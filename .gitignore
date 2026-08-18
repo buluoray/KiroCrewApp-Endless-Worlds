@@ -1,0 +1,22 @@
+# Install artifacts — never commit these.
+# data/ holds the user's own runs and imported templates. The gateway preserves it
+# across app updates (moved aside, installed tree rebuilt, moved back), which is
+# exactly why shipping a data/ in the repo is pointless: the new version's copy is
+# discarded in favour of the user's.
+data/
+.app_secret
+app-crons.json
+installed.json
+/build
+/release-info
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Node — only present once a bundled renderer is introduced.
+node_modules/
+
+# Vite build inputs, never shipped
+web/node_modules/
+web/.vite/

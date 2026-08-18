@@ -1,0 +1,342 @@
+import { useCallback, useEffect, useState } from 'react'
+
+import type { LifeRowData, SeedReport, WorldDetail, WorldRow } from './api'
+import { api } from './api'
+import { DeleteWorldDialog } from './confirm'
+import { LifeRow, WorldCard, WorldDetailView } from './library'
+import { OpeningScreen } from './opening'
+import { PlayPage } from './play'
+import { WorldRail } from './rail'
+import { SceneSlot } from './scene'
+import styles from './styles.css?raw'
+import { t, useLanguage } from './strings'
+import { Glyph } from './ui'
+
+/** Where the player was, so leaving the page does not throw them back to the
+ *  shelf. Prefixed because this app mounts inside the dashboard's own document
+ *  and shares its localStorage. */
+const WHERE = 'endless-worlds:where'
+
+type View = 'library' | 'detail' | 'opening' | 'live'
+
+interface Where {
+  view: View
+  runId?: string
+  worldId?: string
+}
+
+const remember = (where: Where) => {
+  try {
+    localStorage.setItem(WHERE, JSON.stringify(where))
+  } catch {
+    /* private mode */
+  }
+}
+const recall = (): Where | null => {
+  try {
+    return JSON.parse(localStorage.getItem(WHERE) ?? 'null') as Where | null
+  } catch {
+    return null
+  }
+}
+const forget = () => {
+  try {
+    localStorage.removeItem(WHERE)
+  } catch {
+    /* nothing to undo */
+  }
+}
+
+export default function EndlessWorlds() {
+  const [worlds, setWorlds] = useState<WorldRow[] | null>(null)
+  const [seeds, setSeeds] = useState<SeedReport | null>(null)
+  const [runs, setRuns] = useState<LifeRowData[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  const [view, setView] = useState<View>('library')
+  const [selected, setSelected] = useState<string | null>(null)
+  const [world, setWorld] = useState<WorldDetail | null>(null)
+  const [live, setLive] = useState<string | null>(null)
+  const [scene, setScene] = useState('')
+  const [refresh, setRefresh] = useState(0)
+  /** Which world's deletion is being confirmed, or null. Held here rather than in
+   *  the detail view because the reload that follows a deletion unmounts that
+   *  view — a dialog owned by it would vanish mid-request. */
+  const [doomed, setDoomed] = useState<string | null>(null)
+  const [note, setNote] = useState<string>('')
+
+  const load = useCallback(async () => {
+    setError(null)
+    try {
+      const d = await api.worlds()
+      setWorlds(d.worlds)
+      setSeeds(d.seeds)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+    // A failed run list must not blank the shelf — the worlds are still usable.
+    try {
+      setRuns((await api.runs()).runs)
+    } catch {
+      setRuns([])
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  // Restore where the player was.
+  useEffect(() => {
+    const where = recall()
+    if (!where) return
+    if (where.view === 'live' && where.runId) {
+      setLive(where.runId)
+      setView('live')
+      return
+    }
+    // The opening screen is restorable now that its answers are kept with it. Its
+    // world has to be re-read, because the screen is driven by the world's own
+    // declared groups and those are not the player's to cache.
+    if (where.view === 'opening' && where.worldId) {
+      api.world(where.worldId)
+        .then((w) => { setWorld(w); setView('opening') })
+        .catch(() => { /* the world is gone; the shelf is the honest landing */ })
+    }
+  }, [])
+
+  const home = () => {
+    forget()
+    setView('library')
+    setSelected(null)
+    setWorld(null)
+    setLive(null)
+    setScene('')
+    void load()
+  }
+
+  const enterLife = (runId: string) => {
+    remember({ view: 'live', runId })
+    setLive(runId)
+    setView('live')
+  }
+
+  /**
+   * After a world is gone.
+   *
+   * Landing back on the shelf is not decoration: the detail view the player was
+   * standing in now describes a world that would answer 404, and the remembered
+   * screen would send them straight back to it on the next visit. `home()` clears
+   * both.
+   */
+  const afterDelete = (out: { restorable: boolean; lives: number }) => {
+    setDoomed(null)
+    setNote(
+      (out.lives ? t('delete.doneWithLives', { n: out.lives }) : t('delete.done'))
+      + (out.restorable ? ' ' + t('delete.doneRestorable') : ''),
+    )
+    home()
+  }
+
+  const restore = async (worldId: string) => {
+    setNote('')
+    try {
+      await api.restoreWorld(worldId)
+    } catch (e) {
+      setNote((e as Error).message)
+      return
+    }
+    // The seed is copied back by the next listing, not by the restore itself.
+    await load()
+  }
+
+  /**
+   * Opening a world from the rail.
+   *
+   * This is the reason the single-value `view` had to give a little ground. The
+   * rail and the main column are two axes now, so "which world is selected" and
+   * "what is being read" are separate facts: clicking a world while a life is open
+   * must leave the rail's highlight somewhere honest, which means clearing `live`
+   * rather than letting two rows read as current at once.
+   */
+  const openWorld = (worldId: string) => {
+    setLive(null)
+    setScene('')
+    setWorld(null)
+    setSelected(worldId)
+    setView('detail')
+    remember({ view: 'detail', worldId })
+  }
+
+  /**
+   * What the player did in a scene becomes the turn's action — the same road a
+   * tapped choice or a typed sentence takes, so a scene is a way of asking rather
+   * than a second kind of move.
+   */
+  const onSceneChoice = useCallback(
+    async (sceneId: string, choice: string, nonce: string) => {
+      if (!live) return
+      try {
+        const out = await api.answerScene(live, sceneId, { choice, nonce })
+        if (!out.accepted) {
+          setRefresh((n) => n + 1)
+          return
+        }
+        await api.takeTurn(live, { action: out.action })
+      } catch {
+        // A dropped request must not strand the player: reloading shows whether the
+        // answer landed.
+      }
+      setRefresh((n) => n + 1)
+    },
+    [live],
+  )
+
+  let body: React.ReactNode
+  if (view === 'live' && live) {
+    body = <PlayPage runId={live} onBack={home} onScene={setScene} refresh={refresh} />
+  } else if (view === 'opening' && world) {
+    body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
+  } else if (selected) {
+    body = (
+      <WorldDetailView
+        worldId={selected}
+        onBack={home}
+        onDelete={setDoomed}
+        onPlay={(w) => {
+          remember({ view: 'opening', worldId: w.worldId })
+          useLanguage(w.language)
+          setWorld(w)
+          setView('opening')
+        }}
+      />
+    )
+  } else if (error) {
+    body = (
+      <div className="ew-meta">
+        <div style={{ marginBottom: '6px' }}>{t('library.backendSilent')}</div>
+        <div>{t('library.backendHint', { path: '/worlds', error })}</div>
+      </div>
+    )
+  } else if (!worlds) {
+    body = <div className="ew-meta">{t('library.preparing')}</div>
+  } else {
+    // The shelf.
+    //
+    // On desktop the RAIL is the shelf — it lists the same lives and the same worlds,
+    // permanently, in the same order. Rendering the list here as well put it on
+    // screen twice side by side, which is exactly what it looked like: "你正在过的
+    // 人生" over a column of four rows, and the identical four rows two inches left.
+    //
+    // The duplicate is therefore hidden at the rail's own width (a CSS decision,
+    // because the rail's existence is one), and what stays is the part a rail of
+    // names cannot carry: one affordance to continue the most recent life, and the
+    // notices about worlds. Those appear nowhere else.
+    const newest = runs.find((r) => !r.unreadable && !r.ended)
+    body = (
+      <>
+        {newest ? (
+          <div className="ew-onlywide">
+            <div className="ew-section">{t('shelf.continue')}</div>
+            <LifeRow run={newest} onOpen={enterLife} />
+          </div>
+        ) : (
+          <div className="ew-onlywide ew-meta">{t('shelf.pick')}</div>
+        )}
+
+        <div className="ew-shelflist">
+          {runs.length ? (
+            <>
+              <div className="ew-section">{t('library.lives')}</div>
+              {runs.map((r) => <LifeRow key={r.runId} run={r} onOpen={enterLife} />)}
+              <div className="ew-section" style={{ marginTop: '22px' }}>
+                {t('library.otherWorlds')}
+              </div>
+            </>
+          ) : null}
+
+          {worlds.length === 0 ? (
+            <div className="ew-meta">{t('library.empty')}</div>
+          ) : (
+            worlds.map((w) => (
+              <WorldCard
+                key={w.worldId}
+                world={w}
+                onOpen={openWorld}
+              />
+            ))
+          )}
+        </div>
+
+        {(seeds?.newerAvailable ?? []).map((n) => (
+          <div className="ew-note" key={n.worldId}>
+            {t('library.newerSeed', {
+              world: n.worldId, installed: n.installed, available: n.available,
+            })}
+          </div>
+        ))}
+
+        {/* A removed world is reported, not silently absent. Without this row the
+            player has no way to tell "I deleted that" from "the app lost it", and
+            no way back for one that shipped with the app. */}
+        {(seeds?.removed ?? []).map((id) => (
+          <div className="ew-note ew-note-row" key={'removed-' + id}>
+            <span>{t('library.removed', { world: id })}</span>
+            <button className="ew-btn ew-btn-quiet" type="button" onClick={() => void restore(id)}>
+              {t('library.restore')}
+            </button>
+          </div>
+        ))}
+      </>
+    )
+  }
+
+  return (
+    <div className="ew-root">
+      {/* Injected rather than imported as a stylesheet: this app mounts into the
+          dashboard's document, and a <style> element goes away with the component
+          instead of outliving it in the page's stylesheet list. */}
+      <style>{styles}</style>
+
+      <div className="ew-head">
+        <Glyph />
+        <h2>{t('app.title')}</h2>
+      </div>
+
+      {note ? (
+        <div className="ew-note ew-note-row">
+          <span>{note}</span>
+          <button className="ew-btn ew-btn-quiet" type="button" onClick={() => setNote('')}>
+            {t('note.dismiss')}
+          </button>
+        </div>
+      ) : null}
+
+      {/* Two axes, not one. The rail renders nothing below 1100px, so a phone gets
+          exactly the layout it had; a desktop gets navigation that does not have to
+          replace what is being read. */}
+      <div className="ew-shell">
+        <WorldRail
+          worlds={worlds}
+          runs={runs}
+          activeRunId={live}
+          activeWorldId={world?.worldId ?? selected}
+          onWorld={openWorld}
+          onLife={enterLife}
+          onHome={home}
+        />
+        <div className="ew-main">{body}</div>
+      </div>
+
+      {/* Outside `body` on purpose: this element is created on first need and never
+          moved, because moving an iframe reloads it. */}
+      <SceneSlot runId={live} sceneId={scene} onChoice={onSceneChoice} />
+
+      {doomed ? (
+        <DeleteWorldDialog
+          worldId={doomed}
+          onCancel={() => setDoomed(null)}
+          onDeleted={afterDelete}
+        />
+      ) : null}
+    </div>
+  )
+}

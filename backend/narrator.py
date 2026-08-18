@@ -1,0 +1,158 @@
+"""The narrator's session — one app-owned slot per run.
+
+Three properties have to hold at once, and each is enforced here rather than
+hoped for:
+
+1. **The narrator cannot read or write the player's memory** (R26). The mechanism
+   is ``memory_mode="temporary"``, which is load-bearing in BOTH directions:
+   ``slot.blocks_reads`` stops memory/lessons context injection
+   (``context.py:2003``, ``:2073``, wired at ``chat_runner.py:4614``) and
+   ``slot.is_restricted`` stops the consolidator (``chat_utils.py:1225``).
+   ``temporary``'s *prompt prefix* also tells the model not to call memory tools
+   (``chat_utils.py:1139``), but that is advice a model can ignore — so the
+   agent's ``tools`` allowlist (``agents/narrator.json``) is what actually makes
+   a memory tool unreachable. Advisory and mechanism are kept distinct on
+   purpose; only the second is relied on.
+
+2. **The slot belongs to this app.** ``get_or_create_slot`` keys off the name and
+   stamps ``_app`` only on CREATE (``state.py:4501-4520``), so a slot that came
+   up by any other route is unowned — it shows in the player's main chat list and
+   its approved tools run from the gateway's working directory. We create it
+   here, first, and refuse a slot another app owns rather than taking it over.
+   This mirrors ``spec_builder``'s ``_ensure_worker_slot``, which learned it the
+   hard way.
+
+3. **This app never grants itself tool approval at runtime.** No ``_trust``, no
+   ``_trusted_patterns``. ``spec_builder`` removed exactly that after finding a
+   backend grant could not be bounded honestly (its TTL was enforced on a UI
+   poll, so closing the page stopped enforcement while the grant lived on) — see
+   its ``test_app_never_grants_worker_trust``. Approval-free play comes from the
+   *declared* allowlist in the packaged agent, which the governance ceiling can
+   still veto (``governance.py:may_skip_gate``), not from a runtime stamp.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+#: Must equal app.json's ``name`` — it is what ``_app`` is compared against.
+APP_NAME = "endless-worlds"
+
+#: Must equal agents/narrator.json's ``name``.
+NARRATOR_AGENT = "endless-narrator"
+
+#: The app's own MCP server, as the agent must reference it.
+#:
+#: NAMESPACED, not the bare manifest key. Registration writes every app server
+#: under ``f"{app_name}:{server_name}"`` (bridges.py:2064, :2094);
+#: ``_own_mcp_servers`` returns those entries unrenamed (bridges.py:549) and
+#: ``_register_agents`` merges them into the materialized agent's ``mcpServers``
+#: (bridges.py:945-948). kiro-cli resolves ``@x`` against those keys, so the bare
+#: form resolves to nothing and is dropped silently at mount time.
+OWN_SERVER_KEY = "endless-mcp"
+OWN_SERVER_REF = f"@{APP_NAME}:{OWN_SERVER_KEY}"
+
+#: Not negotiable per run. ``persistent`` would let the narrator read the
+#: player's real life, and ``incognito`` still READS memory — only ``temporary``
+#: blocks injection (``state.py:2039-2041``).
+MEMORY_MODE = "temporary"
+
+_SLOT_PREFIX = "endless-run-"
+
+#: Run ids reach here from stored app state, which the narrator itself can be
+#: talked into rewriting. From here the value becomes a slot key and then a
+#: history filename, so it is validated before it can flow into either.
+_RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
+
+
+class NarratorSlotError(RuntimeError):
+    """Base: the narrator must not run."""
+
+
+class BadRunId(NarratorSlotError):
+    pass
+
+
+class SlotOwnedByAnother(NarratorSlotError):
+    """Something else holds this key. Never adopt it."""
+
+
+class MemoryModeConflict(NarratorSlotError):
+    """The slot exists but is not sealed from the player's memory.
+
+    Refusing is the only safe answer. Continuing would narrate into a session
+    that reads the player's preferences and lessons and writes back to them,
+    which is the one thing R26 exists to prevent — and a fallback to
+    ``persistent`` would make the seal look present while being absent.
+    """
+
+
+def narrator_slot_key(run_id: str) -> str:
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        raise BadRunId(f"not a run id: {run_id!r}")
+    return f"{_SLOT_PREFIX}{run_id}"
+
+
+def is_narrator_slot(slot_key: str) -> bool:
+    return isinstance(slot_key, str) and slot_key.startswith(_SLOT_PREFIX)
+
+
+def ensure_narrator_slot(state: Any, run_id: str, *, project: str = "") -> Any:
+    """Return this run's narrator slot, creating it scoped if it is not there.
+
+    Raises rather than degrading. Every failure here means "do not narrate": a slot
+    we do not own, or one not sealed from the player's memory, is not something to
+    work around.
+    """
+    return ensure_narrator_slot_ex(state, run_id, project=project)[0]
+
+
+def ensure_narrator_slot_ex(
+    state: Any, run_id: str, *, project: str = ""
+) -> tuple[Any, bool]:
+    """The slot, and whether THIS call created it.
+
+    The second value exists for one caller and one reason: a slot that already
+    existed has a conversation behind it, and a slot created just now does not. The
+    turn loop uses that to decide whether the world's rulebook still has to be sent
+    — 15,000 characters, measured, re-sent on every single turn before this — or
+    whether the narrator is already holding it from earlier in the same session.
+
+    Kept as a separate function so the plain name keeps its plain signature; a
+    caller that does not care about the distinction should not have to unpack it.
+    """
+    slot_key = narrator_slot_key(run_id)
+
+    existing = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
+    if existing is not None:
+        owner = getattr(existing, "_app", "") or ""
+        if owner != APP_NAME:
+            raise SlotOwnedByAnother(
+                f"{slot_key} is held by {owner or 'nobody'}; refusing to take it over"
+            )
+        # Checked explicitly, and ALSO passed to the create call below, so the
+        # two enforcement points are independent: core's own guard
+        # (state.py:4501) is the backstop if this branch is ever bypassed.
+        if getattr(existing, "memory_mode", "") != MEMORY_MODE:
+            raise MemoryModeConflict(
+                f"{slot_key} has memory_mode="
+                f"{getattr(existing, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
+            )
+        return existing, False
+
+    slot = state.get_or_create_slot(
+        name=slot_key,
+        agent=NARRATOR_AGENT,
+        app=APP_NAME,
+        memory_mode=MEMORY_MODE,
+    )
+
+    # kwargs apply only on CREATE, so anything else the slot needs is assigned
+    # after — see the same note in auto_research/handlers.py:1705.
+    if project:
+        slot.project = project
+
+    # Deliberately absent: slot._trust / slot._trusted_patterns. See the module
+    # docstring. A test asserts this file never assigns them.
+    return slot, True

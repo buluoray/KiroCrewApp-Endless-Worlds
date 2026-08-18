@@ -1,0 +1,44 @@
+{
+  "name": "endless-worlds",
+  "displayName": "Endless Worlds",
+  "version": "0.3.0",
+  "description": "Live a whole life inside an AI-simulated world. Ships 剑火纪元 as its flagship template.",
+  "author": "rayrayxu",
+  "tags": ["game", "simulation", "narrative"],
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [
+      {
+        "route": "/endless-worlds",
+        "label": "无限世界",
+        "iconUrl": "icon.svg"
+      }
+    ]
+  },
+  "backend": {
+    "hooks": {
+      "routes": "backend.routes:register_routes"
+    }
+  },
+  "agents": ["agents/narrator.json"],
+  "mcpServers": {
+    "endless-mcp": {
+      "command": "python3",
+      "args": ["/home/rayrayxu/.kiro/crew/apps/endless-worlds/backend/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/home/rayrayxu/.kiro/crew/apps/endless-worlds/backend"
+      },
+      "disabled": false
+    }
+  },
+  "permissions": {
+    "storage": true,
+    "network": false,
+    "api": [
+      "/api/apps/endless-worlds",
+      "/api/apps/endless-worlds/*",
+      "/api/chat",
+      "/api/chat/*"
+    ]
+  }
+}
