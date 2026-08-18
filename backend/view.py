@@ -246,6 +246,28 @@ def _panel_data(panel: Any, state: dict[str, Any]) -> dict[str, Any]:
     return by_label
 
 
+def resolve_ending(template: Template, state: dict[str, Any]) -> str:
+    """The single place a life is judged to be over, returning the ending id.
+
+    A world declares its ``endings`` as ``when`` conditions; the first one that
+    holds names how this life ended, and the world's own law wins. The narrator
+    may also close a life directly by writing ``state["ended"]`` — a string names
+    the ending, any other truthy value means "over" without a declared id. Empty
+    string means the life continues.
+
+    Kept here so both the play view and the turn route ask the same question: a
+    life the view calls ended must be the same life the turn route refuses to
+    advance, and a second evaluator would let those two drift.
+    """
+    for ending in template.endings:
+        if ending.when.evaluate(state):
+            return ending.id
+    flag = state.get("ended")
+    if isinstance(flag, str) and flag:
+        return flag
+    return "ended" if flag else ""
+
+
 def build_play_view(
     template: Template,
     state: dict[str, Any],
@@ -282,6 +304,7 @@ def build_play_view(
             "empty": all(f["kind"] == "gap" for f in fields),
         })
 
+    ending_id = resolve_ending(template, state)
     return {
         "turn": turn,
         "clock": _clock(template, state),
@@ -291,7 +314,8 @@ def build_play_view(
         "panels": panels,
         "scenes": scenes or [],
         "style": state.get("style") or "",
-        "ended": bool(state.get("ended")),
+        "ended": bool(ending_id),
+        "endingId": ending_id,
     }
 
 

@@ -64,6 +64,35 @@ def test_the_ui_is_never_asked_to_evaluate_a_condition(tpl):
         assert "when" not in panel
 
 
+# -- endings are judged in one place --------------------------------------
+
+
+def test_a_life_continues_until_an_ending_holds(tpl):
+    v = build_play_view(tpl, {"turn": 1})
+    assert v["ended"] is False
+    assert v["endingId"] == ""
+
+
+def test_a_declared_ending_condition_closes_the_life(tpl):
+    """The world's own law: the first ending whose ``when`` holds names it."""
+    v = build_play_view(tpl, {"turn": 9, "alive": False, "lineage": {"hasHeir": False}})
+    assert v["ended"] is True
+    assert v["endingId"] == "line-ended"
+
+
+def test_the_narrator_can_close_a_life_by_flag(tpl):
+    """A bare truthy flag means over without a declared id; a string names one."""
+    assert build_play_view(tpl, {"turn": 3, "ended": True})["endingId"] == "ended"
+    assert build_play_view(tpl, {"turn": 3, "ended": "retired"})["endingId"] == "retired"
+
+
+def test_a_declared_ending_wins_over_the_bare_flag(tpl):
+    v = build_play_view(
+        tpl, {"turn": 9, "ended": True, "world": {"epochClosed": True}}
+    )
+    assert v["endingId"] == "world-epoch-closed"
+
+
 # -- gaps -----------------------------------------------------------------
 
 

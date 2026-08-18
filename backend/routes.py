@@ -152,7 +152,7 @@ from turn import (  # noqa: E402
     generating,
     make_dispatcher,
 )
-from view import build_play_view, world_detail  # noqa: E402
+from view import build_play_view, resolve_ending, world_detail  # noqa: E402
 from widget import SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
@@ -674,6 +674,19 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         return web.json_response(
             {"error": "this world could not be read", "detail": str(exc)}, status=422
         )
+
+    # A life that has reached an ending is over: refuse to narrate another month
+    # and answer with a stable, machine-readable reason so a repeated tap lands on
+    # the same terminal page instead of quietly resurrecting the life.
+    ending_id = resolve_ending(pack.template, run_state)
+    if ending_id:
+        return web.json_response({
+            "advanced": False,
+            "turn": int(run_state.get("turn") or 0),
+            "reason": "ended",
+            "endingId": ending_id,
+            "state": run_state,
+        })
 
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 

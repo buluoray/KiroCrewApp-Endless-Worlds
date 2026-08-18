@@ -62,6 +62,9 @@ export interface PlayView {
   prose: string
   style: string
   ended: boolean
+  /** Which declared ending this life reached, or the narrator's own marker. Empty
+   *  while the life continues. The play page shows a terminal screen when set. */
+  endingId: string
   /** Set while a narrator is writing this month — recorded on the server before it
    *  is asked, so it survives the page that asked. Null when nothing is in flight. */
   generating: { turn: number; slot: string; askedAt: number } | null

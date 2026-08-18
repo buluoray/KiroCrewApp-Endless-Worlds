@@ -33,6 +33,8 @@
 
 ### 1. 执行世界声明的结局条件
 
+> **状态：已实现（2026-08-18）。** `backend/view.py` 新增 `resolve_ending(template, state)`，在唯一位置执行所有 `endings` 条件并返回命中的 ending id（世界声明的条件优先于叙事者写入的 `state["ended"]` 标记）；`build_play_view` 据此回传 `ended` 与 `endingId`。`advance_run_turn` 在派发前检查，已结束人生的新回合以稳定的 `reason:"ended"` + `endingId` 拒绝而不再叙事。前端 `play.tsx` 增加终章分支：显示落幕提示、最后一段叙事作为尾声、存活回合数，并提供“在这个世界再活一次”与“回到书架”入口，编年史仍可回看。测试见 `test_view.py`。**仍未做**：`lineage: true` 世界的下一代继承流程（见 P2 §14）。
+
 **现状**
 
 世界模板可以声明 `endings`，详情页也会展示结局条件数量，但运行时没有统一执行这些条件。`ended` 目前只能依赖 narrator 自己写入状态；即使人生已结束，游玩页和回合路由仍可能允许继续行动。
@@ -117,7 +119,7 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 
 **当前状态**
 
-单独删除人生正在并发实现中：源码已出现 `delete_life` 路由、`DeleteLifeDialog`、API 方法和 `test_delete_life.py`。后续审计应把删除能力标记为已实现或验证中；重命名、归档、置顶和筛选仍未实现。
+单独删除人生已落地：`backend/routes.py` 已注册 `POST /runs/{run_id}/delete`（`delete_life`，`routes.py:548/1172`），复用 `RunStore.delete_run()`，前端有 `DeleteLifeDialog`，并有 `test_delete_life.py`。重命名、归档、置顶和筛选仍未实现。
 
 ### 6. 前情提要与人生大事记
 
@@ -232,6 +234,40 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 - `Cmd/Ctrl+Enter` 用于提交或确认自由行动。
 - 增加字号、行距和阅读宽度偏好。
 - 根节点根据世界语言设置正确的 `lang`。
+
+## 第二轮并行审计补充（2026-08-18，去重后净新增）
+
+> 第二轮用 4 个并行 agent 分别复审存档管理、回合机制、前端 UI、动态内容与世界系统。以下仅列出上文尚未覆盖的项；结局闭环、动态场景全显示、失败重试、单独管理人生、前情提要/事件时间线、长历史导航、开局汇总/复用、OOC 通道、回合重来、导入导出、无障碍等均已在前文覆盖，不再重复。
+
+### N1（并入 P0）：面板 primitive 声明了却运行时丢弃
+
+模板与编译简报承诺的字段在 `backend/view.py` 的 `_shape()` 里被压扁，属于和 P0#1 同类的“世界声明未兑现”正确性问题——编译出的世界包带着这些声明，玩家侧什么都不会发生。
+
+- `people`：`_shape` 只输出 `("name","note")` 两列（`view.py:126`），丢弃 `COMPILER_BRIEF` 承诺的 `attributes` 列（`compile.py:134-135`）。NPC 的态度/亲密度/身份无处展示。
+- `inventory`：dict 物品被压成纯字符串（`view.py:131-135`），数量、描述、分类全丢。“三瓶药水”和“一瓶”在界面上无差别。
+- `resource` 的 `delayed: true`：简报承诺“会被花掉、且变化有延迟后果”（`compile.py:137-138`），但 `_shape` 未读取 `delayed`，与 `stat` 无异，也没有任何“未结算后果”的记录结构。
+- `trend`：只回 `value/direction/note` 字符串，无历史序列，尽管每回合完整 state 快照已在磁盘（chronicle）。
+
+**建议**：`_shape` 的 people/inventory 分支保留声明的列与数量；`resource` 二选一——要么从简报删掉承诺，要么在 store 加 pending-consequences 账本并在 `advance_turn` 提示叙事者；`trend` 可新增 `GET /runs/{id}/series?path=` 从 chronicle 抽取历史值。
+
+### N2（并入 P1）：已有能力仍缺玩家入口
+
+- **章节解锁提示**：`backend/chapters.py` 的 `opened_since()` 已能算出本回合新解锁的章节，但 `view.py`/`routes.py` 都不回传，玩家错过“世界为你打开了魔法体系这一章”的进度感时刻。落点 `build_play_view` 加 `unlocked`，**必须用世界自己的 heading 措辞，不得泄漏 chapter/disclosure 等实现词汇**（R25.2）。难度：低。
+- **世界设定原文入口**：详情页从不请求 `?prose=1`，玩家看不到世界 lore 全文（后端已支持）。落点 `web/src/library.tsx`。难度：低。
+- **世界卡足迹计数**：世界卡只讲静态配置，不讲玩家自己的足迹。按 `worldId` 聚合已有 `runs` 传入 `WorldCard`，显示“我在这里活过 n 次”。落点 `web/src/main.tsx`。难度：低。
+
+### N3（并入 P1/无障碍）：阅读与沉浸体验
+
+- **当前回合与历史的连续阅读流**：游玩页只显示当前一回合正文，上一回合要开抽屉去 History；把最近 1–2 条 chronicle 接在当前正文之上，恢复叙事连续感（`api.chronicle` 已有）。落点 `web/src/play.tsx`。难度：中。
+- **阅读/沉浸模式**：一个开关隐藏 rail 与右侧面板，专心读长叙事。落点 `web/src/main.tsx` + `styles.css`。难度：低。
+- **正文段落摘录/收藏**：叙事是这个 App 唯一产出物，却无法标记喜欢的段落，翻页即失。难度：低～中。
+- **骨架屏加载态**：所有加载态都是一行文字，数据到达瞬间整体跳变；改为骨架屏。难度：低。
+- **移动端面板可粘附**：<900px 时面板只在抽屉里，打字与看状态互斥；改为可 sticky 的摘要条。落点 `web/src/play.tsx`。难度：中。
+
+### N4（并入 P2）：世界表现层
+
+- **scene widget 缺空间/关系类元素**：现有 `ELEMENT_KINDS` 10 种全是线性排版（`widget.py:52-54`：heading/text/note/stat/bar/keyvalue/list/table/choice/divider），工具描述里写着“a map”却没有任何元素能画地图或关系网。建议加受约束的封闭 kind：`grid`（固定行列的区域地图）、`links`（节点+边的关系图）、`tree`（父子层级的技能树/家族谱），**几何全部由后端在 `widget.py` 生成，叙事者只提供关系不提供坐标**，守住“模型字节不直接进 DOM”的信任边界。难度：中高。
+- **成就/里程碑系统**：零实现。header 加 `milestones: [{id, label, when}]`，**直接复用现成的 `Condition` 解释器**（机制成本近乎为零），每轮 commit 后求值，达成项写入 `RESERVED_STATE_KEYS` 保留字段（已有 carry-forward），view 回传本轮新达成项。难度：中（“只触发一次”的持久化需小心）。
 
 ## 推荐实施路线
 

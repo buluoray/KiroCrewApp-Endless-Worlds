@@ -24,11 +24,12 @@ import { History } from './history'
 import { PanelBox, Prose, Waiting } from './ui'
 
 export function PlayPage({
-  runId, onBack, onScene, refresh,
+  runId, onBack, onScene, onReplay, refresh,
 }: {
   runId: string
   onBack: () => void
   onScene: (sceneId: string) => void
+  onReplay: (worldId: string) => void
   refresh: number
 }) {
   const [v, setV] = useState<PlayView | null>(null)
@@ -151,6 +152,38 @@ export function PlayPage({
   }
 
   const panels = <>{(v.panels ?? []).map((p) => <PanelBox key={p.id} panel={p} />)}</>
+
+  // A life that has reached its ending. The action controls are gone — a closed
+  // life takes no more turns — and the last narration stands as its epilogue, with
+  // the way onward being another life in the same world or the shelf.
+  if (v.ended) {
+    return (
+      <div>
+        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
+        <h3 className="ew-detail-title">{v.title}</h3>
+        <div className="ew-note ew-note-live">{t('play.endedBadge')}</div>
+        <Prose text={v.prose} />
+        <div className="ew-meta">{t('play.endedMeta', { turn: v.turn })}</div>
+        <div className="ew-bar">
+          <button
+            className="ew-btn ew-btn-go"
+            type="button"
+            onClick={() => onReplay(v.worldId)}
+          >
+            {t('play.endedReplay')}
+          </button>
+          <button className="ew-btn" type="button" onClick={onBack}>
+            {t('play.endedShelf')}
+          </button>
+        </div>
+        <button className="ew-drawer" type="button" onClick={() => setBack((b) => !b)}>
+          {back ? t('history.close') : t('history.open')}
+        </button>
+        {back ? <History runId={runId} /> : null}
+      </div>
+    )
+  }
 
   const main = (
     <div>
