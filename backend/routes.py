@@ -39,38 +39,84 @@ _UNDER_TEST = "pytest" in sys.modules
 #: purge below. Computed once because the purge runs over every loaded module.
 _HERE_PREFIX = str(_HERE) + os.sep
 
+#: The module names this app OWNS — one per ``.py`` file beside this one. They are
+#: BARE names (``store``, ``view``, ``template``), which is the whole reason the
+#: eviction half of the purge below has to exist: a bare name is not this app's
+#: property, and ``sys.modules`` is consulted before ``sys.path``.
+_MY_MODULES = frozenset(p.stem for p in _HERE.glob("*.py"))
+
 
 def _drop_stale_siblings(modules: dict[str, Any] | None = None) -> None:
-    """Forget this app's own modules so a reload actually reloads them.
+    """Make ``import store`` resolve to THIS app's ``store``, on every load.
 
-    An app disable→enable re-executes THIS file but does not unload the sibling
-    modules it imported. Those siblings live in ``sys.modules`` under bare names
-    for the whole life of the gateway process, so after an edit the fresh
-    ``routes`` imports the OLD ``scenes`` — and the symptom is a route module that
-    fails to load with ``cannot import name 'X' from 'scenes'`` while the file on
-    disk plainly has ``X``. No number of disable→enable cycles fixes it; only a
-    gateway restart would, which is far too big a hammer for editing an app.
+    Two different failures, one mechanism.
 
-    Purges by PATH, unconditionally. An earlier revision only dropped modules
-    whose recorded mtime had moved, to avoid the test-process hazard above — and
-    that could not work: the stale module predated the stamping, carried no
-    recorded mtime, and was therefore skipped. A mechanism that cannot clear the
-    exact state it exists for is worse than none, because it looks like a fix.
+    **A stale copy of my own module.** An app disable→enable re-executes THIS file
+    but does not unload the sibling modules it imported. Those siblings live in
+    ``sys.modules`` under bare names for the whole life of the gateway process, so
+    after an edit the fresh ``routes`` imports the OLD ``scenes`` — and the symptom
+    is a route module that fails to load with ``cannot import name 'X' from
+    'scenes'`` while the file on disk plainly has ``X``. No number of
+    disable→enable cycles fixes it; only a gateway restart would, which is far too
+    big a hammer for editing an app.
 
-    The ``__file__`` check is what keeps this safe rather than rude. Bare names
-    like ``store`` and ``view`` are exactly what another app — or the gateway
-    itself — might have loaded, and purging someone else's module would break them
-    to fix us.
+    **Someone else's module squatting on a name I own.** This one shipped: after
+    this app was renamed and reinstalled under a new id, the new install failed to
+    load with ``cannot import name 'Chapter' from 'template'`` — and the path in
+    that message was the OLD app's ``template.py``, still held by the live process
+    after its app had been uninstalled. The bare name resolved to a foreign file
+    and handed this app someone else's code. An earlier revision of this function
+    deliberately let that through: it purged only modules whose ``__file__`` was
+    under this backend directory, on the grounds that clearing another app's module
+    would break them to fix us. That reasoning was right about the risk and wrong
+    about the conclusion — a foreign occupant of a name I import is not a module I
+    can politely leave alone, it is a module I am about to be handed instead of my
+    own.
 
-    ``modules`` exists so a test can prove both halves against a throwaway mapping
+    Eviction is safe in the direction that matters. Names already bound by the
+    other app (``from template import Chapter``) keep working, because they are
+    references, not lookups; only a future ``import template`` re-runs — and it
+    re-runs against whatever ``sys.path`` that importer has, which is its own. Two
+    apps sharing a bare name therefore ping-pong the slot and each restores its own
+    view before importing, at the cost of re-executing a module. Not pretty, and
+    strictly better than reading the wrong file.
+
+    Purges by PATH, unconditionally. An earlier revision only dropped modules whose
+    recorded mtime had moved, to avoid the test-process hazard above — and that
+    could not work: the stale module predated the stamping, carried no recorded
+    mtime, and was therefore skipped. A mechanism that cannot clear the exact state
+    it exists for is worse than none, because it looks like a fix.
+
+    ``modules`` exists so a test can prove every half against a throwaway mapping
     instead of the live one. Verifying the drop half against the real
     ``sys.modules`` means performing the very identity swap the guard above exists
-    to avoid — which is how a test asserting this function works broke an
-    unrelated one two files away.
+    to avoid — which is how a test asserting this function works broke an unrelated
+    one two files away.
     """
     target = sys.modules if modules is None else modules
     if modules is None and _UNDER_TEST:
         return
+
+    # Half one: evict a FOREIGN occupant of a name this app owns. Keyed on the
+    # name, so it costs one dict lookup per file this app has — not a walk of the
+    # thousands of modules the gateway holds.
+    for name in _MY_MODULES:
+        if name == __name__:
+            continue
+        module = target.get(name)
+        if module is None:
+            continue
+        origin = getattr(module, "__file__", None)
+        if not origin:
+            # A namespace package or a C extension under one of my names is not
+            # mine either, and there is no path to compare. Evict: the import that
+            # follows can only be better off with my file.
+            del target[name]
+            continue
+        if not str(origin).startswith(_HERE_PREFIX):
+            del target[name]
+
+    # Half two: drop a stale copy of my OWN module so an edit actually reloads.
     for name in list(target):
         if name == __name__:
             continue

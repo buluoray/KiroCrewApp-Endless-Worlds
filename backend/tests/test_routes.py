@@ -107,20 +107,69 @@ def test_a_module_from_this_app_is_dropped(routes_mod, tmp_path):
     assert "scenes" not in modules
 
 
-def test_a_module_from_somewhere_else_is_left_alone(routes_mod, tmp_path):
-    """The check that keeps this safe rather than rude.
+def test_a_foreign_module_squatting_on_a_name_this_app_owns_is_evicted(
+    routes_mod, tmp_path
+):
+    """The bug that shipped, as a test.
 
-    Backed by a REAL file outside the app directory. An earlier version pointed at
-    a path that did not exist, so ``resolve()`` raised and the module was skipped
-    for the wrong reason — the test passed whether or not the path check was
-    there, which a mutation run exposed.
+    After this app was renamed and reinstalled under a new id, the new install
+    failed to load with ``cannot import name 'Chapter' from 'template'`` — and the
+    path in that message was the OLD app's ``template.py``, still held by the live
+    gateway after its app had been uninstalled. ``sys.modules`` is consulted before
+    ``sys.path``, so a bare name this app imports can hand it another app's file.
+
+    An earlier revision deliberately left this alone, reasoning that purging
+    someone else's module would break them to fix us. Right about the risk, wrong
+    about the conclusion: a foreign occupant of a name this app imports is not a
+    module it can politely ignore, it is the module it is about to be handed
+    instead of its own.
+
+    Backed by a REAL file outside the app directory. An earlier version of this
+    test pointed at a path that did not exist, so ``resolve()`` raised and the
+    module was skipped for the wrong reason — it passed whether or not the path
+    check was there, which a mutation run exposed.
     """
+    assert "view" in routes_mod._MY_MODULES, "this test needs a name the app owns"
     elsewhere = tmp_path / "view.py"
     elsewhere.write_text("# another app's module\n", encoding="utf-8")
     intruder = _fake("view", elsewhere)
     modules = {"view": intruder}
     routes_mod._drop_stale_siblings(modules)
-    assert modules.get("view") is intruder, "someone else's module was purged"
+    assert "view" not in modules, (
+        "a foreign module kept a name this app imports, so the next import gets it"
+    )
+
+
+def test_a_module_under_a_name_this_app_does_not_own_is_left_alone(
+    routes_mod, tmp_path
+):
+    """The half of the old rule that is still right, and load-bearing.
+
+    Eviction is scoped to the names this app has files for. Without that scope the
+    purge would reach the gateway's own modules and every other app's — breaking
+    them to fix us, which is the objection the earlier revision was built around
+    and which this scope answers properly.
+    """
+    name = "not_a_module_this_app_has"
+    assert name not in routes_mod._MY_MODULES
+    elsewhere = tmp_path / f"{name}.py"
+    elsewhere.write_text("# the gateway's own module\n", encoding="utf-8")
+    stranger = _fake(name, elsewhere)
+    modules = {name: stranger}
+    routes_mod._drop_stale_siblings(modules)
+    assert modules.get(name) is stranger, "a module this app does not own was purged"
+
+
+def test_a_squatter_with_no_file_is_evicted_too(routes_mod):
+    """A namespace package or C extension under one of this app's names is not this
+    app's module either, and offers no path to compare. Keeping it would fail the
+    import for a reason no message explains."""
+    import types as _types
+
+    ghost = _types.ModuleType("template")  # no __file__
+    modules = {"template": ghost}
+    routes_mod._drop_stale_siblings(modules)
+    assert "template" not in modules
 
 
 def test_the_purge_never_drops_the_route_module_itself(routes_mod):
