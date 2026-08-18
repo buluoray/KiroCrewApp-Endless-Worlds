@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { LifeRowData, SeedReport, WorldDetail, WorldRow } from './api'
 import { api } from './api'
-import { DeleteWorldDialog } from './confirm'
+import { DeleteLifeDialog, DeleteWorldDialog } from './confirm'
 import { LifeRow, WorldCard, WorldDetailView } from './library'
 import { OpeningScreen } from './opening'
 import { PlayPage } from './play'
@@ -63,6 +63,8 @@ export default function EndlessWorlds() {
    *  the detail view because the reload that follows a deletion unmounts that
    *  view — a dialog owned by it would vanish mid-request. */
   const [doomed, setDoomed] = useState<string | null>(null)
+  /** Which life's deletion is being confirmed, or null. */
+  const [doomedLife, setDoomedLife] = useState<string | null>(null)
   const [note, setNote] = useState<string>('')
 
   const load = useCallback(async () => {
@@ -133,6 +135,18 @@ export default function EndlessWorlds() {
       (out.lives ? t('delete.doneWithLives', { n: out.lives }) : t('delete.done'))
       + (out.restorable ? ' ' + t('delete.doneRestorable') : ''),
     )
+    home()
+  }
+
+  /**
+   * After a life is gone.
+   *
+   * If the player was standing in it, staying would leave the play page polling a
+   * life that answers 404. The shelf is the only honest landing.
+   */
+  const afterLifeDelete = (turn: number) => {
+    setDoomedLife(null)
+    setNote(turn > 0 ? t('life.delete.done', { n: turn }) : t('life.delete.doneUnborn'))
     home()
   }
 
@@ -246,7 +260,9 @@ export default function EndlessWorlds() {
           {runs.length ? (
             <>
               <div className="ew-section">{t('library.lives')}</div>
-              {runs.map((r) => <LifeRow key={r.runId} run={r} onOpen={enterLife} />)}
+              {runs.map((r) => (
+              <LifeRow key={r.runId} run={r} onOpen={enterLife} onDelete={setDoomedLife} />
+            ))}
               <div className="ew-section" style={{ marginTop: '22px' }}>
                 {t('library.otherWorlds')}
               </div>
@@ -335,6 +351,14 @@ export default function EndlessWorlds() {
           worldId={doomed}
           onCancel={() => setDoomed(null)}
           onDeleted={afterDelete}
+        />
+      ) : null}
+
+      {doomedLife ? (
+        <DeleteLifeDialog
+          runId={doomedLife}
+          onCancel={() => setDoomedLife(null)}
+          onDeleted={afterLifeDelete}
         />
       ) : null}
     </div>

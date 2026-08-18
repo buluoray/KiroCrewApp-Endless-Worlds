@@ -74,10 +74,19 @@ export function WorldCard({
  * left it.
  */
 export function LifeRow({
-  run, onOpen,
+  run, onOpen, onDelete,
 }: {
   run: LifeRowData
   onOpen: (runId: string) => void
+  /** Ending this life. On the SHELF rather than only inside the life, because a
+   *  life whose world cannot be resolved answers 422 when opened — so the play page
+   *  can never offer a control for exactly the life most in need of one.
+   *
+   *  OPTIONAL, and omitted on purpose by the "continue where you left off"
+   *  shortcut: that row exists to get the player back into a life in one tap, and a
+   *  destructive control sitting on the resume affordance is a different job on the
+   *  same surface. The managed list is where lives are managed. */
+  onDelete?: (runId: string) => void
 }) {
   // Checked before the other states: a life mid-generation is also awaitingOpening,
   // and "not born yet" would read as stalled when in fact it is being written.
@@ -91,22 +100,37 @@ export function LifeRow({
           ? t('life.unborn')
           : t('life.turn', { turn: run.turn })
 
+  // A div, not a button. The row carries its own delete control, and a button
+  // inside a button is invalid HTML — browsers recover from it unpredictably, and
+  // the inner click can be swallowed by the outer one.
   return (
-    <button
-      className="ew-card"
-      type="button"
-      disabled={!!run.unreadable}
-      onClick={() => onOpen(run.runId)}
-    >
-      <div className="ew-titlerow">
-        {/* The life first, the world second. Four rows reading only the world's name
-            told the player nothing about which life they were choosing. */}
-        <span className="ew-title">{run.subtitle || run.title || run.worldId}</span>
-        {run.awaitingOpening ? <Chip accent>{t('life.waiting')}</Chip> : null}
-      </div>
-      {run.subtitle ? <div className="ew-sub">{run.title}</div> : null}
-      <div className="ew-meta">{where}</div>
-    </button>
+    <div className="ew-card ew-card-row">
+      <button
+        className="ew-card-open"
+        type="button"
+        disabled={!!run.unreadable}
+        onClick={() => onOpen(run.runId)}
+      >
+        <div className="ew-titlerow">
+          {/* The life first, the world second. Four rows reading only the world's name
+              told the player nothing about which life they were choosing. */}
+          <span className="ew-title">{run.subtitle || run.title || run.worldId}</span>
+          {run.awaitingOpening ? <Chip accent>{t('life.waiting')}</Chip> : null}
+        </div>
+        {run.subtitle ? <div className="ew-sub">{run.title}</div> : null}
+        <div className="ew-meta">{where}</div>
+      </button>
+      {onDelete ? (
+        <button
+          className="ew-btn ew-btn-quiet ew-card-drop"
+          type="button"
+          onClick={() => onDelete(run.runId)}
+          aria-label={t('life.delete.aria', { name: run.subtitle || run.title || run.runId })}
+        >
+          {t('life.delete.short')}
+        </button>
+      ) : null}
+    </div>
   )
 }
 

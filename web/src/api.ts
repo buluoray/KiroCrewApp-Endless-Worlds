@@ -169,6 +169,24 @@ export interface SeedReport {
   removed: string[]
 }
 
+/**
+ * What ending ONE life would cost, as the server sees it right now.
+ *
+ * `unreadable` is the field that matters most here: a life whose world cannot be
+ * resolved answers 422 from the play page, so it is reachable ONLY from the shelf —
+ * and it is exactly the life a player most wants gone.
+ */
+export interface LifeDeletionFacts {
+  runId: string
+  turn: number
+  unreadable: boolean
+  title?: string
+  worldId?: string
+  subtitle?: string
+  ended?: boolean
+  generating?: boolean
+}
+
 /** One life that a world's deletion would end. */
 export interface DoomedLife {
   runId: string
@@ -259,6 +277,17 @@ export const api = {
   deleteWorld: (id: string, lives: number) =>
     post<{ worldId: string; livesRemoved: string[]; restorable: boolean }>(
       `/worlds/${encodeURIComponent(id)}/delete`, { confirm: id, lives },
+    ),
+
+  lifeDeletion: (runId: string) =>
+    json<LifeDeletionFacts>(`/runs/${encodeURIComponent(runId)}/deletion`),
+
+  /** `turn` is a precondition, not a parameter: it must match the month the dialog
+   *  showed, or the server refuses rather than erasing more story than the player
+   *  was told about. */
+  deleteLife: (runId: string, turn: number) =>
+    post<{ runId: string; deleted: boolean; turn: number }>(
+      `/runs/${encodeURIComponent(runId)}/delete`, { confirm: runId, turn },
     ),
 
   restoreWorld: (id: string) =>

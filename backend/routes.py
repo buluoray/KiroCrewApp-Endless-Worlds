@@ -157,7 +157,7 @@ from widget import SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
 #: Bumped independently of app.json; identifies the route contract the UI expects.
-ROUTE_CONTRACT = 8
+ROUTE_CONTRACT = 9
 
 #: Seeds ship in the install tree, one level up from backend/.
 _SEEDS_DIR = _HERE.parent / "seeds"
@@ -503,6 +503,123 @@ async def restore_world(request: web.Request, ctx: AppContext) -> web.Response:
             status=500,
         )
     return web.json_response({"worldId": world_id, "restored": True})
+
+
+def _life_deletion_facts(ctx: AppContext, run_id: str) -> dict[str, Any]:
+    """What ending ONE life would cost, gathered once.
+
+    An unreadable life still answers here. It is the one that most needs to be
+    deletable: it cannot be opened, so a play-page-only delete could never reach
+    it, and until now nothing could erase it at all.
+    """
+    store = _store(ctx)
+    facts: dict[str, Any] = {"runId": run_id, "turn": 0, "unreadable": False}
+    row = next((r for r in store.read_index() if r.get("runId") == run_id), None)
+    if row:
+        facts["title"] = row.get("title") or ""
+        facts["worldId"] = row.get("worldId") or ""
+    try:
+        state = store.read_state(run_id)
+    except Exception:  # noqa: BLE001 — a life too damaged to read is still deletable
+        facts["unreadable"] = True
+        return facts
+    facts["turn"] = int(state.get("turn") or 0)
+    facts["subtitle"] = life_subtitle(state)
+    facts["ended"] = bool(state.get("ended"))
+    facts["worldId"] = state.get("worldId") or facts.get("worldId", "")
+    try:
+        facts["generating"] = generating(store, run_id) is not None
+    except Exception:  # noqa: BLE001
+        facts["generating"] = False
+    return facts
+
+
+async def life_deletion(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/deletion`` — what ending this life would take."""
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    if not any(r.get("runId") == run_id for r in store.read_index()):
+        return web.json_response({"error": "no such life"}, status=404)
+    return web.json_response(_life_deletion_facts(ctx, run_id))
+
+
+async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /runs/{run_id}/delete`` — erase ONE life, leaving its world alone.
+
+    The companion to deleting a world, and the only way to reach two lives the
+    world-level delete cannot help with: one the player wants gone while keeping the
+    world, and one too damaged to open (which no play-page control could offer,
+    because opening it is exactly what fails).
+
+    Same two guards as the world delete, protecting the same two different things.
+    ``confirm`` must equal the run id — that protects the ROUTE from a retried fetch
+    or a caller holding only a path parameter. ``turn`` must equal the month this
+    life is actually on — that protects the PLAYER, because a life that advanced
+    while the dialog was open holds more story than the dialog described. A settled
+    life does not advance on its own, so this fires almost only when something real
+    happened.
+
+    A month being written blocks it, for the same reason: the narrator would commit
+    into a run that no longer exists and lose the turn.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+
+    run_id = request.match_info.get("run_id", "")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "expected an object"}, status=400)
+
+    store = _store(ctx)
+    if not any(r.get("runId") == run_id for r in store.read_index()):
+        return web.json_response({"error": "no such life"}, status=404)
+
+    facts = _life_deletion_facts(ctx, run_id)
+
+    if body.get("confirm") != run_id:
+        return web.json_response(
+            {"field": "confirm", "expected": "the run id, to name the target"},
+            status=400,
+        )
+
+    expected = body.get("turn")
+    if not isinstance(expected, int) or isinstance(expected, bool):
+        return web.json_response(
+            {"field": "turn", "expected": "the month you were shown"}, status=400
+        )
+    if expected != facts["turn"]:
+        return web.json_response(
+            {
+                "error": "this life moved on since you were asked",
+                "code": "turn_changed",
+                **facts,
+            },
+            status=409,
+        )
+
+    if facts.get("generating"):
+        return web.json_response(
+            {
+                "error": "a month is being written for this life right now",
+                "code": "turn_in_flight",
+                **facts,
+            },
+            status=409,
+        )
+
+    try:
+        store.delete_run(run_id)
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response(
+            {"error": "this life could not be erased", "detail": str(exc)}, status=500
+        )
+
+    return web.json_response({"runId": run_id, "deleted": True, "turn": facts["turn"]})
 
 
 async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Response:
@@ -1051,6 +1168,8 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         AppRoute(method="GET", path="/runs", handler=list_runs),
         AppRoute(method="POST", path="/runs", handler=create_run),
         AppRoute(method="GET", path="/runs/{run_id}", handler=get_run),
+        AppRoute(method="GET", path="/runs/{run_id}/deletion", handler=life_deletion),
+        AppRoute(method="POST", path="/runs/{run_id}/delete", handler=delete_life),
         AppRoute(method="GET", path="/runs/{run_id}/scenes/{scene_id}", handler=get_scene),
         AppRoute(
             method="POST",

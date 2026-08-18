@@ -574,3 +574,20 @@
   border: 1px solid var(--border, #2d2f3d); border-radius: 8px; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* A shelf row that carries its own destructive control. The row is a div and the
+   open action is a button INSIDE it, because a button cannot contain a button --
+   and the delete has to be a sibling, not a nested child. */
+.ew-card-row { display: flex; align-items: stretch; gap: 0; padding: 0; overflow: hidden; }
+.ew-card-open {
+  flex: 1 1 auto; min-width: 0; text-align: left; font: inherit;
+  background: transparent; border: none; color: inherit; cursor: pointer;
+  /* 12px, matching .ew-card, so a life row is inset exactly like a world card. */
+  padding: 12px; -webkit-tap-highlight-color: transparent;
+}
+.ew-card-open:disabled { opacity: .55; cursor: default; }
+/* Aligned to the top of the row rather than centred: a row is two or three lines
+   tall, and a vertically centred control drifts as the row's text grows. */
+.ew-card-drop {
+  align-self: flex-start; margin: 10px 10px 0 0; border-radius: 8px;
+}
