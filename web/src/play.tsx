@@ -41,6 +41,9 @@ export function PlayPage({
   // poll while the month is being written.
   const [phrase, setPhrase] = useState('')
   const [stalled, setStalled] = useState(false)
+  // The last action that did not land, kept so a stall can be retried with the
+  // exact same intent instead of making the player retype it.
+  const [retry, setRetry] = useState<{ payload: { turn?: number; action?: string }; what: string } | null>(null)
   const [drawer, setDrawer] = useState(false)
   const [back, setBack] = useState(false)
 
@@ -92,11 +95,21 @@ export function PlayPage({
     setStalled(false)
     try {
       const out = await api.takeTurn(runId, payload)
-      if (!out.advanced && out.reason !== 'already') setStalled(true)
-      setAction('')
+      // A month that actually happened — or was already written, or ended the life
+      // — is the only outcome that clears what the player typed. A narrator that
+      // did not answer keeps their words and offers to resend the same action.
+      const settled = out.advanced || out.reason === 'already' || out.reason === 'ended'
+      if (settled) {
+        setAction('')
+        setRetry(null)
+      } else {
+        setStalled(true)
+        setRetry({ payload, what })
+      }
       await load()
     } catch {
       setStalled(true)
+      setRetry({ payload, what })
     }
     setTapped('')
   }
@@ -213,7 +226,22 @@ export function PlayPage({
 
       <Prose text={v.prose} />
 
-      {stalled ? <div className="ew-note">{t('play.stalled')}</div> : null}
+      {stalled ? (
+        <div className="ew-note">
+          {t('play.stalled')}
+          {retry ? (
+            <button
+              className="ew-btn ew-btn-sm"
+              type="button"
+              disabled={busy}
+              style={{ marginInlineStart: '8px' }}
+              onClick={() => void take(retry.payload, retry.what)}
+            >
+              {t('play.retry')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {(v.choices ?? []).length ? (
         <div className="ew-choices">

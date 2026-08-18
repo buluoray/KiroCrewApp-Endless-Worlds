@@ -186,6 +186,7 @@ var TABLES = {
 		"play.generating": "这个月正在被写下来。可以离开这一页，回来时它会在这里。",
 		"play.nothingToShow": "这一刻还没有什么可看的——这条人生的各栏要等它们各自的条件成立才会出现。",
 		"play.opening": "正在翻开…",
+		"play.retry": "再试一次",
 		"play.rumour": "传闻",
 		"play.rumourSuffix": " —— 只是听说",
 		"play.sceneFailed": "这一处景象没能画出来。",
@@ -332,6 +333,7 @@ var TABLES = {
 		"play.generating": "This month is being written. You can leave this page; it will be here when you come back.",
 		"play.nothingToShow": "Nothing to show yet — this life's panels appear as their own conditions come true.",
 		"play.opening": "Opening…",
+		"play.retry": "Try again",
 		"play.rumour": "Rumour",
 		"play.rumourSuffix": " — only hearsay",
 		"play.sceneFailed": "This scene could not be drawn.",
@@ -1541,6 +1543,7 @@ function PlayPage({ runId, onBack, onScene, onReplay, refresh }) {
 	const [arm, setArm] = useState("");
 	const [phrase, setPhrase] = useState("");
 	const [stalled, setStalled] = useState(false);
+	const [retry, setRetry] = useState(null);
 	const [drawer, setDrawer] = useState(false);
 	const [back, setBack] = useState(false);
 	const load = useCallback(async () => {
@@ -1586,11 +1589,23 @@ function PlayPage({ runId, onBack, onScene, onReplay, refresh }) {
 		setStalled(false);
 		try {
 			const out = await api.takeTurn(runId, payload);
-			if (!out.advanced && out.reason !== "already") setStalled(true);
-			setAction("");
+			if (out.advanced || out.reason === "already" || out.reason === "ended") {
+				setAction("");
+				setRetry(null);
+			} else {
+				setStalled(true);
+				setRetry({
+					payload,
+					what
+				});
+			}
 			await load();
 		} catch {
 			setStalled(true);
+			setRetry({
+				payload,
+				what
+			});
 		}
 		setTapped("");
 	};
@@ -1715,9 +1730,16 @@ function PlayPage({ runId, onBack, onScene, onReplay, refresh }) {
 			}, `${dg.category}-${i}`))
 		}) : null,
 		/* @__PURE__ */ jsx(Prose, { text: v.prose }),
-		stalled ? /* @__PURE__ */ jsx("div", {
+		stalled ? /* @__PURE__ */ jsxs("div", {
 			className: "ew-note",
-			children: t("play.stalled")
+			children: [t("play.stalled"), retry ? /* @__PURE__ */ jsx("button", {
+				className: "ew-btn ew-btn-sm",
+				type: "button",
+				disabled: busy,
+				style: { marginInlineStart: "8px" },
+				onClick: () => void take(retry.payload, retry.what),
+				children: t("play.retry")
+			}) : null]
 		}) : null,
 		(v.choices ?? []).length ? /* @__PURE__ */ jsx("div", {
 			className: "ew-choices",
