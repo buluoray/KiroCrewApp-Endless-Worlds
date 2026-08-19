@@ -615,7 +615,7 @@
   .ew-choice-armed { transition: none; transform: none; }
 }
 
-.ew-act { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
+.ew-act { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }
 .ew-act textarea {
   flex: 1; min-width: 0; box-sizing: border-box; resize: vertical;
   min-height: 44px; max-height: 40vh;
