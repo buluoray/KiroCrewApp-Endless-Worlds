@@ -55,6 +55,12 @@ OUTPUT FORMAT
 REQUIRED FIELDS
   id          lowercase slug (a-z, 0-9, hyphen), derived from the title
   title       the world's own title, as the prose gives it
+  card        an emotional shelf entrance, not a feature summary:
+              {{ "promise": one concise sentence about what living here feels like,
+                "possibilities": 2–3 concrete lives, dilemmas, or long consequences
+                the player might experience }}. Use the prose's own tone and never
+              promise a guaranteed outcome, protagonist privilege, or a genre the
+              rulebook does not support.
   version     quoted string; use "1.0" when the prose does not say
   language    the language the prose is written in ("zh", "en", …)
   clock       {{ "unit": …, "label": … }} — the unit the world advances in

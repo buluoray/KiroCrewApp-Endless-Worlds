@@ -11,6 +11,15 @@ title: Age of Sword and Flame · Western Fantasy Life Simulator
 version: "1.0"
 language: en
 
+# The shelf's emotional entrance: invite the player to imagine a life before
+# showing them the machinery behind it.
+card:
+  promise: Rise from obscurity to the edge of a throne—or live an ordinary life well, close to home.
+  possibilities:
+    - See a choice from your youth return decades later
+    - Decide what you will pay for magic, war, or a quiet life
+    - Leave unfinished dreams, secrets, and enemies to the next generation
+
 # Chapter 147 · The Player Status Bar — 【Time】Year XXX · Month XXX
 clock:
   unit: month

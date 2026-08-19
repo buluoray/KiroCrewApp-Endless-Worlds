@@ -72,24 +72,31 @@ export function WorldCard({
     )
   }
 
+  const possibilities = (world.cardPossibilities ?? []).filter(Boolean).slice(0, 3)
+  const promise = world.cardPromise?.trim() || t('world.cardFallback')
+
   return (
-    <button className="ew-card" type="button" onClick={() => onOpen(world.worldId)}>
+    <button className="ew-card ew-world-card" type="button" onClick={() => onOpen(world.worldId)}>
       <div className="ew-titlerow">
         <span className="ew-title">{world.title}</span>
         {world.lineage ? <Chip accent>{t('world.lineage')}</Chip> : null}
         {world.stale ? <Chip>{t('world.stale')}</Chip> : null}
       </div>
-      <div className="ew-chips" style={{ marginBottom: '8px' }}>
-        {(world.styles ?? []).map((s) => <Chip key={s}>{s}</Chip>)}
-      </div>
-      <div className="ew-meta">
-        {t('world.summary', {
-          groups: world.openingGroups ?? 0,
-          panels: world.panelCount ?? 0,
-          turn: turnPhrase(world.clockUnit),
-        })}
-        {world.stalenessNote ? <div style={{ marginTop: '4px' }}>{world.stalenessNote}</div> : null}
-        {plays > 0 ? <div style={{ marginTop: '4px' }}>{t('world.plays', { n: plays })}</div> : null}
+      <div className="ew-world-promise">{promise}</div>
+      {possibilities.length ? (
+        <div className="ew-world-possibilities">
+          <div className="ew-world-possibilities-label">{t('world.cardPossibilities')}</div>
+          {possibilities.map((possibility) => (
+            <div className="ew-world-possibility" key={possibility}>{possibility}</div>
+          ))}
+        </div>
+      ) : null}
+      {world.stalenessNote ? <div className="ew-meta">{world.stalenessNote}</div> : null}
+      <div className="ew-world-card-footer">
+        <span className="ew-meta">
+          {plays > 0 ? t('world.plays', { n: plays }) : t('world.cardUntold')}
+        </span>
+        <span className="ew-world-enter">{t('world.cardEnter')} →</span>
       </div>
     </button>
   )

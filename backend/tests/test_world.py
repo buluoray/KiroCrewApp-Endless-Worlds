@@ -169,6 +169,27 @@ def test_staleness_note_follows_the_world_language() -> None:
     )
 
 
+def test_summary_carries_only_clean_emotional_card_copy() -> None:
+    header = {
+        **MINIMAL_HEADER,
+        "card": {
+            "promise": "  Live with the consequences.  ",
+            "possibilities": [
+                "  Keep a promise  ", 7, "", "Lose a crown", "Raise an heir"
+            ],
+        },
+    }
+
+    row = summarize(read_world(build(header)))
+
+    assert row["cardPromise"] == "Live with the consequences."
+    assert row["cardPossibilities"] == [
+        "Keep a promise", "Lose a crown", "Raise an heir"
+    ]
+    assert summarize(read_world(build()))["cardPromise"] == ""
+    assert summarize(read_world(build()))["cardPossibilities"] == []
+
+
 def test_a_pack_with_no_provenance_is_not_reported_stale() -> None:
     """Absence predates the field; flagging it would alarm with nothing to act on."""
     pack = read_world(build())

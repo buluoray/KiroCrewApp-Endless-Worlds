@@ -259,8 +259,28 @@ def install_seed(seed_text: str) -> str:
 
 
 def summarize(pack: WorldPack) -> dict[str, Any]:
-    """One Library row (R1.1) plus the staleness marker of R14.5."""
+    """One Library row (R1.1) plus the staleness marker of R14.5.
+
+    A pack may describe its emotional shelf entrance with ``card.promise`` and up
+    to three ``card.possibilities``. These are presentation hints, not simulation
+    rules, so older packs need no migration. Treat malformed hints as absent rather
+    than making an otherwise playable world disappear from the Library.
+    """
     t = pack.template
+    raw_card = pack.raw_header.get("card")
+    card = raw_card if isinstance(raw_card, dict) else {}
+    raw_promise = card.get("promise")
+    promise = raw_promise.strip() if isinstance(raw_promise, str) else ""
+    raw_possibilities = card.get("possibilities")
+    possibilities = (
+        [
+            item.strip()
+            for item in raw_possibilities
+            if isinstance(item, str) and item.strip()
+        ][:3]
+        if isinstance(raw_possibilities, list)
+        else []
+    )
     return {
         "worldId": t.id,
         "title": t.title,
@@ -271,6 +291,8 @@ def summarize(pack: WorldPack) -> dict[str, Any]:
         "styles": [s.label for s in t.styles],
         "panelCount": len(t.panels),
         "openingGroups": len(t.opening),
+        "cardPromise": promise,
+        "cardPossibilities": possibilities,
         "capabilityPacks": len(pack.capability_packs),
         "widgetSpecs": len(pack.widget_specs),
         "stale": pack.is_stale(),

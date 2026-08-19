@@ -171,6 +171,40 @@
 
 .ew-meta { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7; }
 
+/* A world card is an invitation to imagine a life, not a package manifest. The
+   promise leads; concrete possibilities make it credible; implementation counts
+   stay one tap away on the detail page. */
+.ew-world-card { overflow: hidden; }
+.ew-world-promise {
+  margin: 2px 0 12px;
+  font-size: 14px; line-height: 1.65;
+  color: var(--text, #e2e8f0);
+}
+.ew-world-possibilities {
+  margin: 0 0 14px; padding: 10px 12px;
+  border-left: 2px solid color-mix(in oklab, var(--accent, #7c3aed) 48%, transparent);
+  background: color-mix(in oklab, var(--accent, #7c3aed) 7%, transparent);
+}
+.ew-world-possibilities-label {
+  margin-bottom: 5px; font-size: 11px; font-weight: 600;
+  letter-spacing: .04em; color: var(--accent, #7c3aed);
+}
+.ew-world-possibility {
+  position: relative; padding-left: 12px;
+  font-size: 12px; line-height: 1.65;
+  color: var(--muted, #94a3b8);
+}
+.ew-world-possibility::before { content: '·'; position: absolute; left: 1px; }
+.ew-world-card-footer {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--border, #2d2f3d);
+}
+.ew-world-enter {
+  flex: none; font-size: 12px; font-weight: 600;
+  color: var(--accent, #7c3aed);
+}
+
 /* 44px is the smallest reliably tappable target; a 13px text link with 4px of
    padding is about 21px, which is a miss on a phone even when it looks fine on a
    desktop mock. */

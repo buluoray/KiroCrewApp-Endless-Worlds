@@ -131,6 +131,10 @@ export interface WorldRow {
   styles?: string[]
   panelCount?: number
   openingGroups?: number
+  /** A world-authored reason to imagine a life here, shown on the shelf. */
+  cardPromise?: string
+  /** Concrete lives or consequences this world invites the player to imagine. */
+  cardPossibilities?: string[]
   language?: string
   /** Every language this world can be played in, its primary first. A world with
    *  more than one lets the player pick before living a life in it. */

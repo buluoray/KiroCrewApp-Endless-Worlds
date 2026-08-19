@@ -212,6 +212,14 @@ def test_the_shipped_flagship_seed_installs_and_lists(tmp_path: Path) -> None:
     assert row["panelCount"] == 6
     assert row["openingGroups"] == 13
     assert row["lineage"] is True
+    assert row["cardPromise"] == (
+        "从无名之辈走到王座之前——也可能只在故乡，认真过完平凡一生。"
+    )
+    assert row["cardPossibilities"] == [
+        "让一个年轻时的选择，在数十年后回来找你",
+        "在魔法、战争与日常之间，决定自己愿意付出的代价",
+        "把未竟的愿望、秘密与仇敌，留给真正长大成人的下一代",
+    ]
     assert row["stale"] is False
     assert len(row["styles"]) == 6
 
