@@ -32,6 +32,7 @@
   "history.searchClear": "清除",
   "history.searchPlaceholder": "搜索这一生",
   "history.showAll": "看全部回合",
+  "history.summaryTitle": "这一生的大事",
   "history.unreadable": "这条人生的过往读不出来。",
   "history.via": "（来自 {source}）",
   "library.backendHint": "{path} → {error}。404 表示后端模块没有加载，需要 disable→enable 一次。",

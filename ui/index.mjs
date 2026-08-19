@@ -77,10 +77,11 @@ var api = {
 	/** The months already lived. `before` is a turn NUMBER, not an offset: an offset
 	*  would shift under a turn committed between two pages and silently skip or
 	*  repeat a month. `q` filters the whole life by substring before paging. */
-	chronicle: (id, before = 0, q = "") => {
+	chronicle: (id, before = 0, q = "", limit = 0) => {
 		const p = new URLSearchParams();
 		if (before > 0) p.set("before", String(before));
 		if (q) p.set("q", q);
+		if (limit > 0) p.set("limit", String(limit));
 		const qs = p.toString();
 		return json(`/runs/${encodeURIComponent(id)}/chronicle${qs ? `?${qs}` : ""}`);
 	},
@@ -131,6 +132,7 @@ var TABLES = {
 		"history.searchClear": "清除",
 		"history.searchPlaceholder": "搜索这一生",
 		"history.showAll": "看全部回合",
+		"history.summaryTitle": "这一生的大事",
 		"history.unreadable": "这条人生的过往读不出来。",
 		"history.via": "（来自 {source}）",
 		"library.backendHint": "{path} → {error}。404 表示后端模块没有加载，需要 disable→enable 一次。",
@@ -304,6 +306,7 @@ var TABLES = {
 		"history.searchClear": "Clear",
 		"history.searchPlaceholder": "Search this life",
 		"history.showAll": "All turns",
+		"history.summaryTitle": "This life in brief",
 		"history.unreadable": "This life's past could not be read.",
 		"history.via": " (from {source})",
 		"library.backendHint": "{path} → {error}. A 404 means the backend module did not load; a disable→enable cycle reloads it.",
@@ -1856,6 +1859,50 @@ function History({ runId }) {
 		]
 	});
 }
+/**
+* A finished life in brief: its marked events, oldest first.
+*
+* Reuses the chronicle the play page already has — no new model call. Reads up to
+* the most recent 100 months (the whole life for all but the very longest) and
+* flattens their events into one list, so a terminal page can show "this is what
+* happened" without the reader paging back through every turn of prose.
+*/
+function LifeSummary({ runId }) {
+	const [events, setEvents] = useState([]);
+	const [loaded, setLoaded] = useState(false);
+	useEffect(() => {
+		let alive = true;
+		api.chronicle(runId, 0, "", 100).then((out) => {
+			if (!alive) return;
+			const flat = [];
+			for (const turn of [...out.turns].reverse()) for (const ev of turn.events) flat.push({
+				turn: turn.turn,
+				text: ev
+			});
+			setEvents(flat);
+			setLoaded(true);
+		}).catch(() => {
+			if (alive) setLoaded(true);
+		});
+		return () => {
+			alive = false;
+		};
+	}, [runId]);
+	if (!loaded || !events.length) return null;
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ew-summary",
+		children: [/* @__PURE__ */ jsx("div", {
+			className: "ew-glabel",
+			children: t("history.summaryTitle")
+		}), /* @__PURE__ */ jsx("ul", {
+			className: "ew-list",
+			children: events.map((e, i) => /* @__PURE__ */ jsxs("li", { children: [/* @__PURE__ */ jsx("span", {
+				className: "ew-sub",
+				children: `${t("play.turn", { turn: e.turn })} · `
+			}), e.text] }, `${e.turn}-${i}`))
+		})]
+	});
+}
 //#endregion
 //#region src/play.tsx
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
@@ -2046,6 +2093,7 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 			className: "ew-meta",
 			children: t("play.endedMeta", { turn: v.turn })
 		}),
+		/* @__PURE__ */ jsx(LifeSummary, { runId }),
 		/* @__PURE__ */ jsxs("div", {
 			className: "ew-bar",
 			children: [

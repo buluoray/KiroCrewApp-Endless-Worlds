@@ -326,10 +326,11 @@ export const api = {
   /** The months already lived. `before` is a turn NUMBER, not an offset: an offset
    *  would shift under a turn committed between two pages and silently skip or
    *  repeat a month. `q` filters the whole life by substring before paging. */
-  chronicle: (id: string, before = 0, q = '') => {
+  chronicle: (id: string, before = 0, q = '', limit = 0) => {
     const p = new URLSearchParams()
     if (before > 0) p.set('before', String(before))
     if (q) p.set('q', q)
+    if (limit > 0) p.set('limit', String(limit))
     const qs = p.toString()
     return json<Chronicle>(
       `/runs/${encodeURIComponent(id)}/chronicle${qs ? `?${qs}` : ''}`,

@@ -32,6 +32,7 @@
   "history.searchClear": "Clear",
   "history.searchPlaceholder": "Search this life",
   "history.showAll": "All turns",
+  "history.summaryTitle": "This life in brief",
   "history.unreadable": "This life's past could not be read.",
   "history.via": " (from {source})",
   "library.backendHint": "{path} → {error}. A 404 means the backend module did not load; a disable→enable cycle reloads it.",

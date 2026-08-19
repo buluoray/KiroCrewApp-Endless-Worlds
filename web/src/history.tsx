@@ -176,3 +176,49 @@ export function History({ runId }: { runId: string }) {
     </div>
   )
 }
+
+/**
+ * A finished life in brief: its marked events, oldest first.
+ *
+ * Reuses the chronicle the play page already has — no new model call. Reads up to
+ * the most recent 100 months (the whole life for all but the very longest) and
+ * flattens their events into one list, so a terminal page can show "this is what
+ * happened" without the reader paging back through every turn of prose.
+ */
+export function LifeSummary({ runId }: { runId: string }) {
+  const [events, setEvents] = useState<Array<{ turn: number; text: string }>>([])
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    api.chronicle(runId, 0, '', 100)
+      .then((out) => {
+        if (!alive) return
+        const flat: Array<{ turn: number; text: string }> = []
+        // The route returns newest-first; a life story reads oldest-first.
+        for (const turn of [...out.turns].reverse()) {
+          for (const ev of turn.events) flat.push({ turn: turn.turn, text: ev })
+        }
+        setEvents(flat)
+        setLoaded(true)
+      })
+      .catch(() => { if (alive) setLoaded(true) })
+    return () => { alive = false }
+  }, [runId])
+
+  if (!loaded || !events.length) return null
+
+  return (
+    <div className="ew-summary">
+      <div className="ew-glabel">{t('history.summaryTitle')}</div>
+      <ul className="ew-list">
+        {events.map((e, i) => (
+          <li key={`${e.turn}-${i}`}>
+            <span className="ew-sub">{`${t('play.turn', { turn: e.turn })} · `}</span>
+            {e.text}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}

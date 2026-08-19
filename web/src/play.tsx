@@ -20,7 +20,7 @@ const ACT = 'act'
 const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
-import { History } from './history'
+import { History, LifeSummary } from './history'
 import { PanelBox, Prose, Waiting } from './ui'
 
 export function PlayPage({
@@ -189,6 +189,7 @@ export function PlayPage({
         <div className="ew-note ew-note-live">{t('play.endedBadge')}</div>
         <Prose text={v.prose} />
         <div className="ew-meta">{t('play.endedMeta', { turn: v.turn })}</div>
+        <LifeSummary runId={runId} />
         <div className="ew-bar">
           <button
             className="ew-btn ew-btn-go"
