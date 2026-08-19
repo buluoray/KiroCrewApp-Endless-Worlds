@@ -170,6 +170,7 @@
   "world.languagePick": "Play this world in",
   "world.needsNewerCore": "This world needs a newer version of the app (it asks for {needed}, this is {local}).",
   "world.opening": "What it will ask you",
+  "world.worldDecidesHint": "Highlighted choices are settled by the world — you can't pick them.",
   "world.panelAlways": "always shown",
   "world.panelConditional": "shown on condition",
   "world.panelFields": "{count} entries",

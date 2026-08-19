@@ -375,6 +375,9 @@ export function WorldDetailView({
           <Chip key={g.id} accent={g.worldDecides}>{g.label}</Chip>
         ))}
       </div>
+      {groups.some((g) => g.worldDecides) ? (
+        <div className="ew-hint ew-block">{t('world.worldDecidesHint')}</div>
+      ) : null}
 
       <div className="ew-section">{t('world.panels')}</div>
       <div className="ew-block">

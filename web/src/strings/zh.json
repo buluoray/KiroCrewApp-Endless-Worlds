@@ -170,6 +170,7 @@
   "world.languagePick": "用哪种语言游玩",
   "world.needsNewerCore": "这个世界需要更新版本的应用（它要 {needed}，当前 {local}）。",
   "world.opening": "开局会问你",
+  "world.worldDecidesHint": "高亮的项由世界决定，你无法挑选。",
   "world.panelAlways": "始终显示",
   "world.panelConditional": "条件显示",
   "world.panelFields": "{count} 项",

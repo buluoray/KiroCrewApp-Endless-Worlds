@@ -187,6 +187,8 @@
 
 .ew-section { font-size: 13px; font-weight: 600; margin: 0 0 7px; }
 .ew-block { margin-bottom: 18px; }
+/* A small explanatory caption under a block, e.g. what the accented chips mean. */
+.ew-hint { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.6; margin-top: -10px; }
 
 .ew-panel {
   border: 1px solid var(--border, #2d2f3d); border-radius: 8px;
@@ -677,7 +679,7 @@
 /* A shelf row that carries its own destructive control. The row is a div and the
    open action is a button INSIDE it, because a button cannot contain a button --
    and the delete has to be a sibling, not a nested child. */
-.ew-card-row { display: flex; align-items: stretch; gap: 0; padding: 0; overflow: hidden; }
+.ew-card-row { display: flex; align-items: stretch; gap: 0; padding: 0; overflow: visible; }
 .ew-card-open {
   flex: 1 1 auto; min-width: 0; text-align: left; font: inherit;
   background: transparent; border: none; color: inherit; cursor: pointer;
