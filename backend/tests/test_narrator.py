@@ -31,6 +31,7 @@ from narrator import (  # noqa: E402
     ensure_narrator_slot,
     is_narrator_slot,
     narrator_slot_key,
+    release_narrator_slot,
 )
 
 AGENT_JSON = _BACKEND.parent / "agents" / "narrator.json"
@@ -383,3 +384,50 @@ class TestAgainstRealCore:
             pytest.skip("_ChatSlot not exposed")
         assert slot_cls("k", memory_mode="temporary").is_restricted is True
         assert slot_cls("k", memory_mode="persistent").is_restricted is False
+
+
+# -- release on delete ----------------------------------------------------
+
+
+class FakeRuntime:
+    """Mirrors the fields release_narrator_slot touches on core's state: the raw
+    ``_slots`` dict, and the two best-effort hooks."""
+
+    def __init__(self) -> None:
+        self._slots: dict[str, FakeSlot] = {}
+        self.cancelled: list[str] = []
+        self.pushed = 0
+
+    def cancel_questions_for_slot(self, key: str) -> None:
+        self.cancelled.append(key)
+
+    def _push_slots(self) -> None:
+        self.pushed += 1
+
+
+def test_release_drops_this_apps_slot_and_refreshes():
+    rt = FakeRuntime()
+    key = narrator_slot_key("run-1")
+    rt._slots[key] = FakeSlot(key, app=APP_NAME, memory_mode=MEMORY_MODE)
+
+    assert release_narrator_slot(rt, "run-1") is True
+    assert key not in rt._slots, "the deleted life's slot is gone"
+    assert rt.cancelled == [key], "its pending question cards are cancelled"
+    assert rt.pushed == 1, "the slot list is refreshed"
+
+
+def test_release_never_removes_a_slot_another_owner_holds():
+    rt = FakeRuntime()
+    key = narrator_slot_key("run-2")
+    rt._slots[key] = FakeSlot(key, app="someone-else", memory_mode=MEMORY_MODE)
+
+    assert release_narrator_slot(rt, "run-2") is False
+    assert key in rt._slots, "a slot this app does not own is left alone"
+
+
+def test_release_is_a_guarded_noop_on_bad_input():
+    # No slot present, a runtime without _slots, and a bad run id all no-op rather
+    # than raising — a cleanup failure must never fail the deletion.
+    assert release_narrator_slot(FakeRuntime(), "run-3") is False
+    assert release_narrator_slot(object(), "run-3") is False
+    assert release_narrator_slot(FakeRuntime(), "not a run id!!") is False

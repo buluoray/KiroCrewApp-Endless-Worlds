@@ -98,6 +98,51 @@ def is_narrator_slot(slot_key: str) -> bool:
     return isinstance(slot_key, str) and slot_key.startswith(_SLOT_PREFIX)
 
 
+def release_narrator_slot(state: Any, run_id: str) -> bool:
+    """Drop this run's narrator slot when its life is deleted. Returns whether a
+    slot was released.
+
+    Deleting a life removes its store rows, but the in-memory slot — one per run —
+    would otherwise linger for the gateway's lifetime, holding a conversation for a
+    life that no longer exists. This releases it.
+
+    Best-effort and defensive on purpose: a slot-cleanup failure must never fail
+    the deletion the player asked for, so every step is guarded and a missing
+    runtime, a bad id, or a slot this app does not own is simply a no-op. Only a
+    slot stamped with THIS app is ever removed — we never reach into another
+    owner's slot.
+    """
+    try:
+        slot_key = narrator_slot_key(run_id)
+    except BadRunId:
+        return False
+    slots = getattr(state, "_slots", None)
+    if not isinstance(slots, dict):
+        return False
+    slot = slots.get(slot_key)
+    if slot is None:
+        return False
+    if (getattr(slot, "_app", "") or "") != APP_NAME:
+        return False
+    slots.pop(slot_key, None)
+    # Pending question cards belong to a life that is gone; drop them, then refresh
+    # the slot list the dashboard renders. Both are conveniences — a failure here
+    # leaves the slot already removed.
+    cancel = getattr(state, "cancel_questions_for_slot", None)
+    if callable(cancel):
+        try:
+            cancel(slot_key)
+        except Exception:  # noqa: BLE001
+            pass
+    push = getattr(state, "_push_slots", None)
+    if callable(push):
+        try:
+            push()
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
 def ensure_narrator_slot(state: Any, run_id: str, *, project: str = "") -> Any:
     """Return this run's narrator slot, creating it scoped if it is not there.
 
