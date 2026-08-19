@@ -501,16 +501,9 @@ export function PlayPage({
       </div>
       ) : null}
 
-      <button
-        className="ew-drawer"
-        type="button"
-        aria-expanded={back}
-        aria-controls="ew-history-panel"
-        onClick={() => setBack((b) => !b)}
-      >
-        {back ? t('history.close') : t('history.open')}
-      </button>
-      {back ? <div id="ew-history-panel"><History runId={runId} /></div> : null}
+      {/* The history drawer is hidden for now: the turn pager at the top of the
+          story covers re-reading this life. Kept in the ended view, which has no
+          pager. */}
 
       <button
         className="ew-drawer"

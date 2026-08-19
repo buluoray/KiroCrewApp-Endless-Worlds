@@ -2559,18 +2559,6 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 		/* @__PURE__ */ jsx("button", {
 			className: "ew-drawer",
 			type: "button",
-			"aria-expanded": back,
-			"aria-controls": "ew-history-panel",
-			onClick: () => setBack((b) => !b),
-			children: back ? t("history.close") : t("history.open")
-		}),
-		back ? /* @__PURE__ */ jsx("div", {
-			id: "ew-history-panel",
-			children: /* @__PURE__ */ jsx(History, { runId })
-		}) : null,
-		/* @__PURE__ */ jsx("button", {
-			className: "ew-drawer",
-			type: "button",
 			"aria-expanded": drawer,
 			"aria-controls": "ew-panels-drawer",
 			onClick: () => setDrawer((d) => !d),
