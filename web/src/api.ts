@@ -74,6 +74,21 @@ export interface LifeRecap {
   choices: string[]
 }
 
+/** One "an old thing came back" marker on the latest turn. Exists only when the
+ *  narrator's structured commit declared the echo — prose that merely reminisces
+ *  produces none — so `sourceTurn` is always a real page to jump back to. */
+export interface EchoMarker {
+  sourceId: string
+  sourceTurn: number
+  sourceTitle: string
+  sourceSummary: string
+  /** The player's own words on the source turn, when it came from one. */
+  sourceAction: string
+  /** The current event that answers it. */
+  title: string
+  summary: string
+}
+
 export interface PlayView {
   runId: string
   worldId: string
@@ -91,6 +106,8 @@ export interface PlayView {
   endingId: string
   /** Values the world, rather than the player, settled for this life at birth. */
   reveals: OpeningReveal[]
+  /** Declared echoes on the latest turn — each traceable to a real past page. */
+  echoes: EchoMarker[]
   /** Existing chronicle facts used to restore a returning player's place. */
   recap: LifeRecap
   /** Set while a narrator is writing this month — recorded on the server before it
@@ -327,6 +344,30 @@ export const api = {
     json<{ worlds: WorldRow[]; seeds: SeedReport }>(
       `/worlds${language ? `?language=${encodeURIComponent(language)}` : ''}`,
     ),
+  settings: () =>
+    json<{ model: string; reasoningEffort: string; efforts: string[] }>('/settings'),
+  saveSettings: (body: { model: string; reasoningEffort: string }) =>
+    json<{ model: string; reasoningEffort: string }>('/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** The gateway's advertised model list (same-origin dashboard endpoint, not the
+   *  app base). Returns [] rather than throwing when the list is unavailable
+   *  (signed out / gateway restart), so the picker degrades to "keep default". */
+  models: async (): Promise<Array<{ id: string; name?: string }>> => {
+    try {
+      const res = await fetch('/api/models')
+      if (!res.ok) return []
+      const raw = (await res.json()) as unknown
+      const list = Array.isArray(raw) ? raw : []
+      return list.map((m) =>
+        typeof m === 'string' ? { id: m } : (m as { id: string; name?: string }),
+      ).filter((m) => m && typeof m.id === 'string' && m.id)
+    } catch {
+      return []
+    }
+  },
   world: (id: string, prose = false, language?: string) => {
     const q = new URLSearchParams()
     if (prose) q.set('prose', '1')

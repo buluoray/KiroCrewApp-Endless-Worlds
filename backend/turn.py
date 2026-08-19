@@ -184,6 +184,7 @@ def declaration_shape(template: Any) -> str:
         )
     lines.append(text("shape.reach"))
     lines.append(text("shape.omission"))
+    lines.append(text("shape.memory"))
     return "\n".join(lines)
 
 
@@ -236,6 +237,8 @@ async def advance_turn(
     prompt_override: str = "",
     language: Any = "en",
     shape: str = "",
+    model: str = "",
+    reasoning_effort: str = "",
 ) -> TurnOutcome:
     """Ask for one turn and wait for the narrator to commit it.
 
@@ -253,7 +256,9 @@ async def advance_turn(
     baseline = int(run_state.get("turn") or 0)
     wanted = baseline + 1
 
-    slot, fresh_slot = ensure_narrator_slot_ex(state_obj, run_id, project=project)
+    slot, fresh_slot = ensure_narrator_slot_ex(
+        state_obj, run_id, project=project, model=model, reasoning_effort=reasoning_effort
+    )
     slot_key = str(getattr(slot, "key", "") or "")
 
     # Does the narrator still have the world's rulebook?

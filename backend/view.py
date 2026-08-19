@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from halo import gate_digest
+from memory_graph import echo_markers
 from template import Template
 
 #: Box-drawing, block and geometric characters — the ones a template uses to
@@ -466,6 +467,11 @@ def build_play_view(
         "ended": bool(ending_id),
         "endingId": ending_id,
         "reveals": reveals,
+        # "An old thing came back" — the traceable markers for this turn's
+        # declared echoes (design §8.1). Empty unless the narrator's structured
+        # commit named an older event; prose alone never produces one, which is
+        # what makes each marker's "back to that page" honest.
+        "echoes": echo_markers(chronicle),
         "recap": {
             "lastAction": str(last.get("action") or "").strip(),
             "events": recap_events,

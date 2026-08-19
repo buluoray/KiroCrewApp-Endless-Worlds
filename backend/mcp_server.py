@@ -79,6 +79,7 @@ from chapters import (  # noqa: E402
     read_chapter,
 )
 from halo import attribution, compose_restraint, event_density  # noqa: E402
+import memory_graph  # noqa: E402
 from store import RunStore, StoreError  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from view import always_panels_empty  # noqa: E402
@@ -110,7 +111,12 @@ _TOOLS: list[dict[str, Any]] = [
             "and the choices offered. THE ONLY call that changes a life. Declare "
             "state in full — a field you leave out reads to the player as a fact "
             "that vanished. Idempotent per (runId, turn): re-sending a turn you "
-            "already committed changes nothing."
+            "already committed changes nothing. The optional `memory` block is how "
+            "this world REMEMBERS: declare the people/places/things this turn "
+            "introduced, the events that happened, and any relation changes. When "
+            "a new event answers an old one, name the old event's canonical id in "
+            "`echoes` — that is the only thing that makes the world's memory of it "
+            "real. Facts are never extracted from your prose."
         ),
         "inputSchema": {
             "type": "object",
@@ -121,6 +127,107 @@ _TOOLS: list[dict[str, Any]] = [
                 "turn": {"type": "integer", "minimum": 1},
                 "prose": {"type": "string", "maxLength": 20000},
                 "state": {"type": "object"},
+                "memory": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "entities": {
+                            "type": "array",
+                            "maxItems": 12,
+                            "items": {
+                                "type": "object",
+                                "required": ["id", "kind", "name"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "id": {"type": "string", "maxLength": 64},
+                                    "kind": {
+                                        "type": "string",
+                                        "enum": list(memory_graph.KINDS),
+                                    },
+                                    "name": {"type": "string", "maxLength": 120},
+                                    "aliases": {
+                                        "type": "array",
+                                        "maxItems": 6,
+                                        "items": {"type": "string", "maxLength": 120},
+                                    },
+                                    "summary": {"type": "string", "maxLength": 300},
+                                },
+                            },
+                        },
+                        "events": {
+                            "type": "array",
+                            "maxItems": 6,
+                            "items": {
+                                "type": "object",
+                                "required": ["key", "title", "summary", "disclosure"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "key": {"type": "string", "maxLength": 64},
+                                    "title": {"type": "string", "maxLength": 120},
+                                    "summary": {"type": "string", "maxLength": 300},
+                                    "importance": {
+                                        "type": "string",
+                                        "enum": list(memory_graph.IMPORTANCE),
+                                    },
+                                    "participants": {
+                                        "type": "array",
+                                        "maxItems": 8,
+                                        "items": {"type": "string", "maxLength": 64},
+                                    },
+                                    "place": {"type": "string", "maxLength": 64},
+                                    "threads": {
+                                        "type": "array",
+                                        "maxItems": 4,
+                                        "items": {
+                                            "type": "object",
+                                            "required": ["id", "effect"],
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "id": {"type": "string", "maxLength": 64},
+                                                "effect": {
+                                                    "type": "string",
+                                                    "enum": list(
+                                                        memory_graph.THREAD_EFFECTS
+                                                    ),
+                                                },
+                                            },
+                                        },
+                                    },
+                                    "echoes": {
+                                        "type": "array",
+                                        "maxItems": 4,
+                                        "items": {"type": "string", "maxLength": 96},
+                                    },
+                                    "corrects": {"type": "string", "maxLength": 96},
+                                    "disclosure": {
+                                        "type": "string",
+                                        "enum": list(memory_graph.DISCLOSURES),
+                                    },
+                                },
+                            },
+                        },
+                        "relations": {
+                            "type": "array",
+                            "maxItems": 12,
+                            "items": {
+                                "type": "object",
+                                "required": ["from", "type", "to", "change"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "from": {"type": "string", "maxLength": 64},
+                                    "type": {"type": "string", "maxLength": 64},
+                                    "to": {"type": "string", "maxLength": 64},
+                                    "change": {
+                                        "type": "string",
+                                        "enum": list(memory_graph.RELATION_CHANGES),
+                                    },
+                                    "value": {"type": "string", "maxLength": 64},
+                                    "reasonEvent": {"type": "string", "maxLength": 96},
+                                },
+                            },
+                        },
+                    },
+                },
                 "events": {
                     "type": "array",
                     "maxItems": 12,
@@ -194,6 +301,17 @@ _TOOLS: list[dict[str, Any]] = [
                         "difference is sent. If you have lost it, leave this out — "
                         "asking with a baseline you no longer hold is how a turn "
                         "ends up inventing the parts it cannot see."
+                    ),
+                },
+                "memoryEvents": {
+                    "type": "array",
+                    "maxItems": 6,
+                    "items": {"type": "string", "maxLength": 96},
+                    "description": (
+                        "Canonical event ids (from `memoryCandidates` or an earlier "
+                        "turn's memory) whose full record you want now, with the "
+                        "entities they involve. A bounded look, never the whole "
+                        "graph."
                     ),
                 },
             },
@@ -345,6 +463,9 @@ def _check(schema: dict[str, Any], value: Any, path: str) -> None:
         cap = schema.get("maxLength")
         if cap is not None and len(value) > cap:
             raise ToolInputError(path, f"at most {cap} characters, got {len(value)}")
+        allowed = schema.get("enum")
+        if allowed is not None and value not in allowed:
+            raise ToolInputError(path, f"one of {', '.join(allowed)}, got {value!r}")
         if schema.get("pattern") == "run-id":
             if not value or set(value) - _RUN_ID_CHARS or value[0] == "-":
                 raise ToolInputError(path, "a run id (lowercase, digits, hyphens)")
@@ -439,6 +560,31 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                 ),
             }
 
+    # The world's memory, validated BEFORE anything commits (design §5.3): a
+    # memory block that fails refuses the WHOLE call — prose included — so there
+    # is never a turn whose story landed while its facts did not. The narrator
+    # may drop the block and resubmit; the turn then simply contributed no
+    # structured memory, and nothing is ever back-filled from prose.
+    memory = args.get("memory")
+    if memory is not None:
+        index = memory_graph.build_index(store.read_chronicle(run_id))
+        try:
+            memory_graph.validate_memory(memory, index, turn=turn)
+        except memory_graph.MemoryRejected as exc:
+            return {
+                "committed": False,
+                "turn": committed,
+                "reason": "memory-rejected",
+                "field": exc.field,
+                "expected": exc.expected,
+                "detail": (
+                    "Nothing was committed. Fix the named field and resend the "
+                    "whole call, or resend it without `memory` — facts are never "
+                    "taken from prose, so a turn without the block simply "
+                    "records no structured memory."
+                ),
+            }
+
     state = dict(args["state"])
     # The declaration is the story's whole state, so it REPLACES the previous one
     # — a field the narrator stops declaring is a fact that stopped being true.
@@ -456,22 +602,25 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     asked = store.read_pending(run_id) or {}
     action = str(asked.get("action") or "") if int(asked.get("turn") or 0) == turn else ""
 
-    store.append_turn(
-        run_id,
-        {
-            "turn": turn,
-            "prose": args["prose"],
-            "action": action,
-            "choices": args.get("choices") or [],
-            # What this turn marked notable, and what it credited a gain to. Both
-            # are how the anti-halo readings become measurable; `source` is
-            # deliberately NOT required — a narrator that forgot to say where five
-            # gold came from has still narrated a real turn, and the omission is
-            # surfaced to the next turn rather than refused here.
-            "events": args.get("events") or [],
-            "gains": args.get("gains") or [],
-        },
-    )
+    entry: dict[str, Any] = {
+        "turn": turn,
+        "prose": args["prose"],
+        "action": action,
+        "choices": args.get("choices") or [],
+        # What this turn marked notable, and what it credited a gain to. Both
+        # are how the anti-halo readings become measurable; `source` is
+        # deliberately NOT required — a narrator that forgot to say where five
+        # gold came from has still narrated a real turn, and the omission is
+        # surfaced to the next turn rather than refused here.
+        "events": args.get("events") or [],
+        "gains": args.get("gains") or [],
+    }
+    if memory is not None:
+        # Same JSON record as the prose (design §6.2): the fact delta and the
+        # story it narrates commit together or not at all, and every index over
+        # them is derived and rebuildable from this line.
+        entry["memory"] = memory
+    store.append_turn(run_id, entry)
     result: dict[str, Any] = {"committed": True, "turn": turn}
     # Non-blocking correction. The turn is committed either way — a live month is
     # never held hostage to a schema quibble — but if the narrator declared state
@@ -546,6 +695,33 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
         "fingerprint": fingerprint,
         "scenes": _scene_ledger(run_id).mounted(),
     }
+
+    # The world's memory, recalled — never pushed whole (design §7.1). The
+    # system offers a handful of old events scored by deterministic rules; the
+    # narrator decides whether any of them naturally comes due this turn. Using
+    # one means declaring `echoes` on the new event in the commit — mentioning
+    # it in prose alone creates nothing.
+    graph = memory_graph.build_index(chronicle)
+    if graph["events"]:
+        pending = store.read_pending(run_id) or {}
+        candidates = memory_graph.recall_candidates(
+            graph,
+            turn=int(state.get("turn") or 0) + 1,
+            action=str(pending.get("action") or ""),
+        )
+        if candidates:
+            out["memoryCandidates"] = candidates
+            out["memoryNote"] = (
+                "Old events of this life that may naturally come due now. Use one "
+                "only when the story truly answers it, and declare its id in the "
+                "new event's `echoes` when you do. Never claim something happened "
+                "that is not recorded here or in the chronicle."
+            )
+    wanted_events = args.get("memoryEvents") or []
+    if wanted_events:
+        out["memoryEvents"] = memory_graph.event_neighbourhood(
+            graph, [str(e) for e in wanted_events]
+        )
 
     since = str(args.get("since") or "")
     baseline = store.baseline_for(run_id, since) if since else None

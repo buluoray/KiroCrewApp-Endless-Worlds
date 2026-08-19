@@ -116,7 +116,9 @@ def test_the_players_action_is_recorded_with_the_month(store):
 
 def test_the_commit_folds_the_action_into_the_chronicle():
     src = (_BACKEND / "mcp_server.py").read_text(encoding="utf-8")
-    commit = src[src.index("def _advance_turn") : src.index("def _advance_turn") + 4000]
+    start = src.index("def _advance_turn")
+    end = src.index("\ndef ", start)  # the whole function, not a fixed window
+    commit = src[start:end]
     assert "read_pending" in commit, "the commit never recovers what was asked for"
     assert re.search(r'"action":\s*action', commit), (
         "the chronicle entry does not carry the action"

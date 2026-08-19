@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { PastTurn, PlayView, SceneRow } from './api'
+import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
 import { api } from './api'
 
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
@@ -49,6 +49,68 @@ function TurnProgress({ g, label }: { g?: PlayView['generating']; label: string 
       <div className="ew-progress-steps">
         <span className="ew-progress-label">{label}</span>
       </div>
+    </div>
+  )
+}
+
+/**
+ * One "an old thing came back" marker (design §8.1). Deliberately quiet: a single
+ * folded line after the prose, expanding to the source moment, the player's own
+ * choice back then, how this turn answers it, and a jump to the source page. No
+ * celebration, no sound, no modal — the prose stays the protagonist.
+ */
+function EchoMark({ e, onJump }: { e: EchoMarker; onJump: (turn: number) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="ew-echo">
+      <button
+        className="ew-echo-line"
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {t('play.echoLine', { turn: e.sourceTurn })}
+      </button>
+      {open ? (
+        <div className="ew-echo-body">
+          <div className="ew-echo-row">
+            <span className="ew-echo-label">{t('play.echoThen')}</span>
+            <span>
+              <strong>{e.sourceTitle}</strong>
+              {e.sourceSummary ? ` — ${e.sourceSummary}` : ''}
+            </span>
+          </div>
+          {e.sourceAction ? (
+            <div className="ew-echo-row">
+              <span className="ew-echo-label">{t('play.echoYouDid')}</span>
+              <span>{e.sourceAction}</span>
+            </div>
+          ) : null}
+          <div className="ew-echo-row">
+            <span className="ew-echo-label">{t('play.echoNow')}</span>
+            <span>
+              <strong>{e.title}</strong>
+              {e.summary ? ` — ${e.summary}` : ''}
+            </span>
+          </div>
+          <div className="ew-echo-actions">
+            <button
+              className="ew-btn ew-btn-sm"
+              type="button"
+              onClick={() => onJump(e.sourceTurn)}
+            >
+              {t('play.echoJump')}
+            </button>
+            <button
+              className="ew-btn ew-btn-sm"
+              type="button"
+              onClick={() => setOpen(false)}
+            >
+              {t('play.echoClose')}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -463,6 +525,21 @@ export function PlayPage({
       <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
         <Prose text={shownProse} />
       </div>
+
+      {/* After the prose, never before it (design §8.1): the story is the
+          protagonist and an echo is a footnote to it. Live turn only — a past
+          page re-read through the pager already IS the past. */}
+      {isLive && (v.echoes ?? []).length ? (
+        <div className="ew-echoes">
+          {(v.echoes ?? []).map((e, i) => (
+            <EchoMark
+              key={`${e.sourceId}-${i}`}
+              e={e}
+              onJump={(turn) => setViewTurn(turn >= latest ? null : turn)}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {stalled ? (
         <div className="ew-note" role="status" aria-live="polite">
