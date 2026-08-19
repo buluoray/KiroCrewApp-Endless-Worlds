@@ -622,6 +622,54 @@ async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
     return web.json_response({"runId": run_id, "deleted": True, "turn": facts["turn"]})
 
 
+#: A player-chosen life name is a shelf label, not a story: long enough to tell two
+#: lives apart, short enough to sit on the rail.
+LIFE_LABEL_MAX = 60
+
+
+async def set_life_meta(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /runs/{run_id}/meta`` — a player's own name and shelf state for a life.
+
+    Metadata only: a custom ``label`` (shown instead of the answer-derived subtitle)
+    and ``archived`` (folded out of the active shelf). It never touches the life's
+    state or chronicle, and it deliberately does not bump ``lastPlayed`` — renaming
+    a life is not playing it. Send ``label: ""`` to clear a custom name and fall
+    back to the derived subtitle.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+
+    run_id = request.match_info.get("run_id", "")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "expected an object"}, status=400)
+
+    changes: dict[str, Any] = {}
+    if "label" in body:
+        label = body.get("label")
+        if not isinstance(label, str):
+            return web.json_response(
+                {"field": "label", "expected": "a name, or \"\" to clear it"}, status=400
+            )
+        changes["label"] = label.strip()[:LIFE_LABEL_MAX]
+    if "archived" in body:
+        changes["archived"] = bool(body.get("archived"))
+
+    if not changes:
+        return web.json_response(
+            {"error": "nothing to change", "expected": "label and/or archived"},
+            status=400,
+        )
+
+    if not _store(ctx).patch_index(run_id, changes):
+        return web.json_response({"error": "no such life"}, status=404)
+
+    return web.json_response({"runId": run_id, **changes})
+
+
 async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Response:
     """``POST /runs/{run_id}/turn`` — ask the world for the next span of this life.
 
@@ -1183,6 +1231,7 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         AppRoute(method="GET", path="/runs/{run_id}", handler=get_run),
         AppRoute(method="GET", path="/runs/{run_id}/deletion", handler=life_deletion),
         AppRoute(method="POST", path="/runs/{run_id}/delete", handler=delete_life),
+        AppRoute(method="POST", path="/runs/{run_id}/meta", handler=set_life_meta),
         AppRoute(method="GET", path="/runs/{run_id}/scenes/{scene_id}", handler=get_scene),
         AppRoute(
             method="POST",

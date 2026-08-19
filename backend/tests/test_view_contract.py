@@ -131,6 +131,9 @@ def test_the_life_list_carries_every_field_the_ui_reads(ui_src):
         "generating": False,
         # What tells two lives in one world apart.
         "subtitle": "",
+        # Player-set metadata, carried on the index row and spread by list_runs.
+        "label": "",
+        "archived": False,
     }
     # Both readers of a life row, not just the shelf. The rail was added later and
     # reads the same shape; checking only one of them would let the other drift,

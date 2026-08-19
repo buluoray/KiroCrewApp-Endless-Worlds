@@ -226,6 +226,29 @@ export default function EndlessWorlds() {
     [live],
   )
 
+  // A life's own name and shelf state. Metadata only, then reload so the list shows
+  // the truth rather than an optimistic guess.
+  const changeLifeMeta = useCallback(
+    async (runId: string, changes: { label?: string; archived?: boolean }) => {
+      try {
+        await api.setLifeMeta(runId, changes)
+      } catch {
+        /* a dropped request changes nothing; the reload reflects the real state */
+      }
+      void load()
+    },
+    [load],
+  )
+  const renameLife = useCallback(
+    (runId: string, label: string) => { void changeLifeMeta(runId, { label }) },
+    [changeLifeMeta],
+  )
+  const archiveLife = useCallback(
+    (runId: string, archived: boolean) => { void changeLifeMeta(runId, { archived }) },
+    [changeLifeMeta],
+  )
+  const [showArchived, setShowArchived] = useState(false)
+
   let body: React.ReactNode
   if (view === 'live' && live) {
     body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} refresh={refresh} />
@@ -271,7 +294,16 @@ export default function EndlessWorlds() {
     // because the rail's existence is one), and what stays is the part a rail of
     // names cannot carry: one affordance to continue the most recent life, and the
     // notices about worlds. Those appear nowhere else.
-    const newest = runs.find((r) => !r.unreadable && !r.ended)
+    const active = runs.filter((r) => !r.archived && !r.ended)
+    const endedRuns = runs.filter((r) => !r.archived && r.ended)
+    const archivedRuns = runs.filter((r) => r.archived)
+    const newest = active.find((r) => !r.unreadable)
+    const rowProps = {
+      onOpen: enterLife,
+      onDelete: setDoomedLife,
+      onRename: renameLife,
+      onArchive: archiveLife,
+    }
     body = (
       <>
         {newest ? (
@@ -284,16 +316,43 @@ export default function EndlessWorlds() {
         )}
 
         <div className="ew-shelflist">
-          {runs.length ? (
+          {active.length ? (
             <>
               <div className="ew-section">{t('library.lives')}</div>
-              {runs.map((r) => (
-              <LifeRow key={r.runId} run={r} onOpen={enterLife} onDelete={setDoomedLife} />
-            ))}
-              <div className="ew-section" style={{ marginTop: '22px' }}>
-                {t('library.otherWorlds')}
-              </div>
+              {active.map((r) => <LifeRow key={r.runId} run={r} {...rowProps} />)}
             </>
+          ) : null}
+
+          {endedRuns.length ? (
+            <>
+              <div className="ew-section" style={{ marginTop: '22px' }}>
+                {t('shelf.ended')}
+              </div>
+              {endedRuns.map((r) => <LifeRow key={r.runId} run={r} {...rowProps} />)}
+            </>
+          ) : null}
+
+          {archivedRuns.length ? (
+            <>
+              <button
+                className="ew-section ew-section-toggle"
+                type="button"
+                style={{ marginTop: '22px' }}
+                onClick={() => setShowArchived((s) => !s)}
+                aria-expanded={showArchived}
+              >
+                {t('shelf.archived', { n: archivedRuns.length })}
+              </button>
+              {showArchived
+                ? archivedRuns.map((r) => <LifeRow key={r.runId} run={r} {...rowProps} />)
+                : null}
+            </>
+          ) : null}
+
+          {runs.length ? (
+            <div className="ew-section" style={{ marginTop: '22px' }}>
+              {t('library.otherWorlds')}
+            </div>
           ) : null}
 
           {worlds.length === 0 ? (

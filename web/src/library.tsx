@@ -74,7 +74,7 @@ export function WorldCard({
  * left it.
  */
 export function LifeRow({
-  run, onOpen, onDelete,
+  run, onOpen, onDelete, onArchive, onRename,
 }: {
   run: LifeRowData
   onOpen: (runId: string) => void
@@ -87,7 +87,19 @@ export function LifeRow({
    *  destructive control sitting on the resume affordance is a different job on the
    *  same surface. The managed list is where lives are managed. */
   onDelete?: (runId: string) => void
+  /** Fold this life into or out of the archived group. Managed-list only. */
+  onArchive?: (runId: string, archived: boolean) => void
+  /** Give this life a player-chosen name. Managed-list only. */
+  onRename?: (runId: string, label: string) => void
 }) {
+  // The name the player reads: their own label first, then the answer-derived
+  // subtitle, then the world's title.
+  const name = run.label || run.subtitle || run.title || run.worldId
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const commit = () => { onRename?.(run.runId, draft.trim()); setEditing(false) }
+
   // Checked before the other states: a life mid-generation is also awaitingOpening,
   // and "not born yet" would read as stalled when in fact it is being written.
   const where = run.unreadable
@@ -100,9 +112,34 @@ export function LifeRow({
           ? t('life.unborn')
           : t('life.turn', { turn: run.turn })
 
-  // A div, not a button. The row carries its own delete control, and a button
-  // inside a button is invalid HTML — browsers recover from it unpredictably, and
-  // the inner click can be swallowed by the outer one.
+  if (editing) {
+    return (
+      <div className="ew-card ew-card-row">
+        <input
+          className="ew-rename-input"
+          value={draft}
+          maxLength={60}
+          autoFocus
+          placeholder={t('life.rename.placeholder')}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+        />
+        <button className="ew-btn ew-btn-sm ew-btn-go" type="button" onClick={commit}>
+          {t('life.rename.save')}
+        </button>
+        <button className="ew-btn ew-btn-sm" type="button" onClick={() => setEditing(false)}>
+          {t('life.rename.cancel')}
+        </button>
+      </div>
+    )
+  }
+
+  // A div, not a button. The row carries its own controls, and a button inside a
+  // button is invalid HTML — browsers recover from it unpredictably, and the inner
+  // click can be swallowed by the outer one.
   return (
     <div className="ew-card ew-card-row">
       <button
@@ -114,18 +151,37 @@ export function LifeRow({
         <div className="ew-titlerow">
           {/* The life first, the world second. Four rows reading only the world's name
               told the player nothing about which life they were choosing. */}
-          <span className="ew-title">{run.subtitle || run.title || run.worldId}</span>
+          <span className="ew-title">{name}</span>
           {run.awaitingOpening ? <Chip accent>{t('life.waiting')}</Chip> : null}
         </div>
-        {run.subtitle ? <div className="ew-sub">{run.title}</div> : null}
+        {name !== run.title ? <div className="ew-sub">{run.title}</div> : null}
         <div className="ew-meta">{where}</div>
       </button>
+      {onRename ? (
+        <button
+          className="ew-btn ew-btn-quiet ew-card-drop"
+          type="button"
+          onClick={() => { setDraft(run.label || ''); setEditing(true) }}
+          aria-label={t('life.rename.aria', { name })}
+        >
+          {t('life.rename.short')}
+        </button>
+      ) : null}
+      {onArchive ? (
+        <button
+          className="ew-btn ew-btn-quiet ew-card-drop"
+          type="button"
+          onClick={() => onArchive(run.runId, !run.archived)}
+        >
+          {run.archived ? t('life.unarchive') : t('life.archive')}
+        </button>
+      ) : null}
       {onDelete ? (
         <button
           className="ew-btn ew-btn-quiet ew-card-drop"
           type="button"
           onClick={() => onDelete(run.runId)}
-          aria-label={t('life.delete.aria', { name: run.subtitle || run.title || run.runId })}
+          aria-label={t('life.delete.aria', { name })}
         >
           {t('life.delete.short')}
         </button>

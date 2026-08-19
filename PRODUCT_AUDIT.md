@@ -130,7 +130,9 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 
 **当前状态**
 
-单独删除人生已落地：`backend/routes.py` 已注册 `POST /runs/{run_id}/delete`（`delete_life`，`routes.py:548/1172`），复用 `RunStore.delete_run()`，前端有 `DeleteLifeDialog`，并有 `test_delete_life.py`。重命名、归档、置顶和筛选仍未实现。
+单独删除人生已落地：`backend/routes.py` 已注册 `POST /runs/{run_id}/delete`（`delete_life`，`routes.py:548/1172`），复用 `RunStore.delete_run()`，前端有 `DeleteLifeDialog`，并有 `test_delete_life.py`。
+
+> **重命名 / 归档 / 分组已实现（2026-08-18）。** 新增 `RunStore.patch_index()`（合并 `label`/`archived` 到索引行，不动 `lastPlayed` 与其它字段）+ `POST /runs/{run_id}/meta`（`set_life_meta`，`label` 空串清除，`archived` 布尔）。`list_runs` 原样透出这两个字段。前端：`LifeRow` 优先显示玩家自定义 `label`，带内联重命名（Enter 保存 / Esc 取消）、归档/取消归档、删除三个控制；书架按**进行中 / 已落幕 / 已归档（可折叠）** 分组；rail 折叠掉已归档人生并同样优先 `label`。测试 `test_store.py::test_patch_index_*`。**仍未做：** 置顶（starred）、按状态/世界筛选与搜索、`lastPlayed` 目前是创建时间（回合提交不刷新索引，属既有限制）。
 
 ### 6. 前情提要与人生大事记
 

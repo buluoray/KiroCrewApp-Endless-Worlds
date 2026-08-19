@@ -49,6 +49,9 @@ export function WorldRail({
   // Unusable worlds are counted but not offered as navigation targets: a row that
   // cannot be opened is a dead end, and the shelf already explains each one.
   const broken = (worlds ?? []).length - playable.length
+  // Archived lives are folded away here as on the shelf: the rail is for the lives
+  // in play, and the archived group lives on the shelf.
+  const shown = runs.filter((r) => !r.archived)
 
   return (
     <nav className="ew-rail" aria-label={t('rail.label')}>
@@ -56,10 +59,10 @@ export function WorldRail({
         {t('rail.shelf')}
       </button>
 
-      {runs.length ? (
+      {shown.length ? (
         <div className="ew-rail-group">
           <div className="ew-rail-head">{t('library.lives')}</div>
-          {runs.map((r) => (
+          {shown.map((r) => (
             <button
               key={r.runId}
               type="button"
@@ -71,7 +74,7 @@ export function WorldRail({
               aria-current={r.runId === activeRunId ? 'page' : undefined}
             >
               <span className="ew-rail-name">
-                {r.subtitle || r.title || r.worldId}
+                {r.label || r.subtitle || r.title || r.worldId}
               </span>
               <span className="ew-rail-sub">{lifeWhere(r)}</span>
             </button>

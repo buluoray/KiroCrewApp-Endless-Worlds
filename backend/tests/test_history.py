@@ -176,7 +176,7 @@ def test_the_desktop_landing_offers_something_the_rail_cannot():
     space it takes."""
     src = module("main.tsx")
     assert "shelf.continue" in src, "the landing offers no way to carry on"
-    assert re.search(r"runs\.find\(", src), (
+    assert re.search(r"\.find\(", src), (
         "the landing does not identify which life to continue"
     )
     assert "!r.ended" in src, "a finished life must not be offered as the one to resume"

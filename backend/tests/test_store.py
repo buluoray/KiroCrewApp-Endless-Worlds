@@ -186,6 +186,26 @@ def test_index_upsert_replaces_and_promotes(store: RunStore) -> None:
     assert "lastPlayed" in rows[0]
 
 
+def test_patch_index_merges_metadata_without_reordering(store: RunStore) -> None:
+    a = store.create_run(_state(1), {"templateId": "t", "character": "甲"})
+    b = store.create_run(_state(1), {"templateId": "t", "character": "乙"})
+    before = next(r for r in store.read_index() if r["runId"] == a)["lastPlayed"]
+
+    assert store.patch_index(a, {"label": "当上宰相的那一世", "archived": True}) is True
+    rows = store.read_index()
+    # Order is unchanged: renaming is not playing, so recency does not move.
+    assert [r["runId"] for r in rows] == [b, a]
+    row_a = next(r for r in rows if r["runId"] == a)
+    assert row_a["label"] == "当上宰相的那一世"
+    assert row_a["archived"] is True
+    assert row_a["lastPlayed"] == before, "a metadata patch must not bump lastPlayed"
+    assert row_a["character"] == "甲", "other fields are left intact"
+
+
+def test_patch_index_reports_a_missing_life(store: RunStore) -> None:
+    assert store.patch_index(new_run_id(), {"archived": True}) is False
+
+
 # -- locking --------------------------------------------------------------
 
 

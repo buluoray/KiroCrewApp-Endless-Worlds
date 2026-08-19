@@ -150,6 +150,10 @@ export interface LifeRowData {
   /** What tells this life apart from another in the same world — the player's own
    *  opening answers. Empty when the life has nothing distinguishing it yet. */
   subtitle?: string
+  /** A player-chosen name for this life, shown instead of the derived subtitle. */
+  label?: string
+  /** Folded out of the active shelf into the archived group. */
+  archived?: boolean
   /** A month being written right now. The shelf marks it so a life in progress is
    *  not mistaken for one that stalled. */
   generating?: boolean
@@ -299,6 +303,13 @@ export const api = {
   deleteLife: (runId: string, turn: number) =>
     post<{ runId: string; deleted: boolean; turn: number }>(
       `/runs/${encodeURIComponent(runId)}/delete`, { confirm: runId, turn },
+    ),
+
+  /** A player's own name and shelf state for a life — metadata only, never the
+   *  story. Pass `label: ""` to clear a custom name. */
+  setLifeMeta: (runId: string, body: { label?: string; archived?: boolean }) =>
+    post<{ runId: string; label?: string; archived?: boolean }>(
+      `/runs/${encodeURIComponent(runId)}/meta`, body,
     ),
 
   restoreWorld: (id: string) =>

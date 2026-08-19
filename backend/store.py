@@ -353,6 +353,24 @@ class RunStore:
         rows.insert(0, summary)
         self._kv.set(_INDEX_KEY, {"runs": rows})
 
+    def patch_index(self, run_id: str, changes: dict[str, Any]) -> bool:
+        """Merge player-set metadata (label, archived) into a life's index row.
+
+        Deliberately NOT :meth:`upsert_index`: it leaves ``lastPlayed`` and every
+        other field alone, so renaming a life does not reorder the shelf by recency
+        and does not clobber the row a turn commit never rewrites anyway. Returns
+        False when the life is gone, so the route can answer 404 rather than
+        silently succeeding on nothing.
+        """
+        _check_run_id(run_id)
+        rows = self.read_index()
+        for row in rows:
+            if row.get("runId") == run_id:
+                row.update(changes)
+                self._kv.set(_INDEX_KEY, {"runs": rows})
+                return True
+        return False
+
     # -- lifecycle --------------------------------------------------------
 
     def create_run(self, state: dict[str, Any], summary: dict[str, Any]) -> str:
