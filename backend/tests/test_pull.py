@@ -367,3 +367,31 @@ def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, m
     })
     assert ok["committed"] is True
     assert "warnings" not in ok
+
+
+def test_a_full_read_surfaces_the_players_opening_answers(store, tmp_path, monkeypatch):
+    """The narrator must honour the player's picks (sex, race, name…), so the
+    opening groups carry the chosen value, not just the question."""
+    import mcp_server as srv
+
+    flagship = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    if not flagship.is_file():
+        pytest.skip("flagship seed not present")
+    data = tmp_path / "data"
+    (data / "worlds").mkdir(parents=True, exist_ok=True)
+    (data / "worlds" / "jianhuo-jiyuan.md").write_text(
+        flagship.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    run = store.create_run(
+        {"turn": 0, "worldId": "jianhuo-jiyuan", "opening": {"sex": "Female", "name": "Aria"}},
+        {"worldId": "jianhuo-jiyuan"},
+    )
+    monkeypatch.setattr(srv, "_store", lambda: store)
+    monkeypatch.setattr(srv, "_DATA", data)
+
+    out = srv._read_runtime({"runId": run})
+    by_id = {g["id"]: g for g in out["opening"]}
+    assert by_id["sex"].get("value") == "Female", "the chosen sex must reach the narrator"
+    assert by_id["name"].get("value") == "Aria"
+    # A group the player did not answer carries no value.
+    assert "value" not in by_id["race"]

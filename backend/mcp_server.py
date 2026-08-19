@@ -636,10 +636,24 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 # player, the anti-halo signal that must not be lost (R7).
                 out["brief"] = brief(pack.template)
                 out["shape"] = declaration_shape(pack.template)
-                out["opening"] = [
-                    {"id": g.id, "label": g.label, "worldDecides": g.random}
-                    for g in pack.template.opening
-                ]
+                # The opening groups AND the player's own answer to each — the
+                # value is what the narrator must honour (the chosen sex, race,
+                # name…). Listing only the questions here, with the answers buried
+                # in state.opening, is why a choice like sex went unhonoured. A
+                # blank/world-decided group carries no value; the narrator settles
+                # those itself.
+                answers = state.get("opening")
+                answers = answers if isinstance(answers, dict) else {}
+                opening_out: list[dict[str, Any]] = []
+                for g in pack.template.opening:
+                    entry: dict[str, Any] = {
+                        "id": g.id, "label": g.label, "worldDecides": g.random,
+                    }
+                    val = answers.get(g.id)
+                    if isinstance(val, (str, int, float)) and str(val).strip():
+                        entry["value"] = str(val)
+                    opening_out.append(entry)
+                out["opening"] = opening_out
             else:
                 newly = opened_since(pack.template, baseline, state)
                 if newly:
