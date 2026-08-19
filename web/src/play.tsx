@@ -98,13 +98,13 @@ export function PlayPage({
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, v?.turn])
-  // Advancing to a new turn, or paging to another one, should start at the top of
-  // the story rather than wherever the last page was scrolled to.
-  const topRef = useRef<HTMLDivElement>(null)
-  // Remembers the last shown turn so the page-turn animation knows its direction.
+  // Advancing to a new turn, or paging to another one, returns to the top. Scroll
+  // the app root (which starts at the "Endless Worlds" header) into view, NOT the
+  // play column below it — aligning the column to the top scrolled the header out
+  // of sight, which read as the page rebounding to cover the title.
   const prevTurnRef = useRef(0)
   useEffect(() => {
-    topRef.current?.scrollIntoView({ block: 'start' })
+    document.querySelector('.ew-root')?.scrollIntoView({ block: 'start' })
     prevTurnRef.current = viewTurn ?? (v?.turn ?? 0)
   }, [viewTurn, v?.turn])
 
@@ -642,7 +642,7 @@ export function PlayPage({
   )
 
   return (
-    <div ref={topRef}>
+    <div>
       <div className="ew-topbar">
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         {pager}

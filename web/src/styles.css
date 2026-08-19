@@ -32,10 +32,12 @@
 
   /* One way back, not two. The rail's own "back to the shelf" is permanent and
      always in the same place, so the view's inline back button is a second control
-     doing the same thing three lines below the first — which is exactly how it
-     looked: two identical links stacked in the top-left corner. The inline one is
-     the mobile affordance and stays the only one below this width. */
-  .ew-back { display: none; }
+     doing the same thing. Scoped to `.ew-root .ew-back` (0,2,0) on purpose: the
+     base `.ew-back` rule is declared LATER in this file, so an equal-specificity
+     `.ew-back { display: none }` here would lose the cascade and the button would
+     stay visible — which is exactly the "two back buttons" bug this had. The
+     inline one is the mobile affordance and stays the only one below this width. */
+  .ew-root .ew-back { display: none; }
 
   /* The shelf, once. The rail already lists every life and every world, so the
      same list in the reading column was the same information twice, side by side.
