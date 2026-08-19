@@ -283,6 +283,7 @@ def world_detail(pack: Any, *, include_prose: bool = False) -> dict[str, Any]:
         "panels": [
             {
                 "id": p.id,
+                "label": p.label,
                 "always": p.always,
                 "when": p.when.source if p.when else None,
                 "fields": [
@@ -408,6 +409,7 @@ def build_play_view(
         ]
         panels.append({
             "id": panel.id,
+            "label": panel.label,
             "always": panel.always,
             "fields": fields,
             # A panel where the narrator has said nothing yet is still shown, but
@@ -466,6 +468,9 @@ def build_play_view(
         "style": state.get("style") or "",
         "ended": bool(ending_id),
         "endingId": ending_id,
+        # Whether this world declares continuity (§9): the ending page offers
+        # the legacy bridge only when the world's own template allows it.
+        "lineage": template.lineage,
         "reveals": reveals,
         # "An old thing came back" — the traceable markers for this turn's
         # declared echoes (design §8.1). Empty unless the narrator's structured

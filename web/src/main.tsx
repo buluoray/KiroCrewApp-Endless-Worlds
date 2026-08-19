@@ -321,7 +321,7 @@ export default function EndlessWorlds() {
 
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} onReplaySame={restartSameOpening} refresh={refresh} />
+    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} />
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
   } else if (selected) {

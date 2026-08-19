@@ -685,6 +685,10 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     store = _store()
     state = store.read_state(run_id)
     chronicle = store.read_chronicle(run_id)
+    # Turn 0 is the app's own bridge record (design §9), not a narrated month:
+    # the narrator learns of an inheritance through the SUMMARY below and the
+    # graph, never by re-reading the raw record as if it were story.
+    lived = [e for e in chronicle if int(e.get("turn") or 0) >= 1]
     recent = args.get("recentTurns", RECENT_TURNS)
     fingerprint = store.fingerprint(state)
 
@@ -750,9 +754,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # the life's first read). An explicit recentTurns request is always honoured —
     # that is how the narrator deliberately pages back through older history.
     if "recentTurns" in args:
-        out["recentTurns"] = chronicle[-recent:] if recent else []
+        out["recentTurns"] = lived[-recent:] if recent else []
     elif baseline is None:
-        out["recentTurns"] = chronicle[-recent:] if recent else []
+        out["recentTurns"] = lived[-recent:] if recent else []
     else:
         out["recentTurns"] = []
     # The app's own readings of its recent behaviour (R7). A measurement, not an
@@ -768,13 +772,22 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # re-pushed every turn.
     if baseline is None:
         out["restraint"] = {
-            "density": event_density(chronicle),
-            "attribution": attribution(chronicle),
+            "density": event_density(lived),
+            "attribution": attribution(lived),
             # The same readings as a sentence, in the world's own language. Kept
             # because a narrator acts on "you have handed this life three windfalls
             # in six months" and merely notices `{"perTurn": 3.0}`.
-            "note": compose_restraint(chronicle, state.get("language") or "en"),
+            "note": compose_restraint(lived, state.get("language") or "en"),
         }
+        # What the last life left to this one (design §9): names and one-line
+        # summaries, stamped by the bridge — never the ancestor's graph, whose
+        # run id is not even in this payload. Rides only on a full read, like
+        # everything else a continuous session already holds.
+        from legacy import narrator_summary
+
+        inherited = narrator_summary(graph, str(state.get("language") or "en"))
+        if inherited is not None:
+            out["legacy"] = inherited
 
     world_id = state.get("worldId")
     if isinstance(world_id, str) and world_id:

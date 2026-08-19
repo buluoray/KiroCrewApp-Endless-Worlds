@@ -29,6 +29,7 @@ from kiro_crew.apps.route_registry import AppRoute
 
 import memory_graph
 from keepsakes import KeepsakeError, KeepsakeStore
+from legacy import candidates as legacy_candidates
 from store import RunStore, StoreError
 from story_cards import (
     EXPORT_FORMATS,
@@ -369,6 +370,39 @@ async def export_story_card(request: web.Request, ctx: AppContext) -> web.Respon
     )
 
 
+# ── the legacy bridge (design §9) ────────────────────────────────────────
+
+
+async def get_legacy_candidates(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/legacy/candidates`` — what a finished life may pass on.
+
+    Offered only at the ending (§9: 玩家在人生终章确认): a life still being
+    lived answers 409, so the bridge cannot become a mid-life duplication
+    device. Whether the WORLD permits continuity at all is the创建-side gate —
+    ``create_run`` checks the template's ``lineage`` flag before accepting a
+    bridge — this endpoint only reports what exists to choose from.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    try:
+        state = store.read_state(run_id)
+    except StoreError:
+        return web.json_response({"error": "no such life"}, status=404)
+    if not state.get("ended"):
+        return web.json_response(
+            {"error": "this life is still being lived", "code": "not_ended"},
+            status=409,
+        )
+    index = memory_graph.build_index(store.read_chronicle(run_id))
+    return web.json_response({
+        "runId": run_id,
+        "worldId": state.get("worldId") or "",
+        "candidates": legacy_candidates(index),
+    })
+
+
 def memory_routes() -> list[AppRoute]:
     """The routes ``routes.register_routes`` splices in."""
     return [
@@ -403,5 +437,10 @@ def memory_routes() -> list[AppRoute]:
             method="GET",
             path="/runs/{run_id}/story-cards/{card_id}/export",
             handler=export_story_card,
+        ),
+        AppRoute(
+            method="GET",
+            path="/runs/{run_id}/legacy/candidates",
+            handler=get_legacy_candidates,
         ),
     ]

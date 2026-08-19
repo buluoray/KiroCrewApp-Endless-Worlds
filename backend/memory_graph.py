@@ -131,6 +131,12 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
                     "summary": str(ent.get("summary") or ""),
                     "firstTurn": turn,
                 }
+                # Provenance from a legacy bridge (design §9). Only the app's
+                # turn-0 bridge record can carry it — the narrator's tool
+                # schema closes the entity property list — so its presence in
+                # a rebuilt index is itself evidence of a real bridge.
+                if isinstance(ent.get("inheritsFrom"), dict):
+                    entities[eid]["inheritsFrom"] = dict(ent["inheritsFrom"])
             else:
                 # Enrichment only: aliases accumulate, name and summary may be
                 # refreshed. The kind never changes here — validation refused

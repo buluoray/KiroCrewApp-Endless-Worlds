@@ -41,6 +41,7 @@ export interface ShapedField {
 
 export interface PanelView {
   id: string
+  label: string
   always: boolean
   empty: boolean
   fields: ShapedField[]
@@ -213,6 +214,8 @@ export interface PlayView {
   prose: string
   style: string
   ended: boolean
+  /** This world declares continuity (§9): the ending page may offer the bridge. */
+  lineage: boolean
   /** Chapter headings the world opened this month, in its own words. The play page
    *  shows them as a quiet "a new chapter opens" marker. */
   unlocked: string[]
@@ -298,6 +301,7 @@ export interface WorldDetail extends WorldRow {
   styleRows: StyleRow[]
   panels: Array<{
     id: string
+    label: string
     always: boolean
     when: string | null
     fields: Array<{ id: string; label: string; primitive: Primitive }>
@@ -559,8 +563,27 @@ export const api = {
       language?: string
       /** Copy a prior life's opening picks as the starting point. */
       fromRunId?: string
+      /** The legacy bridge (§9): carry a finished life's chosen inheritance in.
+       *  Refused unless the world declares lineage and the source life ended. */
+      legacy?: { fromRunId: string; selected: string[] }
     },
   ) => post<{ runId: string }>('/runs', body),
+
+  /** What a finished life may pass on, grouped by category (§9 step 1). */
+  legacyCandidates: (runId: string) =>
+    json<{
+      runId: string
+      worldId: string
+      candidates: Record<string, Array<{
+        id: string
+        kind: string
+        name: string
+        summary: string
+        appearances: number
+        relations?: Array<{ type: string; level: number; value: string }>
+        open?: boolean
+      }>>
+    }>(`/runs/${encodeURIComponent(runId)}/legacy/candidates`),
 
   openRun: (id: string) =>
     post<{ advanced: boolean; reason: string; turn: number }>(

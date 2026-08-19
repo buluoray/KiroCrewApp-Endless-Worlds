@@ -21,6 +21,7 @@ const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
 import { History, LifeSummary } from './history'
+import { LegacyPicker } from './legacy'
 import { StarMap } from './memory'
 import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
@@ -144,13 +145,15 @@ function EchoMark({
 }
 
 export function PlayPage({
-  runId, onBack, onScenes, onReplay, onReplaySame, refresh,
+  runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife, refresh,
 }: {
   runId: string
   onBack: () => void
   onScenes: (scenes: SceneRow[]) => void
   onReplay: (worldId: string) => void
   onReplaySame: (fromRunId: string) => void
+  /** Enter another life by id — how a legacy heir is stepped into (§9). */
+  onEnterLife: (runId: string) => void
   refresh: number
 }) {
   const [v, setV] = useState<PlayView | null>(null)
@@ -172,6 +175,8 @@ export function PlayPage({
   // The life star map overlay (§8.3): opened from the secondary action area,
   // never from the per-turn controls — it reads the life, it does not play it.
   const [starOpen, setStarOpen] = useState(false)
+  // The legacy bridge picker (§9): offered on the ending page of a lineage world.
+  const [legacyOpen, setLegacyOpen] = useState(false)
   const [back, setBack] = useState(false)
   // A recap belongs to entering a life, not to every poll or newly written turn.
   // The ref distinguishes the first load of this run from subsequent refreshes.
@@ -382,6 +387,25 @@ export function PlayPage({
   if (v.ended) {
     return (
       <div>
+        {legacyOpen ? (
+          <LegacyPicker
+            runId={runId}
+            lang={v.language}
+            onClose={() => setLegacyOpen(false)}
+            onContinue={async (selected) => {
+              // Same create→open→enter shape as "live this again", plus the
+              // bridge. The heir starts a fresh opening — a new life, carrying
+              // chosen things, never a save-file copy (§9).
+              const created = await api.createRun({
+                worldId: v.worldId,
+                language: v.language,
+                legacy: { fromRunId: runId, selected },
+              })
+              void api.openRun(created.runId)
+              onEnterLife(created.runId)
+            }}
+          />
+        ) : null}
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
         <h3 className="ew-detail-title">{v.title}</h3>
@@ -390,8 +414,17 @@ export function PlayPage({
         <div className="ew-meta">{t('play.endedMeta', { turn: v.turn })}</div>
         <LifeSummary runId={runId} />
         <div className="ew-bar">
+          {v.lineage ? (
+            <button
+              className="ew-btn ew-btn-go"
+              type="button"
+              onClick={() => setLegacyOpen(true)}
+            >
+              {mt(v.language, 'legacy.entry')}
+            </button>
+          ) : null}
           <button
-            className="ew-btn ew-btn-go"
+            className={'ew-btn' + (v.lineage ? '' : ' ew-btn-go')}
             type="button"
             onClick={() => onReplaySame(runId)}
           >

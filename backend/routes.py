@@ -896,6 +896,56 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
             {"field": exc.field, "expected": exc.expected}, status=400
         )
 
+    # The legacy bridge (design §9): carry a finished life's chosen inheritance
+    # into this one. Validated BEFORE the run exists, so a refused bridge
+    # leaves nothing behind. Three gates, in order of who owns the rule: the
+    # WORLD must declare continuity (template.lineage), the source life must be
+    # over (终章 confirmation is the ending page this request came from), and
+    # both lives must be of the same world — an heirloom cannot cross worlds.
+    legacy_body = body.get("legacy")
+    bridge_entry = None
+    if isinstance(legacy_body, dict):
+        from legacy import LegacyError, build_bridge_record
+        from memory_graph import build_index as _build_graph_index
+
+        if not pack.template.lineage:
+            return web.json_response(
+                {"field": "legacy", "expected": "a world that declares lineage",
+                 "code": "world_without_lineage"},
+                status=422,
+            )
+        src_run = str(legacy_body.get("fromRunId") or "")
+        try:
+            src_state = store.read_state(src_run)
+        except Exception:  # noqa: BLE001
+            return web.json_response(
+                {"field": "legacy.fromRunId", "expected": "a life that exists"},
+                status=404,
+            )
+        if not src_state.get("ended"):
+            return web.json_response(
+                {"field": "legacy.fromRunId",
+                 "expected": "a finished life — inheritance is settled at the ending",
+                 "code": "not_ended"},
+                status=409,
+            )
+        if src_state.get("worldId") != world_id:
+            return web.json_response(
+                {"field": "legacy.fromRunId", "expected": "a life of the same world"},
+                status=422,
+            )
+        try:
+            bridge_entry = build_bridge_record(
+                _build_graph_index(store.read_chronicle(src_run)),
+                source_run_id=src_run,
+                selected=[str(s) for s in legacy_body.get("selected") or []],
+                language=str(state.get("language") or "en"),
+            )
+        except LegacyError as exc:
+            return web.json_response(
+                {"field": f"legacy.{exc.field}", "expected": exc.expected}, status=422
+            )
+
     run_id = store.create_run(
         state,
         {
@@ -906,6 +956,11 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
             "turn": 0,
         },
     )
+    if bridge_entry is not None:
+        # The bridge is the new life's FIRST canonical record — the same form
+        # every narrated turn uses, so the graph stays rebuildable from the
+        # chronicle alone and dies with the run directory (§9 + Phase 0).
+        store.append_turn(run_id, bridge_entry)
     return web.json_response({"runId": run_id, "state": store.read_state(run_id)},
                              status=201)
 
@@ -1266,6 +1321,10 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
         return web.json_response({"error": "no such life"}, status=404)
 
     entries = store.read_chronicle(run_id)
+    # Turn 0 is the app's own record (the legacy bridge, design §9), not a page
+    # of the story: it has no prose and nobody lived it. The star map still
+    # shows the inheritance — through the graph, where it belongs.
+    entries = [e for e in entries if int(e.get("turn") or 0) >= 1]
 
     # Full-text filter across the whole life, applied before paging so "when did I
     # meet the smith" pages through matches rather than raw months. Case-insensitive
