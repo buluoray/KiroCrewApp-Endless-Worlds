@@ -143,7 +143,7 @@ _drop_stale_siblings()
 from chapters import brief as world_brief  # noqa: E402
 from chapters import opened_since  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
-from narrator import release_narrator_slot  # noqa: E402
+from narrator import purge_narrator_session, release_narrator_slot  # noqa: E402
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
 from store import RunStore  # noqa: E402
@@ -447,10 +447,12 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
         try:
             store.delete_run(str(life["runId"]))
             removed.append(str(life["runId"]))
-            # Release the deleted life's narrator slot so it does not linger in
-            # memory for a run that no longer exists. Best-effort by design.
+            # Release the deleted life's narrator slot and delete its persisted
+            # conversation so nothing lingers for a run that no longer exists.
+            # Best-effort by design.
             if state_obj is not None:
                 release_narrator_slot(state_obj, str(life["runId"]))
+                await purge_narrator_session(state_obj, str(life["runId"]))
         except Exception as exc:  # noqa: BLE001
             failed.append({"runId": str(life["runId"]), "problem": str(exc)})
 
@@ -629,11 +631,13 @@ async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
             {"error": "this life could not be erased", "detail": str(exc)}, status=500
         )
 
-    # Release the narrator slot so a deleted life leaves nothing behind in memory.
+    # Release the narrator slot and delete its persisted conversation so a deleted
+    # life leaves nothing behind — in memory or on disk.
     _app = getattr(request, "app", None)
     state_obj = _app.get("state") if _app is not None else None
     if state_obj is not None:
         release_narrator_slot(state_obj, run_id)
+        await purge_narrator_session(state_obj, run_id)
 
     return web.json_response({"runId": run_id, "deleted": True, "turn": facts["turn"]})
 

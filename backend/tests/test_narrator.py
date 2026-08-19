@@ -431,3 +431,32 @@ def test_release_is_a_guarded_noop_on_bad_input():
     assert release_narrator_slot(FakeRuntime(), "run-3") is False
     assert release_narrator_slot(object(), "run-3") is False
     assert release_narrator_slot(FakeRuntime(), "not a run id!!") is False
+
+
+def test_the_slot_is_created_under_this_app_so_its_origin_is_app():
+    """The app passes ``app=APP_NAME`` to get_or_create_slot, which is exactly what
+    makes core tag the slot's origin APP rather than USER
+    (``slot._origin = origin or (SlotOrigin.APP if app else "")``). Pinning the
+    app-side half here keeps that guarantee from silently regressing."""
+    state = FakeState()
+    ensure_narrator_slot(state, "run-1")
+    assert state.create_calls[0]["app"] == APP_NAME
+
+
+def test_purge_is_a_guarded_noop_without_a_session_store():
+    import asyncio
+
+    class NoSessions:
+        pass
+
+    assert asyncio.run(narrator.purge_narrator_session(NoSessions(), "run-1")) is False
+    assert asyncio.run(narrator.purge_narrator_session(object(), "run-1")) is False
+
+
+def test_purge_is_a_noop_on_a_bad_run_id():
+    import asyncio
+
+    class S:
+        sessions = object()
+
+    assert asyncio.run(narrator.purge_narrator_session(S(), "not a run id!!")) is False

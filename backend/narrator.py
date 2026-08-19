@@ -143,6 +143,52 @@ def release_narrator_slot(state: Any, run_id: str) -> bool:
     return True
 
 
+async def purge_narrator_session(state: Any, run_id: str) -> bool:
+    """Delete the narrator's persisted conversation when a life is deleted.
+
+    ``release_narrator_slot`` drops the in-memory slot; this removes the kiro-cli
+    conversation BEHIND it so a deleted life leaves no transcript on disk. The
+    sequence mirrors the dashboard's own permanent-delete: shut the session down
+    (``sessions.remove`` preserves the files for resume), forget its map entry to
+    get the session id, then unlink that id's transcript files.
+
+    Best-effort and fully guarded: a runtime without a session store, a missing
+    dashboard import (as in unit tests), a bad id, or any per-step failure is a
+    no-op that never fails the deletion the player asked for.
+    """
+    try:
+        slot_key = narrator_slot_key(run_id)
+    except BadRunId:
+        return False
+    sessions = getattr(state, "sessions", None)
+    if sessions is None:
+        return False
+    try:
+        from kiro_crew.dashboard.chat_utils import _history_key_for  # noqa: PLC0415
+        from kiro_crew.dashboard.session_transfer import (  # noqa: PLC0415
+            _unlink_layer_b_files,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    key = _history_key_for(slot_key)
+    try:
+        await sessions.remove(key)
+    except Exception:  # noqa: BLE001
+        pass
+    sid = ""
+    try:
+        sid = sessions.forget_conversation(key) or ""
+    except Exception:  # noqa: BLE001
+        pass
+    if not sid:
+        return False
+    try:
+        _unlink_layer_b_files(sid)
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
 def ensure_narrator_slot(state: Any, run_id: str, *, project: str = "") -> Any:
     """Return this run's narrator slot, creating it scoped if it is not there.
 
@@ -192,6 +238,10 @@ def ensure_narrator_slot_ex(
         app=APP_NAME,
         memory_mode=MEMORY_MODE,
     )
+    # Passing ``app`` is also what tags the slot's ORIGIN as APP, not USER: core
+    # derives ``slot._origin = origin or (SlotOrigin.APP if app else "")``
+    # (state.py). That origin is what a ``slots:user`` grant keys off, so an
+    # app-created narrator slot is never mistaken for one the player opened.
 
     # kwargs apply only on CREATE, so anything else the slot needs is assigned
     # after — see the same note in auto_research/handlers.py:1705.

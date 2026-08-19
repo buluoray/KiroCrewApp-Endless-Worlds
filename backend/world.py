@@ -136,14 +136,19 @@ class WorldPack:
         return self.provenance.prose_sha256 != prose_digest(self.prose)
 
     def staleness_note(self) -> str | None:
-        """One plain sentence for the Library, or None when fresh."""
+        """One plain sentence in the world's language, or None when fresh."""
         if self.provenance is None:
             return None
         if not self.is_stale():
             return None
+        if self.template.language == "zh":
+            return (
+                "这个世界的设定在面板生成后有过改动，"
+                "面板内容可能已经和设定对不上了。"
+            )
         return (
-            "The rulebook was edited after this world's panels were worked out, "
-            "so the panels may not match the text any more."
+            "This world's rulebook changed after its panels were generated, "
+            "so the panels may no longer match it."
         )
 
     def is_improvable(self) -> bool:

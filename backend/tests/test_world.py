@@ -146,10 +146,27 @@ def test_editing_the_prose_flips_staleness_but_the_world_still_loads() -> None:
     edited = read_world(build(header, prose=PROSE + "补一句。\n"))
 
     assert edited.is_stale() is True
-    assert edited.staleness_note()
+    assert edited.staleness_note() == (
+        "This world's rulebook changed after its panels were generated, "
+        "so the panels may no longer match it."
+    )
     # Still fully usable:
     assert edited.template.panels[0].visible({}) is True
     assert summarize(edited)["panelCount"] == 1
+
+
+def test_staleness_note_follows_the_world_language() -> None:
+    header = {
+        **MINIMAL_HEADER,
+        "language": "zh",
+        "compiledFrom": Provenance.for_prose(PROSE).to_dict(),
+    }
+    edited = read_world(build(header, prose=PROSE + "补一句。\n"))
+
+    assert edited.staleness_note() == (
+        "这个世界的设定在面板生成后有过改动，"
+        "面板内容可能已经和设定对不上了。"
+    )
 
 
 def test_a_pack_with_no_provenance_is_not_reported_stale() -> None:
