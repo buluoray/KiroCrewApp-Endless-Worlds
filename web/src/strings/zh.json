@@ -57,6 +57,7 @@
   "life.delete.months": "「{name}」已经活了 {n} 个月。删掉它，这些月份写下的一切都没有了。",
   "life.delete.reading": "正在读这条人生走到了哪里…",
   "life.delete.short": "删除",
+  "life.actions": "{name} 的操作",
   "life.delete.title": "结束这条人生？",
   "life.delete.typeToConfirm": "要继续，请把这条人生的名字打一遍：{name}",
   "life.delete.unborn": "「{name}」还没有出生。删掉它，你留下的开局设定也一起没有。",

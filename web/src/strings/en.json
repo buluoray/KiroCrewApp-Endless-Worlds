@@ -57,6 +57,7 @@
   "life.delete.months": "“{name}” has lived {n} months. Deleting it takes everything written in them.",
   "life.delete.reading": "Reading how far this life got…",
   "life.delete.short": "Delete",
+  "life.actions": "Actions for {name}",
   "life.delete.title": "End this life?",
   "life.delete.typeToConfirm": "To go on, type this life's name: {name}",
   "life.delete.unborn": "“{name}” has not been born yet. Deleting it also takes the opening you chose.",

@@ -690,3 +690,30 @@
 .ew-card-drop {
   align-self: flex-start; margin: 10px 10px 0 0; border-radius: 8px;
 }
+/* Row actions: inline on desktop, collapsed into a kebab menu on a phone where
+   three stacked buttons wrapped badly. */
+.ew-life-actions { display: flex; align-items: flex-start; }
+.ew-life-menu { display: none; position: relative; align-self: flex-start; margin: 10px 10px 0 0; }
+@media (max-width: 767px) {
+  .ew-life-actions { display: none; }
+  .ew-life-menu { display: block; }
+}
+.ew-kebab {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border, #2d2f3d);
+  color: var(--muted, #6b7280); -webkit-tap-highlight-color: transparent;
+}
+.ew-kebab:hover { color: var(--text, #e2e8f0); }
+.ew-menu {
+  position: absolute; right: 0; top: 44px; z-index: 30; min-width: 160px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--card, #1f2030); border: 1px solid var(--border, #2d2f3d);
+  border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .45);
+}
+.ew-menu-item {
+  text-align: left; font: inherit; cursor: pointer; min-height: 42px;
+  padding: 10px 12px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text, #e2e8f0);
+}
+.ew-menu-item:hover { background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030)); }

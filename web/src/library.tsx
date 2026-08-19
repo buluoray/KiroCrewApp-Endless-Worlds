@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { LifeRowData, OpeningGroup, WorldDetail, WorldRow } from './api'
 import { api } from './api'
@@ -22,6 +22,18 @@ const LANGUAGE_ENDONYM: Record<string, string> = {
 
 export function languageName(tag: string): string {
   return LANGUAGE_ENDONYM[tag] ?? tag.toUpperCase()
+}
+
+/** A three-bar hamburger, drawn rather than imported: this app carries no icon
+ *  dependency, and an SVG keeps it crisp and theme-coloured (currentColor). */
+function MenuGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <line x1="3" y1="5" x2="15" y2="5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="3" y1="9" x2="15" y2="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="3" y1="13" x2="15" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
 }
 
 /**
@@ -117,6 +129,39 @@ export function LifeRow({
   const [draft, setDraft] = useState('')
   const commit = () => { onRename?.(run.runId, draft.trim()); setEditing(false) }
 
+  // On a phone the three row actions wrapped into an ugly stack, so there they
+  // collapse into a kebab menu (inline on desktop, unchanged). One list of actions
+  // feeds both, so the two renderings can never drift apart.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const close = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [menuOpen])
+  const actions: Array<{ key: string; label: string; aria?: string; onClick: () => void }> = []
+  if (onRename) {
+    actions.push({
+      key: 'rename', label: t('life.rename.short'), aria: t('life.rename.aria', { name }),
+      onClick: () => { setDraft(run.label || ''); setEditing(true) },
+    })
+  }
+  if (onArchive) {
+    actions.push({
+      key: 'archive', label: run.archived ? t('life.unarchive') : t('life.archive'),
+      onClick: () => onArchive(run.runId, !run.archived),
+    })
+  }
+  if (onDelete) {
+    actions.push({
+      key: 'delete', label: t('life.delete.short'), aria: t('life.delete.aria', { name }),
+      onClick: () => onDelete(run.runId),
+    })
+  }
+
   // Checked before the other states: a life mid-generation is also awaitingOpening,
   // and "not born yet" would read as stalled when in fact it is being written.
   const where = run.unreadable
@@ -174,34 +219,52 @@ export function LifeRow({
         {name !== run.title ? <div className="ew-sub">{run.title}</div> : null}
         <div className="ew-meta">{where}</div>
       </button>
-      {onRename ? (
-        <button
-          className="ew-btn ew-btn-quiet ew-card-drop"
-          type="button"
-          onClick={() => { setDraft(run.label || ''); setEditing(true) }}
-          aria-label={t('life.rename.aria', { name })}
-        >
-          {t('life.rename.short')}
-        </button>
-      ) : null}
-      {onArchive ? (
-        <button
-          className="ew-btn ew-btn-quiet ew-card-drop"
-          type="button"
-          onClick={() => onArchive(run.runId, !run.archived)}
-        >
-          {run.archived ? t('life.unarchive') : t('life.archive')}
-        </button>
-      ) : null}
-      {onDelete ? (
-        <button
-          className="ew-btn ew-btn-quiet ew-card-drop"
-          type="button"
-          onClick={() => onDelete(run.runId)}
-          aria-label={t('life.delete.aria', { name })}
-        >
-          {t('life.delete.short')}
-        </button>
+      {actions.length ? (
+        <>
+          {/* Desktop: the actions inline, as before. */}
+          <div className="ew-life-actions">
+            {actions.map((a) => (
+              <button
+                key={a.key}
+                className="ew-btn ew-btn-quiet ew-card-drop"
+                type="button"
+                aria-label={a.aria}
+                onClick={a.onClick}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+          {/* Mobile: one kebab that opens the same actions as a menu. */}
+          <div className="ew-life-menu" ref={menuRef}>
+            <button
+              className="ew-kebab"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label={t('life.actions', { name })}
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              <MenuGlyph />
+            </button>
+            {menuOpen ? (
+              <div className="ew-menu" role="menu">
+                {actions.map((a) => (
+                  <button
+                    key={a.key}
+                    className="ew-menu-item"
+                    role="menuitem"
+                    type="button"
+                    aria-label={a.aria}
+                    onClick={() => { setMenuOpen(false); a.onClick() }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </>
       ) : null}
     </div>
   )
