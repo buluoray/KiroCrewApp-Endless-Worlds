@@ -395,6 +395,7 @@ export default function EndlessWorlds() {
                 key={w.worldId}
                 world={w}
                 onOpen={openWorld}
+                plays={runs.filter((r) => r.worldId === w.worldId).length}
               />
             ))
           )}

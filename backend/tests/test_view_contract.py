@@ -93,7 +93,9 @@ def test_the_world_bodies_carry_every_field_the_ui_reads(ui_src, pack, tmp_path)
 
     # An unusable row carries the keys a broken world reports instead.
     unusable = {"usable", "problem", "needsCore", "localCore", "field"}
-    sent = set(world_detail(pack)) | set(row) | unusable
+    # The detail page asks for the world's prose (?prose=1), so the body it reads
+    # against is the include_prose shape.
+    sent = set(world_detail(pack, include_prose=True)) | set(row) | unusable
 
     read = (_reads(uisrc.module("library.tsx"), "world")
             | _reads(uisrc.module("opening.tsx"), "world")) - _LOCAL

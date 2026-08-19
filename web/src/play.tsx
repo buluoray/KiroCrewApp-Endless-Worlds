@@ -225,6 +225,16 @@ export function PlayPage({
 
   const main = (
     <div>
+      {(v.unlocked ?? []).length ? (
+        <div className="ew-unlocked" role="status" aria-live="polite">
+          {(v.unlocked ?? []).map((h, i) => (
+            <div className="ew-unlocked-row" key={`${h}-${i}`}>
+              {t('play.unlocked', { heading: h })}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {(v.digest ?? []).length ? (
         <div className="ew-digest">
           {(v.digest ?? []).map((dg, i) => (

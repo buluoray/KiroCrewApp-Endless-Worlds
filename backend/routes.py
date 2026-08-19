@@ -141,6 +141,7 @@ def _drop_stale_siblings(modules: dict[str, Any] | None = None) -> None:
 _drop_stale_siblings()
 
 from chapters import brief as world_brief  # noqa: E402
+from chapters import opened_since  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
@@ -1016,11 +1017,21 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
             {"error": "this world could not be read", "detail": str(exc)}, status=422
         )
 
+    # Chapters the world opened on the last committed month, in its own headings.
+    # Compared against the prior state so "open since birth" is not reported; empty
+    # on a life's first month (no prior state).
+    prev = store.read_prev(run_id)
+    unlocked: list[str] = []
+    if prev:
+        headings = {c.id: c.heading for c in pack.template.chapters}
+        unlocked = [headings[i] for i in opened_since(pack.template, prev, state) if i in headings]
+
     view = build_play_view(
         pack.template,
         state,
         chronicle=store.read_chronicle(run_id),
         scenes=SceneLedger(ctx.data_dir, run_id).mounted(),
+        unlocked=unlocked,
     )
     view["runId"] = run_id
     view["worldId"] = world_id

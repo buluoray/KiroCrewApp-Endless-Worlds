@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import type { LifeRowData, OpeningGroup, WorldDetail, WorldRow } from './api'
 import { api } from './api'
 import { t } from './strings'
-import { Chip } from './ui'
+import { Chip, Prose } from './ui'
 
 const TURN_UNITS: Record<string, string> = {
   month: 'unit.month', year: 'unit.year', day: 'unit.day',
@@ -24,10 +24,12 @@ export function turnPhrase(unit: string | undefined): string {
 
 /** A world on the shelf. Its own words, never the app's vocabulary. */
 export function WorldCard({
-  world, onOpen,
+  world, onOpen, plays = 0,
 }: {
   world: WorldRow
   onOpen: (id: string) => void
+  /** How many lives the player has lived in this world, shown as a footprint. */
+  plays?: number
 }) {
   if (!world.usable) {
     return (
@@ -61,6 +63,7 @@ export function WorldCard({
           turn: turnPhrase(world.clockUnit),
         })}
         {world.stalenessNote ? <div style={{ marginTop: '4px' }}>{world.stalenessNote}</div> : null}
+        {plays > 0 ? <div style={{ marginTop: '4px' }}>{t('world.plays', { n: plays })}</div> : null}
       </div>
     </button>
   )
@@ -203,12 +206,14 @@ export function WorldDetailView({
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
+  const [lore, setLore] = useState(false)
 
   useEffect(() => {
     let alive = true
     setWorld(null)
     setError(null)
-    api.world(worldId)
+    // Ask for the world's own prose too, so the detail page can offer its lore.
+    api.world(worldId, true)
       .then((w) => { if (alive) setWorld(w) })
       .catch((e: Error) => { if (alive) setError(e.message) })
     return () => { alive = false }
@@ -299,6 +304,21 @@ export function WorldDetailView({
           save: (world.save ?? []).length,
         })}
       </div>
+
+      {world.prose ? (
+        <>
+          <button
+            className="ew-section ew-section-toggle"
+            type="button"
+            style={{ marginTop: '18px' }}
+            aria-expanded={lore}
+            onClick={() => setLore((v) => !v)}
+          >
+            {lore ? t('world.loreHide') : t('world.loreShow')}
+          </button>
+          {lore ? <div className="ew-block"><Prose text={world.prose} /></div> : null}
+        </>
+      ) : null}
 
       <div className="ew-bar">
         <button className="ew-btn ew-btn-go" type="button" onClick={() => onPlay(world)}>

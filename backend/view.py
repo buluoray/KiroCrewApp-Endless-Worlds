@@ -341,6 +341,7 @@ def build_play_view(
     *,
     chronicle: list[dict[str, Any]] | None = None,
     scenes: list[dict[str, Any]] | None = None,
+    unlocked: list[str] | None = None,
 ) -> dict[str, Any]:
     """Everything the play page renders, with nothing left for it to decide."""
     chronicle = chronicle or []
@@ -383,6 +384,10 @@ def build_play_view(
         "style": state.get("style") or "",
         "ended": bool(ending_id),
         "endingId": ending_id,
+        # Chapter headings the world has just opened this month, in the world's own
+        # words. Computed by the route (it needs the prior state); the play page
+        # shows them as a quiet "a new chapter opens" marker.
+        "unlocked": list(unlocked or []),
     }
 
 

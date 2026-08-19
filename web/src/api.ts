@@ -70,6 +70,9 @@ export interface PlayView {
   prose: string
   style: string
   ended: boolean
+  /** Chapter headings the world opened this month, in its own words. The play page
+   *  shows them as a quiet "a new chapter opens" marker. */
+  unlocked: string[]
   /** Which declared ending this life reached, or the narrator's own marker. Empty
    *  while the life continues. The play page shows a terminal screen when set. */
   endingId: string
@@ -285,7 +288,8 @@ function post<T>(path: string, body: unknown): Promise<T> {
 
 export const api = {
   worlds: () => json<{ worlds: WorldRow[]; seeds: SeedReport }>('/worlds'),
-  world: (id: string) => json<WorldDetail>(`/worlds/${encodeURIComponent(id)}`),
+  world: (id: string, prose = false) =>
+    json<WorldDetail>(`/worlds/${encodeURIComponent(id)}${prose ? '?prose=1' : ''}`),
 
   worldDeletion: (id: string) =>
     json<DeletionFacts>(`/worlds/${encodeURIComponent(id)}/deletion`),

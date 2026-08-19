@@ -140,6 +140,17 @@ class RunStore:
         self._kv.set(self._state_key(run_id), prev)
         return prev
 
+    def read_prev(self, run_id: str) -> dict[str, Any]:
+        """The state as of before the last commit, or empty if there is none.
+
+        A read-only peek at the rollback point (never mutates current state, unlike
+        :meth:`rollback`). Empty on a life's first turn, which is what lets a caller
+        tell "just opened this month" from "open since birth".
+        """
+        _check_run_id(run_id)
+        prev = self._kv.get(self._prev_key(run_id))
+        return prev if isinstance(prev, dict) else {}
+
     # -- what changed since the narrator last looked ------------------------
 
     @staticmethod

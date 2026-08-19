@@ -206,6 +206,18 @@ def test_patch_index_reports_a_missing_life(store: RunStore) -> None:
     assert store.patch_index(new_run_id(), {"archived": True}) is False
 
 
+def test_read_prev_is_empty_before_a_commit_then_holds_the_outgoing_state(
+    store: RunStore,
+) -> None:
+    run_id = store.create_run(_state(1), {"templateId": "t"})
+    # No commit yet: nothing to peek at, which is what lets a caller tell "opened
+    # this month" from "open since birth".
+    assert store.read_prev(run_id) == {}
+    store.commit_state(run_id, _state(2))
+    assert store.read_prev(run_id)["turn"] == 1, "prev holds the outgoing state"
+    assert store.read_state(run_id)["turn"] == 2, "read_prev must not mutate current"
+
+
 # -- locking --------------------------------------------------------------
 
 

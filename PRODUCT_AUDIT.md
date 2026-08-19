@@ -276,6 +276,8 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 
 ### N2（并入 P1）：已有能力仍缺玩家入口
 
+> **状态：三项已实现（2026-08-18）。** (1) 章节解锁提示：`get_run` 用 `store.read_prev` 对比上一状态与当前，经 `opened_since` 算出本回合新开章节，映射成世界自己的 heading，`build_play_view` 新增 `unlocked` 字段透传，游玩页顶部以“翻开了新的篇章：《…》”安静提示（用世界措辞，不泄漏实现词汇；首回合 prev 为空不误报）。(2) 世界设定原文入口：`api.world(id, true)` 请求 `?prose=1`，`WorldDetailView` 加“读读这个世界的设定”折叠区。(3) 世界卡足迹：`main.tsx` 按 `worldId` 聚合 `runs` 传入 `WorldCard`，显示“你在这里活过 n 次”。测试 `test_store.py::test_read_prev_*`、`test_view.py::test_unlocked_chapters_*`。
+
 - **章节解锁提示**：`backend/chapters.py` 的 `opened_since()` 已能算出本回合新解锁的章节，但 `view.py`/`routes.py` 都不回传，玩家错过“世界为你打开了魔法体系这一章”的进度感时刻。落点 `build_play_view` 加 `unlocked`，**必须用世界自己的 heading 措辞，不得泄漏 chapter/disclosure 等实现词汇**（R25.2）。难度：低。
 - **世界设定原文入口**：详情页从不请求 `?prose=1`，玩家看不到世界 lore 全文（后端已支持）。落点 `web/src/library.tsx`。难度：低。
 - **世界卡足迹计数**：世界卡只讲静态配置，不讲玩家自己的足迹。按 `worldId` 聚合已有 `runs` 传入 `WorldCard`，显示“我在这里活过 n 次”。落点 `web/src/main.tsx`。难度：低。

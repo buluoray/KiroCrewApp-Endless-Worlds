@@ -86,6 +86,12 @@ def test_the_narrator_can_close_a_life_by_flag(tpl):
     assert build_play_view(tpl, {"turn": 3, "ended": "retired"})["endingId"] == "retired"
 
 
+def test_unlocked_chapters_pass_through_and_default_empty(tpl):
+    assert build_play_view(tpl, {"turn": 1})["unlocked"] == []
+    v = build_play_view(tpl, {"turn": 2}, unlocked=["第七章 · 魔法的觉醒"])
+    assert v["unlocked"] == ["第七章 · 魔法的觉醒"]
+
+
 def test_a_declared_ending_wins_over_the_bare_flag(tpl):
     v = build_play_view(
         tpl, {"turn": 9, "ended": True, "world": {"epochClosed": True}}
