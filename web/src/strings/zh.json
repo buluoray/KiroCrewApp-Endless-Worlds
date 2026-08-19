@@ -132,6 +132,8 @@
   "play.endedReplaySame": "以同样的开局再活一次",
   "play.endedShelf": "回到书架",
   "play.generating": "下一页正在落笔。放心离开，归来时故事还在这里。",
+  "play.stage.reading": "叙事者正在翻阅这条人生…",
+  "play.stage.writing": "正在落笔下一页…",
   "play.nothingToShow": "这一刻还没有什么可看的——有些面板要等条件满足了才会出现。",
   "play.opening": "正在翻到你留下的那一页…",
   "play.retry": "再试一次",

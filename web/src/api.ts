@@ -80,7 +80,15 @@ export interface PlayView {
   endingId: string
   /** Set while a narrator is writing this month — recorded on the server before it
    *  is asked, so it survives the page that asked. Null when nothing is in flight. */
-  generating: { turn: number; slot: string; askedAt: number } | null
+  generating: {
+    turn: number
+    slot: string
+    askedAt: number
+    /** When the narrator called endless_read_runtime (0 if not yet). */
+    readAt?: number
+    /** Coarse in-flight stage: 'reading' the life, then 'writing' the month. */
+    stage?: 'reading' | 'writing'
+  } | null
   /** The WORLD's language, so the play view speaks the language its rulebook is
    *  written in. Declared here because the route sends it; it was previously read
    *  through a type assertion, which compiled while the field did not exist. */

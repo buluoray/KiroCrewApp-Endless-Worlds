@@ -32,6 +32,29 @@ function Chevron({ dir }: { dir: 'l' | 'r' }) {
   )
 }
 
+/**
+ * Live feedback while a month is being written, driven by the narrator's actual
+ * tool calls (surfaced by the server as `generating.stage`): 'reading' until it
+ * has pulled this life's state, then 'writing' as it composes the prose. A staged
+ * bar plus stage text, so the wait reads as progress rather than a blank spinner.
+ */
+function TurnProgress({ stage }: { stage?: 'reading' | 'writing' }) {
+  const writing = stage === 'writing'
+  return (
+    <div className="ew-progress" role="status" aria-live="polite">
+      <div className="ew-progress-track">
+        <div className={`ew-progress-fill${writing ? ' ew-progress-writing' : ''}`} />
+      </div>
+      <div className="ew-progress-steps">
+        <span className="ew-progress-label">
+          {writing ? t('play.stage.writing') : t('play.stage.reading')}
+        </span>
+        <span className="ew-progress-count">{writing ? '2 / 2' : '1 / 2'}</span>
+      </div>
+    </div>
+  )
+}
+
 export function PlayPage({
   runId, onBack, onScenes, onReplay, onReplaySame, refresh,
 }: {
@@ -197,6 +220,7 @@ export function PlayPage({
           <div className="ew-arrange">
             <div className="ew-arrange-title">{t('opening.arranging')}</div>
             <Waiting label={arrange || t('opening.arranging')} />
+            <TurnProgress stage={v.generating?.stage} />
           </div>
         ) : (
           <>
@@ -500,10 +524,12 @@ export function PlayPage({
         ) : null}
 
         {/* Coming back to a page whose narrator is still working: nothing local
-            remembers which option was taken, so the reassurance is turn-level. */}
-        {generating && !tapped ? (
+            remembers which option was taken, so the reassurance is turn-level.
+            The staged progress shows for the whole in-flight turn, including
+            while a tapped choice sweeps, so the wait always reads as progress. */}
+        {generating ? (
           <div className="ew-note ew-note-live">
-            <Waiting label={phrase || t('play.generating')} />
+            <TurnProgress stage={v.generating?.stage} />
           </div>
         ) : null}
 

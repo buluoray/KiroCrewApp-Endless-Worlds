@@ -387,8 +387,18 @@ def generating(store: RunStore, run_id: str) -> dict[str, Any] | None:
     live = _in_flight(store, run_id, wanted)
     if live is None:
         return None
-    return {"turn": wanted, "slot": str(live.get("slot") or ""),
-            "askedAt": float(live.get("askedAt") or 0.0)}
+    # A coarse stage the UI can show while the narrator works. The one real signal
+    # a turn emits mid-flight is `readAt`: the moment the narrator called
+    # endless_read_runtime, i.e. it has this life's state in hand and has moved on
+    # to composing the month. Before that it is still reading; after it, writing.
+    read_at = float(live.get("readAt") or 0.0)
+    return {
+        "turn": wanted,
+        "slot": str(live.get("slot") or ""),
+        "askedAt": float(live.get("askedAt") or 0.0),
+        "readAt": read_at,
+        "stage": "writing" if read_at else "reading",
+    }
 
 
 def already_committed(store: RunStore, run_id: str, turn: int) -> dict[str, Any] | None:

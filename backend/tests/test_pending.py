@@ -186,6 +186,15 @@ def test_a_returning_player_is_told_the_month_is_being_written(store, run):
     assert live["slot"]
 
 
+def test_generating_stage_advances_from_reading_to_writing(store, run):
+    """The in-flight stage the UI shows: 'reading' until the narrator calls
+    read_runtime (which stamps readAt), then 'writing' as it composes the month."""
+    asyncio.run(_advance(store, run, _silent([])))
+    assert generating(store, run)["stage"] == "reading"
+    store.note_runtime_read(run, turn=1)
+    assert generating(store, run)["stage"] == "writing"
+
+
 def test_a_landed_turn_leaves_nothing_in_flight(store, run):
     out = asyncio.run(_advance(store, run, _commits(store, run)))
 

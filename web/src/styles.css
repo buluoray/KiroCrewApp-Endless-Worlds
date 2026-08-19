@@ -605,6 +605,35 @@
 .ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); margin-right: 2px; }
 .ew-btn-sm { min-height: 36px; padding: 0 14px; font-size: 13px; flex: 0 0 auto; }
 .ew-note-live { display: flex; align-items: center; margin-top: 10px; min-width: 0; }
+/* Turn progress: a staged bar the narrator's tool calls drive — a fill that jumps
+   to ~90% once it has read the life, plus a moving shimmer so the long writing
+   phase never looks stalled. */
+.ew-progress { width: 100%; min-width: 0; }
+.ew-progress-track {
+  position: relative; height: 6px; border-radius: 999px; overflow: hidden;
+  background: var(--border, #2d2f3d);
+}
+.ew-progress-fill {
+  position: absolute; inset: 0 auto 0 0; width: 45%; border-radius: 999px;
+  background: var(--accent, #7c3aed); transition: width .4s ease;
+}
+.ew-progress-writing { width: 90%; }
+.ew-progress-track::after {
+  content: ''; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(
+    100deg, transparent 20%,
+    color-mix(in oklab, #fff 28%, transparent) 50%, transparent 80%
+  );
+  transform: translateX(-100%); animation: ew-sweep 1.6s ease-in-out infinite;
+}
+.ew-progress-steps {
+  display: flex; justify-content: space-between; gap: 8px; margin-top: 6px;
+}
+.ew-progress-label { font-size: 12px; color: var(--muted, #6b7280); }
+.ew-progress-count { font-size: 11px; color: var(--muted, #6b7280); flex: 0 0 auto; }
+@media (prefers-reduced-motion: reduce) {
+  .ew-progress-track::after { animation: none; opacity: 0; }
+}
 
 /* ── waiting ──────────────────────────────────────────────────────────────
    The app's only animation, introduced with its reduced-motion answer in the same
