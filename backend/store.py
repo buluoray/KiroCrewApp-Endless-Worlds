@@ -224,6 +224,22 @@ class RunStore:
             pending["readTurn"] = int(turn)
             self._kv.set(self._pending_key(run_id), pending)
 
+    def note_tool_call(self, run_id: str, tool: str) -> None:
+        """Advance the in-flight turn's step count by one, naming the tool.
+
+        Every tool call the narrator makes while a month is in flight is a unit of
+        visible progress, so the play page can advance a cell per call rather than
+        show one undifferentiated spinner. Only counts while a pending record
+        exists — a call outside a turn has no turn to advance — and never raises:
+        progress bookkeeping must not fail the tool it is counting.
+        """
+        _check_run_id(run_id)
+        pending = self.read_pending(run_id)
+        if isinstance(pending, dict):
+            pending["steps"] = int(pending.get("steps") or 0) + 1
+            pending["lastTool"] = str(tool)
+            self._kv.set(self._pending_key(run_id), pending)
+
     # -- the world's law, delivered once -----------------------------------
     #
     # The narrator's session is ONE conversation that spans every turn of a life:

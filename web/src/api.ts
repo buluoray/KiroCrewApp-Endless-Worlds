@@ -88,6 +88,10 @@ export interface PlayView {
     readAt?: number
     /** Coarse in-flight stage: 'reading' the life, then 'writing' the month. */
     stage?: 'reading' | 'writing'
+    /** How many tool calls the narrator has made this turn (advances per call). */
+    steps?: number
+    /** The narrator's most recent tool call, for a per-step label. */
+    lastTool?: string
   } | null
   /** The WORLD's language, so the play view speaks the language its rulebook is
    *  written in. Declared here because the route sends it; it was previously read

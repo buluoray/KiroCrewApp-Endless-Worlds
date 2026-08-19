@@ -398,6 +398,10 @@ def generating(store: RunStore, run_id: str) -> dict[str, Any] | None:
         "askedAt": float(live.get("askedAt") or 0.0),
         "readAt": read_at,
         "stage": "writing" if read_at else "reading",
+        # How many tool calls the narrator has made this turn, and the last one —
+        # the fine-grained signal the play page advances a cell per.
+        "steps": int(live.get("steps") or 0),
+        "lastTool": str(live.get("lastTool") or ""),
     }
 
 

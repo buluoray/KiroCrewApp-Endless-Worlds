@@ -732,6 +732,17 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
     if handler is None:  # unreachable: _validate rejects unknown names first
         return json.dumps({"ok": False, "error": "unknown tool", "applied": False})
 
+    # Count this call as a unit of in-flight progress, so the play page advances a
+    # cell per tool call. Best-effort and before dispatch (the call is happening
+    # regardless of what the handler returns); it only records while a turn is
+    # actually pending, and never blocks the tool.
+    run_id = args.get("runId")
+    if isinstance(run_id, str) and run_id:
+        try:
+            _store().note_tool_call(run_id, name)
+        except Exception:  # noqa: BLE001
+            pass
+
     try:
         result = handler(dict(args))
     except ToolInputError as exc:

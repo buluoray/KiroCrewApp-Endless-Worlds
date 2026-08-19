@@ -32,24 +32,40 @@ function Chevron({ dir }: { dir: 'l' | 'r' }) {
   )
 }
 
+/** Friendly, in-world-ish label for the narrator's most recent tool call. */
+const TOOL_LABEL: Record<string, string> = {
+  endless_read_runtime: 'play.tool.read',
+  endless_mount_scene: 'play.tool.scene',
+  endless_update_scene: 'play.tool.scene',
+  endless_dismiss_scene: 'play.tool.scene',
+  endless_await_scene: 'play.tool.await',
+  endless_advance_turn: 'play.tool.write',
+  endless_make_pack: 'play.tool.pack',
+}
+
 /**
- * Live feedback while a month is being written, driven by the narrator's actual
- * tool calls (surfaced by the server as `generating.stage`): 'reading' until it
- * has pulled this life's state, then 'writing' as it composes the prose. A staged
- * bar plus stage text, so the wait reads as progress rather than a blank spinner.
+ * Live feedback while a month is written, driven by the narrator's ACTUAL tool
+ * calls (surfaced by the server as `generating.steps` / `lastTool`): the bar
+ * advances a notch per tool call and the label names the call, so the wait reads
+ * as progress rather than a blank spinner. Capped below full until the turn lands.
  */
-function TurnProgress({ stage }: { stage?: 'reading' | 'writing' }) {
-  const writing = stage === 'writing'
+function TurnProgress({ g }: { g?: PlayView['generating'] }) {
+  const steps = g?.steps ?? 0
+  const writing = g?.stage === 'writing'
+  // ~16% per tool call, capped at 92% so it never looks finished before commit.
+  const pct = Math.min(12 + steps * 16, 92)
+  const toolKey = g?.lastTool ? TOOL_LABEL[g.lastTool] : ''
+  const label = toolKey
+    ? t(toolKey)
+    : (writing ? t('play.stage.writing') : t('play.stage.reading'))
   return (
     <div className="ew-progress" role="status" aria-live="polite">
       <div className="ew-progress-track">
-        <div className={`ew-progress-fill${writing ? ' ew-progress-writing' : ''}`} />
+        <div className="ew-progress-fill" style={{ width: `${pct}%` }} />
       </div>
       <div className="ew-progress-steps">
-        <span className="ew-progress-label">
-          {writing ? t('play.stage.writing') : t('play.stage.reading')}
-        </span>
-        <span className="ew-progress-count">{writing ? '2 / 2' : '1 / 2'}</span>
+        <span className="ew-progress-label">{label}</span>
+        {steps > 0 ? <span className="ew-progress-count">{t('play.steps', { n: steps })}</span> : null}
       </div>
     </div>
   )
@@ -220,7 +236,7 @@ export function PlayPage({
           <div className="ew-arrange">
             <div className="ew-arrange-title">{t('opening.arranging')}</div>
             <Waiting label={arrange || t('opening.arranging')} />
-            <TurnProgress stage={v.generating?.stage} />
+            <TurnProgress g={v.generating} />
           </div>
         ) : (
           <>
@@ -529,7 +545,7 @@ export function PlayPage({
             while a tapped choice sweeps, so the wait always reads as progress. */}
         {generating ? (
           <div className="ew-note ew-note-live">
-            <TurnProgress stage={v.generating?.stage} />
+            <TurnProgress g={v.generating} />
           </div>
         ) : null}
 

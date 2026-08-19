@@ -614,10 +614,9 @@
   background: var(--border, #2d2f3d);
 }
 .ew-progress-fill {
-  position: absolute; inset: 0 auto 0 0; width: 45%; border-radius: 999px;
+  position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 999px;
   background: var(--accent, #7c3aed); transition: width .4s ease;
 }
-.ew-progress-writing { width: 90%; }
 .ew-progress-track::after {
   content: ''; position: absolute; inset: 0; z-index: 1;
   background: linear-gradient(
