@@ -27,6 +27,9 @@ interface RailProps {
   onWorld: (worldId: string) => void
   onLife: (runId: string) => void
   onHome: () => void
+  /** True when the shelf itself is what the main column shows — the rail's own
+   *  "back to the shelf" is then a control that goes nowhere, so it is hidden. */
+  atShelf: boolean
 }
 
 /** The same fact as the shelf's row, in the same words.
@@ -43,7 +46,7 @@ function lifeWhere(run: LifeRowData): string {
 }
 
 export function WorldRail({
-  worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome,
+  worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome, atShelf,
 }: RailProps) {
   const playable = (worlds ?? []).filter((w) => w.usable)
   // Unusable worlds are counted but not offered as navigation targets: a row that
@@ -55,9 +58,11 @@ export function WorldRail({
 
   return (
     <nav className="ew-rail" aria-label={t('rail.label')}>
-      <button className="ew-rail-home" type="button" onClick={onHome}>
-        {t('rail.shelf')}
-      </button>
+      {atShelf ? null : (
+        <button className="ew-rail-home" type="button" onClick={onHome}>
+          {t('rail.shelf')}
+        </button>
+      )}
 
       {shown.length ? (
         <div className="ew-rail-group">

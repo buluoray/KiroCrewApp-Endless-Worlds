@@ -523,6 +523,7 @@ export default function EndlessWorlds() {
           onWorld={openWorld}
           onLife={enterLife}
           onHome={home}
+          atShelf={view === 'library'}
         />
         <div className="ew-main">{body}</div>
       </div>

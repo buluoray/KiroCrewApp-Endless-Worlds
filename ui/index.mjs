@@ -2945,7 +2945,7 @@ function lifeWhere(run) {
 	if (run.awaitingOpening) return t("life.unborn");
 	return t("life.turn", { turn: run.turn });
 }
-function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome }) {
+function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome, atShelf }) {
 	const playable = (worlds ?? []).filter((w) => w.usable);
 	const broken = (worlds ?? []).length - playable.length;
 	const shown = runs.filter((r) => !r.archived);
@@ -2953,7 +2953,7 @@ function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, 
 		className: "ew-rail",
 		"aria-label": t("rail.label"),
 		children: [
-			/* @__PURE__ */ jsx("button", {
+			atShelf ? null : /* @__PURE__ */ jsx("button", {
 				className: "ew-rail-home",
 				type: "button",
 				onClick: onHome,
@@ -3683,7 +3683,8 @@ function EndlessWorlds() {
 						activeWorldId: world?.worldId ?? selected,
 						onWorld: openWorld,
 						onLife: enterLife,
-						onHome: home
+						onHome: home,
+						atShelf: view === "library"
 					}), /* @__PURE__ */ jsx("div", {
 						className: "ew-main",
 						children: body
