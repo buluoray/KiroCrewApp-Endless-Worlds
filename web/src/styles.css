@@ -485,6 +485,10 @@
 .ew-prow { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; line-height: 1.6; }
 .ew-plabel { color: var(--muted, #6b7280); flex: 0 0 5.5em; }
 .ew-pval { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A rank/tier value renders as an accent chip, but the narrator can write a whole
+   clause into it (measured on the flagship). Chips are nowrap by default so tag
+   rows stay tidy — but a value chip must wrap instead of overflowing the panel. */
+.ew-pval .ew-chip { white-space: normal; overflow-wrap: anywhere; }
 .ew-gap { color: var(--border, #2d2f3d); }
 
 /* A label that is really a sentence. Measured on the live flagship: the narrator
