@@ -18,7 +18,7 @@
   "restraint.unsourced": "These gains never said where they came from: {fields}. Things that appear out of nowhere make a life look looked-after.",
   "shape.digest": "- digest: what happened in the world this span, under these categories: {categories}; plus rumours for hearsay",
   "shape.field": "{id} ({label})",
-  "shape.intro": "Declare state in this shape. Copy the key names exactly; the values follow the story.",
+  "shape.intro": "Declare state through endless_advance_turn's `state` argument, in this shape. Each entry below is written `id (label)` — use the bare id as the key, exactly as written: do not translate it, rename it, or key by the label. The player's status panel is built from these ids, so a field declared under any other name shows up blank (this is why a panel can look empty even after you described it in the prose). The values follow the story.",
   "shape.omission": "Give every entry, even when the answer is nothing at all — a field you leave out reads to the player as a fact that vanished.",
   "shape.panel": "- {panel}: {gate}; holds {fields}",
   "shape.panel.always": "always shown",

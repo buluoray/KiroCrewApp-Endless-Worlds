@@ -18,7 +18,7 @@
   "restraint.unsourced": "这些增长没有说清是从哪来的：{fields}。凭空多出来的东西会让这一世显得被人照顾着。",
   "shape.digest": "- digest：这个月世界上发生的事，按这些分类放：{categories}；另有 rumours 放传闻",
   "shape.field": "{id}（{label}）",
-  "shape.intro": "declare 状态时，用下面这个形状（键名照抄，值随剧情变）：",
+  "shape.intro": "declare 状态时，通过 endless_advance_turn 的 `state` 参数，用下面这个形状。每一项写成「id（label）」——键名一律用括号前的 id，一字不差地照抄：不要翻译它、不要改名、也不要用 label 当键。玩家的状态栏就是按这些 id 拼出来的，用别的名字这一项会显示为空（这也是为什么你即使在正文里写了状态、状态栏看起来还是空的）。值随剧情变。",
   "shape.omission": "每一项都要给出，即使内容是「无」——少写一项，玩家看到的是一件凭空消失的事实。",
   "shape.panel": "- {panel}：{gate}；里面放 {fields}",
   "shape.panel.always": "始终显示",
