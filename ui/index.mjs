@@ -2681,6 +2681,10 @@ function EndlessWorlds() {
 	const [runs, setRuns] = useState([]);
 	const [error, setError] = useState(null);
 	const [view, setView] = useState("library");
+	const rootRef = useRef(null);
+	useEffect(() => {
+		rootRef.current?.scrollIntoView({ block: "start" });
+	}, [view]);
 	const [selected, setSelected] = useState(null);
 	const [world, setWorld] = useState(null);
 	const [live, setLive] = useState(null);
@@ -3030,6 +3034,7 @@ function EndlessWorlds() {
 		children: /* @__PURE__ */ jsxs("div", {
 			className: "ew-root",
 			lang,
+			ref: rootRef,
 			children: [
 				/* @__PURE__ */ jsx("style", { children: styles_default }),
 				/* @__PURE__ */ jsxs("div", {

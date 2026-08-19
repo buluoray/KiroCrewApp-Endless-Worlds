@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { LifeRowData, SceneRow, SeedReport, WorldDetail, WorldRow } from './api'
 import { api } from './api'
@@ -58,6 +58,14 @@ export default function EndlessWorlds() {
   const [error, setError] = useState<string | null>(null)
 
   const [view, setView] = useState<View>('library')
+  // The app mounts inside the dashboard's own scroll container, which keeps its
+  // offset across our view swaps — so moving from the shelf into a tall opening
+  // form would land the player at its BOTTOM. Bring our root back into view at the
+  // top on every view change.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    rootRef.current?.scrollIntoView({ block: 'start' })
+  }, [view])
   const [selected, setSelected] = useState<string | null>(null)
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [live, setLive] = useState<string | null>(null)
@@ -456,7 +464,7 @@ export default function EndlessWorlds() {
 
   return (
     <LanguageContext.Provider value={applyLanguage}>
-    <div className="ew-root" lang={lang}>
+    <div className="ew-root" lang={lang} ref={rootRef}>
       {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
           instead of outliving it in the page's stylesheet list. */}
