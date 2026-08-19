@@ -467,10 +467,12 @@
   font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; margin-bottom: 4px;
 }
 
-/* Turn pager at the top of the story: ‹ current turn › */
+/* Back button and turn pager share one row, the pager pushed to the far right. */
+.ew-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* Turn pager: ‹ current turn › */
 .ew-pager {
   display: flex; align-items: center; justify-content: center; gap: 14px;
-  margin: 0 0 12px;
+  margin: 0;
 }
 .ew-pager-turn {
   font-size: 13px; color: var(--muted, #6b7280); letter-spacing: .04em;

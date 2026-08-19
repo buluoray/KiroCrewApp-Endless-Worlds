@@ -342,7 +342,6 @@ export function PlayPage({
         </div>
       ) : null}
 
-      {pager}
       {!isLive && pastAction ? (
         <div className="ew-hint">{t('history.chose', { action: pastAction })}</div>
       ) : null}
@@ -526,7 +525,10 @@ export function PlayPage({
 
   return (
     <div>
-      <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+      <div className="ew-topbar">
+        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        {pager}
+      </div>
       <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
       <h3 className="ew-detail-title">{v.title}</h3>
       <div className="ew-play">
