@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { PlayView, SceneRow } from './api'
+import type { PastTurn, PlayView, SceneRow } from './api'
 import { api } from './api'
 
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
@@ -22,6 +22,15 @@ const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
 import { History, LifeSummary } from './history'
 import { PanelBox, Prose, Waiting } from './ui'
+
+function Chevron({ dir }: { dir: 'l' | 'r' }) {
+  const d = dir === 'l' ? 'M11 4 L6 9 L11 14' : 'M7 4 L12 9 L7 14'
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
 
 export function PlayPage({
   runId, onBack, onScenes, onReplay, onReplaySame, refresh,
@@ -50,6 +59,20 @@ export function PlayPage({
   const [retry, setRetry] = useState<{ payload: { turn?: number; action?: string }; what: string } | null>(null)
   const [drawer, setDrawer] = useState(false)
   const [back, setBack] = useState(false)
+  // The turn pager at the top of the story: which past turn is being read (null =
+  // the live, latest turn), and this life's turns so an arrow can page to one.
+  const [viewTurn, setViewTurn] = useState<number | null>(null)
+  const [chron, setChron] = useState<PastTurn[]>([])
+  useEffect(() => {
+    if (!v || v.turn < 1) return undefined
+    let alive = true
+    // A newly written turn snaps the pager back to live, and refetches so the new
+    // month is pageable.
+    setViewTurn(null)
+    api.chronicle(runId).then((c) => { if (alive) setChron(c.turns) }).catch(() => {})
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, v?.turn])
 
   const load = useCallback(async () => {
     try {
@@ -249,6 +272,40 @@ export function PlayPage({
     )
   }
 
+  // The pager reads the latest turn by default; an arrow steps to a past turn,
+  // whose prose comes from the chronicle. Off the latest turn the story is being
+  // re-read, so the action controls step aside.
+  const latest = v.turn
+  const shownTurn = viewTurn ?? latest
+  const isLive = shownTurn >= latest
+  const shownProse = isLive
+    ? v.prose
+    : (chron.find((c) => c.turn === shownTurn)?.prose ?? v.prose)
+  const pastAction = isLive ? '' : (chron.find((c) => c.turn === shownTurn)?.action ?? '')
+  const pager = latest >= 1 ? (
+    <div className="ew-pager">
+      <button
+        className="ew-pager-arw"
+        type="button"
+        disabled={shownTurn <= 1}
+        aria-label={t('play.prevTurn')}
+        onClick={() => setViewTurn(Math.max(1, shownTurn - 1))}
+      >
+        <Chevron dir="l" />
+      </button>
+      <span className="ew-pager-turn">{t('play.turn', { turn: shownTurn })}</span>
+      <button
+        className="ew-pager-arw"
+        type="button"
+        disabled={shownTurn >= latest}
+        aria-label={t('play.nextTurn')}
+        onClick={() => setViewTurn(shownTurn + 1 >= latest ? null : shownTurn + 1)}
+      >
+        <Chevron dir="r" />
+      </button>
+    </div>
+  ) : null
+
   const main = (
     <div>
       {(v.unlocked ?? []).length ? (
@@ -285,7 +342,12 @@ export function PlayPage({
         </div>
       ) : null}
 
-      <Prose text={v.prose} />
+      {pager}
+      {!isLive && pastAction ? (
+        <div className="ew-hint">{t('history.chose', { action: pastAction })}</div>
+      ) : null}
+
+      <Prose text={shownProse} />
 
       {stalled ? (
         <div className="ew-note" role="status" aria-live="polite">
@@ -304,7 +366,7 @@ export function PlayPage({
         </div>
       ) : null}
 
-      {(v.choices ?? []).length ? (
+      {isLive && (v.choices ?? []).length ? (
         <div className="ew-choices">
           {(v.choices ?? []).map((c) => {
             const target = choiceTarget(c.id)
@@ -361,6 +423,7 @@ export function PlayPage({
         </div>
       ) : null}
 
+      {isLive ? (
       <div>
         <div className="ew-act">
           <textarea
@@ -436,6 +499,7 @@ export function PlayPage({
           <div className="ew-count">{`${action.length} / 500`}</div>
         ) : null}
       </div>
+      ) : null}
 
       <button
         className="ew-drawer"
