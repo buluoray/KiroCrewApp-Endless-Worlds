@@ -4,7 +4,7 @@ import type { LifeRowData, SceneRow, SeedReport, WorldDetail, WorldRow } from '.
 import { api } from './api'
 import { DeleteLifeDialog, DeleteWorldDialog } from './confirm'
 import { LifeRow, WorldCard, WorldDetailView } from './library'
-import { OpeningScreen } from './opening'
+import { DRAFT_PREFIX, OpeningScreen } from './opening'
 import { PlayPage } from './play'
 import { WorldRail } from './rail'
 import { SceneSlot } from './scene'
@@ -96,6 +96,24 @@ export default function EndlessWorlds() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // Drafts outlive nothing they should: an opening left half-answered for a world
+  // that has since been deleted is dead weight in shared localStorage, so it is
+  // swept whenever the world list is known.
+  useEffect(() => {
+    if (!worlds) return
+    const live = new Set(worlds.map((w) => w.worldId))
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith(DRAFT_PREFIX) && !live.has(key.slice(DRAFT_PREFIX.length))) {
+          localStorage.removeItem(key)
+        }
+      }
+    } catch {
+      /* private mode: nothing persisted, nothing to sweep */
+    }
+  }, [worlds])
 
   // Restore where the player was.
   useEffect(() => {

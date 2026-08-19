@@ -13,17 +13,27 @@ const CUSTOM = '\u0000custom'
  *  dashboard's localStorage. */
 export const DRAFT_PREFIX = 'endless-worlds:where:draft:'
 
+/** How long an abandoned opening draft is honoured. A draft is a convenience for
+ *  coming back in a day or two, not a permanent resident of shared localStorage —
+ *  after this it is ignored on read (and overwritten on the next real edit). */
+const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
 interface Draft {
   answers?: Record<string, string>
   customs?: Record<string, string>
   style?: string
   page?: number
   run?: string | null
+  /** When the draft was last written, for expiry. Absent on pre-TTL drafts, which
+   *  are treated as current rather than expired. */
+  savedAt?: number
 }
 
 function readDraft(key: string): Draft {
   try {
-    return (JSON.parse(localStorage.getItem(key) ?? 'null') as Draft | null) ?? {}
+    const d = (JSON.parse(localStorage.getItem(key) ?? 'null') as Draft | null) ?? {}
+    if (typeof d.savedAt === 'number' && Date.now() - d.savedAt > DRAFT_TTL_MS) return {}
+    return d
   } catch {
     return {}
   }
@@ -136,13 +146,24 @@ export function OpeningScreen({
   const [busy, setBusy] = useState<'' | 'creating' | 'opening'>('')
   const [failed, setFailed] = useState<string | null>(null)
   const [run, setRun] = useState<string | null>(draft.run ?? null)
+  // Whether this screen came back to answers the player left behind, so it can say
+  // so once rather than silently pre-filling and looking like the world chose.
+  const [restored, setRestored] = useState<boolean>(() =>
+    Object.keys(draft.answers ?? {}).length > 0
+    || Object.keys(draft.customs ?? {}).length > 0
+    || !!draft.run
+    || (draft.page ?? 0) > 0,
+  )
 
   // Saved on every change rather than on leave: there is no reliable "leaving"
   // event when the dashboard unmounts a page, and a draft that only survives a
   // graceful exit does not survive the case it exists for.
   useEffect(() => {
     try {
-      localStorage.setItem(draftKey, JSON.stringify({ answers, customs, style, page, run }))
+      localStorage.setItem(
+        draftKey,
+        JSON.stringify({ answers, customs, style, page, run, savedAt: Date.now() }),
+      )
     } catch {
       /* private mode: a draft is a convenience, not the life */
     }
@@ -154,6 +175,16 @@ export function OpeningScreen({
     } catch {
       /* nothing to undo */
     }
+  }
+
+  const defaultStyle = (styleRows.find((s) => s.default) ?? styleRows[0])?.id ?? ''
+  const dirty = Object.keys(answers).length > 0 || Object.keys(customs).length > 0
+  const resetAll = () => {
+    setAnswers({})
+    setCustoms({})
+    setStyle(defaultStyle)
+    setPage(0)
+    setRestored(false)
   }
 
   const groups: OpeningGroup[] = world.opening ?? []
@@ -263,6 +294,19 @@ export function OpeningScreen({
         {t('opening.page', { page: page + 1, pages })}
       </div>
 
+      {restored ? (
+        <div className="ew-note ew-note-row">
+          <span>{t('opening.restored')}</span>
+          <button
+            className="ew-btn ew-btn-quiet"
+            type="button"
+            onClick={() => setRestored(false)}
+          >
+            {t('note.dismiss')}
+          </button>
+        </div>
+      ) : null}
+
       {slice.map((g) => (
         <Group
           key={g.id}
@@ -295,6 +339,38 @@ export function OpeningScreen({
 
       {failed && !run ? <div className="ew-note">{failed}</div> : null}
 
+      {/* The whole of this life's opening on one screen before it is committed —
+          including, marked plainly, everything left for the world to decide. A
+          life cannot be un-lived, so the last thing before it starts is a look at
+          what was actually chosen. */}
+      {last ? (
+        <div className="ew-summary">
+          <div className="ew-glabel">{t('opening.summaryTitle')}</div>
+          {groups.map((g) => {
+            const v = answers[g.id]
+            const text = g.worldDecides
+              ? ''
+              : v === CUSTOM
+                ? (customs[g.id] ?? '').trim()
+                : (v ?? '').trim()
+            return (
+              <div className="ew-summary-row" key={g.id}>
+                <span className="ew-summary-label">{g.label}</span>
+                <span className={text ? 'ew-summary-value' : 'ew-summary-world'}>
+                  {text || t('opening.summaryWorld')}
+                </span>
+              </div>
+            )
+          })}
+          <div className="ew-summary-row">
+            <span className="ew-summary-label">{t('opening.styleLabel')}</span>
+            <span className="ew-summary-value">
+              {styleRows.find((s) => s.id === style)?.label ?? style}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       <div className="ew-bar">
         {page > 0 ? (
           <button className="ew-btn" type="button" onClick={() => setPage((p) => p - 1)}>
@@ -304,6 +380,11 @@ export function OpeningScreen({
         {rollable.length ? (
           <button className="ew-btn" type="button" onClick={rollAll}>
             {t('opening.rollAll')}
+          </button>
+        ) : null}
+        {dirty ? (
+          <button className="ew-btn" type="button" onClick={resetAll}>
+            {t('opening.reset')}
           </button>
         ) : null}
         <div className="ew-spacer" />

@@ -323,6 +323,20 @@
 }
 .ew-mark-gain { color: var(--muted, #6b7280); }
 
+/* The pre-birth summary: every opening choice on one line, with world-decided
+   items plainly marked so a look-before-you-leap is honest about what was chosen. */
+.ew-summary {
+  margin: 18px 0 6px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--border, #2d2f3d); background: var(--card, #1f2030);
+}
+.ew-summary-row {
+  display: flex; gap: 12px; justify-content: space-between; align-items: baseline;
+  padding: 4px 0; font-size: 14px; line-height: 1.6;
+}
+.ew-summary-label { color: var(--muted, #6b7280); flex: 0 0 auto; }
+.ew-summary-value { text-align: end; }
+.ew-summary-world { text-align: end; color: var(--muted, #6b7280); font-style: italic; }
+
 .ew-sealed {
   border: 1px dashed var(--border, #2d2f3d); border-radius: 8px;
   padding: 10px 12px; font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7;
