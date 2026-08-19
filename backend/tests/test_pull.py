@@ -300,3 +300,30 @@ def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_
     assert out["opening"] and "worldDecides" in out["opening"][0], (
         "the narrator must be able to tell a player's choice from one the world settled"
     )
+
+
+def test_recent_turns_ride_only_on_a_full_read(store, run):
+    """The narrator's session already holds the months it wrote, so a delta read
+    (one that carried a baseline it could still name) gets no recent chronicle —
+    only a full snapshot (a lost baseline, or the first read) does, and an explicit
+    request is always honoured."""
+    import mcp_server as srv
+
+    srv._store = lambda: store  # type: ignore[assignment]
+    st = {"turn": 2, "worldId": "w", "status": {"age": 7}}
+    store.commit_state(run, st)
+    store.append_turn(run, {"turn": 1, "prose": "born", "action": ""})
+    store.append_turn(run, {"turn": 2, "prose": "a year passes", "action": "wait"})
+
+    full = srv._read_runtime({"runId": run})
+    assert full["recentTurns"], "a full read re-anchors with the recent months"
+    assert "restraint" in full, "a full read carries the R7 reading"
+    since = full["fingerprint"]
+
+    delta = srv._read_runtime({"runId": run, "since": since})
+    assert delta.get("basedOn") == since, "precondition: this was a delta"
+    assert delta["recentTurns"] == [], "a delta must not re-push prose the session holds"
+    assert "restraint" not in delta, "a delta must not re-push the R7 reading"
+
+    asked = srv._read_runtime({"runId": run, "since": since, "recentTurns": 1})
+    assert len(asked["recentTurns"]) == 1, "an explicit request is always honoured"

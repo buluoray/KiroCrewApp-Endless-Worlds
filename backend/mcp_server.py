@@ -532,18 +532,40 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             # world reset.
             out["note"] = "baseline unknown; full state returned"
 
-    out["recentTurns"] = chronicle[-recent:] if recent else []
+    # The narrator's session is ONE continuous conversation across a life's turns,
+    # so on a delta read — one that carried a baseline it could only still name if
+    # its context survived — it already holds every month it wrote. Re-sending the
+    # recent chronicle there pays, every turn, for prose the narrator has in front
+    # of it. So the recent months ride only on a FULL snapshot: the same missing
+    # baseline that means "this narrator was compacted and needs re-anchoring" (and
+    # the life's first read). An explicit recentTurns request is always honoured —
+    # that is how the narrator deliberately pages back through older history.
+    if "recentTurns" in args:
+        out["recentTurns"] = chronicle[-recent:] if recent else []
+    elif baseline is None:
+        out["recentTurns"] = chronicle[-recent:] if recent else []
+    else:
+        out["recentTurns"] = []
     # The app's own readings of its recent behaviour (R7). A measurement, not an
     # instruction — which is exactly why it belongs in a tool result and not in the
     # imperative part of a prompt.
-    out["restraint"] = {
-        "density": event_density(chronicle),
-        "attribution": attribution(chronicle),
-        # The same readings as a sentence, in the world's own language. Kept because
-        # a narrator acts on "you have handed this life three windfalls in six
-        # months" and merely notices `{"perTurn": 3.0}`.
-        "note": compose_restraint(chronicle, state.get("language") or "en"),
-    }
+    #
+    # Gated like the recent months, and for the same reason: this reading exists to
+    # remind a narrator of generosity it might have FORGOTTEN, but on a continuous
+    # session it has forgotten nothing — every month it wrote is still in front of
+    # it. So the reading rides only on a FULL read, which is precisely the moment a
+    # narrator lost that context (a compaction, or the first turn) and genuinely
+    # needs reminding. On a delta read it is omitted rather than recomputed and
+    # re-pushed every turn.
+    if baseline is None:
+        out["restraint"] = {
+            "density": event_density(chronicle),
+            "attribution": attribution(chronicle),
+            # The same readings as a sentence, in the world's own language. Kept
+            # because a narrator acts on "you have handed this life three windfalls
+            # in six months" and merely notices `{"perTurn": 3.0}`.
+            "note": compose_restraint(chronicle, state.get("language") or "en"),
+        }
 
     world_id = state.get("worldId")
     if isinstance(world_id, str) and world_id:
