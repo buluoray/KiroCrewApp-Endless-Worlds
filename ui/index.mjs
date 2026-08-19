@@ -3037,7 +3037,7 @@ function EndlessWorlds() {
 					children: [
 						/* @__PURE__ */ jsx(Glyph, {}),
 						/* @__PURE__ */ jsx("h2", { children: t("app.title") }),
-						/* @__PURE__ */ jsxs("select", {
+						view === "library" ? /* @__PURE__ */ jsxs("select", {
 							className: "ew-uilang",
 							"aria-label": t("app.language"),
 							value: lang,
@@ -3049,7 +3049,7 @@ function EndlessWorlds() {
 								value: "en",
 								children: "English"
 							})]
-						})
+						}) : null
 					]
 				}),
 				note ? /* @__PURE__ */ jsxs("div", {

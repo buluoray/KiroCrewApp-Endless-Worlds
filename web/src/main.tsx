@@ -465,15 +465,17 @@ export default function EndlessWorlds() {
       <div className="ew-head">
         <Glyph />
         <h2>{t('app.title')}</h2>
-        <select
-          className="ew-uilang"
-          aria-label={t('app.language')}
-          value={lang}
-          onChange={(e) => chooseLanguage(e.target.value)}
-        >
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
+        {view === 'library' ? (
+          <select
+            className="ew-uilang"
+            aria-label={t('app.language')}
+            value={lang}
+            onChange={(e) => chooseLanguage(e.target.value)}
+          >
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        ) : null}
       </div>
 
       {note ? (
