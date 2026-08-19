@@ -24,12 +24,13 @@ import { History } from './history'
 import { PanelBox, Prose, Waiting } from './ui'
 
 export function PlayPage({
-  runId, onBack, onScenes, onReplay, refresh,
+  runId, onBack, onScenes, onReplay, onReplaySame, refresh,
 }: {
   runId: string
   onBack: () => void
   onScenes: (scenes: SceneRow[]) => void
   onReplay: (worldId: string) => void
+  onReplaySame: (fromRunId: string) => void
   refresh: number
 }) {
   const [v, setV] = useState<PlayView | null>(null)
@@ -191,6 +192,13 @@ export function PlayPage({
         <div className="ew-bar">
           <button
             className="ew-btn ew-btn-go"
+            type="button"
+            onClick={() => onReplaySame(runId)}
+          >
+            {t('play.endedReplaySame')}
+          </button>
+          <button
+            className="ew-btn"
             type="button"
             onClick={() => onReplay(v.worldId)}
           >

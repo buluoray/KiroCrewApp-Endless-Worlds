@@ -779,7 +779,35 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
     if not isinstance(body, dict):
         return web.json_response({"error": "expected an object"}, status=400)
 
+    store = _store(ctx)
     world_id = body.get("worldId")
+    answers = body.get("answers") if isinstance(body.get("answers"), dict) else {}
+    style = str(body.get("style") or "")
+
+    # "Live this again": copy a prior life's opening as the starting point. Only the
+    # player's own picks carry over — groups the world decides (including random
+    # ones) are stored as null and dropped here, so the world still rolls those
+    # afresh rather than the copy handing the player what the world reserved.
+    from_run = body.get("fromRunId")
+    if isinstance(from_run, str) and from_run:
+        try:
+            src = store.read_state(from_run)
+        except Exception:  # noqa: BLE001
+            src = {}
+        if not (isinstance(world_id, str) and world_id):
+            src_world = src.get("worldId")
+            if isinstance(src_world, str):
+                world_id = src_world
+        if not answers:
+            src_opening = src.get("opening")
+            if isinstance(src_opening, dict):
+                answers = {
+                    k: v for k, v in src_opening.items()
+                    if isinstance(v, str) and v.strip()
+                }
+        if not style:
+            style = str(src.get("style") or "")
+
     if not isinstance(world_id, str) or not world_id:
         return web.json_response({"field": "worldId", "expected": "a world"}, status=400)
 
@@ -793,17 +821,12 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
         )
 
     try:
-        state = build_initial_state(
-            pack.template,
-            body.get("answers") or {},
-            style=str(body.get("style") or ""),
-        )
+        state = build_initial_state(pack.template, answers, style=style)
     except OpeningError as exc:
         return web.json_response(
             {"field": exc.field, "expected": exc.expected}, status=400
         )
 
-    store = _store(ctx)
     run_id = store.create_run(
         state,
         {

@@ -203,6 +203,7 @@ var TABLES = {
 		"play.endedBadge": "这一生落幕了。",
 		"play.endedMeta": "这一生走过了 {turn} 个回合。",
 		"play.endedReplay": "在这个世界再活一次",
+		"play.endedReplaySame": "以同样的开局再活一次",
 		"play.endedShelf": "回到书架",
 		"play.generating": "这个月正在被写下来。可以离开这一页，回来时它会在这里。",
 		"play.nothingToShow": "这一刻还没有什么可看的——这条人生的各栏要等它们各自的条件成立才会出现。",
@@ -371,6 +372,7 @@ var TABLES = {
 		"play.endedBadge": "This life has come to a close.",
 		"play.endedMeta": "This life ran for {turn} turns.",
 		"play.endedReplay": "Live again in this world",
+		"play.endedReplaySame": "Live again with the same opening",
 		"play.endedShelf": "Back to the shelf",
 		"play.generating": "This month is being written. You can leave this page; it will be here when you come back.",
 		"play.nothingToShow": "Nothing to show yet — this life's panels appear as their own conditions come true.",
@@ -1820,7 +1822,7 @@ var GENERATING_POLL_MS = 3e3;
 var ACT = "act";
 var OPEN = "open";
 var choiceTarget = (id) => `c:${id}`;
-function PlayPage({ runId, onBack, onScenes, onReplay, refresh }) {
+function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) {
 	const [v, setV] = useState(null);
 	const [error, setError] = useState(null);
 	const [action, setAction] = useState("");
@@ -1995,17 +1997,26 @@ function PlayPage({ runId, onBack, onScenes, onReplay, refresh }) {
 		}),
 		/* @__PURE__ */ jsxs("div", {
 			className: "ew-bar",
-			children: [/* @__PURE__ */ jsx("button", {
-				className: "ew-btn ew-btn-go",
-				type: "button",
-				onClick: () => onReplay(v.worldId),
-				children: t("play.endedReplay")
-			}), /* @__PURE__ */ jsx("button", {
-				className: "ew-btn",
-				type: "button",
-				onClick: onBack,
-				children: t("play.endedShelf")
-			})]
+			children: [
+				/* @__PURE__ */ jsx("button", {
+					className: "ew-btn ew-btn-go",
+					type: "button",
+					onClick: () => onReplaySame(runId),
+					children: t("play.endedReplaySame")
+				}),
+				/* @__PURE__ */ jsx("button", {
+					className: "ew-btn",
+					type: "button",
+					onClick: () => onReplay(v.worldId),
+					children: t("play.endedReplay")
+				}),
+				/* @__PURE__ */ jsx("button", {
+					className: "ew-btn",
+					type: "button",
+					onClick: onBack,
+					children: t("play.endedShelf")
+				})
+			]
 		}),
 		/* @__PURE__ */ jsx("button", {
 			className: "ew-drawer",
@@ -2545,6 +2556,14 @@ function EndlessWorlds() {
 		setLive(runId);
 		setView("live");
 	};
+	const restartSameOpening = async (fromRunId) => {
+		try {
+			const created = await api.createRun({ fromRunId });
+			api.openRun(created.runId);
+			setScenes([]);
+			enterLife(created.runId);
+		} catch {}
+	};
 	/**
 	* After a world is gone.
 	*
@@ -2638,6 +2657,7 @@ function EndlessWorlds() {
 		onBack: home,
 		onScenes: setScenes,
 		onReplay: openWorld,
+		onReplaySame: restartSameOpening,
 		refresh
 	});
 	else if (view === "opening" && world) body = /* @__PURE__ */ jsx(OpeningScreen, {

@@ -110,6 +110,7 @@
   "play.endedBadge": "这一生落幕了。",
   "play.endedMeta": "这一生走过了 {turn} 个回合。",
   "play.endedReplay": "在这个世界再活一次",
+  "play.endedReplaySame": "以同样的开局再活一次",
   "play.endedShelf": "回到书架",
   "play.generating": "这个月正在被写下来。可以离开这一页，回来时它会在这里。",
   "play.nothingToShow": "这一刻还没有什么可看的——这条人生的各栏要等它们各自的条件成立才会出现。",

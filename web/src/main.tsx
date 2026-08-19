@@ -161,6 +161,20 @@ export default function EndlessWorlds() {
     setView('live')
   }
 
+  // "Live this again": start a fresh life from a prior one's opening picks, then
+  // enter it. The opening turn is fired without awaiting — the play page shows the
+  // generating state and converges on its own.
+  const restartSameOpening = async (fromRunId: string) => {
+    try {
+      const created = await api.createRun({ fromRunId })
+      void api.openRun(created.runId)
+      setScenes([])
+      enterLife(created.runId)
+    } catch {
+      /* the ended page is still there; nothing was lost */
+    }
+  }
+
   /**
    * After a world is gone.
    *
@@ -269,7 +283,7 @@ export default function EndlessWorlds() {
 
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} refresh={refresh} />
+    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} onReplaySame={restartSameOpening} refresh={refresh} />
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
   } else if (selected) {

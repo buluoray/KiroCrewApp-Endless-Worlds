@@ -332,8 +332,15 @@ export const api = {
       + (before > 0 ? `?before=${before}` : ''),
     ),
 
-  createRun: (body: { worldId: string; style: string; answers: Record<string, string> }) =>
-    post<{ runId: string }>('/runs', body),
+  createRun: (
+    body: {
+      worldId?: string
+      style?: string
+      answers?: Record<string, string>
+      /** Copy a prior life's opening picks as the starting point. */
+      fromRunId?: string
+    },
+  ) => post<{ runId: string }>('/runs', body),
 
   openRun: (id: string) =>
     post<{ advanced: boolean; reason: string; turn: number }>(
