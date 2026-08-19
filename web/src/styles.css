@@ -723,6 +723,9 @@
 @media (max-width: 767px) {
   .ew-life-actions { display: none; }
   .ew-life-menu { display: block; }
+  /* iOS Safari zooms the page when a focused control's font-size is under 16px.
+     Floor every control at 16px on a phone so focusing an input never zooms in. */
+  .ew-root input, .ew-root textarea, .ew-root select { font-size: 16px; }
 }
 .ew-kebab {
   display: inline-flex; align-items: center; justify-content: center;
