@@ -118,11 +118,11 @@ export function Value({ f }: { f: ShapedField }) {
     case 'rank':
       return (
         <span>
-          {/* The tier, read from the key the backend actually sends. What this
-              replaces read `label_`, which nothing has ever emitted — so the chip
-              rendered an empty pill, and the type assertion around it was what
-              stopped the compiler from pointing that out. */}
-          {f.tier ? <Chip accent>{f.tier}</Chip> : <span className="ew-gap">—</span>}
+          {/* Rendered as plain text, not an accent pill. A rank's value is meant
+              to be a short tier, but this world's narrator writes a whole clause
+              into it — a sentence inside a stadium-shaped highlight read as an
+              error. Plain text keeps the status panel uniform and calm. */}
+          {f.tier ? String(f.tier) : <span className="ew-gap">—</span>}
           {f.note ? <span className="ew-sub">{` ${f.note}`}</span> : null}
         </span>
       )

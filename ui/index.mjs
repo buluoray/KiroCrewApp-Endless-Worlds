@@ -909,10 +909,7 @@ function Value({ f }) {
 				children: ` ${f.note}`
 			}) : null
 		] });
-		case "rank": return /* @__PURE__ */ jsxs("span", { children: [f.tier ? /* @__PURE__ */ jsx(Chip, {
-			accent: true,
-			children: f.tier
-		}) : /* @__PURE__ */ jsx("span", {
+		case "rank": return /* @__PURE__ */ jsxs("span", { children: [f.tier ? String(f.tier) : /* @__PURE__ */ jsx("span", {
 			className: "ew-gap",
 			children: "—"
 		}), f.note ? /* @__PURE__ */ jsx("span", {
