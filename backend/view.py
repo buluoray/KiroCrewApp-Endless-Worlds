@@ -135,7 +135,27 @@ def _shape(primitive: str, raw: Any, options: Any = None) -> dict[str, Any]:
     if primitive == "inventory":
         return {"kind": "inventory", "items": _inventory(raw)}
 
+    # A scalar field handed a structured value — a narrator wrote the whole family
+    # object into the one-line 家庭 field. Render its text readably instead of a raw
+    # Python repr like {'held': True, 'title': …}: the string values in declaration
+    # order, and a gap when there is nothing textual to show.
+    if isinstance(raw, (dict, list)):
+        lines = _text_lines(raw)
+        return {"kind": "lines", "lines": lines} if lines else {"kind": "gap"}
+
     return {"kind": "field", "value": raw if isinstance(raw, str) else str(raw)}
+
+
+def _text_lines(raw: Any) -> list[str]:
+    """Readable text pulled from a structured value a scalar field was handed.
+
+    Only string values survive: an internal flag (a boolean like ``held`` that gates
+    a panel) and nested structures are dropped rather than shown as ``True`` or a
+    nested repr. Keys are omitted because a world's own keys are often English ids
+    the player should never see.
+    """
+    values = raw.values() if isinstance(raw, dict) else raw
+    return [v.strip() for v in values if isinstance(v, str) and v.strip()]
 
 
 def _columns(options: Any) -> list[str]:

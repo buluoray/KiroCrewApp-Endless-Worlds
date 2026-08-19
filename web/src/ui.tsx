@@ -162,6 +162,13 @@ export function Value({ f }: { f: ShapedField }) {
     case 'field':
       return <span>{String(f.value ?? '')}</span>
 
+    case 'lines':
+      return (
+        <div className="ew-lines">
+          {(f.lines ?? []).map((ln, i) => <div key={`${ln}-${i}`}>{ln}</div>)}
+        </div>
+      )
+
     default:
       // A primitive this build has never heard of. Showing the raw value is better
       // than showing nothing, and it is visibly plain rather than pretending to be

@@ -99,6 +99,23 @@ def test_a_declared_ending_wins_over_the_bare_flag(tpl):
     assert v["endingId"] == "world-epoch-closed"
 
 
+def test_a_structured_value_in_a_scalar_field_renders_readable_lines():
+    """The narrator wrote the whole family object into the one-line field. It must
+    render its text, not a Python repr like {'held': True, ...}."""
+    shaped = view_mod._shape(
+        "field",
+        {"held": True, "title": "维尔卡斯子爵", "wealth": "小贵族之家", "heirs": None},
+    )
+    assert shaped["kind"] == "lines"
+    assert shaped["lines"] == ["维尔卡斯子爵", "小贵族之家"]
+    # The gating boolean and the empty value are dropped, not shown as True/None.
+    assert all("True" not in ln and "held" not in ln for ln in shaped["lines"])
+
+
+def test_a_structured_value_with_no_text_is_a_gap():
+    assert view_mod._shape("field", {"held": True})["kind"] == "gap"
+
+
 # -- gaps -----------------------------------------------------------------
 
 

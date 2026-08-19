@@ -350,6 +350,9 @@
 }
 .ew-mark-gain { color: var(--muted, #6b7280); }
 
+/* A scalar field the narrator handed a structured value: its text, one line each. */
+.ew-lines { display: flex; flex-direction: column; gap: 3px; }
+
 /* The pre-birth summary: every opening choice on one line, with world-decided
    items plainly marked so a look-before-you-leap is honest about what was chosen. */
 .ew-summary {

@@ -355,7 +355,10 @@ def test_the_page_converges_without_the_player_doing_anything():
 
     src = uisrc.module("play.tsx")
     assert "setInterval" in src, "nothing re-reads a life that is being written"
-    poll = re.search(r"if \(!generating\) return\s*\n(.*?)\n  \}, \[", src, re.S)
+    # The poll is gated on something being in flight — a turn being written, or a
+    # freshly-created life awaiting its opening (its "generating" mark can land a
+    # beat after the page loads).
+    poll = re.search(r"if \(!generating[^\n]*return[^\n]*\n(.*?)\n  \}, \[", src, re.S)
     assert poll, "the poll is not gated on there being something in flight"
     assert "clearInterval" in poll.group(1), (
         "an uncleared interval outlives the view — and this app mounts into the "

@@ -15,7 +15,7 @@ export interface ShapedField {
   label: string
   primitive: Primitive
   options: Record<string, unknown>
-  kind: 'gap' | Primitive
+  kind: 'gap' | 'lines' | Primitive
   value?: unknown
   max?: number | null
   pct?: number | null
@@ -35,6 +35,8 @@ export interface ShapedField {
   columns?: string[]
   /** Inventory items with the count and note the narrator wrote. */
   items?: Array<{ name: string; count?: string; note?: string }>
+  /** Readable lines for a scalar field the narrator handed a structured value. */
+  lines?: string[]
 }
 
 export interface PanelView {
