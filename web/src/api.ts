@@ -165,6 +165,10 @@ export interface PastTurn {
   /** The player's own words for that month, when it came from a choice or typed
    *  action. Empty for the opening, which nobody chose. */
   action: string
+  /** What the month marked notable — the material of an events-only timeline. */
+  events: string[]
+  /** What the month credited a gain to, with its source when the narrator named one. */
+  gains: Array<{ field: string; amount: string; source: string }>
 }
 
 export interface Chronicle {

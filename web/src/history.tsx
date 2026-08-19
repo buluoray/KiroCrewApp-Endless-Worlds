@@ -22,15 +22,17 @@ export function History({ runId }: { runId: string }) {
   const [more, setMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  // Reading a life as a list of what happened, not pages of prose.
+  const [eventsOnly, setEventsOnly] = useState(false)
+  const [jump, setJump] = useState('')
 
-  const load = useCallback(async (before: number) => {
+  const load = useCallback(async (before: number, replace = false) => {
     setBusy(true)
     setFailed(false)
     try {
       const out = await api.chronicle(runId, before)
-      // Appended, not replaced: paging further back must not lose what is already
-      // on screen and being read.
-      setTurns((have) => (before > 0 ? [...have, ...out.turns] : out.turns))
+      // Paging further back appends; a jump or a fresh open replaces.
+      setTurns((have) => (before > 0 && !replace ? [...have, ...out.turns] : out.turns))
       setMore(out.more)
     } catch {
       setFailed(true)
@@ -39,6 +41,12 @@ export function History({ runId }: { runId: string }) {
   }, [runId])
 
   useEffect(() => { void load(0) }, [load])
+
+  const jumpTo = () => {
+    const n = parseInt(jump, 10)
+    // `before` is exclusive, so n+1 lands the page ON turn n rather than just above it.
+    if (Number.isFinite(n) && n > 0) void load(n + 1, true)
+  }
 
   if (failed && !turns.length) {
     return (
@@ -60,10 +68,37 @@ export function History({ runId }: { runId: string }) {
   }
 
   const oldest = turns[turns.length - 1]?.turn ?? 0
+  const rows = eventsOnly ? turns.filter((p) => p.events.length) : turns
 
   return (
     <div className="ew-history">
-      {turns.map((p) => (
+      <div className="ew-history-bar">
+        <button
+          className="ew-btn ew-btn-sm"
+          type="button"
+          aria-pressed={eventsOnly}
+          onClick={() => setEventsOnly((v) => !v)}
+        >
+          {eventsOnly ? t('history.showAll') : t('history.eventsOnly')}
+        </button>
+        <input
+          className="ew-jump"
+          inputMode="numeric"
+          value={jump}
+          placeholder={t('history.jumpPlaceholder')}
+          onChange={(e) => setJump(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={(e) => { if (e.key === 'Enter') jumpTo() }}
+        />
+        <button className="ew-btn ew-btn-sm" type="button" onClick={jumpTo}>
+          {t('history.jump')}
+        </button>
+      </div>
+
+      {eventsOnly && !rows.length ? (
+        <div className="ew-meta">{t('history.noEvents')}</div>
+      ) : null}
+
+      {rows.map((p) => (
         <div className="ew-past" key={p.turn}>
           <div className="ew-past-head">
             <span className="ew-past-turn">{t('play.turn', { turn: p.turn })}</span>
@@ -73,7 +108,22 @@ export function History({ runId }: { runId: string }) {
               <span className="ew-past-action">{t('history.chose', { action: p.action })}</span>
             ) : null}
           </div>
-          <Prose text={p.prose} />
+          {eventsOnly ? null : <Prose text={p.prose} />}
+          {p.events.length || p.gains.length ? (
+            <div className="ew-marks">
+              {p.events.map((ev, i) => (
+                <div className="ew-mark" key={`e${i}`}>{ev}</div>
+              ))}
+              {p.gains.map((g, i) => (
+                <div className="ew-mark ew-mark-gain" key={`g${i}`}>
+                  {g.field}{g.amount ? ` ${g.amount}` : ''}
+                  {g.source ? (
+                    <span className="ew-sub">{t('history.via', { source: g.source })}</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
 

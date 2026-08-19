@@ -301,6 +301,28 @@
   color: inherit; text-align: start; -webkit-tap-highlight-color: transparent;
 }
 
+/* History toolbar: the events-only toggle and the jump-to-turn control. */
+.ew-history-bar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+}
+.ew-jump {
+  width: 7em; min-width: 0; box-sizing: border-box; font: inherit; min-height: 36px;
+  padding: 6px 10px; border-radius: 8px;
+  color: var(--text, #e2e8f0); background: var(--bg, #1a1b26);
+  border: 1px solid var(--border, #2d2f3d);
+}
+.ew-jump:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }
+
+/* A turn's marked events and gains — the material the events-only timeline shows. */
+.ew-marks { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.ew-mark {
+  font-size: 13px; line-height: 1.6; padding-inline-start: 12px; position: relative;
+}
+.ew-mark::before {
+  content: "·"; position: absolute; inset-inline-start: 2px; color: var(--muted, #6b7280);
+}
+.ew-mark-gain { color: var(--muted, #6b7280); }
+
 .ew-sealed {
   border: 1px dashed var(--border, #2d2f3d); border-radius: 8px;
   padding: 10px 12px; font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7;

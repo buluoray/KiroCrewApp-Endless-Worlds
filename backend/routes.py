@@ -1182,6 +1182,23 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
                 # What the player chose, so a re-read shows the fork and not only
                 # the outcome. Absent on turns nobody chose from.
                 "action": str(e.get("action") or ""),
+                # What the month marked notable, and what it credited a gain to.
+                # Already stored on every turn (they drive the anti-halo readings);
+                # surfaced here so the player can read a life as a timeline of events
+                # rather than only as pages of prose.
+                "events": [
+                    str(x) for x in (e.get("events") or [])
+                    if isinstance(x, str) and x.strip()
+                ][:12],
+                "gains": [
+                    {
+                        "field": str(g.get("field") or ""),
+                        "amount": str(g.get("amount") or ""),
+                        "source": str(g.get("source") or ""),
+                    }
+                    for g in (e.get("gains") or [])
+                    if isinstance(g, dict) and g.get("field")
+                ][:12],
             }
             for e in page
         ],
