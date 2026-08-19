@@ -63,6 +63,17 @@ export interface Choice {
   label: string
 }
 
+export interface OpeningReveal {
+  label: string
+  value: string
+}
+
+export interface LifeRecap {
+  lastAction: string
+  events: string[]
+  choices: string[]
+}
+
 export interface PlayView {
   runId: string
   worldId: string
@@ -78,6 +89,10 @@ export interface PlayView {
   /** Which declared ending this life reached, or the narrator's own marker. Empty
    *  while the life continues. The play page shows a terminal screen when set. */
   endingId: string
+  /** Values the world, rather than the player, settled for this life at birth. */
+  reveals: OpeningReveal[]
+  /** Existing chronicle facts used to restore a returning player's place. */
+  recap: LifeRecap
   /** Set while a narrator is writing this month — recorded on the server before it
    *  is asked, so it survives the page that asked. Null when nothing is in flight. */
   generating: {

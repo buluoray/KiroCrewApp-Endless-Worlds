@@ -80,6 +80,10 @@ export function PlayPage({
   const [retry, setRetry] = useState<{ payload: { turn?: number; action?: string }; what: string } | null>(null)
   const [drawer, setDrawer] = useState(false)
   const [back, setBack] = useState(false)
+  // A recap belongs to entering a life, not to every poll or newly written turn.
+  // The ref distinguishes the first load of this run from subsequent refreshes.
+  const loadedRun = useRef<string | null>(null)
+  const [recapOpen, setRecapOpen] = useState(false)
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
@@ -106,7 +110,15 @@ export function PlayPage({
 
   const load = useCallback(async () => {
     try {
-      setV(await api.run(runId))
+      const next = await api.run(runId)
+      setV(next)
+      if (loadedRun.current !== runId) {
+        loadedRun.current = runId
+        const recap = next.recap
+        setRecapOpen(next.turn > 1 && !!(
+          recap.lastAction || recap.events.length || recap.choices.length
+        ))
+      }
     } catch (e) {
       setError((e as Error).message)
     }
@@ -213,6 +225,11 @@ export function PlayPage({
     )
   }
   if (!v) return <div className="ew-meta">{t('play.opening')}</div>
+
+  // Response-boundary fallbacks keep a rolling frontend/backend reload from
+  // blanking the whole app while one side is still on the previous shape.
+  const recap = v.recap ?? { lastAction: '', events: [], choices: [] }
+  const reveals = v.reveals ?? []
 
   // A life that exists but has not been born yet — reached from the shelf after an
   // opening turn was interrupted. Everything the player chose is already saved, so
@@ -350,11 +367,66 @@ export function PlayPage({
 
   const main = (
     <div>
+      {isLive && recapOpen ? (
+        <section className="ew-story-moment" aria-label={t('play.recapTitle')}>
+          <div className="ew-story-moment-head">
+            <div className="ew-story-moment-title">{t('play.recapTitle')}</div>
+            <button
+              className="ew-story-moment-close"
+              type="button"
+              onClick={() => setRecapOpen(false)}
+            >
+              {t('play.recapDismiss')}
+            </button>
+          </div>
+          {recap.lastAction ? (
+            <div className="ew-recap-line">
+              <span className="ew-recap-label">{t('play.recapLastChoice')} </span>
+              {recap.lastAction}
+            </div>
+          ) : null}
+          {recap.events.length ? (
+            <>
+              <div className="ew-recap-label">{t('play.recapRecent')}</div>
+              <ul className="ew-recap-list">
+                {recap.events.map((event) => <li key={event}>{event}</li>)}
+              </ul>
+            </>
+          ) : null}
+          {recap.choices.length ? (
+            <>
+              <div className="ew-recap-label">{t('play.recapNow')}</div>
+              <div className="ew-recap-choices">
+                {recap.choices.map((choice) => (
+                  <span className="ew-recap-choice" key={choice}>{choice}</span>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {isLive && v.turn === 1 && reveals.length ? (
+        <section className="ew-story-moment" aria-label={t('play.birthRevealTitle')}>
+          <div className="ew-story-moment-title">{t('play.birthRevealTitle')}</div>
+          {reveals.map((reveal) => (
+            <div className="ew-reveal-row" key={reveal.label}>
+              <span className="ew-reveal-label">{reveal.label}</span>
+              <span className="ew-reveal-value">{reveal.value}</span>
+            </div>
+          ))}
+          <div className="ew-story-moment-hint">{t('play.birthRevealHint')}</div>
+        </section>
+      ) : null}
+
       {(v.unlocked ?? []).length ? (
         <div className="ew-unlocked" role="status" aria-live="polite">
           {(v.unlocked ?? []).map((h, i) => (
             <div className="ew-unlocked-row" key={`${h}-${i}`}>
-              {t('play.unlocked', { heading: h })}
+              <div className="ew-unlocked-heading">{t('play.unlocked', { heading: h })}</div>
+              <div className="ew-unlocked-meaning">
+                {t('play.unlockedMeaning', { heading: h })}
+              </div>
             </div>
           ))}
         </div>

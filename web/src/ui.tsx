@@ -36,22 +36,37 @@ export function Chip({ children, accent }: { children: ReactNode; accent?: boole
  * to the DOM. The dashboard already renders model markdown in chat through this
  * component, so it is the audited one.
  */
+/** A line made only of box-drawing / block-element characters (U+2500–U+259F)
+ *  and whitespace — a decorative frame the narrator sometimes draws around a
+ *  title or a status block. Proportional fonts wrap these into broken rectangles,
+ *  so they are dropped before rendering. Legitimate prose (em dashes, markdown
+ *  `---` dividers) uses ASCII and is never matched. */
+const FRAME_LINE = /^[\s\u2500-\u259F]+$/
+
+function stripFrames(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !FRAME_LINE.test(line))
+    .join('\n')
+}
+
 export function Prose({ text }: { text: string }) {
   const Md = hostUi()?.MarkdownRenderer
-  if (!text) {
+  const cleaned = text ? stripFrames(text) : text
+  if (!cleaned) {
     return <p className="ew-prose ew-prose-plain">{t('play.silent')}</p>
   }
   if (!Md) {
     // Older host: plain text with the line breaks the narrator wrote. Worse than
     // markdown, never worse than unreadable.
-    return <p className="ew-prose ew-prose-plain">{text}</p>
+    return <p className="ew-prose ew-prose-plain">{cleaned}</p>
   }
   return (
     <div className="ew-prose">
       {/* softBreaks: a line break the narrator wrote is a line break they meant.
           Narration is not documentation, so collapsing single newlines the way
           strict markdown does would run sentences together. */}
-      <Md content={text} softBreaks />
+      <Md content={cleaned} softBreaks />
     </div>
   )
 }

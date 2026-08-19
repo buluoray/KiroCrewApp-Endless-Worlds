@@ -92,6 +92,44 @@ def test_unlocked_chapters_pass_through_and_default_empty(tpl):
     assert v["unlocked"] == ["第七章 · 魔法的觉醒"]
 
 
+def test_world_decided_opening_values_are_revealed_at_birth(tpl) -> None:
+    view = build_play_view(
+        tpl,
+        {"turn": 1, "opening": {"aptitude": "特殊", "race": "龙裔"}},
+    )
+
+    assert view["reveals"] == [{"label": "魔法资质", "value": "特殊"}]
+
+
+def test_return_recap_uses_recent_unique_facts_without_generating_copy(tpl) -> None:
+    chronicle = [
+        {
+            "turn": 1,
+            "prose": "First",
+            "action": "Keep the oath",
+            "events": ["Swore an oath", "Met the knight"],
+            "choices": [],
+        },
+        {
+            "turn": 2,
+            "prose": "Second",
+            "action": "Open the letter",
+            "events": ["Met the knight", "Learned the family secret", "Left home"],
+            "choices": [
+                {"id": "stay", "label": "Stay"},
+                {"id": "go", "label": "Go"},
+            ],
+        },
+    ]
+
+    recap = build_play_view(tpl, {"turn": 2}, chronicle=chronicle)["recap"]
+
+    assert recap == {
+        "lastAction": "Open the letter",
+        "events": ["Met the knight", "Learned the family secret", "Left home"],
+        "choices": ["Stay", "Go"],
+    }
+
 def test_a_declared_ending_wins_over_the_bare_flag(tpl):
     v = build_play_view(
         tpl, {"turn": 9, "ended": True, "world": {"epochClosed": True}}

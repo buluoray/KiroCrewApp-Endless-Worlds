@@ -375,11 +375,50 @@
 }
 
 /* A quiet marker when the world opens a new chapter of this life. */
-.ew-unlocked { margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.ew-unlocked { margin: 0 0 14px; display: flex; flex-direction: column; gap: 7px; }
 .ew-unlocked-row {
-  font-size: 13px; font-style: italic; color: var(--accent, #7c3aed);
+  font-size: 13px; color: var(--accent, #7c3aed);
   padding-inline-start: 10px;
   border-inline-start: 2px solid var(--accent, #7c3aed);
+}
+.ew-unlocked-heading { font-style: italic; font-weight: 600; }
+.ew-unlocked-meaning {
+  margin-top: 2px; font-size: 12px; line-height: 1.6;
+  color: var(--muted, #6b7280);
+}
+
+/* Small ceremonies around the prose: one reveals what the world settled at birth;
+   the other restores a returning player's place without generating a new summary. */
+.ew-story-moment {
+  margin: 0 0 16px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--accent, #7c3aed) 32%, var(--border, #2d2f3d));
+  background: color-mix(in oklab, var(--accent, #7c3aed) 7%, var(--card, #1f2030));
+}
+.ew-story-moment-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 7px;
+}
+.ew-story-moment-title { font-size: 13px; font-weight: 600; color: var(--accent, #7c3aed); }
+.ew-story-moment-close {
+  flex: none; border: none; padding: 3px 0; background: transparent;
+  color: var(--muted, #6b7280); font: inherit; font-size: 11px; cursor: pointer;
+}
+.ew-story-moment-close:focus-visible {
+  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;
+}
+.ew-reveal-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 4px 0; font-size: 13px; line-height: 1.5;
+}
+.ew-reveal-label, .ew-recap-label { color: var(--muted, #6b7280); }
+.ew-reveal-value { text-align: end; font-weight: 600; }
+.ew-story-moment-hint { margin-top: 6px; font-size: 11px; color: var(--muted, #6b7280); }
+.ew-recap-line { margin: 5px 0; font-size: 12px; line-height: 1.65; }
+.ew-recap-list { margin: 4px 0 8px; padding-inline-start: 18px; font-size: 12px; line-height: 1.65; }
+.ew-recap-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ew-recap-choice {
+  border-radius: 9999px; padding: 3px 9px; font-size: 11px;
+  border: 1px solid var(--border, #2d2f3d); color: var(--muted, #94a3b8);
 }
 
 /* A turn's marked events and gains — the material the events-only timeline shows. */

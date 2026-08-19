@@ -393,6 +393,45 @@ def build_play_view(
         })
 
     ending_id = resolve_ending(template, state)
+
+    opening = state.get("opening")
+    opening = opening if isinstance(opening, dict) else {}
+    reveals = []
+    for group in template.opening:
+        value = opening.get(group.id)
+        if (
+            group.random
+            and isinstance(value, (str, int, float))
+            and str(value).strip()
+        ):
+            reveals.append({"label": group.label, "value": str(value).strip()})
+
+    recap_events: list[str] = []
+    seen_events: set[str] = set()
+    for entry in reversed(chronicle):
+        raw_events = entry.get("events")
+        if not isinstance(raw_events, list):
+            continue
+        for event in raw_events:
+            text = event.strip() if isinstance(event, str) else ""
+            if text and text not in seen_events:
+                recap_events.append(text)
+                seen_events.add(text)
+                if len(recap_events) == 3:
+                    break
+        if len(recap_events) == 3:
+            break
+
+    raw_choices = last.get("choices")
+    recap_choices = []
+    if isinstance(raw_choices, list):
+        for choice in raw_choices:
+            if not isinstance(choice, dict):
+                continue
+            label = choice.get("label")
+            if isinstance(label, str) and label.strip():
+                recap_choices.append(label.strip())
+
     return {
         "turn": turn,
         "clock": _clock(template, state),
@@ -404,6 +443,12 @@ def build_play_view(
         "style": state.get("style") or "",
         "ended": bool(ending_id),
         "endingId": ending_id,
+        "reveals": reveals,
+        "recap": {
+            "lastAction": str(last.get("action") or "").strip(),
+            "events": recap_events,
+            "choices": recap_choices[:3],
+        },
         # Chapter headings the world has just opened this month, in the world's own
         # words. Computed by the route (it needs the prior state); the play page
         # shows them as a quiet "a new chapter opens" marker.
