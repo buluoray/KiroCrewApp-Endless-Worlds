@@ -491,6 +491,15 @@
 .ew-pager-arw:disabled { opacity: .35; cursor: default; }
 
 .ew-digest { margin: 0 0 20px; }
+/* Page-turn: the story slides+fades in — from the right going forward, from the
+   left going back. Keyed remount per turn runs it once; motion-reduce opts out. */
+@keyframes ew-page-fwd { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+@keyframes ew-page-back { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
+.ew-turnpage-fwd { animation: ew-page-fwd .3s ease-out both; }
+.ew-turnpage-back { animation: ew-page-back .3s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .ew-turnpage-fwd, .ew-turnpage-back { animation: none; }
+}
 .ew-drow {
   display: flex; gap: 8px; padding: 6px 0; font-size: 13px; line-height: 1.7;
   border-bottom: 1px solid var(--border, #2d2f3d);

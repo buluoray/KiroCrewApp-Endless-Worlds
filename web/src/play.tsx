@@ -76,8 +76,11 @@ export function PlayPage({
   // Advancing to a new turn, or paging to another one, should start at the top of
   // the story rather than wherever the last page was scrolled to.
   const topRef = useRef<HTMLDivElement>(null)
+  // Remembers the last shown turn so the page-turn animation knows its direction.
+  const prevTurnRef = useRef(0)
   useEffect(() => {
     topRef.current?.scrollIntoView({ block: 'start' })
+    prevTurnRef.current = viewTurn ?? (v?.turn ?? 0)
   }, [viewTurn, v?.turn])
 
   const load = useCallback(async () => {
@@ -288,6 +291,8 @@ export function PlayPage({
     ? v.prose
     : (chron.find((c) => c.turn === shownTurn)?.prose ?? v.prose)
   const pastAction = isLive ? '' : (chron.find((c) => c.turn === shownTurn)?.action ?? '')
+  // Forward when the turn number grew (a new page or a step right), back otherwise.
+  const pageDir = shownTurn >= prevTurnRef.current ? 'fwd' : 'back'
   const pager = latest >= 1 ? (
     <div className="ew-pager">
       <button
@@ -352,7 +357,9 @@ export function PlayPage({
         <div className="ew-hint">{t('history.chose', { action: pastAction })}</div>
       ) : null}
 
-      <Prose text={shownProse} />
+      <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
+        <Prose text={shownProse} />
+      </div>
 
       {stalled ? (
         <div className="ew-note" role="status" aria-live="polite">
