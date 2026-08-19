@@ -34,6 +34,7 @@ def tpl():
 def test_only_the_always_panel_shows_before_the_narrator_says_otherwise(tpl):
     v = build_play_view(tpl, {"turn": 1})
     assert [p["id"] for p in v["panels"]] == ["status"]
+    assert [p["label"] for p in v["panels"]] == ["角色状态"]
 
 
 def test_a_conditional_panel_appears_when_its_flag_flips(tpl):

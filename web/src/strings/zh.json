@@ -103,6 +103,7 @@
   "opening.restored": "已恢复你上次的选择。",
   "opening.retry": "再试一次",
   "opening.rollAll": "全部随机",
+  "opening.rollPage": "本页随机",
   "opening.rollOne": "随机 {label}",
   "opening.sealed": "这一项由世界定下，不由你选。等你出生时才会知道。",
   "opening.silent": "这一世没能开始。",

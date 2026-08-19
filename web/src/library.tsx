@@ -391,7 +391,7 @@ export function WorldDetailView({
         {(world.panels ?? []).map((p) => (
           <div className="ew-panel" key={p.id}>
             <div className="ew-panel-head">
-              <span className="ew-panel-name">{p.id}</span>
+              <span className="ew-panel-name">{p.label || p.id}</span>
               <Chip accent={p.always}>
                 {p.always ? t('world.panelAlways') : t('world.panelConditional')}
               </Chip>

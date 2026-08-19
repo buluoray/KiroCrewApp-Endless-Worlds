@@ -91,6 +91,7 @@ digest:
 panels:
   # 第一百四十七章 · 玩家状态栏 — the 17 always-visible fields.
   - id: status
+    label: 角色状态
     always: true
     fields:
       - { id: time, label: 时间, primitive: field }
@@ -134,6 +135,7 @@ panels:
   # 第一百二十二章 says a player may never learn magic at all, so this panel
   # must be genuinely absent rather than shown empty.
   - id: magic
+    label: 魔法能力
     when: state.magic.awakened == true
     fields:
       - { id: mana, label: 魔力, primitive: stat }
@@ -151,6 +153,7 @@ panels:
   # (姓名/身份/种族/关系/信任/利益/敌意/最近动态). 第九十九章 · NPC自主系统
   # means these move whether or not the player is looking.
   - id: relations
+    label: 社会关系
     when: state.relations.known == true
     fields:
       - id: figures
@@ -160,6 +163,7 @@ panels:
 
   # 第一百五十章 · 国家面板 — "如果玩家成为高层".
   - id: nation
+    label: 国家
     when: state.office.high == true
     fields:
       - { id: population, label: 人口, primitive: resource, delayed: true }
@@ -178,6 +182,7 @@ panels:
 
   # 第一百五十一章 · 学院面板 — "如果玩家加入学院".
   - id: academy
+    label: 学院
     when: state.academy.enrolled == true
     fields:
       - { id: standing, label: 学院声望, primitive: stat }
@@ -194,6 +199,7 @@ panels:
   # 第一百五十二章 · 家族面板 — "如果玩家拥有家族".
   # 第一百二十九章 · 家族历史 accumulates across generations.
   - id: family
+    label: 家族
     when: state.family.held == true
     fields:
       - id: title

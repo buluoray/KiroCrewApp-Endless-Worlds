@@ -195,19 +195,22 @@ export function OpeningScreen({
   const pages = Math.max(1, Math.ceil(groups.length / PER_PAGE))
   const slice = groups.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE)
   const last = page >= pages - 1
-  const rollable = groups.filter((g) => !g.worldDecides && g.options.length > 0)
+  // Only THIS page's rollable groups — a page with none shows no roll button, and
+  // rolling touches only what is on the page in front of the player, not groups on
+  // other pages they have not seen yet.
+  const rollableHere = slice.filter((g) => !g.worldDecides && g.options.length > 0)
 
   const rollOne = (g: OpeningGroup) => {
     const pick = g.options[Math.floor(Math.random() * g.options.length)]
     if (pick) setAnswers((a) => ({ ...a, [g.id]: pick }))
   }
 
-  const rollAll = () => {
+  const rollPage = () => {
     const next: Record<string, string> = {}
     // Only groups with options can be rolled here. A name has nothing to draw
     // from, so it stays blank and the world decides it — the same rule the backend
     // applies, kept identical on purpose.
-    rollable.forEach((g) => {
+    rollableHere.forEach((g) => {
       const pick = g.options[Math.floor(Math.random() * g.options.length)]
       if (pick) next[g.id] = pick
     })
@@ -390,9 +393,9 @@ export function OpeningScreen({
             {t('opening.prev')}
           </button>
         ) : null}
-        {rollable.length ? (
-          <button className="ew-btn" type="button" onClick={rollAll}>
-            {t('opening.rollAll')}
+        {rollableHere.length ? (
+          <button className="ew-btn" type="button" onClick={rollPage}>
+            {t('opening.rollPage')}
           </button>
         ) : null}
         {dirty ? (

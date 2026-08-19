@@ -75,9 +75,10 @@ REQUIRED FIELDS
               list ends with a self-defined choice. Add "random": true when the
               prose offers a randomise option — that is an action, NOT an option
               the character can end up literally holding.
-  panels      the state surfaces. EXACTLY ONE must have "always": true — that is
-              the status bar shown at all times. Every other panel needs a "when"
-              expression instead. Each field is
+  panels      the state surfaces. Each panel needs a stable "id" for state and a
+              localized "label" for display. EXACTLY ONE must have "always": true —
+              that is the status bar shown at all times. Every other panel needs a
+              "when" expression instead. Each field is
               {{ "id", "label", "primitive" }}.
   endings     conditions that finish a life. Each {{ "id", "when" }}.
   digest      {{ "categories": [...], "rumours": bool }} — the categories the world
@@ -387,7 +388,7 @@ def preview(pack: WorldPack) -> dict[str, Any]:
         "opening": [g.label for g in t.opening],
         "panels": [
             {
-                "label": p.id,
+                "label": p.label,
                 "always": p.always,
                 "fields": [f.label for f in p.fields],
             }

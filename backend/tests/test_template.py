@@ -37,11 +37,13 @@ opening:
   - { id: name, label: Name, kind: text }
 panels:
   - id: status
+    label: Character Status
     always: true
     fields:
       - { id: age, label: Age, primitive: field }
       - { id: renown, label: Renown, primitive: stat, min: 0, max: 100 }
   - id: magic
+    label: Magic
     when: state.magic.awakened == true
     fields:
       - { id: mana, label: Mana, primitive: stat }
@@ -116,6 +118,7 @@ def test_flagship_shaped_template_parses() -> None:
     assert [g.id for g in t.opening] == ["era", "name"]
     assert t.opening[0].custom is True
     assert [p.id for p in t.panels] == ["status", "magic"]
+    assert [p.label for p in t.panels] == ["Character Status", "Magic"]
     assert t.digest_categories == ["nations", "wars"]
     assert t.digest_rumours is True
     assert t.save_schema == ["character", "wealth"]
@@ -131,6 +134,11 @@ def test_version_given_as_a_yaml_float_becomes_a_string() -> None:
 def test_default_style_falls_back_to_the_first_when_none_declared() -> None:
     header = HEADER.replace(", default: true", "")
     assert parse_template(build(header)).default_style.id == "gentle"
+
+
+def test_panel_label_falls_back_to_stable_id_for_older_worlds() -> None:
+    header = HEADER.replace("    label: Character Status\n", "", 1)
+    assert parse_template(build(header)).panels[0].label == "status"
 
 
 def test_panel_extras_are_carried_through_for_the_primitive() -> None:

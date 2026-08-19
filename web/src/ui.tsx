@@ -195,6 +195,7 @@ export function Value({ f }: { f: ShapedField }) {
 export function PanelBox({ panel }: { panel: PanelView }) {
   return (
     <div className={`ew-panel-box${panel.empty ? ' ew-panel-quiet' : ''}`}>
+      <div className="ew-panel-box-name">{panel.label || panel.id}</div>
       {(panel.fields ?? []).map((f) => (
         // A label the width of a phrase and a label the width of a paragraph cannot
         // share one layout. The narrator may put its own wording in the label slot,

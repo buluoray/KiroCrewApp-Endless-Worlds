@@ -102,6 +102,16 @@ def test_status_panel_is_the_seventeen_field_bar(flagship) -> None:
     ]
 
 
+def test_all_panel_labels_are_localized(flagship) -> None:
+    assert [(panel.id, panel.label) for panel in flagship.panels] == [
+        ("status", "角色状态"),
+        ("magic", "魔法能力"),
+        ("relations", "社会关系"),
+        ("nation", "国家"),
+        ("academy", "学院"),
+        ("family", "家族"),
+    ]
+
 def test_the_five_conditional_panels_match_chapters_148_to_152(flagship) -> None:
     """R5.2 — each appears only when its trigger is met."""
     conditional = {p.id: p for p in flagship.panels if not p.always}

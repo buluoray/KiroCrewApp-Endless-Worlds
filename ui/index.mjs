@@ -250,6 +250,7 @@ var TABLES$1 = {
 		"opening.restored": "已恢复你上次的选择。",
 		"opening.retry": "再试一次",
 		"opening.rollAll": "全部随机",
+		"opening.rollPage": "本页随机",
 		"opening.rollOne": "随机 {label}",
 		"opening.sealed": "这一项由世界定下，不由你选。等你出生时才会知道。",
 		"opening.silent": "这一世没能开始。",
@@ -484,6 +485,7 @@ var TABLES$1 = {
 		"opening.restored": "Your last choices are back.",
 		"opening.retry": "Try again",
 		"opening.rollAll": "Roll everything",
+		"opening.rollPage": "Roll this page",
 		"opening.rollOne": "Roll {label}",
 		"opening.sealed": "The world decides this one, not you. You will find out when this life begins.",
 		"opening.silent": "This life could not begin.",
@@ -1775,7 +1777,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 	const pages = Math.max(1, Math.ceil(groups.length / PER_PAGE));
 	const slice = groups.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE);
 	const last = page >= pages - 1;
-	const rollable = groups.filter((g) => !g.worldDecides && g.options.length > 0);
+	const rollableHere = slice.filter((g) => !g.worldDecides && g.options.length > 0);
 	const rollOne = (g) => {
 		const pick = g.options[Math.floor(Math.random() * g.options.length)];
 		if (pick) setAnswers((a) => ({
@@ -1783,9 +1785,9 @@ function OpeningScreen({ world, onBack, onLive }) {
 			[g.id]: pick
 		}));
 	};
-	const rollAll = () => {
+	const rollPage = () => {
 		const next = {};
-		rollable.forEach((g) => {
+		rollableHere.forEach((g) => {
 			const pick = g.options[Math.floor(Math.random() * g.options.length)];
 			if (pick) next[g.id] = pick;
 		});
@@ -1985,11 +1987,11 @@ function OpeningScreen({ world, onBack, onLive }) {
 					onClick: () => setPage((p) => p - 1),
 					children: t("opening.prev")
 				}) : null,
-				rollable.length ? /* @__PURE__ */ jsx("button", {
+				rollableHere.length ? /* @__PURE__ */ jsx("button", {
 					className: "ew-btn",
 					type: "button",
-					onClick: rollAll,
-					children: t("opening.rollAll")
+					onClick: rollPage,
+					children: t("opening.rollPage")
 				}) : null,
 				dirty ? /* @__PURE__ */ jsx("button", {
 					className: "ew-btn",

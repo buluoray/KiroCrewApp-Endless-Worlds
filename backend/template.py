@@ -336,6 +336,7 @@ class PanelField:
 @dataclass
 class Panel:
     id: str
+    label: str
     fields: list[PanelField]
     always: bool = False
     when: Condition | None = None
@@ -558,6 +559,10 @@ def _parse_panels(raw: Any) -> list[Panel]:
     always_count = 0
     for i, item in enumerate(raw):
         pid = _require_id(item, f"panels[{i}]")
+        raw_label = item.get("label", pid)
+        if not isinstance(raw_label, str) or not raw_label.strip():
+            raise TemplateError(f"panels[{i}].label", "a non-empty display label")
+        label = raw_label.strip()
         raw_fields = _require(item, "fields", list, "a non-empty list of fields")
         if not raw_fields:
             raise TemplateError(f"panels[{i}].fields", "a non-empty list of fields")
@@ -581,7 +586,7 @@ def _parse_panels(raw: Any) -> list[Panel]:
             raise TemplateError(f"panels[{i}]", "needs always: true or a when expression")
         always_count += 1 if always else 0
         panels.append(
-            Panel(pid, fields, always, Condition.parse(when_src) if when_src else None)
+            Panel(pid, label, fields, always, Condition.parse(when_src) if when_src else None)
         )
     if always_count == 0:
         raise TemplateError("panels", "exactly one panel must set always: true")

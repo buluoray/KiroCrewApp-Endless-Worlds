@@ -103,6 +103,7 @@
   "opening.restored": "Your last choices are back.",
   "opening.retry": "Try again",
   "opening.rollAll": "Roll everything",
+  "opening.rollPage": "Roll this page",
   "opening.rollOne": "Roll {label}",
   "opening.sealed": "The world decides this one, not you. You will find out when this life begins.",
   "opening.silent": "This life could not begin.",

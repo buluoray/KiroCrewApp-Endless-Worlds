@@ -86,6 +86,7 @@ digest:
 panels:
   # Chapter 147 · The Player Status Bar — the 17 always-visible fields.
   - id: status
+    label: Character Status
     always: true
     fields:
       - { id: time, label: Time, primitive: field }
@@ -129,6 +130,7 @@ panels:
   # Chapter 122 says a player may never learn magic at all, so this panel
   # must be genuinely absent rather than shown empty.
   - id: magic
+    label: Magic
     when: state.magic.awakened == true
     fields:
       - { id: mana, label: Mana, primitive: stat }
@@ -146,6 +148,7 @@ panels:
   # attributes. Chapter 99 · NPC autonomy means these move whether or not the
   # player is looking.
   - id: relations
+    label: Relationships
     when: state.relations.known == true
     fields:
       - id: figures
@@ -155,6 +158,7 @@ panels:
 
   # Chapter 150 · Nation panel — "if the player becomes high-ranking".
   - id: nation
+    label: Nation
     when: state.office.high == true
     fields:
       - { id: population, label: Population, primitive: resource, delayed: true }
@@ -174,6 +178,7 @@ panels:
 
   # Chapter 151 · Academy panel — "if the player joins an academy".
   - id: academy
+    label: Academy
     when: state.academy.enrolled == true
     fields:
       - { id: standing, label: Academy Standing, primitive: stat }
@@ -190,6 +195,7 @@ panels:
   # Chapter 152 · Family panel — "if the player holds a family".
   # Chapter 129 · Family history accumulates across generations.
   - id: family
+    label: Family
     when: state.family.held == true
     fields:
       - id: title
