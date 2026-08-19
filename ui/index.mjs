@@ -2146,6 +2146,10 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 			alive = false;
 		};
 	}, [runId, v?.turn]);
+	const topRef = useRef(null);
+	useEffect(() => {
+		topRef.current?.scrollIntoView({ block: "start" });
+	}, [viewTurn, v?.turn]);
 	const load = useCallback(async () => {
 		try {
 			setV(await api.run(runId));
@@ -2574,34 +2578,37 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 			})
 		}) : null
 	] });
-	return /* @__PURE__ */ jsxs("div", { children: [
-		/* @__PURE__ */ jsxs("div", {
-			className: "ew-topbar",
-			children: [/* @__PURE__ */ jsx("button", {
-				className: "ew-back",
-				type: "button",
-				onClick: onBack,
-				children: t("play.back")
-			}), pager]
-		}),
-		/* @__PURE__ */ jsxs("div", {
-			className: "ew-titleline",
-			children: [/* @__PURE__ */ jsx("h3", {
-				className: "ew-detail-title",
-				children: v.title
-			}), v.clock ? /* @__PURE__ */ jsx("span", {
-				className: "ew-clock",
-				children: v.clock
-			}) : null]
-		}),
-		/* @__PURE__ */ jsxs("div", {
-			className: "ew-play",
-			children: [main, /* @__PURE__ */ jsx("div", {
-				className: "ew-aside",
-				children: panels
-			})]
-		})
-	] });
+	return /* @__PURE__ */ jsxs("div", {
+		ref: topRef,
+		children: [
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-topbar",
+				children: [/* @__PURE__ */ jsx("button", {
+					className: "ew-back",
+					type: "button",
+					onClick: onBack,
+					children: t("play.back")
+				}), pager]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-titleline",
+				children: [/* @__PURE__ */ jsx("h3", {
+					className: "ew-detail-title",
+					children: v.title
+				}), v.clock ? /* @__PURE__ */ jsx("span", {
+					className: "ew-clock",
+					children: v.clock
+				}) : null]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-play",
+				children: [main, /* @__PURE__ */ jsx("div", {
+					className: "ew-aside",
+					children: panels
+				})]
+			})
+		]
+	});
 }
 //#endregion
 //#region src/rail.tsx

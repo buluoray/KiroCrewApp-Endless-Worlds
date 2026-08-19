@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { PastTurn, PlayView, SceneRow } from './api'
 import { api } from './api'
@@ -73,6 +73,12 @@ export function PlayPage({
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, v?.turn])
+  // Advancing to a new turn, or paging to another one, should start at the top of
+  // the story rather than wherever the last page was scrolled to.
+  const topRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    topRef.current?.scrollIntoView({ block: 'start' })
+  }, [viewTurn, v?.turn])
 
   const load = useCallback(async () => {
     try {
@@ -524,7 +530,7 @@ export function PlayPage({
   )
 
   return (
-    <div>
+    <div ref={topRef}>
       <div className="ew-topbar">
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         {pager}
