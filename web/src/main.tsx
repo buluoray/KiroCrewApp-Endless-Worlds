@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { LifeRowData, SeedReport, WorldDetail, WorldRow } from './api'
+import type { LifeRowData, SceneRow, SeedReport, WorldDetail, WorldRow } from './api'
 import { api } from './api'
 import { DeleteLifeDialog, DeleteWorldDialog } from './confirm'
 import { LifeRow, WorldCard, WorldDetailView } from './library'
@@ -57,7 +57,7 @@ export default function EndlessWorlds() {
   const [selected, setSelected] = useState<string | null>(null)
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [live, setLive] = useState<string | null>(null)
-  const [scene, setScene] = useState('')
+  const [scenes, setScenes] = useState<SceneRow[]>([])
   const [refresh, setRefresh] = useState(0)
   /** Which world's deletion is being confirmed, or null. Held here rather than in
    *  the detail view because the reload that follows a deletion unmounts that
@@ -111,7 +111,7 @@ export default function EndlessWorlds() {
     setSelected(null)
     setWorld(null)
     setLive(null)
-    setScene('')
+    setScenes([])
     void load()
   }
 
@@ -173,7 +173,7 @@ export default function EndlessWorlds() {
    */
   const openWorld = (worldId: string) => {
     setLive(null)
-    setScene('')
+    setScenes([])
     setWorld(null)
     setSelected(worldId)
     setView('detail')
@@ -206,7 +206,7 @@ export default function EndlessWorlds() {
 
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScene={setScene} onReplay={openWorld} refresh={refresh} />
+    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} refresh={refresh} />
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
   } else if (selected) {
@@ -342,10 +342,13 @@ export default function EndlessWorlds() {
         <div className="ew-main">{body}</div>
       </div>
 
-      {/* Outside `body` on purpose: this element is created on first need and never
-          moved, because moving an iframe reloads it. */}
-      <SceneSlot runId={live} sceneId={scene} onChoice={onSceneChoice} />
-
+      {/* Outside `body` on purpose, and one frame per mounted scene: each is
+          created on first need and never moved or re-keyed, because moving an
+          iframe reloads it. The order is the mount order and never re-sorted, so an
+          asking scene becoming answered does not shuffle a frame and reload it. */}
+      {live ? scenes.map((s) => (
+        <SceneSlot key={s.sceneId} runId={live} sceneId={s.sceneId} onChoice={onSceneChoice} />
+      )) : null}
       {doomed ? (
         <DeleteWorldDialog
           worldId={doomed}

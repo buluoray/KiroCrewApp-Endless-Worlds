@@ -1547,7 +1547,7 @@ var GENERATING_POLL_MS = 3e3;
 var ACT = "act";
 var OPEN = "open";
 var choiceTarget = (id) => `c:${id}`;
-function PlayPage({ runId, onBack, onScene, onReplay, refresh }) {
+function PlayPage({ runId, onBack, onScenes, onReplay, refresh }) {
 	const [v, setV] = useState(null);
 	const [error, setError] = useState(null);
 	const [action, setAction] = useState("");
@@ -1592,9 +1592,8 @@ function PlayPage({ runId, onBack, onScene, onReplay, refresh }) {
 		useLanguage(v?.language);
 	}, [v]);
 	useEffect(() => {
-		const asking = (v?.scenes ?? []).filter((s) => s.asks && !s.answered);
-		onScene(asking.length ? asking[asking.length - 1]?.sceneId ?? "" : "");
-	}, [v, onScene]);
+		onScenes(v?.scenes ?? []);
+	}, [v, onScenes]);
 	const take = async (payload, what) => {
 		setTapped(what);
 		setPhrase(pick("play.waiting"));
@@ -2123,7 +2122,7 @@ function EndlessWorlds() {
 	const [selected, setSelected] = useState(null);
 	const [world, setWorld] = useState(null);
 	const [live, setLive] = useState(null);
-	const [scene, setScene] = useState("");
+	const [scenes, setScenes] = useState([]);
 	const [refresh, setRefresh] = useState(0);
 	/** Which world's deletion is being confirmed, or null. Held here rather than in
 	*  the detail view because the reload that follows a deletion unmounts that
@@ -2169,7 +2168,7 @@ function EndlessWorlds() {
 		setSelected(null);
 		setWorld(null);
 		setLive(null);
-		setScene("");
+		setScenes([]);
 		load();
 	};
 	const enterLife = (runId) => {
@@ -2225,7 +2224,7 @@ function EndlessWorlds() {
 	*/
 	const openWorld = (worldId) => {
 		setLive(null);
-		setScene("");
+		setScenes([]);
 		setWorld(null);
 		setSelected(worldId);
 		setView("detail");
@@ -2258,7 +2257,7 @@ function EndlessWorlds() {
 	if (view === "live" && live) body = /* @__PURE__ */ jsx(PlayPage, {
 		runId: live,
 		onBack: home,
-		onScene: setScene,
+		onScenes: setScenes,
 		onReplay: openWorld,
 		refresh
 	});
@@ -2387,11 +2386,11 @@ function EndlessWorlds() {
 					children: body
 				})]
 			}),
-			/* @__PURE__ */ jsx(SceneSlot, {
+			live ? scenes.map((s) => /* @__PURE__ */ jsx(SceneSlot, {
 				runId: live,
-				sceneId: scene,
+				sceneId: s.sceneId,
 				onChoice: onSceneChoice
-			}),
+			}, s.sceneId)) : null,
 			doomed ? /* @__PURE__ */ jsx(DeleteWorldDialog, {
 				worldId: doomed,
 				onCancel: () => setDoomed(null),

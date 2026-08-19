@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { PlayView } from './api'
+import type { PlayView, SceneRow } from './api'
 import { api } from './api'
 
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
@@ -24,11 +24,11 @@ import { History } from './history'
 import { PanelBox, Prose, Waiting } from './ui'
 
 export function PlayPage({
-  runId, onBack, onScene, onReplay, refresh,
+  runId, onBack, onScenes, onReplay, refresh,
 }: {
   runId: string
   onBack: () => void
-  onScene: (sceneId: string) => void
+  onScenes: (scenes: SceneRow[]) => void
   onReplay: (worldId: string) => void
   refresh: number
 }) {
@@ -82,12 +82,14 @@ export function PlayPage({
   // The world's own language, not the build's.
   useEffect(() => { useLanguage(v?.language) }, [v])
 
-  // The newest asking scene is the one on screen. Reported upward rather than
-  // rendered here: the frame lives at the app root so it survives this view.
+  // Every mounted scene is reported upward, in the order it was mounted. The app
+  // root draws one persistent frame per scene: an asking scene the player answers,
+  // and display-only scenes (a map, a ledger) that stay visible — including after
+  // they are answered — until the narrator dismisses them. The order is never
+  // re-sorted: moving a frame in the DOM reloads it.
   useEffect(() => {
-    const asking = (v?.scenes ?? []).filter((s) => s.asks && !s.answered)
-    onScene(asking.length ? (asking[asking.length - 1]?.sceneId ?? '') : '')
-  }, [v, onScene])
+    onScenes(v?.scenes ?? [])
+  }, [v, onScenes])
 
   const take = async (payload: { turn?: number; action?: string }, what: string) => {
     setTapped(what)
