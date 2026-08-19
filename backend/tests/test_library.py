@@ -214,3 +214,55 @@ def test_the_shipped_flagship_seed_installs_and_lists(tmp_path: Path) -> None:
     assert row["lineage"] is True
     assert row["stale"] is False
     assert len(row["styles"]) == 6
+
+
+# -- language variants ----------------------------------------------------
+
+
+def _zh_variant() -> str:
+    """The same world (id test-world) rendered in another language."""
+    header = {**HEADER, "language": "zh", "title": "测试世界"}
+    return world_file(header, prose="第一章\n\n世界不围绕玩家存在。\n")
+
+
+def test_a_language_variant_is_one_world_not_two(lib: WorldLibrary) -> None:
+    """``test-world.zh.md`` is the SAME world in another language, so the shelf
+    shows one row carrying both languages — never a second world."""
+    write_seed(lib, "test-world", world_file())          # en, the primary
+    write_seed(lib, "test-world.zh", _zh_variant())       # zh, a variant
+
+    lib.ensure_seeds_installed()
+
+    rows = lib.list_worlds()
+    assert [r["worldId"] for r in rows] == ["test-world"], "the variant is not its own row"
+    assert rows[0]["languages"] == ["en", "zh"], "the primary leads, the variant follows"
+    assert lib.count() == 1, "one world, not two, however many languages it has"
+
+
+def test_read_resolves_the_run_s_language(lib: WorldLibrary) -> None:
+    """A run bound to zh reads the zh file; the primary and an absent language both
+    fall back to the base, which IS the primary rendering."""
+    write_seed(lib, "test-world", world_file())
+    write_seed(lib, "test-world.zh", _zh_variant())
+    lib.ensure_seeds_installed()
+
+    assert lib.read("test-world", "zh").template.language == "zh"
+    assert lib.read("test-world", "en").template.language == "en"
+    assert lib.read("test-world", None).template.language == "en"
+    assert lib.read("test-world", "fr").template.language == "en", "no variant → base"
+
+
+def test_removing_a_world_takes_every_language_with_it(lib: WorldLibrary) -> None:
+    """A world is one shelf entry; deleting it must not leave an orphan variant
+    that would also reinstall the base past the gravestone on the next listing."""
+    write_seed(lib, "test-world", world_file())
+    write_seed(lib, "test-world.zh", _zh_variant())
+    lib.ensure_seeds_installed()
+    variant_path = lib._worlds / "test-world.zh.md"
+    assert lib.path_for("test-world").is_file() and variant_path.is_file()
+
+    lib.remove("test-world")
+
+    assert not lib.path_for("test-world").is_file()
+    assert not variant_path.is_file(), "the language variant must go too"
+    assert lib.list_worlds() == [], "and the shelf is empty"

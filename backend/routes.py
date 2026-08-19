@@ -265,9 +265,10 @@ async def get_world(request: web.Request, ctx: AppContext) -> web.Response:
         return _unauthorized()
 
     world_id = request.match_info.get("world_id", "")
+    language = request.query.get("language") or None
     library = _library(ctx)
     try:
-        pack = library.read(world_id)
+        pack = library.read(world_id, language)
     except LibraryError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except Exception as exc:
@@ -275,9 +276,9 @@ async def get_world(request: web.Request, ctx: AppContext) -> web.Response:
             {"error": "this world could not be read", "detail": str(exc)}, status=422
         )
 
-    return web.json_response(
-        world_detail(pack, include_prose=bool(request.query.get("prose")))
-    )
+    detail = world_detail(pack, include_prose=bool(request.query.get("prose")))
+    detail["languages"] = library.languages_for(world_id)
+    return web.json_response(detail)
 
 
 def lives_claiming(store: RunStore, world_id: str) -> list[dict[str, Any]]:
@@ -719,7 +720,7 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         return web.json_response({"error": "this life has no world"}, status=422)
 
     try:
-        pack = _library(ctx).read(world_id)
+        pack = _library(ctx).read(world_id, run_state.get("language"))
     except (LibraryError, Exception) as exc:  # noqa: BLE001
         return web.json_response(
             {"error": "this world could not be read", "detail": str(exc)}, status=422
@@ -785,6 +786,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
     world_id = body.get("worldId")
     answers = body.get("answers") if isinstance(body.get("answers"), dict) else {}
     style = str(body.get("style") or "")
+    language = body.get("language") if isinstance(body.get("language"), str) else None
 
     # "Live this again": copy a prior life's opening as the starting point. Only the
     # player's own picks carry over — groups the world decides (including random
@@ -809,12 +811,24 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
                 }
         if not style:
             style = str(src.get("style") or "")
+        if not language:
+            src_lang = src.get("language")
+            if isinstance(src_lang, str) and src_lang:
+                language = src_lang
 
     if not isinstance(world_id, str) or not world_id:
         return web.json_response({"field": "worldId", "expected": "a world"}, status=400)
 
+    library = _library(ctx)
+    if language:
+        available = library.languages_for(world_id)
+        if available and language not in available:
+            return web.json_response(
+                {"field": "language", "expected": "a language this world offers"},
+                status=400,
+            )
     try:
-        pack = _library(ctx).read(world_id)
+        pack = library.read(world_id, language)
     except LibraryError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except Exception as exc:  # noqa: BLE001
@@ -874,7 +888,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
     if not isinstance(world_id, str) or not world_id:
         return web.json_response({"error": "this life has no world"}, status=422)
     try:
-        pack = _library(ctx).read(world_id)
+        pack = _library(ctx).read(world_id, run_state.get("language"))
     except Exception as exc:  # noqa: BLE001
         return web.json_response(
             {"error": "this world could not be read", "detail": str(exc)}, status=422
@@ -1010,7 +1024,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     if not isinstance(world_id, str) or not world_id:
         return web.json_response({"error": "this life has no world"}, status=422)
     try:
-        pack = _library(ctx).read(world_id)
+        pack = _library(ctx).read(world_id, state.get("language"))
     except Exception as exc:  # noqa: BLE001
         return web.json_response(
             {"error": "this world could not be read", "detail": str(exc)}, status=422

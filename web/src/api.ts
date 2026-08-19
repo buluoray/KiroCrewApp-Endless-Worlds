@@ -120,6 +120,9 @@ export interface WorldRow {
   panelCount?: number
   openingGroups?: number
   language?: string
+  /** Every language this world can be played in, its primary first. A world with
+   *  more than one lets the player pick before living a life in it. */
+  languages?: string[]
   problem?: string
   needsCore?: number
   localCore?: number
@@ -290,8 +293,13 @@ function post<T>(path: string, body: unknown): Promise<T> {
 
 export const api = {
   worlds: () => json<{ worlds: WorldRow[]; seeds: SeedReport }>('/worlds'),
-  world: (id: string, prose = false) =>
-    json<WorldDetail>(`/worlds/${encodeURIComponent(id)}${prose ? '?prose=1' : ''}`),
+  world: (id: string, prose = false, language?: string) => {
+    const q = new URLSearchParams()
+    if (prose) q.set('prose', '1')
+    if (language) q.set('language', language)
+    const qs = q.toString()
+    return json<WorldDetail>(`/worlds/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`)
+  },
 
   worldDeletion: (id: string) =>
     json<DeletionFacts>(`/worlds/${encodeURIComponent(id)}/deletion`),
@@ -348,6 +356,9 @@ export const api = {
       worldId?: string
       style?: string
       answers?: Record<string, string>
+      /** Which language to live this life in — one of the world's `languages`.
+       *  Binds the run to that language's rulebook and UI for its whole life. */
+      language?: string
       /** Copy a prior life's opening picks as the starting point. */
       fromRunId?: string
     },

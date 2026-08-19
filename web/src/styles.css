@@ -406,6 +406,16 @@
 }
 .ew-btn-quiet:hover { color: var(--text, #e2e8f0); }
 .ew-spacer { flex: 1; }
+/* Language chooser on the world card: a small toggle set, the chosen one filled. */
+.ew-lang {
+  border: 1px solid var(--border, #334155); border-radius: 999px;
+  background: transparent; color: var(--muted, #6b7280);
+  min-height: 32px; padding: 0 14px; font-size: 13px; cursor: pointer;
+}
+.ew-lang:hover { color: var(--text, #e2e8f0); }
+.ew-lang[aria-pressed="true"] {
+  background: var(--accent, #6366f1); color: #fff; border-color: transparent;
+}
 @media (min-width: 768px) { .ew-btn-go { flex: 0 0 auto; } }
 
 /* ── prose ── */

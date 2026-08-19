@@ -11,6 +11,20 @@ const TURN_UNITS: Record<string, string> = {
 }
 
 /**
+ * How a language reads in its own tongue. Endonyms are conventionally not
+ * translated, so they carry no catalog key; an unknown tag shows its own code
+ * uppercased rather than nothing.
+ */
+const LANGUAGE_ENDONYM: Record<string, string> = {
+  en: 'English', zh: '中文', ja: '日本語', ko: '한국어', fr: 'Français',
+  de: 'Deutsch', es: 'Español', 'pt-br': 'Português', ru: 'Русский',
+}
+
+export function languageName(tag: string): string {
+  return LANGUAGE_ENDONYM[tag] ?? tag.toUpperCase()
+}
+
+/**
  * How a turn reads, in one place.
  *
  * The card and the detail view used to build this phrase separately, which is how
@@ -194,7 +208,7 @@ export function LifeRow({
 }
 
 export function WorldDetailView({
-  worldId, onBack, onPlay, onDelete,
+  worldId, onBack, onPlay, onDelete, onLanguage,
 }: {
   worldId: string
   onBack: () => void
@@ -202,22 +216,29 @@ export function WorldDetailView({
   /** Opening the confirmation is the parent's job: the dialog belongs above this
    *  view so it is not unmounted by the very reload that follows a deletion. */
   onDelete: (worldId: string) => void
+  /** Told the language of whatever variant is now shown, so the parent can keep
+   *  the dashboard chrome in the same language as the world being read. */
+  onLanguage?: (language: string) => void
 }) {
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
   const [lore, setLore] = useState(false)
+  // The language the player is reading this world in. Undefined = the world's
+  // primary, whatever the base file declares; a pick re-fetches the variant so
+  // labels AND lore switch together, which is the whole point of the choice.
+  const [language, setLanguage] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     let alive = true
     setWorld(null)
     setError(null)
     // Ask for the world's own prose too, so the detail page can offer its lore.
-    api.world(worldId, true)
-      .then((w) => { if (alive) setWorld(w) })
+    api.world(worldId, true, language)
+      .then((w) => { if (alive) { setWorld(w); if (w.language) onLanguage?.(w.language) } })
       .catch((e: Error) => { if (alive) setError(e.message) })
     return () => { alive = false }
-  }, [worldId, nonce])
+  }, [worldId, nonce, language])
 
   const back = (
     <button className="ew-back" type="button" onClick={onBack}>
@@ -261,6 +282,25 @@ export function WorldDetailView({
           lineage: world.lineage ? t('world.detailLineage') : '',
         })}
       </div>
+
+      {(world.languages ?? []).length > 1 ? (
+        <div className="ew-block">
+          <div className="ew-section">{t('world.languagePick')}</div>
+          <div className="ew-chips" role="group" aria-label={t('world.languagePick')}>
+            {(world.languages ?? []).map((lg) => (
+              <button
+                key={lg}
+                type="button"
+                className="ew-lang"
+                aria-pressed={world.language === lg}
+                onClick={() => setLanguage(lg)}
+              >
+                {languageName(lg)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="ew-section">{t('world.opening')}</div>
       <div className="ew-chips ew-block">

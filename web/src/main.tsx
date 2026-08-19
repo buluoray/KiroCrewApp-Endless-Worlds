@@ -292,6 +292,7 @@ export default function EndlessWorlds() {
         worldId={selected}
         onBack={home}
         onDelete={setDoomed}
+        onLanguage={applyLanguage}
         onPlay={(w) => {
           remember({ view: 'opening', worldId: w.worldId })
           applyLanguage(w.language)

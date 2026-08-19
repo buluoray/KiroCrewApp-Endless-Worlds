@@ -165,6 +165,7 @@
   "world.lineage": "Can pass through generations",
   "world.loreHide": "Hide the world's lore",
   "world.loreShow": "Read this world's lore",
+  "world.languagePick": "Play this world in",
   "world.needsNewerCore": "This world needs a newer version of the app (it asks for {needed}, this is {local}).",
   "world.opening": "What it will ask you",
   "world.panelAlways": "always shown",

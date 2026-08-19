@@ -547,7 +547,16 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
 
     world_id = state.get("worldId")
     if isinstance(world_id, str) and world_id:
-        path = _DATA / "worlds" / f"{world_id}.md"
+        # A run is bound to one language for its whole life; its variant file
+        # (``<id>.<lang>.md``) is the rulebook the narrator reads, falling back to
+        # the base ``<id>.md`` when the run is in the world's primary language.
+        worlds = _DATA / "worlds"
+        language = state.get("language")
+        path = worlds / f"{world_id}.md"
+        if isinstance(language, str) and language:
+            variant = worlds / f"{world_id}.{language}.md"
+            if variant.is_file():
+                path = variant
         if path.is_file():
             pack = read_world(path.read_text(encoding="utf-8"))
             out["world"] = summarize(pack)

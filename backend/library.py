@@ -39,6 +39,30 @@ from world import (
 #: path — a world file is user-supplied content and its name is part of that.
 _WORLD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
+#: A language tag, e.g. ``en``, ``zh``, ``pt-br``. A world id can never contain a
+#: dot, so a dotted file stem is unambiguously a language VARIANT of a base world:
+#: ``jianhuo-jiyuan.en.md`` is the English rendering of ``jianhuo-jiyuan``. Each
+#: variant is a complete, ordinary pack (its own header + prose) whose ``id``
+#: equals the base id and whose ``language`` equals the tag — so the whole render
+#: and narrate pipeline is untouched; only which FILE a run reads changes.
+_LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$")
+
+
+def _split_variant(stem: str) -> tuple[str, str] | None:
+    """``("jianhuo-jiyuan", "en")`` for a variant stem, ``None`` for a base world.
+
+    The base id is everything before the last dot; the language tag is the part
+    after it. Returns ``None`` unless BOTH halves validate, so a base world (no
+    dot) and any malformed name fall through to being treated as a world of their
+    own rather than silently hidden as someone's variant.
+    """
+    base, dot, lang = stem.rpartition(".")
+    if not dot:
+        return None
+    if _WORLD_ID_RE.match(base) and _LANG_RE.match(lang):
+        return base, lang
+    return None
+
 
 class LibraryError(ValueError):
     pass
@@ -69,8 +93,52 @@ class WorldLibrary:
             raise LibraryError(f"not a world id: {world_id!r}")
         return world_id
 
-    def path_for(self, world_id: str) -> Path:
-        return self._worlds / f"{self._check_id(world_id)}.md"
+    def _check_lang(self, language: str) -> str:
+        if not isinstance(language, str) or not _LANG_RE.match(language):
+            raise LibraryError(f"not a language tag: {language!r}")
+        return language
+
+    def path_for(self, world_id: str, language: str | None = None) -> Path:
+        """The file a run reads. With no ``language`` (or none matching a variant)
+        this is the base ``<id>.md``, whose header language is the world's primary
+        one; a language with a sibling ``<id>.<lang>.md`` on disk resolves there.
+
+        Falls back to the base rather than raising for an absent variant: the base
+        IS the default-language rendering, so a run tagged with the primary
+        language, or one whose variant was removed, still reads a real world.
+        """
+        self._check_id(world_id)
+        if language:
+            variant = self._worlds / f"{world_id}.{self._check_lang(language)}.md"
+            if variant.is_file():
+                return variant
+        return self._worlds / f"{world_id}.md"
+
+    def languages_for(self, world_id: str, primary: str | None = None) -> list[str]:
+        """The languages a world can be played in — its primary first, then each
+        sibling variant on disk.
+
+        ``primary`` lets a caller that already parsed the BASE pack skip a re-read;
+        pass it ONLY from the base ``<id>.md``, never from a variant (a variant's
+        language is not the world's primary). When omitted, the primary is read
+        from the base file so a caller holding only a variant still gets the full,
+        correctly-ordered set rather than one that drops the base language.
+        """
+        self._check_id(world_id)
+        langs: list[str] = []
+        if primary:
+            langs.append(primary)
+        else:
+            base = self._worlds / f"{world_id}.md"
+            try:
+                langs.append(read_world(base.read_text(encoding="utf-8")).template.language)
+            except (TemplateError, WorldError, ContractTooNew, OSError):
+                pass
+        for path in sorted(self._worlds.glob(f"{world_id}.*.md")):
+            split = _split_variant(path.stem)
+            if split and split[0] == world_id and split[1] not in langs:
+                langs.append(split[1])
+        return langs
 
     def seed_path_for(self, world_id: str) -> Path:
         return self._seeds / f"{self._check_id(world_id)}.md"
@@ -123,6 +191,14 @@ class WorldLibrary:
         self._check_id(world_id)
         self._write_removed(self.removed() | {world_id})
         self.path_for(world_id).unlink(missing_ok=True)
+        # A world is one shelf entry across all its languages, so removing it takes
+        # every ``<id>.<lang>.md`` rendering with it — otherwise a deleted world's
+        # English text would linger and, worse, reinstall the base on the next
+        # listing when the gravestone only guards the id.
+        for path in self._worlds.glob(f"{world_id}.*.md"):
+            split = _split_variant(path.stem)
+            if split and split[0] == world_id:
+                path.unlink(missing_ok=True)
 
     def restore(self, world_id: str) -> None:
         """Drop the gravestone so the next listing reinstalls the seed.
@@ -150,6 +226,7 @@ class WorldLibrary:
         self._worlds.mkdir(parents=True, exist_ok=True)
 
         for seed_path in sorted(self._seeds.glob("*.md")):
+            variant = _split_variant(seed_path.stem)
             try:
                 seed_text = seed_path.read_text(encoding="utf-8")
                 seed_pack = read_world(seed_text)
@@ -158,12 +235,21 @@ class WorldLibrary:
                 continue
 
             try:
-                target = self.path_for(seed_pack.id)
+                if variant:
+                    # A variant installs beside its base under the language-tagged
+                    # name, keyed for the gravestone on the base id it shares.
+                    base_id, lang = variant
+                    target = self._worlds / (
+                        f"{self._check_id(base_id)}.{self._check_lang(lang)}.md"
+                    )
+                else:
+                    base_id = seed_pack.id
+                    target = self.path_for(base_id)
             except LibraryError as exc:
                 report.failed.append({"seed": seed_path.name, "problem": str(exc)})
                 continue
 
-            if seed_pack.id in gone:
+            if base_id in gone:
                 continue
 
             if target.exists():
@@ -198,8 +284,8 @@ class WorldLibrary:
 
     # -- reading ----------------------------------------------------------
 
-    def read(self, world_id: str) -> WorldPack:
-        path = self.path_for(world_id)
+    def read(self, world_id: str, language: str | None = None) -> WorldPack:
+        path = self.path_for(world_id, language)
         if not path.is_file():
             raise LibraryError(f"no such world: {world_id}")
         return read_world(path.read_text(encoding="utf-8"))
@@ -215,15 +301,24 @@ class WorldLibrary:
         on the shelf: if a removal wrote its gravestone and then failed to unlink,
         hiding the row would leave a world that is present, playable, and invisible.
         Listing it is what makes the failure visible and the retry obvious.
+
+        Language variants (``<id>.<lang>.md``) are NOT rows of their own — they are
+        the same world in another language. Each base row carries a ``languages``
+        list so the shelf can offer the choice.
         """
         if not self._worlds.is_dir():
             return []
         rows: list[dict[str, Any]] = []
         for path in sorted(self._worlds.glob("*.md")):
+            if _split_variant(path.stem):
+                continue
             world_id = path.stem
             try:
-                rows.append({**summarize(read_world(path.read_text(encoding="utf-8"))),
-                             "usable": True})
+                pack = read_world(path.read_text(encoding="utf-8"))
+                rows.append({
+                    **summarize(pack), "usable": True,
+                    "languages": self.languages_for(world_id, pack.template.language),
+                })
             except ContractTooNew as exc:
                 rows.append({
                     "worldId": world_id, "title": world_id, "usable": False,
@@ -243,4 +338,6 @@ class WorldLibrary:
         return rows
 
     def count(self) -> int:
-        return len(list(self._worlds.glob("*.md"))) if self._worlds.is_dir() else 0
+        if not self._worlds.is_dir():
+            return 0
+        return sum(1 for p in self._worlds.glob("*.md") if not _split_variant(p.stem))

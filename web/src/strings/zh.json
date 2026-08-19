@@ -165,6 +165,7 @@
   "world.lineage": "可传承数代",
   "world.loreHide": "收起世界设定",
   "world.loreShow": "读读这个世界的设定",
+  "world.languagePick": "用哪种语言游玩",
   "world.needsNewerCore": "这个世界需要更新版本的应用（它要 {needed}，当前 {local}）。",
   "world.opening": "开局会问你",
   "world.panelAlways": "始终显示",

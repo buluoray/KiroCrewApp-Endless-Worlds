@@ -253,7 +253,9 @@ export function OpeningScreen({
     setBusy('creating')
     setFailed(null)
     try {
-      const created = await api.createRun({ worldId: world.worldId, style, answers: payload() })
+      const created = await api.createRun({
+        worldId: world.worldId, style, answers: payload(), language: world.language,
+      })
       // The life exists now, with its own id already handed to the narrator by the
       // opening prompt. Fire the first turn WITHOUT blocking this screen and hand
       // off to the play page: the "arranging" state then lives on the server, so
