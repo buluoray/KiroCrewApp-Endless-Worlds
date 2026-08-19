@@ -20,6 +20,7 @@ The invariants enforced at this boundary (§12.3, §12.4):
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -30,6 +31,7 @@ from kiro_crew.apps.route_registry import AppRoute
 import memory_graph
 from keepsakes import KeepsakeError, KeepsakeStore
 from legacy import candidates as legacy_candidates
+from library import WorldLibrary
 from store import RunStore, StoreError
 from story_cards import (
     EXPORT_FORMATS,
@@ -373,6 +375,29 @@ async def export_story_card(request: web.Request, ctx: AppContext) -> web.Respon
 # ── the legacy bridge (design §9) ────────────────────────────────────────
 
 
+def _life_over(ctx: AppContext, state: dict[str, Any]) -> bool:
+    """One answer to "is this life over", shared with the ending page.
+
+    ``resolve_ending`` is the single evaluator (view.py): a life ended by the
+    WORLD's own declared condition (``state.alive == false``) never carries a
+    narrator-written ``ended`` flag, yet its ending page rightly offers the
+    bridge — so a gate keyed on the flag alone answers 409 to a player the UI
+    just invited. Found by the full-chain simulation, pinned by it since.
+    Falls back to the flag when the world itself cannot be read.
+    """
+    from view import resolve_ending
+
+    world_id = state.get("worldId")
+    if isinstance(world_id, str) and world_id:
+        try:
+            seeds = Path(__file__).resolve().parent.parent / "seeds"
+            pack = WorldLibrary(ctx.data_dir, seeds).read(world_id, state.get("language"))
+            return bool(resolve_ending(pack.template, state))
+        except Exception:  # noqa: BLE001 — an unreadable world falls back to the flag
+            pass
+    return bool(state.get("ended"))
+
+
 async def get_legacy_candidates(request: web.Request, ctx: AppContext) -> web.Response:
     """``GET /runs/{run_id}/legacy/candidates`` — what a finished life may pass on.
 
@@ -390,7 +415,7 @@ async def get_legacy_candidates(request: web.Request, ctx: AppContext) -> web.Re
         state = store.read_state(run_id)
     except StoreError:
         return web.json_response({"error": "no such life"}, status=404)
-    if not state.get("ended"):
+    if not _life_over(ctx, state):
         return web.json_response(
             {"error": "this life is still being lived", "code": "not_ended"},
             status=409,

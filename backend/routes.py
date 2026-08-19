@@ -922,7 +922,10 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
                 {"field": "legacy.fromRunId", "expected": "a life that exists"},
                 status=404,
             )
-        if not src_state.get("ended"):
+        if not (resolve_ending(pack.template, src_state) or src_state.get("ended")):
+            # The same "is this life over" the ending page uses: a world-declared
+            # ending (state.alive == false) carries no narrator flag, and both
+            # lives share one world, so the already-loaded pack judges it.
             return web.json_response(
                 {"field": "legacy.fromRunId",
                  "expected": "a finished life — inheritance is settled at the ending",

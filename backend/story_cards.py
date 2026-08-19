@@ -250,16 +250,10 @@ def resolve(card: dict[str, Any]) -> dict[str, Any]:
     an anonymised name is substituted inside summaries and the excerpt too,
     and with spoilers off the ending turn's events vanish entirely.
     """
-    names: dict[str, str] = {}
-    entities = []
-    for ent in card["entities"]:
-        if not ent["included"]:
-            continue
-        entities.append({**ent})
-        names[ent["id"]] = ent["display"]
-
-    # Real-name → display-name substitution inside free text. A renamed 艾琳
-    # must not survive inside a summary the narrator wrote her name into.
+    # Real-name → display-name substitution, applied to EVERY surface a name
+    # can reach. That includes other entities' own names: a thread called
+    # 「艾琳欠下的人情」 embeds the very name the player anonymised, and a cast
+    # chip or SVG label printing it verbatim would undo the rename (§12.3).
     renames = [
         (e["name"], e["display"]) for e in card["entities"]
         if e["included"] and e["display"] != e["name"] and e["name"]
@@ -272,6 +266,23 @@ def resolve(card: dict[str, Any]) -> dict[str, Any]:
         for old in hidden_names:
             text = text.replace(old, "□□")
         return text
+
+    names: dict[str, str] = {}
+    entities = []
+    for ent in card["entities"]:
+        if not ent["included"]:
+            continue
+        # Scrub OTHER names out of this entity's display — never its own pair:
+        # a player who renames 艾琳 to 「艾琳姐」 chose a display containing the
+        # real name, and self-application would mangle it (艾琳姐姐).
+        display = ent["display"]
+        for old, new in renames:
+            if old != ent["name"]:
+                display = display.replace(old, new)
+        for old in hidden_names:
+            display = display.replace(old, "□□")
+        entities.append({**ent, "display": display})
+        names[ent["id"]] = display
 
     spoilers = bool(card["showSpoilers"])
     ended = int(card.get("endedTurn") or 0)
