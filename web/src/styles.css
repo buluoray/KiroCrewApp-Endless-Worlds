@@ -321,6 +321,7 @@
   border: 1px solid var(--border, #2d2f3d);
 }
 .ew-jump:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }
+.ew-search { width: 12em; }
 
 /* A turn's marked events and gains — the material the events-only timeline shows. */
 .ew-marks { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }

@@ -1187,6 +1187,20 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
 
     entries = store.read_chronicle(run_id)
 
+    # Full-text filter across the whole life, applied before paging so "when did I
+    # meet the smith" pages through matches rather than raw months. Case-insensitive
+    # over prose, the player's action, and the marked events.
+    q = request.query.get("q", "").strip().lower()
+    if q:
+        def _hit(e: dict[str, Any]) -> bool:
+            hay = " ".join([
+                str(e.get("prose") or ""),
+                str(e.get("action") or ""),
+                " ".join(str(x) for x in (e.get("events") or [])),
+            ]).lower()
+            return q in hay
+        entries = [e for e in entries if _hit(e)]
+
     # `before` is a turn NUMBER, not an offset: an offset would shift under a turn
     # committed between two pages and silently skip or repeat a month.
     before = _int_param(request, "before", default=0)

@@ -25,13 +25,17 @@ export function History({ runId }: { runId: string }) {
   // Reading a life as a list of what happened, not pages of prose.
   const [eventsOnly, setEventsOnly] = useState(false)
   const [jump, setJump] = useState('')
+  // Full-text search across the whole life. `query` is what is currently applied
+  // (so paging carries it); `search` is the box the player is typing in.
+  const [query, setQuery] = useState('')
+  const [search, setSearch] = useState('')
 
-  const load = useCallback(async (before: number, replace = false) => {
+  const load = useCallback(async (before: number, replace = false, q = '') => {
     setBusy(true)
     setFailed(false)
     try {
-      const out = await api.chronicle(runId, before)
-      // Paging further back appends; a jump or a fresh open replaces.
+      const out = await api.chronicle(runId, before, q)
+      // Paging further back appends; a jump, a search, or a fresh open replaces.
       setTurns((have) => (before > 0 && !replace ? [...have, ...out.turns] : out.turns))
       setMore(out.more)
     } catch {
@@ -45,7 +49,18 @@ export function History({ runId }: { runId: string }) {
   const jumpTo = () => {
     const n = parseInt(jump, 10)
     // `before` is exclusive, so n+1 lands the page ON turn n rather than just above it.
-    if (Number.isFinite(n) && n > 0) void load(n + 1, true)
+    if (Number.isFinite(n) && n > 0) void load(n + 1, true, query)
+  }
+
+  const runSearch = () => {
+    const q = search.trim()
+    setQuery(q)
+    void load(0, true, q)
+  }
+  const clearSearch = () => {
+    setSearch('')
+    setQuery('')
+    void load(0, true, '')
   }
 
   if (failed && !turns.length) {
@@ -63,7 +78,7 @@ export function History({ runId }: { runId: string }) {
       </div>
     )
   }
-  if (!turns.length) {
+  if (!turns.length && !query) {
     return <div className="ew-meta">{busy ? t('history.reading') : t('history.none')}</div>
   }
 
@@ -92,7 +107,26 @@ export function History({ runId }: { runId: string }) {
         <button className="ew-btn ew-btn-sm" type="button" onClick={jumpTo}>
           {t('history.jump')}
         </button>
+        <input
+          className="ew-jump ew-search"
+          value={search}
+          placeholder={t('history.searchPlaceholder')}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+        />
+        <button className="ew-btn ew-btn-sm" type="button" onClick={runSearch}>
+          {t('history.search')}
+        </button>
+        {query ? (
+          <button className="ew-btn ew-btn-sm" type="button" onClick={clearSearch}>
+            {t('history.searchClear')}
+          </button>
+        ) : null}
       </div>
+
+      {query && !turns.length && !busy ? (
+        <div className="ew-meta">{t('history.noMatches', { q: query })}</div>
+      ) : null}
 
       {eventsOnly && !rows.length ? (
         <div className="ew-meta">{t('history.noEvents')}</div>
@@ -132,7 +166,7 @@ export function History({ runId }: { runId: string }) {
           className="ew-btn"
           type="button"
           disabled={busy}
-          onClick={() => void load(oldest)}
+          onClick={() => void load(oldest, false, query)}
         >
           {busy ? t('history.reading') : t('history.earlier')}
         </button>
