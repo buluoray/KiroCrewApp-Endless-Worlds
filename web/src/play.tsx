@@ -529,7 +529,10 @@ export function PlayPage({
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         {pager}
       </div>
-      <h3 className="ew-detail-title">{v.title}</h3>
+      <div className="ew-titleline">
+        <h3 className="ew-detail-title">{v.title}</h3>
+        {v.clock ? <span className="ew-clock">{v.clock}</span> : null}
+      </div>
       <div className="ew-play">
         {main}
         <div className="ew-aside">{panels}</div>

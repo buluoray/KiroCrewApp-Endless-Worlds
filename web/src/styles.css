@@ -463,6 +463,9 @@
   .ew-aside { display: block; position: sticky; top: 12px; }
 }
 
+/* Title with the in-world date beside it (shown only when the world has one). */
+.ew-titleline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ew-titleline .ew-clock { margin-bottom: 0; }
 .ew-clock {
   font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; margin-bottom: 4px;
 }
