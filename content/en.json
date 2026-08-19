@@ -8,6 +8,7 @@
   "opening.chosen.none": "(Nothing has been settled.)",
   "opening.chosen.rolled": "{label}: {value} (settled by the world; the player had no say)",
   "opening.left": "The player leaves these to you. Settle them by this world's own logic, and do not explain how you decided:",
+  "opening.pull": "This is the opening of a new life — turn one. Nothing about the world or this life's choices is in this message. Call endless_read_runtime first: it returns the world's rules, this life's opening choices (and which of them the world settled rather than the player), and the shape of the state to record. Then write the first turn — the circumstances they are born into and what the world around them is doing — and declare the state in full. Do not name any of the setup fields.",
   "opening.rulebook": "The rulebook of this world:",
   "opening.style": "Simulation style: {style}",
   "restraint.busy": "In the last {turns} turns, {events} things worth recording happened. The world does not owe them that much event — let the next stretch go quiet, or let the cost of one of them come due now.",

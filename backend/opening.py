@@ -106,59 +106,26 @@ def build_initial_state(
     }
 
 
-def compose_opening_prompt(
-    *, rulebook: str, template: Template, state: dict[str, Any], run_id: str,
-    shape: str = "",
-) -> str:
-    """Ask for the first turn: a life placed in the world, not a summary of a form.
+def compose_opening_prompt(*, template: Template, run_id: str) -> str:
+    """The opening turn's prompt: the run id, and an instruction to go read the
+    rest. Nothing else.
 
-    ``run_id`` is required for the same reason it is in ``turn.compose_prompt``:
-    every tool the narrator has takes it, and the first live opening turn failed
-    because the prompt never named it — the narrator invented an id, its commit was
-    refused, and it spent the turn looking for a run it could not name.
+    Everything a first turn needs — the world's rules, the player's opening
+    choices (and which the world settled rather than the player), and the shape of
+    the state to record — is served by ``endless_read_runtime`` on the narrator's
+    first, no-``since`` call. It is kept OUT of this message on purpose: the
+    narrator's session is visible to the player, and a 15,000-character rulebook
+    plus a dump of every opening answer pushed into it makes that transcript a wall
+    of setup. What is pushed is only what cannot be pulled — which run this is.
 
-    The language is read off the ``template`` rather than taken as an argument.
-    A caller cannot then pass one that disagrees with the world whose rulebook is
-    in the same call — which is not hypothetical: a ``language=`` argument WAS
-    added at the call site while this signature had no such parameter, and because
-    no test executes this route the resulting ``TypeError`` shipped.
+    ``run_id`` is still required and still named first, for the reason the turn
+    prompt names it: every tool the narrator has takes it, and the first live
+    opening turn failed because the prompt never named it — the narrator invented
+    an id, its commit was refused, and it spent the turn hunting a run it could not
+    name.
     """
     text = Content(template.language)
-    join = text("list.join")
-
-    chosen: list[str] = []
-    left: list[str] = []
-    for group in template.opening:
-        value = (state.get("opening") or {}).get(group.id)
-        if value in (None, ""):
-            left.append(group.label)
-        elif group.random:
-            chosen.append(text("opening.chosen.rolled", label=group.label, value=value))
-        else:
-            chosen.append(text("opening.chosen.line", label=group.label, value=value))
-
-    parts = [
-        text("addressing", run_id=run_id, turn=1),
-        "",
-        text("opening.rulebook"),
-        rulebook.strip(),
-        "",
-        text("turn.pull"),
-        "",
-        text("opening.chosen"),
-        "\n".join(chosen) if chosen else text("opening.chosen.none"),
-    ]
-    if left:
-        parts += ["", text("opening.left"), join.join(left)]
-    if shape:
-        parts += ["", shape]
-    parts += [
-        "",
-        text("opening.style", style=state.get("style")),
-        "",
-        text("opening.ask"),
-    ]
-    return "\n".join(parts)
+    return "\n".join([text("addressing", run_id=run_id, turn=1), "", text("opening.pull")])
 
 
 # ── internals ────────────────────────────────────────────────────────────

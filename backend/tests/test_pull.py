@@ -271,3 +271,32 @@ def test_the_refusal_explains_itself_without_leaking_implementation():
     assert "endless_read_runtime" in detail, "the fix is not named"
     for leak in ("store", "pending", "kv", ".py"):
         assert leak not in detail.lower(), f"the refusal leaks {leak!r}"
+
+
+def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_path, monkeypatch):
+    """The opening prompt is now only the run id, so the narrator's first (no-`since`)
+    read must carry what used to be pushed: the world's brief, the shape of the state
+    to record, and the opening groups — including which the world decides rather than
+    the player, the anti-halo signal (R7) that would otherwise be lost."""
+    import mcp_server as srv
+
+    flagship = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    if not flagship.is_file():
+        pytest.skip("flagship seed not present")
+
+    data = tmp_path / "data"
+    (data / "worlds").mkdir(parents=True, exist_ok=True)
+    (data / "worlds" / "jianhuo-jiyuan.md").write_text(
+        flagship.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    run = store.create_run({"turn": 0, "worldId": "jianhuo-jiyuan"}, {"worldId": "jianhuo-jiyuan"})
+    monkeypatch.setattr(srv, "_store", lambda: store)
+    monkeypatch.setattr(srv, "_DATA", data)
+
+    out = srv._read_runtime({"runId": run})
+
+    assert out["brief"], "the world's rules must reach a narrator that was sent only an id"
+    assert out["shape"], "how to record state must be pullable, not pushed"
+    assert out["opening"] and "worldDecides" in out["opening"][0], (
+        "the narrator must be able to tell a player's choice from one the world settled"
+    )

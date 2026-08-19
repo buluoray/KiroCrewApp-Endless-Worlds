@@ -73,12 +73,14 @@ except Exception as exc:  # noqa: BLE001
 from scenes import SceneLedger, SceneLedgerError  # noqa: E402
 from chapters import (  # noqa: E402
     ChapterError,
+    brief,
     contents,
     opened_since,
     read_chapter,
 )
 from halo import attribution, compose_restraint, event_density  # noqa: E402
 from store import RunStore, StoreError  # noqa: E402
+from turn import declaration_shape  # noqa: E402
 from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
 
 
@@ -562,6 +564,18 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             # gets no delta and therefore gets the contents again.
             if baseline is None:
                 out["chapters"] = contents(pack.template, state)
+                # A fresh pull is what the opening turn makes, and what a compacted
+                # narrator falls back to. It carries everything that used to be
+                # pushed into the opening prompt, so that prompt can be just the run
+                # id: the world's always-open rules, how to record state, and the
+                # opening groups — including which the world settles rather than the
+                # player, the anti-halo signal that must not be lost (R7).
+                out["brief"] = brief(pack.template)
+                out["shape"] = declaration_shape(pack.template)
+                out["opening"] = [
+                    {"id": g.id, "label": g.label, "worldDecides": g.random}
+                    for g in pack.template.opening
+                ]
             else:
                 newly = opened_since(pack.template, baseline, state)
                 if newly:

@@ -174,35 +174,25 @@ def test_a_new_run_starts_awaiting_its_opening_turn(tpl):
 # -- the prompt -----------------------------------------------------------
 
 
-def test_the_prompt_separates_what_was_chosen_from_what_was_left(tpl):
+def test_the_opening_prompt_carries_no_setup_only_a_pull(tpl):
+    """The opening push is the run id and an instruction to pull. The world's rules
+    and the player's own answers are served by endless_read_runtime, so the
+    narrator's visible session is not a wall of setup."""
     state = build_initial_state(tpl, {"name": "艾琳", "era": tpl.opening[0].options[0]})
-    prompt = compose_opening_prompt(rulebook="世界不围绕玩家。", template=tpl, state=state, run_id="run-1")
-
-    assert "艾琳" in prompt
-    assert "留给你决定" in prompt
-    assert "初始人生目标" in prompt, "an unanswered group must be named as left open"
+    prompt = compose_opening_prompt(template=tpl, run_id="run-1")
+    assert "endless_read_runtime" in prompt, "nothing tells it to pull the world"
+    assert "艾琳" not in prompt, "the player's answers are pulled from state, not pushed"
 
 
-def test_the_prompt_says_a_rolled_group_was_not_the_players_choice(tpl):
-    state = build_initial_state(tpl, {}, rng=random.Random(1))
-    prompt = compose_opening_prompt(rulebook="r", template=tpl, state=state, run_id="run-1")
-    assert "由世界定下，玩家无从选择" in prompt
-
-
-def test_the_prompt_tells_the_narrator_not_to_name_the_settings(tpl):
-    """R25 — the player is living in a world, not filling in a form they can see
-    the fields of."""
-    state = build_initial_state(tpl, {})
-    prompt = compose_opening_prompt(rulebook="r", template=tpl, state=state, run_id="run-1")
+def test_the_opening_prompt_tells_the_narrator_not_to_name_the_settings(tpl):
+    """R25 — the player is living in a world, not filling in a form. Carried in the
+    pull instruction now, not a separate line."""
+    prompt = compose_opening_prompt(template=tpl, run_id="run-1")
     assert "不要提到任何设定项的名字" in prompt
 
 
-def test_the_opening_prompt_names_the_run_too(tpl):
-    """Same named regression as the turn loop: the first turn is the one that
-    actually failed this way."""
-    state = build_initial_state(tpl, {})
-    prompt = compose_opening_prompt(
-        rulebook="r", template=tpl, state=state, run_id="9856fa638614440fbc7171ba8fe896c5"
-    )
+def test_the_opening_prompt_names_the_run(tpl):
+    """The named regression: the first live opening failed because the prompt never
+    named the run and the narrator invented an id its commit was then refused for."""
+    prompt = compose_opening_prompt(template=tpl, run_id="9856fa638614440fbc7171ba8fe896c5")
     assert "9856fa638614440fbc7171ba8fe896c5" in prompt
-    assert prompt.index("9856fa") < prompt.index("规则书")

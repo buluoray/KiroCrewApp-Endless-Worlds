@@ -882,10 +882,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
 
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 
-    prompt = compose_opening_prompt(
-        rulebook=world_brief(pack.template), template=pack.template, state=run_state, run_id=run_id,
-        shape=declaration_shape(pack.template),
-    )
+    prompt = compose_opening_prompt(template=pack.template, run_id=run_id)
     outcome = await advance_turn(
         state_obj=state_obj,
         store=store,
