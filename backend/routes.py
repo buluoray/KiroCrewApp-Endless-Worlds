@@ -245,7 +245,7 @@ async def list_worlds(request: web.Request, ctx: AppContext) -> web.Response:
         )
 
     return web.json_response({
-        "worlds": library.list_worlds(),
+        "worlds": library.list_worlds(request.query.get("language") or None),
         "seeds": {
             "installed": seeds.installed,
             "alreadyPresent": seeds.already_present,

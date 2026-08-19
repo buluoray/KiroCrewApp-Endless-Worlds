@@ -292,7 +292,10 @@ function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  worlds: () => json<{ worlds: WorldRow[]; seeds: SeedReport }>('/worlds'),
+  worlds: (language?: string) =>
+    json<{ worlds: WorldRow[]; seeds: SeedReport }>(
+      `/worlds${language ? `?language=${encodeURIComponent(language)}` : ''}`,
+    ),
   world: (id: string, prose = false, language?: string) => {
     const q = new URLSearchParams()
     if (prose) q.set('prose', '1')

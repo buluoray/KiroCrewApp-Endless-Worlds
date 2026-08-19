@@ -290,7 +290,7 @@ class WorldLibrary:
             raise LibraryError(f"no such world: {world_id}")
         return read_world(path.read_text(encoding="utf-8"))
 
-    def list_worlds(self) -> list[dict[str, Any]]:
+    def list_worlds(self, language: str | None = None) -> list[dict[str, Any]]:
         """Every world, newest-titled first, with unusable ones listed too.
 
         A world that cannot be parsed appears as a row carrying its problem
@@ -304,20 +304,33 @@ class WorldLibrary:
 
         Language variants (``<id>.<lang>.md``) are NOT rows of their own — they are
         the same world in another language. Each base row carries a ``languages``
-        list so the shelf can offer the choice.
+        list so the shelf can offer the choice. When ``language`` names a variant a
+        world has, that world's row is summarized FROM the variant, so its title and
+        labels render in the reader's chosen language rather than the world's
+        authoring one.
         """
         if not self._worlds.is_dir():
             return []
+        want = language if (isinstance(language, str) and _LANG_RE.match(language)) else None
         rows: list[dict[str, Any]] = []
         for path in sorted(self._worlds.glob("*.md")):
             if _split_variant(path.stem):
                 continue
             world_id = path.stem
             try:
-                pack = read_world(path.read_text(encoding="utf-8"))
+                base = read_world(path.read_text(encoding="utf-8"))
+                primary = base.template.language
+                pack = base
+                if want and want != primary:
+                    variant = self._worlds / f"{world_id}.{want}.md"
+                    if variant.is_file():
+                        try:
+                            pack = read_world(variant.read_text(encoding="utf-8"))
+                        except (TemplateError, WorldError, ContractTooNew, OSError):
+                            pack = base  # a broken variant never hides the world
                 rows.append({
                     **summarize(pack), "usable": True,
-                    "languages": self.languages_for(world_id, pack.template.language),
+                    "languages": self.languages_for(world_id, primary),
                 })
             except ContractTooNew as exc:
                 rows.append({

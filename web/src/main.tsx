@@ -81,25 +81,35 @@ export default function EndlessWorlds() {
   const [lang, setLangState] = useState<Lang>(
     () => asLang(localStorage.getItem(LANG_KEY) ?? undefined) ?? 'zh',
   )
+  // Whether the player made an EXPLICIT choice (the header dropdown). Once they
+  // have, it overrides world-follow: opening a world no longer flips the chrome to
+  // that world's language. Until they do, the app still follows the world opened.
+  const [langLocked, setLangLocked] = useState<boolean>(
+    () => localStorage.getItem(LANG_KEY) != null,
+  )
   setCurrentLanguage(lang)
   const applyLanguage = useCallback((code?: string) => {
+    if (langLocked) return
     const next = asLang(code)
     if (next) setLangState(next)
-  }, [])
-  // The explicit language dropdown: unlike opening a world (which follows that
-  // world's language for the session), this is the player's standing choice, so it
-  // persists and becomes the default the app next opens in.
+  }, [langLocked])
+  // The explicit language dropdown: unlike opening a world (which otherwise follows
+  // that world's language), this is the player's standing choice, so it persists,
+  // locks out world-follow, and becomes the default the app next opens in.
   const chooseLanguage = useCallback((code: string) => {
     const next = asLang(code)
     if (!next) return
     localStorage.setItem(LANG_KEY, next)
+    setLangLocked(true)
     setLangState(next)
   }, [])
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      const d = await api.worlds()
+      // Fetch the shelf in the reader's language so a world with a variant shows
+      // its title and labels translated, not only its authoring language.
+      const d = await api.worlds(lang)
       setWorlds(d.worlds)
       setSeeds(d.seeds)
     } catch (e) {
@@ -111,7 +121,7 @@ export default function EndlessWorlds() {
     } catch {
       setRuns([])
     }
-  }, [])
+  }, [lang])
 
   useEffect(() => { void load() }, [load])
 
@@ -310,6 +320,7 @@ export default function EndlessWorlds() {
         worldId={selected}
         onBack={home}
         onDelete={setDoomed}
+        initialLanguage={lang}
         onLanguage={applyLanguage}
         onPlay={(w) => {
           remember({ view: 'opening', worldId: w.worldId })

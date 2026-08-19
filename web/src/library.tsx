@@ -208,7 +208,7 @@ export function LifeRow({
 }
 
 export function WorldDetailView({
-  worldId, onBack, onPlay, onDelete, onLanguage,
+  worldId, onBack, onPlay, onDelete, onLanguage, initialLanguage,
 }: {
   worldId: string
   onBack: () => void
@@ -219,15 +219,19 @@ export function WorldDetailView({
   /** Told the language of whatever variant is now shown, so the parent can keep
    *  the dashboard chrome in the same language as the world being read. */
   onLanguage?: (language: string) => void
+  /** The reader's chosen UI language, used as the language this world first opens
+   *  in — so a player reading the app in English lands on the English rendering
+   *  when the world has one, rather than the world's authoring language. */
+  initialLanguage?: string
 }) {
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
   const [lore, setLore] = useState(false)
-  // The language the player is reading this world in. Undefined = the world's
-  // primary, whatever the base file declares; a pick re-fetches the variant so
-  // labels AND lore switch together, which is the whole point of the choice.
-  const [language, setLanguage] = useState<string | undefined>(undefined)
+  // The language the player is reading this world in. Starts at the app's chosen
+  // language; a pick from the toggle re-fetches the variant so labels AND lore
+  // switch together, which is the whole point of the choice.
+  const [language, setLanguage] = useState<string | undefined>(initialLanguage)
 
   useEffect(() => {
     let alive = true

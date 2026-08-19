@@ -50,7 +50,7 @@ function post(path, body) {
 	});
 }
 var api = {
-	worlds: () => json("/worlds"),
+	worlds: (language) => json(`/worlds${language ? `?language=${encodeURIComponent(language)}` : ""}`),
 	world: (id, prose = false, language) => {
 		const q = new URLSearchParams();
 		if (prose) q.set("prose", "1");
@@ -1224,12 +1224,12 @@ function LifeRow({ run, onOpen, onDelete, onArchive, onRename }) {
 		]
 	});
 }
-function WorldDetailView({ worldId, onBack, onPlay, onDelete, onLanguage }) {
+function WorldDetailView({ worldId, onBack, onPlay, onDelete, onLanguage, initialLanguage }) {
 	const [world, setWorld] = useState(null);
 	const [error, setError] = useState(null);
 	const [nonce, setNonce] = useState(0);
 	const [lore, setLore] = useState(false);
-	const [language, setLanguage] = useState(void 0);
+	const [language, setLanguage] = useState(initialLanguage);
 	useEffect(() => {
 		let alive = true;
 		setWorld(null);
@@ -2694,21 +2694,24 @@ function EndlessWorlds() {
 	const [doomedLife, setDoomedLife] = useState(null);
 	const [note, setNote] = useState("");
 	const [lang, setLangState] = useState(() => asLang(localStorage.getItem(LANG_KEY) ?? void 0) ?? "zh");
+	const [langLocked, setLangLocked] = useState(() => localStorage.getItem(LANG_KEY) != null);
 	setCurrentLanguage(lang);
 	const applyLanguage = useCallback((code) => {
+		if (langLocked) return;
 		const next = asLang(code);
 		if (next) setLangState(next);
-	}, []);
+	}, [langLocked]);
 	const chooseLanguage = useCallback((code) => {
 		const next = asLang(code);
 		if (!next) return;
 		localStorage.setItem(LANG_KEY, next);
+		setLangLocked(true);
 		setLangState(next);
 	}, []);
 	const load = useCallback(async () => {
 		setError(null);
 		try {
-			const d = await api.worlds();
+			const d = await api.worlds(lang);
 			setWorlds(d.worlds);
 			setSeeds(d.seeds);
 		} catch (e) {
@@ -2719,7 +2722,7 @@ function EndlessWorlds() {
 		} catch {
 			setRuns([]);
 		}
-	}, []);
+	}, [lang]);
 	useEffect(() => {
 		load();
 	}, [load]);
@@ -2896,6 +2899,7 @@ function EndlessWorlds() {
 		worldId: selected,
 		onBack: home,
 		onDelete: setDoomed,
+		initialLanguage: lang,
 		onLanguage: applyLanguage,
 		onPlay: (w) => {
 			remember({
