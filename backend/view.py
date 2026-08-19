@@ -64,7 +64,7 @@ def strip_terminal_framing(prose: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def _shape(primitive: str, raw: Any) -> dict[str, Any]:
+def _shape(primitive: str, raw: Any, options: Any = None) -> dict[str, Any]:
     """Normalise a declared value into what a primitive component can render.
 
     Shaped by PRIMITIVE, never by field id — the whole point of the primitives is
@@ -123,18 +123,85 @@ def _shape(primitive: str, raw: Any) -> dict[str, Any]:
         return {"kind": "rank", "tier": "" if raw is None else str(raw), "note": ""}
 
     if primitive == "people":
-        return {"kind": "people", "entries": _entries(raw, ("name", "note"))}
+        return {
+            "kind": "people",
+            "columns": _columns(options),
+            "entries": _people(raw, _columns(options)),
+        }
 
     if primitive == "threads":
         return {"kind": "threads", "entries": _entries(raw, ("text", "status"))}
 
     if primitive == "inventory":
-        if isinstance(raw, list):
-            items = [str(x) if not isinstance(x, dict) else str(x.get("name", "")) for x in raw]
-            return {"kind": "inventory", "items": [i for i in items if i]}
-        return {"kind": "inventory", "items": [str(raw)]}
+        return {"kind": "inventory", "items": _inventory(raw)}
 
     return {"kind": "field", "value": raw if isinstance(raw, str) else str(raw)}
+
+
+def _columns(options: Any) -> list[str]:
+    """The column names a ``people`` field declared via ``attributes: [...]``.
+
+    The world names the columns its prose lists (attitude, closeness, standing);
+    without them this is empty and people fall back to name + note, exactly as
+    before. Read from the field's own ``options``, never from a field id.
+    """
+    if isinstance(options, dict):
+        cols = options.get("attributes")
+        if isinstance(cols, list):
+            return [str(c) for c in cols if isinstance(c, str) and c]
+    return []
+
+
+def _people(raw: Any, columns: list[str]) -> list[dict[str, Any]]:
+    """People as name + note, plus any declared attribute columns per person.
+
+    With no declared columns this is exactly the old name/note shape, so a world
+    that named none is untouched. With them, each person also carries the values
+    the prose lists under those columns — previously shaped away and lost.
+    """
+    if isinstance(raw, str):
+        return [{"name": raw, "note": ""}]
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("text") or ""
+            if not name:
+                continue
+            entry: dict[str, Any] = {"name": str(name), "note": str(item.get("note") or "")}
+            cols = {c: str(item[c]) for c in columns if item.get(c) not in (None, "")}
+            if cols:
+                entry["cols"] = cols
+            out.append(entry)
+        elif item:
+            out.append({"name": str(item), "note": ""})
+    return out
+
+
+def _inventory(raw: Any) -> list[dict[str, str]]:
+    """Inventory items as name + optional count + note.
+
+    A dict item keeps the count and note the narrator wrote, so "three healing
+    potions" is no longer the same chip as "one". A bare string is just a name.
+    Empty items (no name) are dropped, as they always were.
+    """
+    items = raw if isinstance(raw, list) else [raw]
+    out: list[dict[str, str]] = []
+    for x in items:
+        if isinstance(x, dict):
+            name = str(x.get("name") or "")
+            if not name:
+                continue
+            entry = {"name": name}
+            if x.get("count") not in (None, ""):
+                entry["count"] = str(x.get("count"))
+            if x.get("note") not in (None, ""):
+                entry["note"] = str(x.get("note"))
+            out.append(entry)
+        elif x:
+            out.append({"name": str(x)})
+    return out
 
 
 def _entries(raw: Any, keys: tuple[str, str]) -> list[dict[str, str]]:
@@ -291,7 +358,7 @@ def build_play_view(
                 "label": f.label,
                 "primitive": f.primitive,
                 "options": f.options,
-                **_shape(f.primitive, _lookup(data, f)),
+                **_shape(f.primitive, _lookup(data, f), f.options),
             }
             for f in panel.fields
         ]

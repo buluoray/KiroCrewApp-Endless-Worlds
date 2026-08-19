@@ -65,15 +65,15 @@ const Bar = ({ pct }: { pct: number }) => (
 const Lines = ({
   entries, primary, secondary,
 }: {
-  entries: Array<Record<string, string>>
+  entries: Array<Record<string, unknown>>
   primary: string
   secondary: string
 }) => (
   <ul className="ew-list">
     {entries.map((e, i) => (
-      <li key={`${e[primary]}-${i}`}>
-        {e[primary]}
-        {e[secondary] ? <span className="ew-sub">{` — ${e[secondary]}`}</span> : null}
+      <li key={`${String(e[primary] ?? '')}-${i}`}>
+        {String(e[primary] ?? '')}
+        {e[secondary] ? <span className="ew-sub">{` — ${String(e[secondary])}`}</span> : null}
       </li>
     ))}
   </ul>
@@ -128,7 +128,21 @@ export function Value({ f }: { f: ShapedField }) {
       )
 
     case 'people':
-      return <Lines entries={f.entries ?? []} primary="name" secondary="note" />
+      return (
+        <ul className="ew-list">
+          {(f.entries ?? []).map((e, i) => (
+            <li key={`${e.name}-${i}`}>
+              {e.name}
+              {(f.columns ?? []).map((c) =>
+                e.cols?.[c] ? (
+                  <span className="ew-sub" key={c}>{` · ${c}：${e.cols[c]}`}</span>
+                ) : null,
+              )}
+              {e.note ? <span className="ew-sub">{` — ${e.note}`}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )
 
     case 'threads':
       return <Lines entries={f.entries ?? []} primary="text" secondary="status" />
@@ -136,8 +150,11 @@ export function Value({ f }: { f: ShapedField }) {
     case 'inventory':
       return (
         <div className="ew-chips">
-          {(f.items ?? []).map((i, n) => (
-            <Chip key={`${i}-${n}`}>{i}</Chip>
+          {(f.items ?? []).map((it, n) => (
+            <Chip key={`${it.name}-${n}`}>
+              {it.name}
+              {it.count ? <span className="ew-sub">{` ×${it.count}`}</span> : null}
+            </Chip>
           ))}
         </div>
       )

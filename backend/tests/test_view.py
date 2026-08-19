@@ -189,9 +189,32 @@ def test_people_and_threads_accept_a_bare_string_or_a_list():
 
 
 def test_an_inventory_drops_empty_entries():
-    assert view_mod._shape("inventory", ["剑", "", {"name": "护符"}, {}])["items"] == [
-        "剑", "护符"
-    ]
+    items = view_mod._shape("inventory", ["剑", "", {"name": "护符"}, {}])["items"]
+    assert [i["name"] for i in items] == ["剑", "护符"]
+
+
+def test_an_inventory_keeps_count_and_note():
+    """"三瓶药水" must not shape down to the same chip as "一瓶"."""
+    items = view_mod._shape(
+        "inventory", [{"name": "药水", "count": 3, "note": "治疗"}, "剑"]
+    )["items"]
+    assert items[0] == {"name": "药水", "count": "3", "note": "治疗"}
+    assert items[1] == {"name": "剑"}
+
+
+def test_people_carry_declared_attribute_columns():
+    """A people field that declares `attributes` keeps those columns per person;
+    one that declares none is untouched."""
+    plain = view_mod._shape("people", [{"name": "母亲", "note": "病重"}])
+    assert plain["columns"] == [] and "cols" not in plain["entries"][0]
+
+    shaped = view_mod._shape(
+        "people",
+        [{"name": "李衍", "attitude": "亲近", "closeness": "挚友"}],
+        {"attributes": ["attitude", "closeness"]},
+    )
+    assert shaped["columns"] == ["attitude", "closeness"]
+    assert shaped["entries"][0]["cols"] == {"attitude": "亲近", "closeness": "挚友"}
 
 
 # -- the world's own clock -----------------------------------------------

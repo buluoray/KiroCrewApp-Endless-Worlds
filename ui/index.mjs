@@ -754,10 +754,10 @@ var Bar = ({ pct }) => /* @__PURE__ */ jsx("div", {
 });
 var Lines = ({ entries, primary, secondary }) => /* @__PURE__ */ jsx("ul", {
 	className: "ew-list",
-	children: entries.map((e, i) => /* @__PURE__ */ jsxs("li", { children: [e[primary], e[secondary] ? /* @__PURE__ */ jsx("span", {
+	children: entries.map((e, i) => /* @__PURE__ */ jsxs("li", { children: [String(e[primary] ?? ""), e[secondary] ? /* @__PURE__ */ jsx("span", {
 		className: "ew-sub",
-		children: ` — ${e[secondary]}`
-	}) : null] }, `${e[primary]}-${i}`))
+		children: ` — ${String(e[secondary])}`
+	}) : null] }, `${String(e[primary] ?? "")}-${i}`))
 });
 /**
 * One field, drawn by its PRIMITIVE alone.
@@ -805,10 +805,19 @@ function Value({ f }) {
 			className: "ew-sub",
 			children: ` ${f.note}`
 		}) : null] });
-		case "people": return /* @__PURE__ */ jsx(Lines, {
-			entries: f.entries ?? [],
-			primary: "name",
-			secondary: "note"
+		case "people": return /* @__PURE__ */ jsx("ul", {
+			className: "ew-list",
+			children: (f.entries ?? []).map((e, i) => /* @__PURE__ */ jsxs("li", { children: [
+				e.name,
+				(f.columns ?? []).map((c) => e.cols?.[c] ? /* @__PURE__ */ jsx("span", {
+					className: "ew-sub",
+					children: ` · ${c}：${e.cols[c]}`
+				}, c) : null),
+				e.note ? /* @__PURE__ */ jsx("span", {
+					className: "ew-sub",
+					children: ` — ${e.note}`
+				}) : null
+			] }, `${e.name}-${i}`))
 		});
 		case "threads": return /* @__PURE__ */ jsx(Lines, {
 			entries: f.entries ?? [],
@@ -817,7 +826,10 @@ function Value({ f }) {
 		});
 		case "inventory": return /* @__PURE__ */ jsx("div", {
 			className: "ew-chips",
-			children: (f.items ?? []).map((i, n) => /* @__PURE__ */ jsx(Chip, { children: i }, `${i}-${n}`))
+			children: (f.items ?? []).map((it, n) => /* @__PURE__ */ jsxs(Chip, { children: [it.name, it.count ? /* @__PURE__ */ jsx("span", {
+				className: "ew-sub",
+				children: ` ×${it.count}`
+			}) : null] }, `${it.name}-${n}`))
 		});
 		case "field": return /* @__PURE__ */ jsx("span", { children: String(f.value ?? "") });
 		default: return /* @__PURE__ */ jsx("span", {

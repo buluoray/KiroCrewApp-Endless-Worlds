@@ -25,8 +25,16 @@ export interface ShapedField {
    *  add a label, it deletes the one the world gave the field. */
   tier?: string
   direction?: string
-  entries?: Array<Record<string, string>>
-  items?: string[]
+  /** People/threads rows. People rows may carry declared attribute columns under
+   *  `cols`; threads rows use text/status. */
+  entries?: Array<{
+    name?: string; note?: string; text?: string; status?: string
+    cols?: Record<string, string>
+  }>
+  /** The attribute column names a `people` field declared, in order. */
+  columns?: string[]
+  /** Inventory items with the count and note the narrator wrote. */
+  items?: Array<{ name: string; count?: string; note?: string }>
 }
 
 export interface PanelView {

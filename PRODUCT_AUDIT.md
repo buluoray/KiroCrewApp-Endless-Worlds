@@ -243,6 +243,9 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 
 ### N1（并入 P0）：面板 primitive 声明了却运行时丢弃
 
+> **状态：people 与 inventory 已修（2026-08-18）。** `backend/view.py` 的 `_shape` 现接收字段 `options`：`people` 按声明的 `attributes` 列保留每个人的属性值（态度/亲密度/身份），无声明时仍为 name+note 原状；`inventory` 保留每件物品的 `count`/`note`（“三瓶药水”不再与“一瓶”同形）。前端 `ui.tsx` 渲染人物列与物品数量，`ShapedField` 类型相应更新。测试见 `test_view.py`（`test_people_carry_declared_attribute_columns`、`test_an_inventory_keeps_count_and_note`）。
+> **仍未做（需存储/新路由，非“快且安全”）：** `resource` 的 `delayed` 后果账本、`trend` 的历史序列（sparkline）——两者都要在 store 侧记录逐回合数值或未结算项，留待专门一版。
+
 模板与编译简报承诺的字段在 `backend/view.py` 的 `_shape()` 里被压扁，属于和 P0#1 同类的“世界声明未兑现”正确性问题——编译出的世界包带着这些声明，玩家侧什么都不会发生。
 
 - `people`：`_shape` 只输出 `("name","note")` 两列（`view.py:126`），丢弃 `COMPILER_BRIEF` 承诺的 `attributes` 列（`compile.py:134-135`）。NPC 的态度/亲密度/身份无处展示。
@@ -303,3 +306,135 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 - 回合重来必须维护 state、chronicle、scene 和 narrator baseline 的一致性。
 - 完整历史分支必须建立在逐回合状态快照之上。
 - Narrator 隔离和玩家记忆隔离是产品边界，便利功能不得绕过它。
+
+## Mobile frontend deep audit
+
+> 深审日期：2026-08-19
+> 基线：当前 `main`（`0b807f1`），手机设计下限 320px，按 320 / 360 / 390 / 430 / 768 / 900 / 1100px 检查。
+> 方法：4 路独立源码审计后逐项回看当前 TSX/CSS。当前 host 未安装 Browser 驱动，且已安装 app bundle 与源码 bundle 不同，因此本节把确定性的 DOM/CSS 缺陷标为“源码确认”，把必须看真实像素的项目留在验证矩阵，不用旧安装包截图代替证据。
+
+本轮确认现有布局有良好基础：CSS 是 narrow-first；320–767px 使用 16px gutter；rail 只在 1100px 以上出现；面板 sidebar 只在 900px 以上出现，手机有 drawer 替代；正文保持 16px / 1.85 / 66ch；关键 choice 是 48px，主按钮、返回、输入框和 drawer 是 44px；`prefers-reduced-motion` 已完整覆盖现有动画。以下问题是在这些基础上的具体断点，而不是建议推翻现有响应式结构。
+
+### Critical mobile blockers
+
+#### M0.1 Scene 放大后 iframe 高度为 0
+
+**状态：源码确认；跨宽度必现。**
+
+- `web/src/styles.css:559-566`：`.ew-slot-full` 使用 `position: absolute; inset: 0; height: auto`，但最近的 positioned ancestor 是 `.ew-slot-wrap { position: relative }`，不是注释所指的 `.ew-root`。
+- `web/src/scene.tsx:100-126`：full 状态下 iframe 和按钮栏都脱离文档流；wrapper 没有 in-flow child，内容高度坍缩为 0，iframe 的 top/bottom 也只能解出 0 高。
+- 手机上常规 scene 已固定为 320px，放大是查看复杂场景的唯一出口，因此不是装饰性问题。
+
+**建议**：让 full scene 保持 in-flow（例如 wrapper 负责 overlay 几何），或把 full class 放到 wrapper 上；同时增加 Escape 退出、`aria-expanded`，并保留同一个 iframe DOM 节点不移动的现有正确约束。
+
+#### M0.2 删除确认弹窗可能出现在当前视口之外
+
+**状态：源码确认；长书架/长详情页滚动后触发。**
+
+- `web/src/styles.css:213-227`：`.ew-modal-wrap` 是相对整个 `.ew-root` 的 absolute box；panel 固定在 root 顶部 `4vh`，不是当前 viewport 顶部。
+- `web/src/confirm.tsx:87,219`：两种删除弹窗都使用同一结构，打开时只 focus panel，没有 `scrollIntoView`。
+- 从长列表底部点删除时，当前视口可能只看到 scrim，dialog 在上方数屏之外。输入框又 `autoFocus`，15px 字号会触发 iOS focus zoom，键盘进一步缩小可用区域。
+
+**建议**：保持 overlay 不遮住 host chrome 的边界，但在打开时把 panel 滚入可见区；用 `dvh` 约束 dialog body、sticky action bar、16px 输入字号；删除 working 时禁止 scrim/Escape 关闭。
+
+#### M0.3 手机系统 Back/边缘返回不会回到 app 上一层
+
+**状态：源码确认。**
+
+`web/src/main.tsx` 的 shelf/detail/opening/live 全是 React state；源码没有 `pushState`、`popstate` 或 hash 路由。Android 系统 Back 与 iOS 返回手势会退出 dashboard 当前页面，而不是 detail → shelf、opening → detail 或 live → shelf。现有可见返回按钮仍应保留，但浏览器历史必须反映用户进入的层级。
+
+#### M0.4 提问 scene 位于整页末尾，回答时没有等待反馈
+
+**状态：源码确认；实际“离首屏几屏”需真实数据复测。**
+
+- `web/src/main.tsx:347` 把唯一 `SceneSlot` 挂在 `.ew-shell` 之后；`web/src/play.tsx` 只把 scene id 上报，没有 notice、anchor 或 `scrollIntoView`。手机上 scene 会出现在正文、choice、输入区和两个 drawer 之后。
+- `onSceneChoice` 直接等待 `answerScene` + `takeTurn`，没有接入 PlayPage 的 tapped/phrase/busy 状态；直到整轮完成才 refresh。一次可能耗时几十秒的 scene 点击看起来像没有响应。
+
+**建议**：PlayPage 内显示 scene 到达通知/入口并把 scene 滚入可见区；scene 回答复用普通行动的 waiting 与幂等 turn 语义。
+
+#### M0.5 一次轮询读取失败会永久盖住后来成功的数据
+
+**状态：源码确认。**
+
+`web/src/play.tsx:50-56` 的 `load()` 失败时设置 `error`，成功时只 `setV`，不清除旧 error；渲染又先判断 `error`。生成中每 3 秒的轮询即使后来成功，玩家仍停留在错误页。在移动网络切换、短暂离线和后台恢复时影响最高。
+
+### Layout defects by viewport
+
+#### 320–430px
+
+- **长 chip 可制造整页横向滚动（源码确认）**：`.ew-chip` 使用 `white-space: nowrap` 且没有 max-width；库存、rank、world style、opening label 与 digest category 都可来自世界或 narrator，不能假设字符串短。应允许单个 chip 在必要时换行或截断后提供完整值。
+- **digest flex row 不能可靠收缩（源码确认）**：`.ew-dcat` 是 `flex: 0 0 auto`，正文 sibling 无 `min-width: 0` / `overflow-wrap`；长 category 或无断点 token 会撑宽页面。
+- **正文长 token 没有 containment（源码确认）**：`.ew-prose` 缺少 `overflow-wrap: anywhere`，code/pre 也没有局部横向滚动策略。普通 CJK 正文默认换行是正确的，不应全局使用 `break-all`。
+- **history 打开后把 panels drawer 推到整段历史之后（源码确认）**：`play.tsx` 顺序是 history button → 全部 History → panels button。历史越长，查看当前状态的入口越难到达。两个辅助面板应并列成 tabs/disclosure，或固定入口而不是彼此推远。
+- **choice 二次确认可能生成在 fold 以下（设计缺陷，需像素确认）**：点击最后一个 choice 后，confirm row 插在该 choice 下方，但无 `scrollIntoView`。选择会亮起，提交控制可能不在视口内。
+- **输入区是不可换行的单行 flex（潜在 i18n 缺陷）**：当前中英文短标签尚能放下，但 textarea 可被更长 locale 的按钮压成很窄的 sliver。为输入设置可用最小宽度，并允许 row 在约束不足时换行。
+- **scene 常规高度固定 320px（需真实场景确认）**：在 320×568 上约占 56% 屏高；目前唯一放大出口又被 M0.1 破坏。修 M0.1 后再决定 `min()`/`dvh` 策略，不应先武断缩短。
+
+#### 768px transition
+
+- gutter 从 16px 变为 24px，仍保持单列阅读；没有发现双栏提前挤压的问题。
+- 需要在 768px 两侧复测 opening action bar：`.ew-spacer` 在 mobile wrap 时只是残留的桌面右对齐机制，可能产生不自然的孤立空位。
+
+#### 900px transition
+
+- **history 被错误隐藏（源码确认）**：`@media (min-width: 900px) { .ew-drawer { display: none } }` 同时隐藏 history 与 panel drawer；只有 panel 有 `.ew-aside` 替代，history 没有。900–1099px 连 rail 也没有，因此 history 完全不可达；1100px 以上同样没有替代入口。
+- **结束人生没有 panels（源码确认）**：ended branch 只渲染 history，不渲染 `panels` 或 `.ew-aside`，所有宽度都无法查看最终状态。
+
+#### 1100px transition
+
+- rail 与阅读列的 grid 分工正确，inline back 被 rail 的永久 shelf 入口替代也合理。
+- `.ew-rail` 使用 `max-height: calc(100vh - 120px)`，高度依赖 host chrome 的硬编码猜测；真实 dashboard 容器若不是 viewport scroller，sticky/高度可能不符合预期。该项必须在 host 内实测，不能仅凭源码判失败。
+
+### Touch, keyboard and accessibility
+
+本轮把 44px 平台惯例与 WCAG 2.2 AA 的 24px target-size floor 分开评级。当前没有确认到 `<24×24` 且间距也不满足的 SC 2.5.8 失败；以下是重要的 44px 惯例缺口：
+
+- `.ew-opt`、`.ew-btn-sm`、`.ew-btn-quiet`、`.ew-slot-btn` 是 36px。优先提升 choice 二次确认、opening option、删除和 scene zoom。
+- `.ew-input` 与行动 textarea 是 15px，iOS 聚焦会自动放大；改为至少 16px。
+- 多个按钮移除了 `-webkit-tap-highlight-color`，却没有自有 `:active` 反馈，触摸时像没有点中。
+
+明确的语义/键盘缺口：
+
+- `web/src/opening.tsx` 的视觉 `.ew-glabel` 不是 `<label>`，文本/数字输入没有 accessible name。
+- opening option 与 style pill 没有 `aria-pressed` 或 radio 语义；颜色是唯一 selected state。
+- history/panel drawer 没有 `aria-expanded`、`aria-controls`，展开内容也没有命名 region。
+- action textarea 只靠 placeholder 命名；输入后名称消失，字符上限也没有关联说明。
+- loading、error、stalled、scene 到达与删除失败多数没有 status/alert live region；`Waiting` 已有正确 pattern，可复用。
+- modal 主动删除 focus outline、无 focus trap、关闭后不 restore opener；世界删除的 `.ew-doomed` 是可滚动但不可键盘聚焦的区域。
+- modal 的 Escape 与 scrim 在 working 阶段仍可关闭，使后端删除完成但 UI 不执行 `onDeleted`，留下陈旧书架。
+- scene fullscreen 没有 Escape 退出，也没有 expanded 状态。
+- 根节点没有随世界设置 `lang`；语言模块 mutation 也不保证立即触发 React rerender。
+
+### Loading, error and recovery behavior
+
+- shelf backend error 在手机上没有 retry；桌面 rail 也不是一个明确重试入口。
+- PlayPage 初始 `!v` loading 只有一行文字，没有 Back；挂起请求没有 timeout/AbortController，手机可进入无法退出的等待页。
+- history 首次失败会显示错误，但加载过部分 turns 后的下一页失败没有可见提示或 retry。
+- scene fetch 没有 pending 状态；失败提示存在，但新 scene 到达不会被宣布。
+- 没有 offline/online、visibility 或 reconnect 处理；后台仍按 3 秒轮询，回到前台也不立即 refetch。
+- `view:'detail'` 会写入 localStorage，但 restore effect 只恢复 live/opening；细节页记忆是死写入。
+- view 切换和删除后回书架没有 scroll reset；操作结果 note 在 root 顶部，用户可能停在长列表中段看不到反馈。
+
+### Recommended mobile implementation order
+
+1. **修不可用路径**：M0.1 scene full geometry；M0.2 modal 可见性/working 关闭保护；900px history；ended panels。
+2. **修手机导航与反馈**：app 内 history integration；scene 到达/等待；PlayPage 成功读取清旧 error；所有关键 error 提供 retry/back。
+3. **修触控与输入**：36→44px；输入 16px；active/focus-visible；confirm row 自动保持可见。
+4. **修 modal a11y**：focus trap/restore、可聚焦 doomed region、live regions、键盘与视觉 viewport 行为。
+5. **修内容 reflow**：chip、digest、prose/code 与长 locale；真实 CJK/Latin 长数据共同验证。
+6. **补语义**：opening labels/selected state、drawers、textarea、root language。
+7. **再做体验增强**：history/panels 的手机信息架构、离线/visibility、长历史性能与 scroll restoration。
+
+### Verification matrix
+
+| Width | Required checks | Current evidence |
+|---:|---|---|
+| 320×568 | shelf/detail/opening/live 无整页横向滚动；所有关键目标 ≥44px；keyboard 打开后 dialog input + action 可见；scene/confirm 不被 fold 吞掉 | 源码缺陷已确认；真实像素待 Browser 驱动 |
+| 360×800 | CJK populated world；长 chip/digest；history 与 panels 互相可达 | 源码缺陷已确认；真实像素待 Browser 驱动 |
+| 390×844 | iPhone 主检查：focus zoom、返回手势、删除弹窗、scene full、safe visible height | 源码缺陷已确认；真实设备待测 |
+| 430×932 | 大屏手机：opening 4-group 页面与 action bar wrap；长标题/人生删除同行 | 源码缺陷已确认；真实像素待 Browser 驱动 |
+| 768×900 | 16→24px gutter 边界；仍为单阅读列；action bar 无异常空位 | 静态结构正确；边界截图待测 |
+| 900×900 | `.ew-aside` 出现；panel drawer 消失；history 仍必须存在 | **当前源码失败：history 一并消失** |
+| 1100×900 | rail 出现；inline back 消失但 shelf 路径仍可达；rail sticky 高度；history 可达 | rail 结构静态正确；**history 当前失败**；host sticky 待测 |
+
+视觉验证恢复后，最小自动化门槛应包括：320/390px 的 `documentElement.scrollWidth <= clientWidth + 1`；逐个列出越过 viewport 的非 fixed 元素；直接测量主内容列宽而不只测 overflow；打开 keyboard/dialog/scene/history 状态；以中文真实填充数据看截图。overflow 结果要先区分允许局部滚动的 table 与不允许溢出的 control/text，且 CJK 被挤成一字一行只能靠看图发现。
