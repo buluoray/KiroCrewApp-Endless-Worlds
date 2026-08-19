@@ -31,8 +31,11 @@ from content import Content
 from narrator import ensure_narrator_slot_ex
 from store import RunStore
 
-#: R4.2 — a turn the player is waiting on gets 120 seconds.
-TURN_DEADLINE_SECS = 120.0
+#: R4.2 — a turn the player is waiting on. Raised to 240s: a rich mid-life turn on
+#: a slower model routinely ran past two minutes, so the request returned "timeout"
+#: and the player saw the wait give up even though the narrator was still writing.
+#: Still well under PENDING_STALE_SECS.
+TURN_DEADLINE_SECS = 240.0
 
 #: The opening turn gets longer. It is the heaviest turn a life ever asks for — the
 #: narrator reads the whole opening brief and invents a world's first moment from

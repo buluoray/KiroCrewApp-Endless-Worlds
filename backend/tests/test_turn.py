@@ -319,7 +319,10 @@ def test_a_queued_turn_is_still_waited_for(store):
 
 
 def test_the_deadline_is_the_one_the_player_was_promised():
-    assert turn_mod.TURN_DEADLINE_SECS == 120.0
+    # A waited turn gets 240s, and must stay under the stale window by a margin so a
+    # turn running past one request is never mistaken for abandoned.
+    assert turn_mod.TURN_DEADLINE_SECS == 240.0
+    assert turn_mod.PENDING_STALE_SECS > turn_mod.TURN_DEADLINE_SECS * 2
 
 
 # -- the slot the turn runs in -------------------------------------------
