@@ -81,6 +81,7 @@ from chapters import (  # noqa: E402
 from halo import attribution, compose_restraint, event_density  # noqa: E402
 from store import RunStore, StoreError  # noqa: E402
 from turn import declaration_shape  # noqa: E402
+from view import always_panels_empty  # noqa: E402
 from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
 
 
@@ -471,7 +472,39 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
             "gains": args.get("gains") or [],
         },
     )
-    return {"committed": True, "turn": turn}
+    result: dict[str, Any] = {"committed": True, "turn": turn}
+    # Non-blocking correction. The turn is committed either way — a live month is
+    # never held hostage to a schema quibble — but if the narrator declared state
+    # yet an always-on panel still resolved to entirely blank, it almost certainly
+    # keyed the fields by a renamed name or a label the panel does not read. Tell
+    # it, with the exact ids, so it self-corrects next turn instead of drawing the
+    # status into the prose (which is where the broken frames came from).
+    declared = any(k not in RESERVED_STATE_KEYS and k != "turn" for k in state)
+    world_id = state.get("worldId")
+    if declared and isinstance(world_id, str) and world_id:
+        try:
+            worlds = _DATA / "worlds"
+            language = state.get("language")
+            path = worlds / f"{world_id}.md"
+            if isinstance(language, str) and language:
+                variant = worlds / f"{world_id}.{language}.md"
+                if variant.is_file():
+                    path = variant
+            if path.is_file():
+                pack = read_world(path.read_text(encoding="utf-8"))
+                empties = always_panels_empty(pack.template, state)
+                if empties:
+                    result["warnings"] = empties
+                    result["hint"] = (
+                        "A panel below came out blank even though you declared state. "
+                        "Declare each field by the exact id shown in `declareById`, "
+                        "inside the `state` you pass here (at the top level, or nested "
+                        "under `state.<panel>`) — a value under a renamed key or a "
+                        "label does not reach the panel and shows as empty."
+                    )
+        except Exception:  # noqa: BLE001
+            pass  # a warning is a nicety; never let it disturb a committed turn
+    return result
 
 
 #: How many months one read returns when the narrator does not say.

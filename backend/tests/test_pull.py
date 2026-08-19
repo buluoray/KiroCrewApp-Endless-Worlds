@@ -327,3 +327,43 @@ def test_recent_turns_ride_only_on_a_full_read(store, run):
 
     asked = srv._read_runtime({"runId": run, "since": since, "recentTurns": 1})
     assert len(asked["recentTurns"]) == 1, "an explicit request is always honoured"
+
+
+def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, monkeypatch):
+    """The turn still commits — a live month is never held hostage — but a status
+    declared under a name the panel does not key on comes back with a non-blocking
+    warning naming the ids it should have used, so the narrator self-corrects."""
+    import mcp_server as srv
+
+    flagship = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    if not flagship.is_file():
+        pytest.skip("flagship seed not present")
+    data = tmp_path / "data"
+    (data / "worlds").mkdir(parents=True, exist_ok=True)
+    (data / "worlds" / "jianhuo-jiyuan.md").write_text(
+        flagship.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    run = store.create_run(
+        {"turn": 0, "worldId": "jianhuo-jiyuan"}, {"worldId": "jianhuo-jiyuan"}
+    )
+    monkeypatch.setattr(srv, "_store", lambda: store)
+    monkeypatch.setattr(srv, "_DATA", data)
+    store.mark_pending(run, turn=1, slot="s")
+    store.note_runtime_read(run, turn=1)
+
+    bad = srv._advance_turn({
+        "runId": run, "turn": 1, "prose": "p",
+        "state": {"worldId": "jianhuo-jiyuan", "Made Up Section": {"whatever": "x"}},
+    })
+    assert bad["committed"] is True, "the month lands regardless"
+    warned = bad.get("warnings") or []
+    assert any(w["panel"] == "status" for w in warned), "the empty always-panel is flagged"
+    assert "time" in warned[0]["declareById"], "and the correct ids are offered"
+
+    # A status keyed correctly (even partially) does not warn.
+    ok = srv._advance_turn({
+        "runId": run, "turn": 2, "prose": "p",
+        "state": {"worldId": "jianhuo-jiyuan", "status": {"time": "Year 1"}},
+    })
+    assert ok["committed"] is True
+    assert "warnings" not in ok

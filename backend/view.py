@@ -333,6 +333,28 @@ def _panel_data(panel: Any, state: dict[str, Any]) -> dict[str, Any]:
     return by_label
 
 
+def always_panels_empty(template: Template, state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Always-visible panels that resolved to ENTIRELY empty despite the narrator
+    having declared some state.
+
+    The signal for the one failure this catches: the narrator declared the life's
+    status under renamed keys or labels the panel does not key on, so an always-on
+    panel that should be full reads as blank. Returns one entry per such panel with
+    the field ids it should have been keyed by — for a non-blocking warning the
+    narrator can act on next turn. Empty when the narrator declared nothing (that
+    is omission, a different matter) or when the panels resolved fine.
+    """
+    out: list[dict[str, Any]] = []
+    for panel in template.panels:
+        if not panel.always or not panel.visible(state):
+            continue
+        data = _panel_data(panel, state)
+        shaped = [_shape(f.primitive, _lookup(data, f), f.options) for f in panel.fields]
+        if shaped and all(s.get("kind") == "gap" for s in shaped):
+            out.append({"panel": panel.id, "declareById": [f.id for f in panel.fields]})
+    return out
+
+
 def resolve_ending(template: Template, state: dict[str, Any]) -> str:
     """The single place a life is judged to be over, returning the ending id.
 
