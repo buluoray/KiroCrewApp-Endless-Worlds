@@ -34,6 +34,12 @@ from store import RunStore
 #: R4.2 — a turn the player is waiting on gets 120 seconds.
 TURN_DEADLINE_SECS = 120.0
 
+#: The opening turn gets longer. It is the heaviest turn a life ever asks for — the
+#: narrator reads the whole opening brief and invents a world's first moment from
+#: nothing — and unlike a mid-life turn the player is not mid-story, so waiting for
+#: a richer birth is the right trade. Still well under PENDING_STALE_SECS.
+OPENING_DEADLINE_SECS = 300.0
+
 #: How long an in-flight record is believed. It must exceed TURN_DEADLINE_SECS by a
 #: real margin: a turn that merely ran past one request's deadline is still being
 #: written, and treating it as abandoned would dispatch exactly the second narrator

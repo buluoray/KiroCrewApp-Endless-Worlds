@@ -41,6 +41,9 @@ export function PlayPage({
   // Picked once per commit. Re-rolling during render would cycle the phrase every
   // poll while the month is being written.
   const [phrase, setPhrase] = useState('')
+  // A rotating "the world is being made" line, cycled while a life is being born so
+  // the arranging screen reads as generation rather than a frozen spinner.
+  const [arrange, setArrange] = useState('')
   const [stalled, setStalled] = useState(false)
   // The last action that did not land, kept so a stall can be retried with the
   // exact same intent instead of making the player retype it.
@@ -69,16 +72,29 @@ export function PlayPage({
    * instead of needing the player to guess whether to tap again.
    */
   const generating = !!v?.generating
+  // Also poll while a freshly-created life awaits its opening: begin() fires the
+  // opening turn in the background, so its "generating" mark can land a beat after
+  // this page first loads. Polling catches it and flips to the arranging screen
+  // rather than stranding the player on the birth button.
+  const awaiting = !!v?.awaitingOpening
   useEffect(() => {
-    if (!generating) return
-    setPhrase((p) => p || pick('play.waiting'))
+    if (!generating && !awaiting) return undefined
+    if (generating) setPhrase((p) => p || pick('play.waiting'))
     const timer = window.setInterval(() => { void load() }, GENERATING_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [generating, load])
+  }, [generating, awaiting, load])
 
   // Either reason the player cannot act: their own tap, or a narrator already at
   // work — including one asked for by a page they have since closed.
   const busy = !!tapped || generating
+
+  // Cycle the arranging flavour while a life is being born.
+  useEffect(() => {
+    if (!(v?.awaitingOpening && generating)) return undefined
+    setArrange(pick('opening.waiting'))
+    const timer = window.setInterval(() => setArrange(pick('opening.waiting')), 4000)
+    return () => window.clearInterval(timer)
+  }, [v?.awaitingOpening, generating])
 
   // The world's own language, not the build's. Setting it at the root re-renders
   // this page already speaking it (the setter is stable; the re-render is driven by
@@ -143,34 +159,44 @@ export function PlayPage({
       <div>
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         <h3 className="ew-detail-title">{v.title}</h3>
-        <div className="ew-note">
-          {busy ? t('opening.arranging') : t('opening.notStarted')}
-        </div>
-        {generating ? <div className="ew-note">{t('play.generating')}</div> : null}
-        {stalled && !busy ? <div className="ew-note">{t('opening.silent')}</div> : null}
-        <div className="ew-bar">
-          <button
-            className="ew-btn ew-btn-go"
-            type="button"
-            disabled={busy}
-            onClick={async () => {
-              setTapped(OPEN)
-              setPhrase(pick('opening.waiting'))
-              setStalled(false)
-              try {
-                const out = await api.openRun(runId)
-                if (!out.advanced && out.reason !== 'already') setStalled(true)
-                await load()
-              } catch {
-                setStalled(true)
-              }
-              setTapped('')
-            }}
-          >
-            {t('opening.continueBirth')}
-            {tapped === OPEN ? <Waiting label={phrase} /> : null}
-          </button>
-        </div>
+        {generating ? (
+          // The world is being made. This state lives on the server, so leaving and
+          // returning lands right back here rather than on a blank form.
+          <div className="ew-arrange">
+            <div className="ew-arrange-title">{t('opening.arranging')}</div>
+            <Waiting label={arrange || t('opening.arranging')} />
+          </div>
+        ) : (
+          <>
+            <div className="ew-note">
+              {busy ? t('opening.arranging') : t('opening.notStarted')}
+            </div>
+            {stalled && !busy ? <div className="ew-note">{t('opening.silent')}</div> : null}
+            <div className="ew-bar">
+              <button
+                className="ew-btn ew-btn-go"
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setTapped(OPEN)
+                  setPhrase(pick('opening.waiting'))
+                  setStalled(false)
+                  try {
+                    const out = await api.openRun(runId)
+                    if (!out.advanced && out.reason !== 'already') setStalled(true)
+                    await load()
+                  } catch {
+                    setStalled(true)
+                  }
+                  setTapped('')
+                }}
+              >
+                {t('opening.continueBirth')}
+                {tapped === OPEN ? <Waiting label={phrase} /> : null}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     )
   }

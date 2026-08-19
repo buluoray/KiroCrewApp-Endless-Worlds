@@ -323,6 +323,15 @@
 .ew-jump:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }
 .ew-search { width: 12em; }
 
+/* The "world is being arranged" state on the play page while a life is born. */
+.ew-arrange {
+  display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
+  padding: 20px 0;
+}
+.ew-arrange-title {
+  font-size: 18px; font-weight: 600; color: var(--text, #e2e8f0);
+}
+
 /* A quiet marker when the world opens a new chapter of this life. */
 .ew-unlocked { margin: 0 0 12px; display: flex; flex-direction: column; gap: 4px; }
 .ew-unlocked-row {

@@ -149,7 +149,7 @@ export function OpeningScreen({
   const [page, setPage] = useState(draft.page ?? 0)
   const [busy, setBusy] = useState<'' | 'creating' | 'opening'>('')
   const [failed, setFailed] = useState<string | null>(null)
-  const [run, setRun] = useState<string | null>(draft.run ?? null)
+  const run: string | null = draft.run ?? null
   // Whether this screen came back to answers the player left behind, so it can say
   // so once rather than silently pre-filling and looking like the world chose.
   const [restored, setRestored] = useState<boolean>(() =>
@@ -254,8 +254,14 @@ export function OpeningScreen({
     setFailed(null)
     try {
       const created = await api.createRun({ worldId: world.worldId, style, answers: payload() })
-      setRun(created.runId)
-      await openRun(created.runId)
+      // The life exists now, with its own id already handed to the narrator by the
+      // opening prompt. Fire the first turn WITHOUT blocking this screen and hand
+      // off to the play page: the "arranging" state then lives on the server, so
+      // leaving and coming back still shows the world being made rather than a
+      // blank form. The play page polls it to completion.
+      void api.openRun(created.runId)
+      clearDraft()
+      onLive(created.runId)
     } catch (e) {
       setFailed((e as Error).message)
       setBusy('')

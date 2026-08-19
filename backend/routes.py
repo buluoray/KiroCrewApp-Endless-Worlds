@@ -152,6 +152,7 @@ from turn import (  # noqa: E402
     declaration_shape,
     generating,
     make_dispatcher,
+    OPENING_DEADLINE_SECS,
 )
 from view import build_play_view, resolve_ending, world_detail  # noqa: E402
 from widget import SceneSpecError, bound_values, compile_cached  # noqa: E402
@@ -894,6 +895,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         style=str(run_state.get("style") or ""),
         project=str(ctx.data_dir / "runs" / run_id),
         prompt_override=prompt,
+        deadline_secs=OPENING_DEADLINE_SECS,
     )
     return web.json_response({
         "advanced": outcome.advanced,
