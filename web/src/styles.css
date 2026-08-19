@@ -129,10 +129,23 @@
 @media (min-width: 768px) { .ew-head h2 { font-size: 19px; } }
 /* Interface-language dropdown: pushed to the far right of the title bar. */
 .ew-uilang {
-  margin-left: auto; min-height: 30px; padding: 0 8px; font-size: 13px;
+  margin-left: 0; min-height: 30px; padding: 0 8px; font-size: 13px;
   color: var(--text, #e2e8f0); background: transparent;
   border: 1px solid var(--border, #334155); border-radius: 8px; cursor: pointer;
 }
+/* The header's right-hand controls (language, settings), grouped and pushed right. */
+.ew-headtools { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+/* Narrator settings panel on the home page. */
+.ew-settings {
+  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;
+  background: var(--card, #1f2030); padding: 14px; margin-bottom: 16px;
+}
+.ew-settings-head { display: flex; align-items: center; justify-content: space-between; }
+.ew-settings-row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.ew-settings-label { flex: 0 0 8em; color: var(--muted, #6b7280); font-size: 13px; }
+.ew-settings-select { flex: 1; min-width: 0; }
+.ew-settings-foot { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.ew-settings-saved { font-size: 12px; color: var(--accent, #7c3aed); }
 
 /* A world name is user content and can be one long unbroken run; without this a
    phone gets a horizontal scrollbar on the whole page. */

@@ -200,7 +200,7 @@ def ensure_narrator_slot(state: Any, run_id: str, *, project: str = "") -> Any:
 
 
 def ensure_narrator_slot_ex(
-    state: Any, run_id: str, *, project: str = ""
+    state: Any, run_id: str, *, project: str = "", model: str = "", reasoning_effort: str = ""
 ) -> tuple[Any, bool]:
     """The slot, and whether THIS call created it.
 
@@ -230,6 +230,10 @@ def ensure_narrator_slot_ex(
                 f"{slot_key} has memory_mode="
                 f"{getattr(existing, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
             )
+        # Re-applied on an EXISTING slot too, so a player who changes the model or
+        # effort on the home page sees it take on the very next turn of a life
+        # already in progress, not only on a fresh one.
+        _apply_choice(existing, model, reasoning_effort)
         return existing, False
 
     slot = state.get_or_create_slot(
@@ -247,7 +251,21 @@ def ensure_narrator_slot_ex(
     # after — see the same note in auto_research/handlers.py:1705.
     if project:
         slot.project = project
+    _apply_choice(slot, model, reasoning_effort)
 
     # Deliberately absent: slot._trust / slot._trusted_patterns. See the module
     # docstring. A test asserts this file never assigns them.
     return slot, True
+
+
+def _apply_choice(slot: Any, model: str, reasoning_effort: str) -> None:
+    """Set the player's chosen model / reasoning effort on the slot.
+
+    Empty means "leave the agent's own default" (``auto`` model, no effort
+    override), so an unset preference never forces a concrete id onto a slot — an
+    explicit pick is the only thing that overrides.
+    """
+    if isinstance(model, str) and model:
+        slot.model = model
+    if isinstance(reasoning_effort, str) and reasoning_effort:
+        slot.reasoning_effort = reasoning_effort

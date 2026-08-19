@@ -145,6 +145,7 @@ from chapters import opened_since  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
 from narrator import purge_narrator_session, release_narrator_slot  # noqa: E402
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
+from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
 from store import RunStore  # noqa: E402
 from turn import (  # noqa: E402
@@ -223,6 +224,37 @@ async def health(request: web.Request, ctx: AppContext) -> web.Response:
             "worlds": _library(ctx).count(),
         }
     )
+
+
+async def get_settings(request: web.Request, ctx: AppContext) -> web.Response:
+    """The narrator settings the player set on the home page (model + effort)."""
+    if request.get("user") is None:
+        return _unauthorized()
+    out = read_settings(ctx.data_dir)
+    out["efforts"] = list(REASONING_EFFORTS)
+    return web.json_response(out)
+
+
+async def put_settings(request: web.Request, ctx: AppContext) -> web.Response:
+    """Save the narrator settings. Applied to every life's narrator slot at the
+    next turn (including one already in progress)."""
+    if request.get("user") is None:
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "expected an object"}, status=400)
+    model = body.get("model") if isinstance(body.get("model"), str) else ""
+    effort = body.get("reasoningEffort") if isinstance(body.get("reasoningEffort"), str) else ""
+    if effort not in REASONING_EFFORTS:
+        return web.json_response(
+            {"field": "reasoningEffort", "expected": "a known effort level or empty"},
+            status=400,
+        )
+    saved = write_settings(ctx.data_dir, model=model, reasoning_effort=effort)
+    return web.json_response(saved)
 
 
 async def list_worlds(request: web.Request, ctx: AppContext) -> web.Response:
@@ -758,6 +790,7 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
 
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 
+    _cfg = read_settings(ctx.data_dir)
     outcome = await advance_turn(
         state_obj=state_obj,
         store=store,
@@ -769,6 +802,8 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         shape=declaration_shape(pack.template),
         language=pack.template.language,
         project=str(ctx.data_dir / "runs" / run_id),
+        model=_cfg["model"],
+        reasoning_effort=_cfg["reasoningEffort"],
     )
 
     return web.json_response({
@@ -914,6 +949,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 
     prompt = compose_opening_prompt(template=pack.template, run_id=run_id)
+    _cfg = read_settings(ctx.data_dir)
     outcome = await advance_turn(
         state_obj=state_obj,
         store=store,
@@ -923,6 +959,8 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         style=str(run_state.get("style") or ""),
         project=str(ctx.data_dir / "runs" / run_id),
         prompt_override=prompt,
+        model=_cfg["model"],
+        reasoning_effort=_cfg["reasoningEffort"],
         deadline_secs=OPENING_DEADLINE_SECS,
     )
     return web.json_response({
@@ -1316,6 +1354,8 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
     """
     return [
         AppRoute(method="GET", path="/health", handler=health),
+        AppRoute(method="GET", path="/settings", handler=get_settings),
+        AppRoute(method="PUT", path="/settings", handler=put_settings),
         AppRoute(method="GET", path="/worlds", handler=list_worlds),
         AppRoute(method="GET", path="/worlds/{world_id}", handler=get_world),
         AppRoute(method="GET", path="/worlds/{world_id}/deletion", handler=world_deletion),

@@ -8,6 +8,7 @@ import { DRAFT_PREFIX, OpeningScreen } from './opening'
 import { PlayPage } from './play'
 import { WorldRail } from './rail'
 import { SceneSlot } from './scene'
+import { SettingsPanel } from './settings'
 import styles from './styles.css?raw'
 import { asLang, LanguageContext, setCurrentLanguage, t, type Lang } from './strings'
 import { Glyph } from './ui'
@@ -58,6 +59,7 @@ export default function EndlessWorlds() {
   const [error, setError] = useState<string | null>(null)
 
   const [view, setView] = useState<View>('library')
+  const [showSettings, setShowSettings] = useState(false)
   // The app mounts inside the dashboard's own scroll container, which keeps its
   // offset across our view swaps — so moving from the shelf into a tall opening
   // form would land the player at its BOTTOM. Bring our root back into view at the
@@ -474,17 +476,31 @@ export default function EndlessWorlds() {
         <Glyph />
         <h2>{t('app.title')}</h2>
         {view === 'library' ? (
-          <select
-            className="ew-uilang"
-            aria-label={t('app.language')}
-            value={lang}
-            onChange={(e) => chooseLanguage(e.target.value)}
-          >
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-          </select>
+          <div className="ew-headtools">
+            <select
+              className="ew-uilang"
+              aria-label={t('app.language')}
+              value={lang}
+              onChange={(e) => chooseLanguage(e.target.value)}
+            >
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+            <button
+              className="ew-uilang"
+              type="button"
+              onClick={() => setShowSettings((s) => !s)}
+              aria-expanded={showSettings}
+            >
+              {t('settings.open')}
+            </button>
+          </div>
         ) : null}
       </div>
+
+      {view === 'library' && showSettings ? (
+        <SettingsPanel onClose={() => setShowSettings(false)} />
+      ) : null}
 
       {note ? (
         <div className="ew-note ew-note-row">
