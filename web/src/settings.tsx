@@ -23,7 +23,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     let alive = true
     void api.settings().then((s) => {
       if (!alive) return
-      setModel(s.model || '')
+      // The advertised list already carries an `auto` entry, and the default
+      // option ("") also resolves to auto — so a persisted "auto" is the same
+      // choice as default. Normalize it to "" so the select shows one auto row,
+      // not a value with no matching option.
+      setModel(s.model && s.model !== 'auto' ? s.model : '')
       setEffort(s.reasoningEffort || '')
       if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts)
     }).catch(() => {})
@@ -44,9 +48,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }
 
   // The saved model may not be in the advertised list (offline, or a pick from a
-  // prior session); keep it selectable so saving does not silently drop it.
-  const modelIds = models.map((m) => m.id)
-  const extra = model && !modelIds.includes(model) ? [model] : []
+  // prior session); keep it selectable so saving does not silently drop it. Drop
+  // the advertised `auto` id: the default option ("") already stands for auto, so
+  // listing it again is a confusing duplicate row.
+  const modelIds = models.map((m) => m.id).filter((id) => id && id !== 'auto')
+  const extra = model && model !== 'auto' && !modelIds.includes(model) ? [model] : []
 
   return (
     <div className="ew-settings ew-block">

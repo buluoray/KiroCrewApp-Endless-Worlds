@@ -487,10 +487,29 @@ export const api = {
       const res = await fetch('/api/models')
       if (!res.ok) return []
       const raw = (await res.json()) as unknown
-      const list = Array.isArray(raw) ? raw : []
-      return list.map((m) =>
-        typeof m === 'string' ? { id: m } : (m as { id: string; name?: string }),
-      ).filter((m) => m && typeof m.id === 'string' && m.id)
+      // Core answers with a bare array today, but tolerate a `{ models: [...] }`
+      // wrapper too, so a future shape drift on this endpoint doesn't silently
+      // empty the picker (the same field-drift risk that first broke it).
+      const list = Array.isArray(raw)
+        ? raw
+        : Array.isArray((raw as { models?: unknown })?.models)
+          ? (raw as { models: unknown[] }).models
+          : []
+      // The gateway forwards kiro-cli's own `--list-models` rows verbatim, which
+      // are keyed `model_id` / `model_name` (NOT `id` / `name`). Read those first
+      // and only fall back to `id` / `name`, so the picker isn't emptied by a
+      // shape mismatch — the whole list filtering out on a missing `id` is what
+      // left this picker showing only "Default (auto)".
+      return list
+        .map((m) => {
+          if (typeof m === 'string') return { id: m }
+          const o = m as {
+            model_id?: string; model_name?: string; id?: string; name?: string
+          }
+          const id = o.model_id || o.model_name || o.id || ''
+          return { id, name: o.model_name || o.name || id }
+        })
+        .filter((m) => m && typeof m.id === 'string' && m.id)
     } catch {
       return []
     }

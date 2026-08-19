@@ -231,7 +231,8 @@ function StarStyles() {
 
 const CSS_TEXT = `
 .ews-overlay {
-  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  position: absolute; inset: 0; min-height: 100%; z-index: 60;
+  display: flex; flex-direction: column;
   background: var(--bg, #14151f); color: var(--fg, #e5e7eb); overflow: hidden;
 }
 .ews-head {
@@ -260,6 +261,10 @@ const CSS_TEXT = `
   padding: 8px 16px; border-bottom: 1px solid var(--border, #2d2f3d); font-size: 13px;
 }
 .ews-filter { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+/* Native checkboxes render the browser's blue check; paint them with the app's
+ * accent (the same colour the lens tabs and chips use) so they match the rest of
+ * the crew UI instead of clashing with a stray blue. */
+.ews-filter input[type="checkbox"] { accent-color: var(--accent, #7c3aed); }
 .ews-mode { margin-inline-start: auto; }
 .ews-body { flex: 1; display: flex; min-height: 0; }
 .ews-lens-pane { flex: 1; overflow: auto; padding: 16px; }

@@ -774,11 +774,20 @@ export function PlayPage({
       >
         {drawer ? t('play.drawerClose') : t('play.drawerOpen')}
       </button>
+      {/* Its own class, not `.ew-drawer`: that class is hidden above 900px because
+          the PANELS move into the aside there, and the star map has no such desktop
+          twin — sharing the class left the desktop with no way into it at all. */}
       {v.turn >= 1 ? (
         <button
-          className="ew-drawer"
+          className="ew-starbtn"
           type="button"
-          onClick={() => setStarOpen(true)}
+          onClick={() => {
+            // The overlay is absolute-anchored to the app box (not the viewport),
+            // so its head sits at the box top. The star button is at the bottom,
+            // so scroll the app to the top first or the modal opens off-screen.
+            document.querySelector('.ew-root')?.scrollIntoView({ block: 'start' })
+            setStarOpen(true)
+          }}
         >
           {mt(v.language, 'star.title')}
         </button>

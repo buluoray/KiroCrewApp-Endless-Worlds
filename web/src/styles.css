@@ -146,6 +146,10 @@
 .ew-settings-select { flex: 1; min-width: 0; }
 .ew-settings-foot { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
 .ew-settings-saved { font-size: 12px; color: var(--accent, #7c3aed); }
+/* The shared .ew-hint carries a negative top margin tuned for its other call
+ * sites; inside the settings panel it directly follows the 44px Save button row,
+ * where that negative margin pulls the note up ONTO the button. Reset it here. */
+.ew-settings .ew-hint { margin-top: 8px; }
 
 /* A world name is user content and can be one long unbroken run; without this a
    phone gets a horizontal scrollbar on the whole page. */
