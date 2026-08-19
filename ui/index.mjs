@@ -240,6 +240,7 @@ var TABLES = {
 		"play.silent": "（世界还没有说话。）",
 		"play.stalled": "世界一时没有回应。再说一次试试。",
 		"play.turn": "第 {turn} 回合",
+		"play.page": "第 {n} 页",
 		"play.prevTurn": "上一回合",
 		"play.nextTurn": "下一回合",
 		"play.unlocked": "翻开了新的篇章：{heading}",
@@ -427,6 +428,7 @@ var TABLES = {
 		"play.silent": "(The world has not spoken yet.)",
 		"play.stalled": "The world did not answer. Say it again.",
 		"play.turn": "Turn {turn}",
+		"play.page": "Page {n}",
 		"play.prevTurn": "Previous turn",
 		"play.nextTurn": "Next turn",
 		"play.unlocked": "A new chapter opens: {heading}",
@@ -2376,7 +2378,7 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 			}),
 			/* @__PURE__ */ jsx("span", {
 				className: "ew-pager-turn",
-				children: t("play.turn", { turn: shownTurn })
+				children: t("play.page", { n: shownTurn })
 			}),
 			/* @__PURE__ */ jsx("button", {
 				className: "ew-pager-arw",
@@ -2581,10 +2583,6 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 				onClick: onBack,
 				children: t("play.back")
 			}), pager]
-		}),
-		/* @__PURE__ */ jsx("div", {
-			className: "ew-clock",
-			children: v.clock || t("play.turn", { turn: v.turn })
 		}),
 		/* @__PURE__ */ jsx("h3", {
 			className: "ew-detail-title",

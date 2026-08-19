@@ -293,7 +293,7 @@ export function PlayPage({
       >
         <Chevron dir="l" />
       </button>
-      <span className="ew-pager-turn">{t('play.turn', { turn: shownTurn })}</span>
+      <span className="ew-pager-turn">{t('play.page', { n: shownTurn })}</span>
       <button
         className="ew-pager-arw"
         type="button"
@@ -529,7 +529,6 @@ export function PlayPage({
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         {pager}
       </div>
-      <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
       <h3 className="ew-detail-title">{v.title}</h3>
       <div className="ew-play">
         {main}

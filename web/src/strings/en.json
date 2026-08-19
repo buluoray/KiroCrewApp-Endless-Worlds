@@ -134,6 +134,7 @@
   "play.silent": "(The world has not spoken yet.)",
   "play.stalled": "The world did not answer. Say it again.",
   "play.turn": "Turn {turn}",
+  "play.page": "Page {n}",
   "play.prevTurn": "Previous turn",
   "play.nextTurn": "Next turn",
   "play.unlocked": "A new chapter opens: {heading}",
