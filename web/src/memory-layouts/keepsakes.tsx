@@ -12,9 +12,10 @@ import { useState } from 'react'
 import type { Keepsake, StarPayload } from '../api'
 import { api } from '../api'
 import { mt, nodeById } from '../memory-state'
+import { StoryCardEditor } from '../story-card'
 
 function KeepsakeCard({
-  runId, kp, lang, payload, focus, setFocus, onChanged,
+  runId, kp, lang, payload, focus, setFocus, onChanged, onMakeCard,
 }: {
   runId: string
   kp: Keepsake
@@ -23,6 +24,7 @@ function KeepsakeCard({
   focus: string
   setFocus: (id: string) => void
   onChanged: () => void
+  onMakeCard: (kp: Keepsake) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(kp.title)
@@ -101,6 +103,15 @@ function KeepsakeCard({
         </div>
       ) : null}
       <div className="ews-kp-actions">
+        {kp.cites.length ? (
+          <button
+            className="ews-btn"
+            type="button"
+            onClick={() => onMakeCard(kp)}
+          >
+            {mt(lang, 'star.keeps.makeCard')}
+          </button>
+        ) : null}
         {editing ? (
           <button className="ews-btn" type="button" disabled={busy} onClick={() => void save()}>
             {mt(lang, 'star.keeps.save')}
@@ -141,12 +152,23 @@ export function KeepsakesLens({
   setFocus: (id: string) => void
   onChanged: () => void
 }) {
+  // The card editor opens ON TOP of the star map (§8.3.2: story cards are
+  // entered from the keepsake lens) and closes back into it.
+  const [cardFor, setCardFor] = useState<Keepsake | null>(null)
   if (!payload.keepsakes.length) {
     return <div className="ews-empty">{mt(lang, 'star.keeps.none')}</div>
   }
   const rows = [...payload.keepsakes].sort((a, b) => b.createdAt - a.createdAt)
   return (
     <div className="ews-kp-map">
+      {cardFor ? (
+        <StoryCardEditor
+          runId={runId}
+          keepsake={cardFor}
+          lang={lang}
+          onClose={() => setCardFor(null)}
+        />
+      ) : null}
       {rows.map((kp) => (
         <KeepsakeCard
           key={kp.id}
@@ -157,6 +179,7 @@ export function KeepsakesLens({
           focus={focus}
           setFocus={setFocus}
           onChanged={onChanged}
+          onMakeCard={setCardFor}
         />
       ))}
     </div>

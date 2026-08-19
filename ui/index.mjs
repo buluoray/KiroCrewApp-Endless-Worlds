@@ -132,7 +132,13 @@ var api = {
 	setMemoryView: (runId, view) => send("PATCH", `/runs/${encodeURIComponent(runId)}/preferences/memory-view`, { view }),
 	createKeepsake: (runId, body) => post(`/runs/${encodeURIComponent(runId)}/keepsakes`, body),
 	updateKeepsake: (runId, keepsakeId, body) => send("PATCH", `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`, body),
-	deleteKeepsake: (runId, keepsakeId) => send("DELETE", `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`)
+	deleteKeepsake: (runId, keepsakeId) => send("DELETE", `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`),
+	/** Turn a keepsake into an editable story-card draft (allowlist fixed here). */
+	previewStoryCard: (runId, keepsakeId) => post(`/runs/${encodeURIComponent(runId)}/story-cards/preview`, { keepsakeId }),
+	/** Narrow, relabel, reorder — the server refuses anything additive. */
+	editStoryCard: (runId, cardId, body) => send("PATCH", `/runs/${encodeURIComponent(runId)}/story-cards/${encodeURIComponent(cardId)}`, body),
+	/** The browser downloads this URL directly; auth rides on the cookie. */
+	storyCardExportUrl: (runId, cardId, format) => `${API}/runs/${encodeURIComponent(runId)}/story-cards/${encodeURIComponent(cardId)}/export?format=${format}`
 };
 //#endregion
 //#region src/strings.ts
@@ -2306,7 +2312,25 @@ var TABLES = {
 		"star.keeps.deleteNo": "留着",
 		"star.keeps.cites": "引用的时刻",
 		"star.keeps.excerpt": "摘录",
-		"star.keeps.newTitle": "未命名的纪念"
+		"star.keeps.newTitle": "未命名的纪念",
+		"star.keeps.makeCard": "做成故事卡",
+		"card.title": "回响故事卡",
+		"card.close": "返回",
+		"card.export.html": "导出网页",
+		"card.export.md": "导出 Markdown",
+		"card.export.svg": "导出图片 (SVG)",
+		"card.field.title": "标题",
+		"card.field.cover": "封面句",
+		"card.field.coverHint": "一句话，说明这段往事为什么值得讲",
+		"card.field.thought": "结尾感想",
+		"card.sect.events": "要讲哪几件事",
+		"card.sect.people": "出场的他们",
+		"card.anonHint": "改掉名字即可匿名；取消勾选则完全不出现。",
+		"card.moveUp": "上移",
+		"card.moveDown": "下移",
+		"card.renameOf": "{name} 在卡片上的名字",
+		"card.spoilers": "显示结局内容（含剧透）",
+		"card.wrap": "界面语言"
 	},
 	en: {
 		"star.title": "Life star map",
@@ -2346,7 +2370,25 @@ var TABLES = {
 		"star.keeps.deleteNo": "Keep it",
 		"star.keeps.cites": "Cited moments",
 		"star.keeps.excerpt": "Excerpt",
-		"star.keeps.newTitle": "Untitled keepsake"
+		"star.keeps.newTitle": "Untitled keepsake",
+		"star.keeps.makeCard": "Make a story card",
+		"card.title": "Echo story card",
+		"card.close": "Back",
+		"card.export.html": "Export page",
+		"card.export.md": "Export Markdown",
+		"card.export.svg": "Export image (SVG)",
+		"card.field.title": "Title",
+		"card.field.cover": "Cover line",
+		"card.field.coverHint": "One line on why this is worth telling",
+		"card.field.thought": "Closing thought",
+		"card.sect.events": "Which moments to tell",
+		"card.sect.people": "Who appears",
+		"card.anonHint": "Change a name to anonymise; untick to leave someone out entirely.",
+		"card.moveUp": "Move up",
+		"card.moveDown": "Move down",
+		"card.renameOf": "{name}'s name on the card",
+		"card.spoilers": "Show ending content (spoilers)",
+		"card.wrap": "Card language"
 	}
 };
 function mt(lang, key, vars = {}) {
@@ -2607,6 +2649,365 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 	})] });
 }
 //#endregion
+//#region src/story-card.tsx
+/** The echo story card editor (design §8.4).
+*
+* One panel, two halves: the LEFT edits the draft (include/exclude events and
+* people, rename for anonymity, title/cover/thought, spoilers, wrap language);
+* the RIGHT shows the resolved preview the server returns with every edit.
+* The preview is rendered by the SAME resolver the exporters use, so what the
+* player reads here is byte-for-byte what the file will say — the §11 Phase 3
+* completion bar, surfaced as UI.
+*
+* Nothing here can ADD to a card: the server refuses ids outside the
+* allowlist, and this editor simply has no control that would try.
+*/
+function StoryCardEditor({ runId, keepsake, lang, onClose }) {
+	const [card, setCard] = useState(null);
+	const [preview, setPreview] = useState(null);
+	const [error, setError] = useState("");
+	const [title, setTitle] = useState("");
+	const [cover, setCover] = useState("");
+	const [thought, setThought] = useState("");
+	useEffect(() => {
+		let alive = true;
+		api.previewStoryCard(runId, keepsake.id).then(({ card: c, preview: p }) => {
+			if (!alive) return;
+			setCard(c);
+			setPreview(p);
+			setTitle(c.title);
+			setCover(c.coverLine);
+			setThought(c.thought);
+		}).catch((e) => {
+			if (alive) setError(e.message);
+		});
+		return () => {
+			alive = false;
+		};
+	}, [runId, keepsake.id]);
+	const patch = async (body) => {
+		if (!card) return;
+		try {
+			const { card: c, preview: p } = await api.editStoryCard(runId, card.id, body);
+			setCard(c);
+			setPreview(p);
+		} catch (e) {
+			setError(e.message);
+		}
+	};
+	const move = (id, dir) => {
+		if (!card) return;
+		const order = card.events.map((e) => e.id);
+		const i = order.indexOf(id);
+		const j = i + dir;
+		if (i < 0 || j < 0 || j >= order.length) return;
+		const next = [...order];
+		const a = next[i];
+		next[i] = next[j];
+		next[j] = a;
+		patch({ order: next });
+	};
+	if (error) return /* @__PURE__ */ jsxs("div", {
+		className: "ewc-overlay",
+		role: "dialog",
+		"aria-modal": "true",
+		children: [/* @__PURE__ */ jsxs("div", {
+			className: "ewc-head",
+			children: [/* @__PURE__ */ jsx("div", {
+				className: "ewc-title",
+				children: mt(lang, "card.title")
+			}), /* @__PURE__ */ jsx("button", {
+				className: "ews-btn",
+				type: "button",
+				onClick: onClose,
+				children: mt(lang, "card.close")
+			})]
+		}), /* @__PURE__ */ jsx("div", {
+			className: "ews-empty",
+			children: error
+		})]
+	});
+	if (!card || !preview) return /* @__PURE__ */ jsx("div", {
+		className: "ewc-overlay",
+		role: "dialog",
+		"aria-modal": "true",
+		children: /* @__PURE__ */ jsx("div", {
+			className: "ews-empty",
+			children: "…"
+		})
+	});
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ewc-overlay",
+		role: "dialog",
+		"aria-modal": "true",
+		"aria-label": mt(lang, "card.title"),
+		children: [
+			/* @__PURE__ */ jsxs("div", {
+				className: "ewc-head",
+				children: [
+					/* @__PURE__ */ jsx("div", {
+						className: "ewc-title",
+						children: mt(lang, "card.title")
+					}),
+					/* @__PURE__ */ jsx("div", {
+						className: "ewc-exports",
+						children: [
+							"html",
+							"md",
+							"svg"
+						].map((fmt) => /* @__PURE__ */ jsx("a", {
+							className: "ews-btn",
+							href: api.storyCardExportUrl(runId, card.id, fmt),
+							download: true,
+							children: mt(lang, `card.export.${fmt}`)
+						}, fmt))
+					}),
+					/* @__PURE__ */ jsx("button", {
+						className: "ews-btn",
+						type: "button",
+						onClick: onClose,
+						children: mt(lang, "card.close")
+					})
+				]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ewc-body",
+				children: [/* @__PURE__ */ jsxs("div", {
+					className: "ewc-edit",
+					children: [
+						/* @__PURE__ */ jsxs("label", {
+							className: "ewc-field",
+							children: [/* @__PURE__ */ jsx("span", { children: mt(lang, "card.field.title") }), /* @__PURE__ */ jsx("input", {
+								value: title,
+								maxLength: 120,
+								onChange: (e) => setTitle(e.target.value),
+								onBlur: () => {
+									if (title.trim() && title !== card.title) patch({ title });
+								}
+							})]
+						}),
+						/* @__PURE__ */ jsxs("label", {
+							className: "ewc-field",
+							children: [/* @__PURE__ */ jsx("span", { children: mt(lang, "card.field.cover") }), /* @__PURE__ */ jsx("input", {
+								value: cover,
+								maxLength: 200,
+								placeholder: mt(lang, "card.field.coverHint"),
+								onChange: (e) => setCover(e.target.value),
+								onBlur: () => {
+									if (cover !== card.coverLine) patch({ coverLine: cover });
+								}
+							})]
+						}),
+						/* @__PURE__ */ jsx("div", {
+							className: "ewc-sect",
+							children: mt(lang, "card.sect.events")
+						}),
+						card.events.map((ev, i) => /* @__PURE__ */ jsxs("div", {
+							className: "ewc-row",
+							children: [/* @__PURE__ */ jsxs("label", {
+								className: "ewc-check",
+								children: [
+									/* @__PURE__ */ jsx("input", {
+										type: "checkbox",
+										checked: ev.included,
+										onChange: () => void patch({ events: { [ev.id]: !ev.included } })
+									}),
+									/* @__PURE__ */ jsx("span", {
+										className: "ewc-row-turn",
+										children: mt(lang, "star.detail.turn", { n: ev.turn })
+									}),
+									/* @__PURE__ */ jsx("span", {
+										className: "ewc-row-title",
+										children: ev.title
+									})
+								]
+							}), /* @__PURE__ */ jsxs("span", {
+								className: "ewc-move",
+								children: [/* @__PURE__ */ jsx("button", {
+									className: "ews-btn",
+									type: "button",
+									disabled: i === 0,
+									"aria-label": mt(lang, "card.moveUp"),
+									onClick: () => move(ev.id, -1),
+									children: "↑"
+								}), /* @__PURE__ */ jsx("button", {
+									className: "ews-btn",
+									type: "button",
+									disabled: i === card.events.length - 1,
+									"aria-label": mt(lang, "card.moveDown"),
+									onClick: () => move(ev.id, 1),
+									children: "↓"
+								})]
+							})]
+						}, ev.id)),
+						/* @__PURE__ */ jsx("div", {
+							className: "ewc-sect",
+							children: mt(lang, "card.sect.people")
+						}),
+						/* @__PURE__ */ jsx("div", {
+							className: "ewc-hint",
+							children: mt(lang, "card.anonHint")
+						}),
+						card.entities.map((ent) => /* @__PURE__ */ jsxs("div", {
+							className: "ewc-row",
+							children: [/* @__PURE__ */ jsxs("label", {
+								className: "ewc-check",
+								children: [/* @__PURE__ */ jsx("input", {
+									type: "checkbox",
+									checked: ent.included,
+									onChange: () => void patch({ entities: { [ent.id]: { included: !ent.included } } })
+								}), /* @__PURE__ */ jsx("span", {
+									className: "ewc-row-title",
+									children: ent.name
+								})]
+							}), /* @__PURE__ */ jsx("input", {
+								className: "ewc-rename",
+								value: ent.display,
+								maxLength: 120,
+								"aria-label": mt(lang, "card.renameOf", { name: ent.name }),
+								onChange: (e) => {
+									const display = e.target.value;
+									setCard({
+										...card,
+										entities: card.entities.map((x) => x.id === ent.id ? {
+											...x,
+											display
+										} : x)
+									});
+								},
+								onBlur: (e) => {
+									const display = e.target.value.trim();
+									if (display && display !== ent.name) patch({ entities: { [ent.id]: { display } } });
+								}
+							})]
+						}, ent.id)),
+						card.endedTurn ? /* @__PURE__ */ jsxs("label", {
+							className: "ewc-check ewc-spoiler",
+							children: [/* @__PURE__ */ jsx("input", {
+								type: "checkbox",
+								checked: card.showSpoilers,
+								onChange: () => void patch({ showSpoilers: !card.showSpoilers })
+							}), mt(lang, "card.spoilers")]
+						}) : null,
+						/* @__PURE__ */ jsxs("label", {
+							className: "ewc-field",
+							children: [/* @__PURE__ */ jsx("span", { children: mt(lang, "card.field.thought") }), /* @__PURE__ */ jsx("textarea", {
+								rows: 2,
+								value: thought,
+								maxLength: 1e3,
+								onChange: (e) => setThought(e.target.value),
+								onBlur: () => {
+									if (thought !== card.thought) patch({ thought });
+								}
+							})]
+						}),
+						/* @__PURE__ */ jsxs("div", {
+							className: "ewc-langrow",
+							children: [/* @__PURE__ */ jsx("span", { children: mt(lang, "card.wrap") }), ["zh", "en"].map((l) => /* @__PURE__ */ jsx("button", {
+								className: "ews-lens" + (card.language === l ? " ews-lens-on" : ""),
+								type: "button",
+								onClick: () => void patch({ language: l }),
+								children: l === "zh" ? "中文" : "English"
+							}, l))]
+						})
+					]
+				}), /* @__PURE__ */ jsxs("div", {
+					className: "ewc-preview",
+					children: [
+						/* @__PURE__ */ jsx("h2", {
+							className: "ewc-p-title",
+							children: preview.title
+						}),
+						preview.coverLine ? /* @__PURE__ */ jsx("p", {
+							className: "ewc-p-cover",
+							children: preview.coverLine
+						}) : null,
+						preview.events.map((ev) => /* @__PURE__ */ jsxs("section", {
+							className: "ewc-p-event",
+							children: [
+								/* @__PURE__ */ jsxs("div", {
+									className: "ewc-p-head",
+									children: [/* @__PURE__ */ jsx("span", {
+										className: "ewc-row-turn",
+										children: mt(lang, "star.detail.turn", { n: ev.turn })
+									}), /* @__PURE__ */ jsx("strong", { children: ev.title })]
+								}),
+								/* @__PURE__ */ jsx("p", { children: ev.excerpt || ev.summary }),
+								ev.action ? /* @__PURE__ */ jsx("div", {
+									className: "ewc-p-act",
+									children: ev.action
+								}) : null
+							]
+						}, ev.id)),
+						preview.entities.length ? /* @__PURE__ */ jsx("div", {
+							className: "ewc-p-cast",
+							children: preview.entities.map((e) => /* @__PURE__ */ jsx("span", {
+								className: "ews-chip",
+								children: e.display
+							}, e.id))
+						}) : null,
+						preview.thought ? /* @__PURE__ */ jsx("p", {
+							className: "ewc-p-thought",
+							children: preview.thought
+						}) : null
+					]
+				})]
+			}),
+			/* @__PURE__ */ jsx("style", { children: CSS_TEXT$1 })
+		]
+	});
+}
+var CSS_TEXT$1 = `
+.ewc-overlay {
+  position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  background: var(--bg, #14151f); color: var(--fg, #e5e7eb);
+}
+.ewc-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border, #2d2f3d);
+}
+.ewc-title { font-weight: 600; }
+.ewc-exports { display: flex; gap: 6px; margin-inline: auto; }
+.ewc-exports a { text-decoration: none; }
+.ewc-body { flex: 1; display: flex; min-height: 0; }
+.ewc-edit {
+  flex: 0 0 380px; overflow: auto; padding: 14px 16px;
+  border-inline-end: 1px solid var(--border, #2d2f3d);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ewc-preview { flex: 1; overflow: auto; padding: 20px 24px; max-width: 660px; }
+.ewc-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ewc-field input, .ewc-field textarea, .ewc-rename {
+  font: inherit; color: inherit; background: none;
+  border: 1px solid var(--border, #2d2f3d); border-radius: 8px; padding: 6px 8px;
+}
+.ewc-sect { font-size: 12px; color: var(--muted, #9ca3af); margin-top: 10px; }
+.ewc-hint { font-size: 12px; color: var(--muted, #6b7280); }
+.ewc-row { display: flex; gap: 8px; align-items: center; }
+.ewc-check { display: flex; gap: 7px; align-items: center; flex: 1; min-width: 0;
+             cursor: pointer; font-size: 14px; }
+.ewc-row-turn { font-size: 12px; color: var(--muted, #9ca3af); flex: 0 0 auto; }
+.ewc-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ewc-move { display: flex; gap: 4px; }
+.ewc-rename { flex: 0 0 130px; font-size: 13px; }
+.ewc-spoiler { margin-top: 10px; }
+.ewc-langrow { display: flex; gap: 6px; align-items: center; font-size: 13px;
+               margin-top: 8px; }
+.ewc-p-title { font-size: 22px; margin: 0 0 8px; }
+.ewc-p-cover { font-style: italic; color: var(--muted, #a5a8b6);
+  border-inline-start: 3px solid var(--accent, #7c3aed); padding-inline-start: 12px; }
+.ewc-p-event { margin: 18px 0; }
+.ewc-p-head { margin-bottom: 4px; }
+.ewc-p-act { font-size: 13px; font-style: italic; color: var(--accent, #a78bfa); }
+.ewc-p-cast { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.ewc-p-thought { font-style: italic; margin-top: 16px; }
+@media (max-width: 860px) {
+  .ewc-body { flex-direction: column; }
+  .ewc-edit { flex: 0 0 auto; max-height: 52dvh;
+    border-inline-end: 0; border-bottom: 1px solid var(--border, #2d2f3d); }
+}
+`;
+//#endregion
 //#region src/memory-layouts/keepsakes.tsx
 /** 纪念地图 — the "keepsakes" lens (design §8.3.1).
 *
@@ -2616,7 +3017,7 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 * cited path is immutable, deletion of a keepsake deletes nothing the world
 * remembers).
 */
-function KeepsakeCard({ runId, kp, lang, payload, focus, setFocus, onChanged }) {
+function KeepsakeCard({ runId, kp, lang, payload, focus, setFocus, onChanged, onMakeCard }) {
 	const [editing, setEditing] = useState(false);
 	const [title, setTitle] = useState(kp.title);
 	const [thought, setThought] = useState(kp.thought);
@@ -2699,62 +3100,78 @@ function KeepsakeCard({ runId, kp, lang, payload, focus, setFocus, onChanged }) 
 			}) : null,
 			/* @__PURE__ */ jsxs("div", {
 				className: "ews-kp-actions",
-				children: [editing ? /* @__PURE__ */ jsx("button", {
-					className: "ews-btn",
-					type: "button",
-					disabled: busy,
-					onClick: () => void save(),
-					children: mt(lang, "star.keeps.save")
-				}) : /* @__PURE__ */ jsx("button", {
-					className: "ews-btn",
-					type: "button",
-					onClick: () => setEditing(true),
-					children: mt(lang, "star.keeps.rename")
-				}), confirming ? /* @__PURE__ */ jsxs(Fragment, { children: [
-					/* @__PURE__ */ jsx("span", {
-						className: "ews-kp-ask",
-						children: mt(lang, "star.keeps.deleteAsk")
-					}),
-					/* @__PURE__ */ jsx("button", {
-						className: "ews-btn ews-btn-danger",
-						type: "button",
-						disabled: busy,
-						onClick: () => void remove(),
-						children: mt(lang, "star.keeps.deleteYes")
-					}),
-					/* @__PURE__ */ jsx("button", {
+				children: [
+					kp.cites.length ? /* @__PURE__ */ jsx("button", {
 						className: "ews-btn",
 						type: "button",
-						onClick: () => setConfirming(false),
-						children: mt(lang, "star.keeps.deleteNo")
+						onClick: () => onMakeCard(kp),
+						children: mt(lang, "star.keeps.makeCard")
+					}) : null,
+					editing ? /* @__PURE__ */ jsx("button", {
+						className: "ews-btn",
+						type: "button",
+						disabled: busy,
+						onClick: () => void save(),
+						children: mt(lang, "star.keeps.save")
+					}) : /* @__PURE__ */ jsx("button", {
+						className: "ews-btn",
+						type: "button",
+						onClick: () => setEditing(true),
+						children: mt(lang, "star.keeps.rename")
+					}),
+					confirming ? /* @__PURE__ */ jsxs(Fragment, { children: [
+						/* @__PURE__ */ jsx("span", {
+							className: "ews-kp-ask",
+							children: mt(lang, "star.keeps.deleteAsk")
+						}),
+						/* @__PURE__ */ jsx("button", {
+							className: "ews-btn ews-btn-danger",
+							type: "button",
+							disabled: busy,
+							onClick: () => void remove(),
+							children: mt(lang, "star.keeps.deleteYes")
+						}),
+						/* @__PURE__ */ jsx("button", {
+							className: "ews-btn",
+							type: "button",
+							onClick: () => setConfirming(false),
+							children: mt(lang, "star.keeps.deleteNo")
+						})
+					] }) : /* @__PURE__ */ jsx("button", {
+						className: "ews-btn",
+						type: "button",
+						onClick: () => setConfirming(true),
+						children: mt(lang, "star.keeps.delete")
 					})
-				] }) : /* @__PURE__ */ jsx("button", {
-					className: "ews-btn",
-					type: "button",
-					onClick: () => setConfirming(true),
-					children: mt(lang, "star.keeps.delete")
-				})]
+				]
 			})
 		]
 	});
 }
 function KeepsakesLens({ runId, payload, lang, focus, setFocus, onChanged }) {
+	const [cardFor, setCardFor] = useState(null);
 	if (!payload.keepsakes.length) return /* @__PURE__ */ jsx("div", {
 		className: "ews-empty",
 		children: mt(lang, "star.keeps.none")
 	});
 	const rows = [...payload.keepsakes].sort((a, b) => b.createdAt - a.createdAt);
-	return /* @__PURE__ */ jsx("div", {
+	return /* @__PURE__ */ jsxs("div", {
 		className: "ews-kp-map",
-		children: rows.map((kp) => /* @__PURE__ */ jsx(KeepsakeCard, {
+		children: [cardFor ? /* @__PURE__ */ jsx(StoryCardEditor, {
+			runId,
+			keepsake: cardFor,
+			lang,
+			onClose: () => setCardFor(null)
+		}) : null, rows.map((kp) => /* @__PURE__ */ jsx(KeepsakeCard, {
 			runId,
 			kp,
 			lang,
 			payload,
 			focus,
 			setFocus,
-			onChanged
-		}, kp.id))
+			onChanged,
+			onMakeCard: setCardFor
+		}, kp.id))]
 	});
 }
 //#endregion

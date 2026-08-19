@@ -155,6 +155,55 @@ export interface StarPayload {
   view: MemoryView
 }
 
+// ── echo story cards (design §8.4): allowlist drafts, narrow-only edits ──
+
+export interface CardEvent {
+  id: string
+  turn: number
+  title: string
+  summary: string
+  action: string
+  excerpt: string
+  included: boolean
+}
+
+export interface CardEntity {
+  id: string
+  kind: string
+  /** The real name, shown only in the editor. */
+  name: string
+  /** What the export prints — editing this IS anonymisation. */
+  display: string
+  included: boolean
+}
+
+export interface StoryCard {
+  id: string
+  keepsakeId: string
+  title: string
+  coverLine: string
+  thought: string
+  language: 'zh' | 'en'
+  showSpoilers: boolean
+  endedTurn: number
+  events: CardEvent[]
+  entities: CardEntity[]
+  edges: StarEdge[]
+  createdAt: number
+  updatedAt: number
+}
+
+/** What the export will actually contain — rendered by the same resolver. */
+export interface CardPreview {
+  title: string
+  coverLine: string
+  thought: string
+  language: string
+  events: CardEvent[]
+  entities: CardEntity[]
+  edges: StarEdge[]
+}
+
 export interface PlayView {
   runId: string
   worldId: string
@@ -576,4 +625,35 @@ export const api = {
       'DELETE',
       `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`,
     ),
+
+  /** Turn a keepsake into an editable story-card draft (allowlist fixed here). */
+  previewStoryCard: (runId: string, keepsakeId: string) =>
+    post<{ card: StoryCard; preview: CardPreview }>(
+      `/runs/${encodeURIComponent(runId)}/story-cards/preview`, { keepsakeId },
+    ),
+
+  /** Narrow, relabel, reorder — the server refuses anything additive. */
+  editStoryCard: (
+    runId: string,
+    cardId: string,
+    body: {
+      title?: string
+      coverLine?: string
+      thought?: string
+      showSpoilers?: boolean
+      language?: 'zh' | 'en'
+      order?: string[]
+      events?: Record<string, boolean>
+      entities?: Record<string, { included?: boolean; display?: string }>
+    },
+  ) =>
+    send<{ card: StoryCard; preview: CardPreview }>(
+      'PATCH',
+      `/runs/${encodeURIComponent(runId)}/story-cards/${encodeURIComponent(cardId)}`,
+      body,
+    ),
+
+  /** The browser downloads this URL directly; auth rides on the cookie. */
+  storyCardExportUrl: (runId: string, cardId: string, format: 'html' | 'md' | 'svg') =>
+    `${API}/runs/${encodeURIComponent(runId)}/story-cards/${encodeURIComponent(cardId)}/export?format=${format}`,
 }

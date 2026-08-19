@@ -30,6 +30,14 @@ from kiro_crew.apps.route_registry import AppRoute
 import memory_graph
 from keepsakes import KeepsakeError, KeepsakeStore
 from store import RunStore, StoreError
+from story_cards import (
+    EXPORT_FORMATS,
+    StoryCardError,
+    StoryCardStore,
+    apply_edits,
+    build_draft,
+    resolve,
+)
 from view import strip_terminal_framing
 
 #: The lenses a life remembers as its last-used view (§8.3.2). "life" is the
@@ -257,6 +265,110 @@ async def delete_keepsake(request: web.Request, ctx: AppContext) -> web.Response
     return web.json_response({"deleted": keepsake_id})
 
 
+# ── story cards (design §8.4) ────────────────────────────────────────────
+
+
+async def preview_story_card(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /runs/{run_id}/story-cards/preview`` — a keepsake becomes a draft.
+
+    The allowlist is fixed here (the keepsake's known cited events + their
+    directly involved entities) and every later edit can only narrow it. The
+    response is the editable draft plus its resolved preview — the same
+    ``resolve()`` the exporters render from, so what the player sees IS what
+    the file will contain (§11 Phase 3 completion bar).
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    try:
+        state = store.read_state(run_id)
+    except StoreError:
+        return web.json_response({"error": "no such life"}, status=404)
+
+    body = await _body(request)
+    keepsake_id = str(body.get("keepsakeId") or "")
+    kp = KeepsakeStore(ctx.data_dir, run_id).get(keepsake_id)
+    if kp is None:
+        return web.json_response({"error": "no such keepsake"}, status=404)
+
+    chronicle = store.read_chronicle(run_id)
+    index = memory_graph.build_index(chronicle)
+    ended = int(state.get("turn") or 0) if state.get("ended") else 0
+    try:
+        card = build_draft(
+            index, kp,
+            ended_turn=ended,
+            language=str(state.get("language") or "en"),
+        )
+    except StoryCardError as exc:
+        return web.json_response(
+            {"field": exc.field, "expected": exc.expected}, status=422
+        )
+    StoryCardStore(ctx.data_dir, run_id).put(card)
+    return web.json_response({"card": card, "preview": resolve(card)})
+
+
+async def edit_story_card(request: web.Request, ctx: AppContext) -> web.Response:
+    """``PATCH /runs/{run_id}/story-cards/{card_id}`` — narrow, relabel, reorder.
+
+    Adding is structurally impossible: an id not already on the card is
+    refused, and turn numbers have no edit path (§8.4 调整顺序但不能篡改回合).
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    card_id = request.match_info.get("card_id", "")
+    cards = StoryCardStore(ctx.data_dir, run_id)
+    card = cards.get(card_id)
+    if card is None:
+        return web.json_response({"error": "no such story card"}, status=404)
+    try:
+        card = apply_edits(card, await _body(request))
+    except StoryCardError as exc:
+        return web.json_response(
+            {"field": exc.field, "expected": exc.expected}, status=422
+        )
+    cards.put(card)
+    return web.json_response({"card": card, "preview": resolve(card)})
+
+
+async def export_story_card(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/story-cards/{card_id}/export?format=html|md|svg``.
+
+    Renders from the stored draft through the same ``resolve()`` the preview
+    used — the export cannot diverge from what was shown. The file is served
+    as a download and is self-contained: no script, no external reference, no
+    run id (§12.3). Nothing is uploaded anywhere (§8.4 不自动上传).
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    card_id = request.match_info.get("card_id", "")
+    card = StoryCardStore(ctx.data_dir, run_id).get(card_id)
+    if card is None:
+        return web.json_response({"error": "no such story card"}, status=404)
+
+    fmt = request.query.get("format", "html")
+    if fmt not in EXPORT_FORMATS:
+        return web.json_response(
+            {"field": "format", "expected": f"one of {', '.join(EXPORT_FORMATS)}"},
+            status=400,
+        )
+    content_type, render = EXPORT_FORMATS[fmt]
+    text = render(card)
+    # The filename comes from the card id alone — never the title (a header
+    # cannot carry arbitrary unicode safely) and never the run id (§12.3).
+    return web.Response(
+        text=text,
+        content_type=content_type.split(";")[0],
+        charset="utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="story-card-{card_id}.{fmt}"'
+        },
+    )
+
+
 def memory_routes() -> list[AppRoute]:
     """The routes ``routes.register_routes`` splices in."""
     return [
@@ -276,5 +388,20 @@ def memory_routes() -> list[AppRoute]:
             method="DELETE",
             path="/runs/{run_id}/keepsakes/{keepsake_id}",
             handler=delete_keepsake,
+        ),
+        AppRoute(
+            method="POST",
+            path="/runs/{run_id}/story-cards/preview",
+            handler=preview_story_card,
+        ),
+        AppRoute(
+            method="PATCH",
+            path="/runs/{run_id}/story-cards/{card_id}",
+            handler=edit_story_card,
+        ),
+        AppRoute(
+            method="GET",
+            path="/runs/{run_id}/story-cards/{card_id}/export",
+            handler=export_story_card,
         ),
     ]
