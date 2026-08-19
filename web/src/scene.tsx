@@ -94,11 +94,26 @@ export function SceneSlot({
     return () => window.removeEventListener('message', onMessage)
   }, [sceneId, onChoice, everNeeded])
 
+  // Escape leaves fullscreen — a scene blown up to fill the panel needs a keyboard
+  // way back out, not only the zoom button.
+  useEffect(() => {
+    if (!full) return undefined
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFull(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [full])
+
   const on = !!(html && sceneId)
+  // A scene that has been asked for but whose picture has not arrived yet: say so,
+  // rather than leaving a blank slot that reads as broken.
+  const loading = !!sceneId && !html && !failed
 
   return (
     <div className="ew-slot-wrap" style={on ? undefined : { margin: 0 }}>
       {failed && sceneId ? <div className="ew-note">{t('play.sceneFailed')}</div> : null}
+      {loading ? (
+        <div className="ew-note" role="status" aria-live="polite">{t('play.sceneLoading')}</div>
+      ) : null}
 
       {/* Once it exists it is never removed, never re-keyed and never moved — hidden
           with display instead. Before the first scene there is nothing to protect,

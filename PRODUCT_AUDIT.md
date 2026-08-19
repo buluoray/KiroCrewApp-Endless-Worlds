@@ -239,6 +239,8 @@ Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景�
 
 ## 无障碍与操作快赢
 
+> **状态：主要项已实现（2026-08-18）。** 已做：开局输入用 `aria-label` 命名、开局选项/风格 pill 用 `aria-pressed`、历史与状态抽屉用 `aria-expanded`/`aria-controls`、stalled 与 scene 加载用 `role=status aria-live=polite`、场景 fullscreen 支持 Escape 退出、场景加载显示 pending 文案、`Cmd/Ctrl+Enter` 直接提交自由行动、根节点按世界语言设 `lang`、所有自定义控件加 `:focus-visible` 焦点环。**仍未做：** 44px 触控目标统一梳理、Modal 完整 focus-trap/关闭后 focus restore、字号/行距/阅读宽度偏好（属设置类功能，单独排）。
+
 建议在 P1 一并处理：
 
 - 开局输入使用真实 `<label>` 或明确的 accessible name。

@@ -81,6 +81,7 @@ function Group({
                 key={o}
                 type="button"
                 className={`ew-opt${value === o ? ' ew-opt-on' : ''}`}
+                aria-pressed={value === o}
                 onClick={() => onPick(value === o ? '' : o)}
               >
                 {o}
@@ -90,6 +91,7 @@ function Group({
               <button
                 type="button"
                 className={`ew-opt${isCustom ? ' ew-opt-on' : ''}`}
+                aria-pressed={isCustom}
                 onClick={() => onPick(isCustom ? '' : CUSTOM)}
               >
                 {t('opening.custom')}
@@ -102,6 +104,7 @@ function Group({
               style={{ marginTop: '8px' }}
               value={custom ?? ''}
               maxLength={200}
+              aria-label={group.label}
               placeholder={t('opening.customPlaceholder')}
               onChange={(e) => onCustom(e.target.value)}
             />
@@ -114,6 +117,7 @@ function Group({
           inputMode={group.kind === 'number' ? 'numeric' : 'text'}
           value={value === CUSTOM ? '' : (value ?? '')}
           maxLength={200}
+          aria-label={group.label}
           onChange={(e) => onPick(e.target.value)}
         />
       )}
@@ -328,6 +332,7 @@ export function OpeningScreen({
                 key={s.id}
                 type="button"
                 className={`ew-opt${style === s.id ? ' ew-opt-on' : ''}`}
+                aria-pressed={style === s.id}
                 onClick={() => setStyle(s.id)}
               >
                 {s.label}

@@ -411,7 +411,7 @@ export default function EndlessWorlds() {
 
   return (
     <LanguageContext.Provider value={applyLanguage}>
-    <div className="ew-root">
+    <div className="ew-root" lang={lang}>
       {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
           instead of outliving it in the page's stylesheet list. */}

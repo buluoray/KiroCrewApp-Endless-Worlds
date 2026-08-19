@@ -200,10 +200,16 @@ export function PlayPage({
             {t('play.endedShelf')}
           </button>
         </div>
-        <button className="ew-drawer" type="button" onClick={() => setBack((b) => !b)}>
+        <button
+          className="ew-drawer"
+          type="button"
+          aria-expanded={back}
+          aria-controls="ew-history-panel-ended"
+          onClick={() => setBack((b) => !b)}
+        >
           {back ? t('history.close') : t('history.open')}
         </button>
-        {back ? <History runId={runId} /> : null}
+        {back ? <div id="ew-history-panel-ended"><History runId={runId} /></div> : null}
       </div>
     )
   }
@@ -237,7 +243,7 @@ export function PlayPage({
       <Prose text={v.prose} />
 
       {stalled ? (
-        <div className="ew-note">
+        <div className="ew-note" role="status" aria-live="polite">
           {t('play.stalled')}
           {retry ? (
             <button
@@ -319,6 +325,15 @@ export function PlayPage({
             placeholder={t('play.actionPlaceholder')}
             disabled={busy}
             onChange={(e) => { setAction(e.target.value); setArm('') }}
+            onKeyDown={(e) => {
+              // Cmd/Ctrl+Enter is itself the deliberate act, so it commits directly
+              // rather than only arming the two-step confirm.
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && action.trim() && !busy) {
+                e.preventDefault()
+                setArm('')
+                void take({ turn: v.turn + 1, action: action.trim() }, ACT)
+              }
+            }}
           />
           <button
             className="ew-btn ew-btn-go"
@@ -377,16 +392,28 @@ export function PlayPage({
         ) : null}
       </div>
 
-      <button className="ew-drawer" type="button" onClick={() => setBack((b) => !b)}>
+      <button
+        className="ew-drawer"
+        type="button"
+        aria-expanded={back}
+        aria-controls="ew-history-panel"
+        onClick={() => setBack((b) => !b)}
+      >
         {back ? t('history.close') : t('history.open')}
       </button>
-      {back ? <History runId={runId} /> : null}
+      {back ? <div id="ew-history-panel"><History runId={runId} /></div> : null}
 
-      <button className="ew-drawer" type="button" onClick={() => setDrawer((d) => !d)}>
+      <button
+        className="ew-drawer"
+        type="button"
+        aria-expanded={drawer}
+        aria-controls="ew-panels-drawer"
+        onClick={() => setDrawer((d) => !d)}
+      >
         {drawer ? t('play.drawerClose') : t('play.drawerOpen')}
       </button>
       {drawer ? (
-        <div style={{ marginTop: '10px' }}>
+        <div id="ew-panels-drawer" style={{ marginTop: '10px' }}>
           {(v.panels ?? []).length ? panels : (
             <div className="ew-note">{t('play.nothingToShow')}</div>
           )}

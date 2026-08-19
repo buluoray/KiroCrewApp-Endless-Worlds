@@ -118,6 +118,7 @@
   "play.rumour": "Rumour",
   "play.rumourSuffix": " — only hearsay",
   "play.sceneFailed": "This scene could not be drawn.",
+  "play.sceneLoading": "Drawing this scene…",
   "play.sceneTitle": "Scene",
   "play.silent": "(The world has not spoken yet.)",
   "play.stalled": "The world did not answer. Say it again.",

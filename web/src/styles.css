@@ -284,6 +284,15 @@
 }
 .ew-input:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }
 
+/* A visible keyboard focus ring on every custom control, so tabbing through the
+   app can be followed. :focus-visible keeps it off pointer clicks. */
+.ew-btn:focus-visible, .ew-opt:focus-visible, .ew-choice:focus-visible,
+.ew-drawer:focus-visible, .ew-card-open:focus-visible, .ew-slot-btn:focus-visible,
+.ew-rail-row:focus-visible, .ew-rail-home:focus-visible, .ew-back:focus-visible,
+.ew-section-toggle:focus-visible {
+  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;
+}
+
 /* Inline rename inside a life row: flexes to fill the row beside its save/cancel
    buttons rather than forcing them onto a second line. */
 .ew-rename-input {
