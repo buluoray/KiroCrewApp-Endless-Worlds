@@ -33,6 +33,7 @@
   "library.preparing": "Getting ready…",
   "library.removed": "You removed “{world}”.",
   "library.restore": "Put it back",
+  "library.retry": "Retry",
   "life.delete.aria": "Delete the life: {name}",
   "life.delete.changed": "This life moved on by a month elsewhere, so the number changed. Look again before deciding.",
   "life.delete.done": "The life was deleted ({n} months lived).",

@@ -146,6 +146,7 @@ export function WorldDetailView({
 }) {
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -155,7 +156,7 @@ export function WorldDetailView({
       .then((w) => { if (alive) setWorld(w) })
       .catch((e: Error) => { if (alive) setError(e.message) })
     return () => { alive = false }
-  }, [worldId])
+  }, [worldId, nonce])
 
   const back = (
     <button className="ew-back" type="button" onClick={onBack}>
@@ -168,6 +169,11 @@ export function WorldDetailView({
       <div>
         {back}
         <div className="ew-meta">{t('world.unreadableDetail', { error })}</div>
+        <div className="ew-bar">
+          <button className="ew-btn" type="button" onClick={() => setNonce((n) => n + 1)}>
+            {t('library.retry')}
+          </button>
+        </div>
       </div>
     )
   }

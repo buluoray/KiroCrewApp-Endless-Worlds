@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 //#region src/api.ts
 /** The app's HTTP surface, and the shapes it answers with.
@@ -123,6 +123,7 @@ var TABLES = {
 		"library.preparing": "正在准备…",
 		"library.removed": "「{world}」已被你移除。",
 		"library.restore": "重新装回",
+		"library.retry": "重试",
 		"life.delete.aria": "删除人生：{name}",
 		"life.delete.changed": "这条人生在别处又往前走了一个月，数目变了。请重新看一遍再决定。",
 		"life.delete.done": "人生已删除（活了 {n} 个月）。",
@@ -270,6 +271,7 @@ var TABLES = {
 		"library.preparing": "Getting ready…",
 		"library.removed": "You removed “{world}”.",
 		"library.restore": "Put it back",
+		"library.retry": "Retry",
 		"life.delete.aria": "Delete the life: {name}",
 		"life.delete.changed": "This life moved on by a month elsewhere, so the number changed. Look again before deciding.",
 		"life.delete.done": "The life was deleted ({n} months lived).",
@@ -383,10 +385,32 @@ var TABLES = {
 		"world.unreadableDetail": "This life cannot be read: {error}"
 	}
 };
+/**
+* The language `t()` and `pick()` render in.
+*
+* Read from module scope so that every call site stays a plain `t('key')` with no
+* hook, but it is DRIVEN by React state at the app root (see `LanguageProvider`):
+* the root sets this synchronously during its own render, so a change to the world
+* being played re-renders the whole tree and this value is already correct on that
+* same commit rather than one render late.
+*/
 var current = "zh";
-/** Follow the world being played. Unknown codes keep the previous choice. */
-function useLanguage(lang) {
-	if (lang === "zh" || lang === "en") current = lang;
+/** Normalise a world's declared code; unknown codes are not a language we have. */
+function asLang(lang) {
+	return lang === "zh" || lang === "en" ? lang : null;
+}
+/** Set the render language synchronously. Called by the root during render, never
+*  from an effect — an effect runs after the frame it should have governed. */
+function setCurrentLanguage(lang) {
+	current = lang;
+}
+/** Delivers the language setter down the tree so a page that learns its world's
+*  language (after a fetch) can apply it without prop-drilling. The re-render is
+*  driven by the root's own state, not by this context. */
+var LanguageContext = createContext(() => {});
+/** The function a page calls to make the app follow its world's language. */
+function useSetLanguage() {
+	return useContext(LanguageContext);
 }
 /**
 * One string, with `{name}` placeholders filled in.
@@ -1032,6 +1056,7 @@ function LifeRow({ run, onOpen, onDelete }) {
 function WorldDetailView({ worldId, onBack, onPlay, onDelete }) {
 	const [world, setWorld] = useState(null);
 	const [error, setError] = useState(null);
+	const [nonce, setNonce] = useState(0);
 	useEffect(() => {
 		let alive = true;
 		setWorld(null);
@@ -1044,17 +1069,29 @@ function WorldDetailView({ worldId, onBack, onPlay, onDelete }) {
 		return () => {
 			alive = false;
 		};
-	}, [worldId]);
+	}, [worldId, nonce]);
 	const back = /* @__PURE__ */ jsx("button", {
 		className: "ew-back",
 		type: "button",
 		onClick: onBack,
 		children: t("world.back")
 	});
-	if (error) return /* @__PURE__ */ jsxs("div", { children: [back, /* @__PURE__ */ jsx("div", {
-		className: "ew-meta",
-		children: t("world.unreadableDetail", { error })
-	})] });
+	if (error) return /* @__PURE__ */ jsxs("div", { children: [
+		back,
+		/* @__PURE__ */ jsx("div", {
+			className: "ew-meta",
+			children: t("world.unreadableDetail", { error })
+		}),
+		/* @__PURE__ */ jsx("div", {
+			className: "ew-bar",
+			children: /* @__PURE__ */ jsx("button", {
+				className: "ew-btn",
+				type: "button",
+				onClick: () => setNonce((n) => n + 1),
+				children: t("library.retry")
+			})
+		})
+	] });
 	if (!world) return /* @__PURE__ */ jsxs("div", { children: [back, /* @__PURE__ */ jsx("div", {
 		className: "ew-meta",
 		children: t("library.preparing")
@@ -1495,9 +1532,15 @@ function History({ runId }) {
 	useEffect(() => {
 		load(0);
 	}, [load]);
-	if (failed && !turns.length) return /* @__PURE__ */ jsx("div", {
+	if (failed && !turns.length) return /* @__PURE__ */ jsxs("div", {
 		className: "ew-meta",
-		children: t("history.unreadable")
+		children: [t("history.unreadable"), /* @__PURE__ */ jsx("button", {
+			className: "ew-btn ew-btn-sm",
+			type: "button",
+			style: { marginInlineStart: "8px" },
+			onClick: () => void load(0),
+			children: t("library.retry")
+		})]
 	});
 	if (!turns.length) return /* @__PURE__ */ jsx("div", {
 		className: "ew-meta",
@@ -1588,9 +1631,10 @@ function PlayPage({ runId, onBack, onScenes, onReplay, refresh }) {
 		return () => window.clearInterval(timer);
 	}, [generating, load]);
 	const busy = !!tapped || generating;
+	const setLanguage = useSetLanguage();
 	useEffect(() => {
-		useLanguage(v?.language);
-	}, [v]);
+		setLanguage(v?.language);
+	}, [v, setLanguage]);
 	useEffect(() => {
 		onScenes(v?.scenes ?? []);
 	}, [v, onScenes]);
@@ -1620,15 +1664,30 @@ function PlayPage({ runId, onBack, onScenes, onReplay, refresh }) {
 		}
 		setTapped("");
 	};
-	if (error) return /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("button", {
-		className: "ew-back",
-		type: "button",
-		onClick: onBack,
-		children: t("play.back")
-	}), /* @__PURE__ */ jsx("div", {
-		className: "ew-meta",
-		children: t("world.unreadableDetail", { error })
-	})] });
+	if (error) return /* @__PURE__ */ jsxs("div", { children: [
+		/* @__PURE__ */ jsx("button", {
+			className: "ew-back",
+			type: "button",
+			onClick: onBack,
+			children: t("play.back")
+		}),
+		/* @__PURE__ */ jsx("div", {
+			className: "ew-meta",
+			children: t("world.unreadableDetail", { error })
+		}),
+		/* @__PURE__ */ jsx("div", {
+			className: "ew-bar",
+			children: /* @__PURE__ */ jsx("button", {
+				className: "ew-btn",
+				type: "button",
+				onClick: () => {
+					setError(null);
+					load();
+				},
+				children: t("play.retry")
+			})
+		})
+	] });
 	if (!v) return /* @__PURE__ */ jsx("div", {
 		className: "ew-meta",
 		children: t("play.opening")
@@ -2131,6 +2190,12 @@ function EndlessWorlds() {
 	/** Which life's deletion is being confirmed, or null. */
 	const [doomedLife, setDoomedLife] = useState(null);
 	const [note, setNote] = useState("");
+	const [lang, setLangState] = useState("zh");
+	setCurrentLanguage(lang);
+	const applyLanguage = useCallback((code) => {
+		const next = asLang(code);
+		if (next) setLangState(next);
+	}, []);
 	const load = useCallback(async () => {
 		setError(null);
 		try {
@@ -2153,15 +2218,35 @@ function EndlessWorlds() {
 		const where = recall();
 		if (!where) return;
 		if (where.view === "live" && where.runId) {
-			setLive(where.runId);
-			setView("live");
+			const rid = where.runId;
+			api.run(rid).then((v) => {
+				applyLanguage(v.language);
+				setLive(rid);
+				setView("live");
+			}).catch(() => {
+				forget();
+			});
+			return;
+		}
+		if (where.view === "detail" && where.worldId) {
+			const wid = where.worldId;
+			api.world(wid).then((w) => {
+				applyLanguage(w.language);
+				setSelected(wid);
+				setView("detail");
+			}).catch(() => {
+				forget();
+			});
 			return;
 		}
 		if (where.view === "opening" && where.worldId) api.world(where.worldId).then((w) => {
+			applyLanguage(w.language);
 			setWorld(w);
 			setView("opening");
-		}).catch(() => {});
-	}, []);
+		}).catch(() => {
+			forget();
+		});
+	}, [applyLanguage]);
 	const home = () => {
 		forget();
 		setView("library");
@@ -2275,20 +2360,32 @@ function EndlessWorlds() {
 				view: "opening",
 				worldId: w.worldId
 			});
-			useLanguage(w.language);
+			applyLanguage(w.language);
 			setWorld(w);
 			setView("opening");
 		}
 	});
 	else if (error) body = /* @__PURE__ */ jsxs("div", {
 		className: "ew-meta",
-		children: [/* @__PURE__ */ jsx("div", {
-			style: { marginBottom: "6px" },
-			children: t("library.backendSilent")
-		}), /* @__PURE__ */ jsx("div", { children: t("library.backendHint", {
-			path: "/worlds",
-			error
-		}) })]
+		children: [
+			/* @__PURE__ */ jsx("div", {
+				style: { marginBottom: "6px" },
+				children: t("library.backendSilent")
+			}),
+			/* @__PURE__ */ jsx("div", { children: t("library.backendHint", {
+				path: "/worlds",
+				error
+			}) }),
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-bar",
+				children: /* @__PURE__ */ jsx("button", {
+					className: "ew-btn",
+					type: "button",
+					onClick: () => void load(),
+					children: t("library.retry")
+				})
+			})
+		]
 	});
 	else if (!worlds) body = /* @__PURE__ */ jsx("div", {
 		className: "ew-meta",
@@ -2354,54 +2451,57 @@ function EndlessWorlds() {
 			}, "removed-" + id))
 		] });
 	}
-	return /* @__PURE__ */ jsxs("div", {
-		className: "ew-root",
-		children: [
-			/* @__PURE__ */ jsx("style", { children: styles_default }),
-			/* @__PURE__ */ jsxs("div", {
-				className: "ew-head",
-				children: [/* @__PURE__ */ jsx(Glyph, {}), /* @__PURE__ */ jsx("h2", { children: t("app.title") })]
-			}),
-			note ? /* @__PURE__ */ jsxs("div", {
-				className: "ew-note ew-note-row",
-				children: [/* @__PURE__ */ jsx("span", { children: note }), /* @__PURE__ */ jsx("button", {
-					className: "ew-btn ew-btn-quiet",
-					type: "button",
-					onClick: () => setNote(""),
-					children: t("note.dismiss")
-				})]
-			}) : null,
-			/* @__PURE__ */ jsxs("div", {
-				className: "ew-shell",
-				children: [/* @__PURE__ */ jsx(WorldRail, {
-					worlds,
-					runs,
-					activeRunId: live,
-					activeWorldId: world?.worldId ?? selected,
-					onWorld: openWorld,
-					onLife: enterLife,
-					onHome: home
-				}), /* @__PURE__ */ jsx("div", {
-					className: "ew-main",
-					children: body
-				})]
-			}),
-			live ? scenes.map((s) => /* @__PURE__ */ jsx(SceneSlot, {
-				runId: live,
-				sceneId: s.sceneId,
-				onChoice: onSceneChoice
-			}, s.sceneId)) : null,
-			doomed ? /* @__PURE__ */ jsx(DeleteWorldDialog, {
-				worldId: doomed,
-				onCancel: () => setDoomed(null),
-				onDeleted: afterDelete
-			}) : null,
-			doomedLife ? /* @__PURE__ */ jsx(DeleteLifeDialog, {
-				runId: doomedLife,
-				onCancel: () => setDoomedLife(null),
-				onDeleted: afterLifeDelete
-			}) : null
-		]
+	return /* @__PURE__ */ jsx(LanguageContext.Provider, {
+		value: applyLanguage,
+		children: /* @__PURE__ */ jsxs("div", {
+			className: "ew-root",
+			children: [
+				/* @__PURE__ */ jsx("style", { children: styles_default }),
+				/* @__PURE__ */ jsxs("div", {
+					className: "ew-head",
+					children: [/* @__PURE__ */ jsx(Glyph, {}), /* @__PURE__ */ jsx("h2", { children: t("app.title") })]
+				}),
+				note ? /* @__PURE__ */ jsxs("div", {
+					className: "ew-note ew-note-row",
+					children: [/* @__PURE__ */ jsx("span", { children: note }), /* @__PURE__ */ jsx("button", {
+						className: "ew-btn ew-btn-quiet",
+						type: "button",
+						onClick: () => setNote(""),
+						children: t("note.dismiss")
+					})]
+				}) : null,
+				/* @__PURE__ */ jsxs("div", {
+					className: "ew-shell",
+					children: [/* @__PURE__ */ jsx(WorldRail, {
+						worlds,
+						runs,
+						activeRunId: live,
+						activeWorldId: world?.worldId ?? selected,
+						onWorld: openWorld,
+						onLife: enterLife,
+						onHome: home
+					}), /* @__PURE__ */ jsx("div", {
+						className: "ew-main",
+						children: body
+					})]
+				}),
+				live ? scenes.map((s) => /* @__PURE__ */ jsx(SceneSlot, {
+					runId: live,
+					sceneId: s.sceneId,
+					onChoice: onSceneChoice
+				}, s.sceneId)) : null,
+				doomed ? /* @__PURE__ */ jsx(DeleteWorldDialog, {
+					worldId: doomed,
+					onCancel: () => setDoomed(null),
+					onDeleted: afterDelete
+				}) : null,
+				doomedLife ? /* @__PURE__ */ jsx(DeleteLifeDialog, {
+					runId: doomedLife,
+					onCancel: () => setDoomedLife(null),
+					onDeleted: afterLifeDelete
+				}) : null
+			]
+		})
 	});
 }
 //#endregion

@@ -41,7 +41,19 @@ export function History({ runId }: { runId: string }) {
   useEffect(() => { void load(0) }, [load])
 
   if (failed && !turns.length) {
-    return <div className="ew-meta">{t('history.unreadable')}</div>
+    return (
+      <div className="ew-meta">
+        {t('history.unreadable')}
+        <button
+          className="ew-btn ew-btn-sm"
+          type="button"
+          style={{ marginInlineStart: '8px' }}
+          onClick={() => void load(0)}
+        >
+          {t('library.retry')}
+        </button>
+      </div>
+    )
   }
   if (!turns.length) {
     return <div className="ew-meta">{busy ? t('history.reading') : t('history.none')}</div>

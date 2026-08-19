@@ -9,7 +9,7 @@ import { PlayPage } from './play'
 import { WorldRail } from './rail'
 import { SceneSlot } from './scene'
 import styles from './styles.css?raw'
-import { t, useLanguage } from './strings'
+import { asLang, LanguageContext, setCurrentLanguage, t, type Lang } from './strings'
 import { Glyph } from './ui'
 
 /** Where the player was, so leaving the page does not throw them back to the
@@ -67,6 +67,17 @@ export default function EndlessWorlds() {
   const [doomedLife, setDoomedLife] = useState<string | null>(null)
   const [note, setNote] = useState<string>('')
 
+  // The render language is React state at the root: setting it synchronously here
+  // (not in an effect) means a world of a different language re-renders the whole
+  // tree already speaking it, rather than one frame late. `t()` reads this module
+  // value, so no call site needs a hook.
+  const [lang, setLangState] = useState<Lang>('zh')
+  setCurrentLanguage(lang)
+  const applyLanguage = useCallback((code?: string) => {
+    const next = asLang(code)
+    if (next) setLangState(next)
+  }, [])
+
   const load = useCallback(async () => {
     setError(null)
     try {
@@ -91,8 +102,19 @@ export default function EndlessWorlds() {
     const where = recall()
     if (!where) return
     if (where.view === 'live' && where.runId) {
-      setLive(where.runId)
-      setView('live')
+      const rid = where.runId
+      // Verify the life still exists: a remembered life that was since deleted must
+      // clear the stale location and land on the shelf, not open a 404 page.
+      api.run(rid)
+        .then((v) => { applyLanguage(v.language); setLive(rid); setView('live') })
+        .catch(() => { forget() })
+      return
+    }
+    if (where.view === 'detail' && where.worldId) {
+      const wid = where.worldId
+      api.world(wid)
+        .then((w) => { applyLanguage(w.language); setSelected(wid); setView('detail') })
+        .catch(() => { forget() })
       return
     }
     // The opening screen is restorable now that its answers are kept with it. Its
@@ -100,10 +122,10 @@ export default function EndlessWorlds() {
     // declared groups and those are not the player's to cache.
     if (where.view === 'opening' && where.worldId) {
       api.world(where.worldId)
-        .then((w) => { setWorld(w); setView('opening') })
-        .catch(() => { /* the world is gone; the shelf is the honest landing */ })
+        .then((w) => { applyLanguage(w.language); setWorld(w); setView('opening') })
+        .catch(() => { forget() })
     }
-  }, [])
+  }, [applyLanguage])
 
   const home = () => {
     forget()
@@ -217,7 +239,7 @@ export default function EndlessWorlds() {
         onDelete={setDoomed}
         onPlay={(w) => {
           remember({ view: 'opening', worldId: w.worldId })
-          useLanguage(w.language)
+          applyLanguage(w.language)
           setWorld(w)
           setView('opening')
         }}
@@ -228,6 +250,11 @@ export default function EndlessWorlds() {
       <div className="ew-meta">
         <div style={{ marginBottom: '6px' }}>{t('library.backendSilent')}</div>
         <div>{t('library.backendHint', { path: '/worlds', error })}</div>
+        <div className="ew-bar">
+          <button className="ew-btn" type="button" onClick={() => void load()}>
+            {t('library.retry')}
+          </button>
+        </div>
       </div>
     )
   } else if (!worlds) {
@@ -306,6 +333,7 @@ export default function EndlessWorlds() {
   }
 
   return (
+    <LanguageContext.Provider value={applyLanguage}>
     <div className="ew-root">
       {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
@@ -365,5 +393,6 @@ export default function EndlessWorlds() {
         />
       ) : null}
     </div>
+    </LanguageContext.Provider>
   )
 }

@@ -19,7 +19,7 @@ const GENERATING_POLL_MS = 3000
 const ACT = 'act'
 const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
-import { pick, t, useLanguage } from './strings'
+import { pick, t, useSetLanguage } from './strings'
 import { History } from './history'
 import { PanelBox, Prose, Waiting } from './ui'
 
@@ -79,8 +79,11 @@ export function PlayPage({
   // work — including one asked for by a page they have since closed.
   const busy = !!tapped || generating
 
-  // The world's own language, not the build's.
-  useEffect(() => { useLanguage(v?.language) }, [v])
+  // The world's own language, not the build's. Setting it at the root re-renders
+  // this page already speaking it (the setter is stable; the re-render is driven by
+  // the root's state).
+  const setLanguage = useSetLanguage()
+  useEffect(() => { setLanguage(v?.language) }, [v, setLanguage])
 
   // Every mounted scene is reported upward, in the order it was mounted. The app
   // root draws one persistent frame per scene: an asking scene the player answers,
@@ -121,6 +124,11 @@ export function PlayPage({
       <div>
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         <div className="ew-meta">{t('world.unreadableDetail', { error })}</div>
+        <div className="ew-bar">
+          <button className="ew-btn" type="button" onClick={() => { setError(null); void load() }}>
+            {t('play.retry')}
+          </button>
+        </div>
       </div>
     )
   }

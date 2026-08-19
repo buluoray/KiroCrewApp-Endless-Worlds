@@ -1,3 +1,5 @@
+import { createContext, useContext } from 'react'
+
 import en from './strings/en.json'
 import zh from './strings/zh.json'
 
@@ -17,11 +19,36 @@ export type Lang = 'zh' | 'en'
 
 const TABLES: Record<Lang, Record<string, string>> = { zh, en }
 
+/**
+ * The language `t()` and `pick()` render in.
+ *
+ * Read from module scope so that every call site stays a plain `t('key')` with no
+ * hook, but it is DRIVEN by React state at the app root (see `LanguageProvider`):
+ * the root sets this synchronously during its own render, so a change to the world
+ * being played re-renders the whole tree and this value is already correct on that
+ * same commit rather than one render late.
+ */
 let current: Lang = 'zh'
 
-/** Follow the world being played. Unknown codes keep the previous choice. */
-export function useLanguage(lang: string | undefined): void {
-  if (lang === 'zh' || lang === 'en') current = lang
+/** Normalise a world's declared code; unknown codes are not a language we have. */
+export function asLang(lang: string | undefined): Lang | null {
+  return lang === 'zh' || lang === 'en' ? lang : null
+}
+
+/** Set the render language synchronously. Called by the root during render, never
+ *  from an effect — an effect runs after the frame it should have governed. */
+export function setCurrentLanguage(lang: Lang): void {
+  current = lang
+}
+
+/** Delivers the language setter down the tree so a page that learns its world's
+ *  language (after a fetch) can apply it without prop-drilling. The re-render is
+ *  driven by the root's own state, not by this context. */
+export const LanguageContext = createContext<(lang: string | undefined) => void>(() => {})
+
+/** The function a page calls to make the app follow its world's language. */
+export function useSetLanguage(): (lang: string | undefined) => void {
+  return useContext(LanguageContext)
 }
 
 /**

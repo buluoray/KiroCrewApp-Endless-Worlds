@@ -33,6 +33,7 @@
   "library.preparing": "正在准备…",
   "library.removed": "「{world}」已被你移除。",
   "library.restore": "重新装回",
+  "library.retry": "重试",
   "life.delete.aria": "删除人生：{name}",
   "life.delete.changed": "这条人生在别处又往前走了一个月，数目变了。请重新看一遍再决定。",
   "life.delete.done": "人生已删除（活了 {n} 个月）。",
