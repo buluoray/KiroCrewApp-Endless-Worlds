@@ -602,11 +602,9 @@
   animation: ew-rise .16s ease-out;
 }
 .ew-confirm-act { padding-left: 0; }
-/* The ask sits on its own line above the buttons — the confirmation reads as a
-   sentence, not as a label crammed against two controls. */
-.ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); flex: 0 0 100%; margin: 0 0 2px; }
+.ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); margin-right: 2px; }
 .ew-btn-sm { min-height: 36px; padding: 0 14px; font-size: 13px; flex: 0 0 auto; }
-.ew-note-live { display: flex; align-items: center; margin-top: 10px; }
+.ew-note-live { display: flex; align-items: center; margin-top: 10px; min-width: 0; }
 
 /* ── waiting ──────────────────────────────────────────────────────────────
    The app's only animation, introduced with its reduced-motion answer in the same
@@ -615,11 +613,12 @@
    media query means shipping the version without it. */
 
 .ew-wait {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
   vertical-align: middle; margin-left: 8px; position: relative; z-index: 1;
+  min-width: 0; max-width: 100%;
 }
-.ew-wait-dots { display: inline-flex; gap: 4px; }
-.ew-wait-label { font-size: 12px; color: var(--muted, #6b7280); }
+.ew-wait-dots { display: inline-flex; gap: 4px; flex: 0 0 auto; }
+.ew-wait-label { font-size: 12px; color: var(--muted, #6b7280); min-width: 0; overflow-wrap: anywhere; }
 
 .ew-dot {
   width: 5px; height: 5px; border-radius: 50%;
