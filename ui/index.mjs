@@ -2272,6 +2272,12 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 		const timer = window.setInterval(() => setArrange(pick("opening.waiting")), 4e3);
 		return () => window.clearInterval(timer);
 	}, [v?.awaitingOpening, generating]);
+	useEffect(() => {
+		if (!(generating && !awaiting)) return void 0;
+		setPhrase(pick("play.waiting"));
+		const timer = window.setInterval(() => setPhrase(pick("play.waiting")), 4e3);
+		return () => window.clearInterval(timer);
+	}, [generating, awaiting]);
 	const setLanguage = useSetLanguage();
 	useEffect(() => {
 		setLanguage(v?.language);

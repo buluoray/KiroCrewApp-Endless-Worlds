@@ -149,6 +149,16 @@ export function PlayPage({
     return () => window.clearInterval(timer)
   }, [v?.awaitingOpening, generating])
 
+  // Cycle the mid-life waiting flavour the same way while a month is written (the
+  // opening screen has its own rotation just above). Rotating rather than picking
+  // once keeps the wait alive and shows off the several tuned play.waiting lines.
+  useEffect(() => {
+    if (!(generating && !awaiting)) return undefined
+    setPhrase(pick('play.waiting'))
+    const timer = window.setInterval(() => setPhrase(pick('play.waiting')), 4000)
+    return () => window.clearInterval(timer)
+  }, [generating, awaiting])
+
   // The world's own language, not the build's. Setting it at the root re-renders
   // this page already speaking it (the setter is stable; the re-render is driven by
   // the root's state).
