@@ -59,7 +59,7 @@ opening:
   - { id: name, label: 姓名, kind: text }
   # 第一百六十一章 — 从18岁开始,活到90岁。
   - { id: age, label: 年龄, kind: number }
-  - { id: sex, label: 性别, kind: text }
+  - { id: sex, label: 性别, kind: pick, custom: true, options: [男, 女] }
   - { id: birthplace, label: 出生地, kind: text }
   - { id: family, label: 家庭状况, kind: text }
   - { id: skills, label: 初始技能, kind: text }

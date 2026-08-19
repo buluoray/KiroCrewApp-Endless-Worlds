@@ -53,7 +53,7 @@ opening:
   - { id: name, label: Name, kind: text }
   # Chapter 161 — begins at age 18, lives to 90.
   - { id: age, label: Age, kind: number }
-  - { id: sex, label: Sex, kind: text }
+  - { id: sex, label: Sex, kind: pick, custom: true, options: [Male, Female] }
   - { id: birthplace, label: Birthplace, kind: text }
   - { id: family, label: Family Circumstances, kind: text }
   - { id: skills, label: Starting Skills, kind: text }

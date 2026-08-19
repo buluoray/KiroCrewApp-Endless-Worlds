@@ -602,7 +602,9 @@
   animation: ew-rise .16s ease-out;
 }
 .ew-confirm-act { padding-left: 0; }
-.ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); margin-right: 2px; }
+/* The ask sits on its own line above the buttons — the confirmation reads as a
+   sentence, not as a label crammed against two controls. */
+.ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); flex: 0 0 100%; margin: 0 0 2px; }
 .ew-btn-sm { min-height: 36px; padding: 0 14px; font-size: 13px; flex: 0 0 auto; }
 .ew-note-live { display: flex; align-items: center; margin-top: 10px; }
 
