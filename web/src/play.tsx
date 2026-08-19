@@ -213,9 +213,9 @@ export function PlayPage({
       if (loadedRun.current !== runId) {
         loadedRun.current = runId
         const recap = next.recap
-        setRecapOpen(next.turn > 1 && !!(
-          recap.lastAction || recap.events.length || recap.choices.length
-        ))
+        // choices are no longer shown here (they duplicate the bottom choice list),
+        // so they no longer justify opening the recap on their own.
+        setRecapOpen(next.turn > 1 && !!(recap.lastAction || recap.events.length))
       }
     } catch (e) {
       setError((e as Error).message)
@@ -517,16 +517,6 @@ export function PlayPage({
               <ul className="ew-recap-list">
                 {recap.events.map((event) => <li key={event}>{event}</li>)}
               </ul>
-            </>
-          ) : null}
-          {recap.choices.length ? (
-            <>
-              <div className="ew-recap-label">{t('play.recapNow')}</div>
-              <div className="ew-recap-choices">
-                {recap.choices.map((choice) => (
-                  <span className="ew-recap-choice" key={choice}>{choice}</span>
-                ))}
-              </div>
             </>
           ) : null}
         </section>
