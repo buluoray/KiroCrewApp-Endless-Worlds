@@ -143,6 +143,7 @@ _drop_stale_siblings()
 from chapters import brief as world_brief  # noqa: E402
 from chapters import opened_since  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
+from memory_routes import memory_routes  # noqa: E402
 from narrator import purge_narrator_session, release_narrator_slot  # noqa: E402
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
 from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
@@ -1378,4 +1379,8 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
             method="GET", path="/runs/{run_id}/chronicle", handler=get_chronicle
         ),
         AppRoute(method="POST", path="/runs/{run_id}/turn", handler=advance_run_turn),
+        # The life star map + keepsakes (design §8.2/§8.3); handlers live in
+        # memory_routes.py so the player meaning layer stays apart from the
+        # turn loop.
+        *memory_routes(),
     ]

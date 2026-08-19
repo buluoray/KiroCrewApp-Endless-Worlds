@@ -49,6 +49,13 @@ function post(path, body) {
 		body: JSON.stringify(body ?? {})
 	});
 }
+function send(method, path, body) {
+	return json(path, {
+		method,
+		headers: { "Content-Type": "application/json" },
+		body: body === void 0 ? void 0 : JSON.stringify(body)
+	});
+}
 var api = {
 	worlds: (language) => json(`/worlds${language ? `?language=${encodeURIComponent(language)}` : ""}`),
 	settings: () => json("/settings"),
@@ -118,11 +125,18 @@ var api = {
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		return res.text();
 	},
-	answerScene: (runId, sceneId, body) => post(`/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}/answer`, body)
+	answerScene: (runId, sceneId, body) => post(`/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}/answer`, body),
+	/** The sparse graph all three star-map lenses share — one request per open. */
+	star: (runId) => json(`/runs/${encodeURIComponent(runId)}/memory/star`),
+	/** Remember this life's last-used lens. Fire-and-forget metadata. */
+	setMemoryView: (runId, view) => send("PATCH", `/runs/${encodeURIComponent(runId)}/preferences/memory-view`, { view }),
+	createKeepsake: (runId, body) => post(`/runs/${encodeURIComponent(runId)}/keepsakes`, body),
+	updateKeepsake: (runId, keepsakeId, body) => send("PATCH", `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`, body),
+	deleteKeepsake: (runId, keepsakeId) => send("DELETE", `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`)
 };
 //#endregion
 //#region src/strings.ts
-var TABLES = {
+var TABLES$1 = {
 	zh: {
 		"app.title": "无限世界",
 		"app.language": "界面语言",
@@ -627,8 +641,8 @@ function useSetLanguage() {
 * sentence should be looks like a design choice.
 */
 function t(key, vars = {}) {
-	const table = TABLES[current];
-	const fallback = TABLES.en;
+	const table = TABLES$1[current];
+	const fallback = TABLES$1.en;
 	return (table[key] ?? fallback[key] ?? key).replace(/\{(\w+)\}/g, (whole, name) => name in vars ? String(vars[name]) : whole);
 }
 /**
@@ -644,8 +658,8 @@ function t(key, vars = {}) {
 * being written — the phrase would flicker through the whole set.
 */
 function pick(prefix, vars = {}) {
-	const table = TABLES[current];
-	const fallback = TABLES.en;
+	const table = TABLES$1[current];
+	const fallback = TABLES$1.en;
 	const variants = [];
 	for (let i = 0;; i += 1) {
 		const key = `${prefix}.${i}`;
@@ -2217,6 +2231,888 @@ function LifeSummary({ runId }) {
 	});
 }
 //#endregion
+//#region src/memory-state.ts
+var ALL_FILTERS = {
+	characters: true,
+	places: true,
+	groups: true,
+	objects: true,
+	threads: true
+};
+var KIND_TO_FILTER = {
+	character: "characters",
+	place: "places",
+	group: "groups",
+	object: "objects",
+	thread: "threads"
+};
+function nodeVisible(node, filters) {
+	if (node.kind === "event") return true;
+	const key = KIND_TO_FILTER[node.kind];
+	return key ? filters[key] : true;
+}
+/** The nodes adjacent to `id`, for the detail panel's one-hop expansion. */
+function neighbours(payload, id) {
+	const wanted = /* @__PURE__ */ new Set();
+	for (const e of payload.edges) {
+		if (e.from === id) wanted.add(e.to);
+		if (e.to === id) wanted.add(e.from);
+	}
+	return payload.nodes.filter((n) => wanted.has(n.id));
+}
+function nodeById(payload, id) {
+	return payload.nodes.find((n) => n.id === id);
+}
+/** A node's display name, whatever its kind. */
+function nodeLabel(node) {
+	return node.kind === "event" ? node.title ?? node.id : node.name ?? node.id;
+}
+var TABLES = {
+	zh: {
+		"star.title": "人生星图",
+		"star.close": "返回故事",
+		"star.lens.life": "人生",
+		"star.lens.people": "人物",
+		"star.lens.keepsakes": "纪念",
+		"star.empty": "这段人生还没有留下可以画进星图的事。往前走，世界会记住的。",
+		"star.hint": "星图不会改变故事——它只是世界记得你的方式。",
+		"star.filter.characters": "人物",
+		"star.filter.places": "地点",
+		"star.filter.groups": "群体",
+		"star.filter.objects": "物品",
+		"star.filter.threads": "线索",
+		"star.detail.turn": "第 {n} 页",
+		"star.detail.jump": "回到那一页",
+		"star.detail.action": "你当时的选择",
+		"star.detail.related": "相关",
+		"star.detail.echoed": "被回响于第 {n} 页",
+		"star.detail.thread.open": "仍未了结",
+		"star.detail.thread.done": "已了结",
+		"star.keep.this": "收藏这一刻",
+		"star.keep.kept": "已收藏",
+		"star.people.centre": "以谁为中心",
+		"star.people.none": "这段人生还没有记下与人的往来。",
+		"star.rel.evidence": "因为这些事",
+		"star.mode.canvas": "画布",
+		"star.mode.list": "列表",
+		"star.keeps.none": "还没有纪念。在回响或星图节点上点「收藏」，把重要的时刻留在这里。",
+		"star.keeps.thought": "感想",
+		"star.keeps.thoughtPlaceholder": "为什么这一刻重要…",
+		"star.keeps.rename": "重命名",
+		"star.keeps.save": "保存",
+		"star.keeps.delete": "删除",
+		"star.keeps.deleteAsk": "删除这份纪念？事实不会消失，只是不再被你标记。",
+		"star.keeps.deleteYes": "删除",
+		"star.keeps.deleteNo": "留着",
+		"star.keeps.cites": "引用的时刻",
+		"star.keeps.excerpt": "摘录",
+		"star.keeps.newTitle": "未命名的纪念"
+	},
+	en: {
+		"star.title": "Life star map",
+		"star.close": "Back to the story",
+		"star.lens.life": "Life",
+		"star.lens.people": "People",
+		"star.lens.keepsakes": "Keepsakes",
+		"star.empty": "Nothing has been drawn into this map yet. Keep going — the world will remember.",
+		"star.hint": "The map never changes the story — it is only how the world remembers you.",
+		"star.filter.characters": "People",
+		"star.filter.places": "Places",
+		"star.filter.groups": "Groups",
+		"star.filter.objects": "Objects",
+		"star.filter.threads": "Threads",
+		"star.detail.turn": "Page {n}",
+		"star.detail.jump": "Back to that page",
+		"star.detail.action": "What you chose then",
+		"star.detail.related": "Related",
+		"star.detail.echoed": "Echoed on page {n}",
+		"star.detail.thread.open": "Still open",
+		"star.detail.thread.done": "Settled",
+		"star.keep.this": "Keep this moment",
+		"star.keep.kept": "Kept",
+		"star.people.centre": "Centred on",
+		"star.people.none": "No dealings with anyone have been recorded yet.",
+		"star.rel.evidence": "Because of",
+		"star.mode.canvas": "Canvas",
+		"star.mode.list": "List",
+		"star.keeps.none": "No keepsakes yet. Tap \"keep\" on an echo or a map node to hold on to a moment.",
+		"star.keeps.thought": "Thought",
+		"star.keeps.thoughtPlaceholder": "Why this moment matters…",
+		"star.keeps.rename": "Rename",
+		"star.keeps.save": "Save",
+		"star.keeps.delete": "Delete",
+		"star.keeps.deleteAsk": "Delete this keepsake? The facts stay; only your mark on them goes.",
+		"star.keeps.deleteYes": "Delete",
+		"star.keeps.deleteNo": "Keep it",
+		"star.keeps.cites": "Cited moments",
+		"star.keeps.excerpt": "Excerpt",
+		"star.keeps.newTitle": "Untitled keepsake"
+	}
+};
+function mt(lang, key, vars = {}) {
+	return ((lang === "zh" ? TABLES.zh : TABLES.en)[key] ?? TABLES.en[key] ?? key).replace(/\{(\w+)\}/g, (whole, name) => name in vars ? String(vars[name]) : whole);
+}
+//#endregion
+//#region src/memory-layouts/timeline.tsx
+function TimelineLens({ payload, lang, focus, setFocus, filters }) {
+	const events = payload.nodes.filter((n) => n.kind === "event").sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0) || a.id.localeCompare(b.id));
+	if (!events.length) return /* @__PURE__ */ jsx("div", {
+		className: "ews-empty",
+		children: mt(lang, "star.empty")
+	});
+	const byId = new Map(payload.nodes.map((n) => [n.id, n]));
+	const echoOf = /* @__PURE__ */ new Map();
+	for (const e of payload.edges) if (e.type === "echoes") echoOf.set(e.from, [...echoOf.get(e.from) ?? [], e.to]);
+	const attached = /* @__PURE__ */ new Map();
+	for (const e of payload.edges) {
+		if (e.type === "echoes") continue;
+		const event = e.type === "participated_in" ? e.to : e.from;
+		const entity = e.type === "participated_in" ? e.from : e.to;
+		const node = byId.get(entity);
+		if (!node || node.kind === "event" || !nodeVisible(node, filters)) continue;
+		const list = attached.get(event) ?? [];
+		if (!list.some((n) => n.id === node.id)) list.push(node);
+		attached.set(event, list);
+	}
+	return /* @__PURE__ */ jsx("div", {
+		className: "ews-timeline",
+		role: "list",
+		children: events.map((ev) => {
+			const selected = ev.id === focus;
+			const echoes = echoOf.get(ev.id) ?? [];
+			return /* @__PURE__ */ jsxs("div", {
+				className: "ews-tl-row",
+				role: "listitem",
+				children: [/* @__PURE__ */ jsx("div", {
+					className: "ews-tl-spine",
+					"aria-hidden": "true",
+					children: /* @__PURE__ */ jsx("span", { className: "ews-tl-dot" + (ev.importance === "major" ? " ews-tl-dot-major" : "") + (selected ? " ews-tl-dot-sel" : "") })
+				}), /* @__PURE__ */ jsxs("div", {
+					className: "ews-tl-body",
+					children: [
+						/* @__PURE__ */ jsxs("button", {
+							className: "ews-node" + (selected ? " ews-node-sel" : ""),
+							type: "button",
+							"aria-pressed": selected,
+							onClick: () => setFocus(ev.id),
+							children: [/* @__PURE__ */ jsx("span", {
+								className: "ews-tl-turn",
+								children: mt(lang, "star.detail.turn", { n: ev.turn ?? 0 })
+							}), /* @__PURE__ */ jsx("span", {
+								className: "ews-tl-title",
+								children: ev.title
+							})]
+						}),
+						echoes.map((target) => {
+							const src = byId.get(target);
+							return src ? /* @__PURE__ */ jsxs("button", {
+								className: "ews-echo-ref",
+								type: "button",
+								onClick: () => setFocus(target),
+								children: [
+									mt(lang, "star.detail.echoed", { n: src.turn ?? 0 }),
+									" · ",
+									nodeLabel(src)
+								]
+							}, target) : null;
+						}),
+						(attached.get(ev.id) ?? []).length ? /* @__PURE__ */ jsx("div", {
+							className: "ews-tl-cluster",
+							children: (attached.get(ev.id) ?? []).map((n) => /* @__PURE__ */ jsx("button", {
+								className: "ews-chip ews-chip-" + n.kind + (n.id === focus ? " ews-chip-sel" : ""),
+								type: "button",
+								onClick: () => setFocus(n.id),
+								children: nodeLabel(n)
+							}, n.id))
+						}) : null
+					]
+				})]
+			}, ev.id);
+		})
+	});
+}
+//#endregion
+//#region src/memory-layouts/relations.tsx
+var SIZE = 620;
+var CX = SIZE / 2;
+function ring(index, count, radius) {
+	const angle = index / Math.max(count, 1) * Math.PI * 2 - Math.PI / 2;
+	return {
+		x: CX + radius * Math.cos(angle),
+		y: CX + radius * Math.sin(angle)
+	};
+}
+function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCentre, mode }) {
+	const characters = payload.nodes.filter((n) => n.kind === "character" && nodeVisible(n, filters));
+	const relations = payload.relations.filter((r) => r.from === centre || r.to === centre);
+	if (!characters.length && !relations.length) return /* @__PURE__ */ jsx("div", {
+		className: "ews-empty",
+		children: mt(lang, "star.people.none")
+	});
+	const partners = /* @__PURE__ */ new Map();
+	for (const r of relations) {
+		const other = r.from === centre ? r.to : r.from;
+		partners.set(other, [...partners.get(other) ?? [], r]);
+	}
+	const inner = [...partners.keys()].map((id) => nodeById(payload, id)).filter((n) => !!n && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
+	const outer = payload.nodes.filter((n) => n.kind !== "event" && n.id !== centre && !partners.has(n.id) && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
+	const centreLabel = centre === "player" ? mt(lang, "star.lens.life") : nodeLabel(nodeById(payload, centre) ?? {
+		id: centre,
+		kind: "character",
+		name: centre
+	});
+	const picker = /* @__PURE__ */ jsxs("div", {
+		className: "ews-centre-row",
+		children: [
+			/* @__PURE__ */ jsx("span", {
+				className: "ews-centre-label",
+				children: mt(lang, "star.people.centre")
+			}),
+			/* @__PURE__ */ jsx("button", {
+				className: "ews-chip" + (centre === "player" ? " ews-chip-sel" : ""),
+				type: "button",
+				onClick: () => setCentre("player"),
+				children: lang === "zh" ? "我" : "Me"
+			}),
+			characters.map((c) => /* @__PURE__ */ jsx("button", {
+				className: "ews-chip ews-chip-character" + (centre === c.id ? " ews-chip-sel" : ""),
+				type: "button",
+				onClick: () => setCentre(c.id),
+				children: nodeLabel(c)
+			}, c.id))
+		]
+	});
+	if (mode === "list") return /* @__PURE__ */ jsxs("div", { children: [picker, /* @__PURE__ */ jsx("div", {
+		className: "ews-rel-list",
+		children: relations.map((r, i) => {
+			const other = r.from === centre ? r.to : r.from;
+			const node = nodeById(payload, other);
+			return /* @__PURE__ */ jsxs("div", {
+				className: "ews-rel-row",
+				children: [
+					/* @__PURE__ */ jsx("button", {
+						className: "ews-node" + (focus === other ? " ews-node-sel" : ""),
+						type: "button",
+						onClick: () => setFocus(other),
+						children: node ? nodeLabel(node) : other
+					}),
+					/* @__PURE__ */ jsxs("span", {
+						className: "ews-rel-kind",
+						children: [r.type, r.value ? ` · ${r.value}` : r.level ? ` · ${r.level > 0 ? "+" : ""}${r.level}` : ""]
+					}),
+					r.sources.length ? /* @__PURE__ */ jsxs("span", {
+						className: "ews-rel-srcs",
+						children: [
+							mt(lang, "star.rel.evidence"),
+							":",
+							" ",
+							r.sources.map((s) => {
+								const ev = nodeById(payload, s);
+								return ev ? /* @__PURE__ */ jsx("button", {
+									className: "ews-echo-ref",
+									type: "button",
+									onClick: () => setFocus(s),
+									children: mt(lang, "star.detail.turn", { n: ev.turn ?? 0 })
+								}, s) : null;
+							})
+						]
+					}) : null
+				]
+			}, `${r.from}-${r.type}-${r.to}-${i}`);
+		})
+	})] });
+	return /* @__PURE__ */ jsxs("div", { children: [picker, /* @__PURE__ */ jsxs("svg", {
+		className: "ews-canvas",
+		viewBox: `0 0 ${SIZE} ${SIZE}`,
+		role: "img",
+		"aria-label": mt(lang, "star.lens.people"),
+		children: [
+			/* @__PURE__ */ jsx("circle", {
+				cx: CX,
+				cy: CX,
+				r: 150,
+				className: "ews-orbit"
+			}),
+			/* @__PURE__ */ jsx("circle", {
+				cx: CX,
+				cy: CX,
+				r: 265,
+				className: "ews-orbit"
+			}),
+			inner.map((n, i) => {
+				const p = ring(i, inner.length, 150);
+				return /* @__PURE__ */ jsx("line", {
+					x1: CX,
+					y1: CX,
+					x2: p.x,
+					y2: p.y,
+					className: "ews-rel-line"
+				}, `l-${n.id}`);
+			}),
+			/* @__PURE__ */ jsxs("g", {
+				className: "ews-star ews-star-centre",
+				onClick: () => setFocus(centre),
+				role: "button",
+				tabIndex: 0,
+				children: [/* @__PURE__ */ jsx("circle", {
+					cx: CX,
+					cy: CX,
+					r: 26
+				}), /* @__PURE__ */ jsx("text", {
+					x: CX,
+					y: 314,
+					textAnchor: "middle",
+					children: centreLabel
+				})]
+			}),
+			inner.map((n, i) => {
+				const p = ring(i, inner.length, 150);
+				return /* @__PURE__ */ jsxs("g", {
+					className: "ews-star ews-star-" + n.kind + (focus === n.id ? " ews-star-sel" : ""),
+					onClick: () => setFocus(n.id),
+					role: "button",
+					tabIndex: 0,
+					children: [/* @__PURE__ */ jsx("circle", {
+						cx: p.x,
+						cy: p.y,
+						r: 20
+					}), /* @__PURE__ */ jsx("text", {
+						x: p.x,
+						y: p.y + 34,
+						textAnchor: "middle",
+						children: nodeLabel(n)
+					})]
+				}, n.id);
+			}),
+			outer.map((n, i) => {
+				const p = ring(i, outer.length, 265);
+				return /* @__PURE__ */ jsxs("g", {
+					className: "ews-star ews-star-" + n.kind + (focus === n.id ? " ews-star-sel" : ""),
+					onClick: () => setFocus(n.id),
+					role: "button",
+					tabIndex: 0,
+					children: [/* @__PURE__ */ jsx("circle", {
+						cx: p.x,
+						cy: p.y,
+						r: 14
+					}), /* @__PURE__ */ jsx("text", {
+						x: p.x,
+						y: p.y + 28,
+						textAnchor: "middle",
+						children: nodeLabel(n)
+					})]
+				}, n.id);
+			})
+		]
+	})] });
+}
+//#endregion
+//#region src/memory-layouts/keepsakes.tsx
+/** 纪念地图 — the "keepsakes" lens (design §8.3.1).
+*
+* The question: "哪些时刻对我最重要？" Keepsakes are the anchors; each opens
+* into the exact events it cites. Editing here touches the MEANING layer only
+* — a rename, a thought, a deletion — and can never move a fact (§8.2: the
+* cited path is immutable, deletion of a keepsake deletes nothing the world
+* remembers).
+*/
+function KeepsakeCard({ runId, kp, lang, payload, focus, setFocus, onChanged }) {
+	const [editing, setEditing] = useState(false);
+	const [title, setTitle] = useState(kp.title);
+	const [thought, setThought] = useState(kp.thought);
+	const [confirming, setConfirming] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const save = async () => {
+		setBusy(true);
+		try {
+			await api.updateKeepsake(runId, kp.id, {
+				title: title.trim(),
+				thought
+			});
+			setEditing(false);
+			onChanged();
+		} finally {
+			setBusy(false);
+		}
+	};
+	const remove = async () => {
+		setBusy(true);
+		try {
+			await api.deleteKeepsake(runId, kp.id);
+			onChanged();
+		} finally {
+			setBusy(false);
+		}
+	};
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ews-kp" + (kp.cites.includes(focus) ? " ews-kp-hot" : ""),
+		children: [
+			editing ? /* @__PURE__ */ jsx("input", {
+				className: "ews-kp-title-edit",
+				value: title,
+				maxLength: 120,
+				onChange: (e) => setTitle(e.target.value)
+			}) : /* @__PURE__ */ jsx("div", {
+				className: "ews-kp-title",
+				children: kp.title
+			}),
+			kp.kind === "excerpt" && kp.excerpt ? /* @__PURE__ */ jsxs("blockquote", {
+				className: "ews-kp-excerpt",
+				children: [kp.excerpt, /* @__PURE__ */ jsxs("div", {
+					className: "ews-kp-excerpt-src",
+					children: [
+						mt(lang, "star.keeps.excerpt"),
+						" · ",
+						mt(lang, "star.detail.turn", { n: kp.turn })
+					]
+				})]
+			}) : null,
+			editing ? /* @__PURE__ */ jsx("textarea", {
+				className: "ews-kp-thought-edit",
+				rows: 2,
+				value: thought,
+				maxLength: 1e3,
+				placeholder: mt(lang, "star.keeps.thoughtPlaceholder"),
+				onChange: (e) => setThought(e.target.value)
+			}) : kp.thought ? /* @__PURE__ */ jsx("div", {
+				className: "ews-kp-thought",
+				children: kp.thought
+			}) : null,
+			kp.cites.length ? /* @__PURE__ */ jsxs("div", {
+				className: "ews-kp-cites",
+				children: [/* @__PURE__ */ jsx("span", {
+					className: "ews-kp-cites-label",
+					children: mt(lang, "star.keeps.cites")
+				}), kp.cites.map((cid) => {
+					const ev = nodeById(payload, cid);
+					return ev ? /* @__PURE__ */ jsxs("button", {
+						className: "ews-chip" + (focus === cid ? " ews-chip-sel" : ""),
+						type: "button",
+						onClick: () => setFocus(cid),
+						children: [
+							mt(lang, "star.detail.turn", { n: ev.turn ?? 0 }),
+							" · ",
+							ev.title
+						]
+					}, cid) : null;
+				})]
+			}) : null,
+			/* @__PURE__ */ jsxs("div", {
+				className: "ews-kp-actions",
+				children: [editing ? /* @__PURE__ */ jsx("button", {
+					className: "ews-btn",
+					type: "button",
+					disabled: busy,
+					onClick: () => void save(),
+					children: mt(lang, "star.keeps.save")
+				}) : /* @__PURE__ */ jsx("button", {
+					className: "ews-btn",
+					type: "button",
+					onClick: () => setEditing(true),
+					children: mt(lang, "star.keeps.rename")
+				}), confirming ? /* @__PURE__ */ jsxs(Fragment, { children: [
+					/* @__PURE__ */ jsx("span", {
+						className: "ews-kp-ask",
+						children: mt(lang, "star.keeps.deleteAsk")
+					}),
+					/* @__PURE__ */ jsx("button", {
+						className: "ews-btn ews-btn-danger",
+						type: "button",
+						disabled: busy,
+						onClick: () => void remove(),
+						children: mt(lang, "star.keeps.deleteYes")
+					}),
+					/* @__PURE__ */ jsx("button", {
+						className: "ews-btn",
+						type: "button",
+						onClick: () => setConfirming(false),
+						children: mt(lang, "star.keeps.deleteNo")
+					})
+				] }) : /* @__PURE__ */ jsx("button", {
+					className: "ews-btn",
+					type: "button",
+					onClick: () => setConfirming(true),
+					children: mt(lang, "star.keeps.delete")
+				})]
+			})
+		]
+	});
+}
+function KeepsakesLens({ runId, payload, lang, focus, setFocus, onChanged }) {
+	if (!payload.keepsakes.length) return /* @__PURE__ */ jsx("div", {
+		className: "ews-empty",
+		children: mt(lang, "star.keeps.none")
+	});
+	const rows = [...payload.keepsakes].sort((a, b) => b.createdAt - a.createdAt);
+	return /* @__PURE__ */ jsx("div", {
+		className: "ews-kp-map",
+		children: rows.map((kp) => /* @__PURE__ */ jsx(KeepsakeCard, {
+			runId,
+			kp,
+			lang,
+			payload,
+			focus,
+			setFocus,
+			onChanged
+		}, kp.id))
+	});
+}
+//#endregion
+//#region src/memory.tsx
+/** The life star map container (design §8.3).
+*
+* Three lenses over ONE payload: switching a lens swaps the layout adapter and
+* nothing else — the fetched graph, the selected node, the filters and the
+* detail panel all survive the switch (§12.4). The last-used lens is saved per
+* life on the server; the entry point only chooses the INITIAL lens (§8.3.2).
+*
+* Rendered as a full-screen overlay from the play page rather than a route of
+* its own, and styled by a module-scoped <style> tag: both choices keep this
+* feature's file footprint disjoint from concurrently-edited app files
+* (main.tsx, styles.css) — the container is self-contained by construction.
+*/
+var FILTER_KEYS = [
+	"characters",
+	"places",
+	"groups",
+	"objects",
+	"threads"
+];
+function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus }) {
+	const [payload, setPayload] = useState(null);
+	const [lens, setLens] = useState(null);
+	const [focus, setFocus] = useState(initialFocus ?? "");
+	const [filters, setFilters] = useState(ALL_FILTERS);
+	const [centre, setCentre] = useState("player");
+	const [mode, setMode] = useState("canvas");
+	const [kept, setKept] = useState([]);
+	const load = useCallback(async () => {
+		const got = await api.star(runId);
+		setPayload(got);
+		setLens((cur) => cur ?? got.view);
+	}, [runId]);
+	useEffect(() => {
+		load();
+	}, [load]);
+	const pick = (next) => {
+		setLens(next);
+		api.setMemoryView(runId, next).catch(() => {});
+	};
+	if (!payload || !lens) return /* @__PURE__ */ jsxs("div", {
+		className: "ews-overlay",
+		role: "dialog",
+		"aria-modal": "true",
+		children: [/* @__PURE__ */ jsx(StarStyles, {}), /* @__PURE__ */ jsx("div", {
+			className: "ews-head",
+			children: /* @__PURE__ */ jsx("button", {
+				className: "ews-btn",
+				type: "button",
+				onClick: onClose,
+				children: mt(lang, "star.close")
+			})
+		})]
+	});
+	const focused = focus ? nodeById(payload, focus) : void 0;
+	const isKept = focused ? kept.includes(focused.id) || payload.keepsakes.some((kp) => kp.cites.includes(focused.id)) : false;
+	const keep = async () => {
+		if (!focused || focused.kind !== "event") return;
+		await api.createKeepsake(runId, {
+			kind: "event",
+			title: focused.title ?? mt(lang, "star.keeps.newTitle"),
+			cites: [focused.id]
+		});
+		setKept((k) => [...k, focused.id]);
+		await load();
+	};
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ews-overlay",
+		role: "dialog",
+		"aria-modal": "true",
+		"aria-label": mt(lang, "star.title"),
+		children: [
+			/* @__PURE__ */ jsx(StarStyles, {}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ews-head",
+				children: [
+					/* @__PURE__ */ jsx("div", {
+						className: "ews-title",
+						children: mt(lang, "star.title")
+					}),
+					/* @__PURE__ */ jsx("div", {
+						className: "ews-lenses",
+						role: "tablist",
+						children: [
+							"life",
+							"people",
+							"keepsakes"
+						].map((v) => /* @__PURE__ */ jsx("button", {
+							className: "ews-lens" + (lens === v ? " ews-lens-on" : ""),
+							type: "button",
+							role: "tab",
+							"aria-selected": lens === v,
+							onClick: () => pick(v),
+							children: mt(lang, `star.lens.${v}`)
+						}, v))
+					}),
+					/* @__PURE__ */ jsx("button", {
+						className: "ews-btn",
+						type: "button",
+						onClick: onClose,
+						children: mt(lang, "star.close")
+					})
+				]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ews-toolbar",
+				children: [FILTER_KEYS.map((key) => /* @__PURE__ */ jsxs("label", {
+					className: "ews-filter",
+					children: [/* @__PURE__ */ jsx("input", {
+						type: "checkbox",
+						checked: filters[key],
+						onChange: () => setFilters((f) => ({
+							...f,
+							[key]: !f[key]
+						}))
+					}), mt(lang, `star.filter.${key}`)]
+				}, key)), lens === "people" ? /* @__PURE__ */ jsx("button", {
+					className: "ews-btn ews-mode",
+					type: "button",
+					onClick: () => setMode((m) => m === "canvas" ? "list" : "canvas"),
+					children: mt(lang, mode === "canvas" ? "star.mode.list" : "star.mode.canvas")
+				}) : null]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ews-body",
+				children: [/* @__PURE__ */ jsx("div", {
+					className: "ews-lens-pane",
+					children: lens === "life" ? /* @__PURE__ */ jsx(TimelineLens, {
+						payload,
+						lang,
+						focus,
+						setFocus,
+						filters
+					}) : lens === "people" ? /* @__PURE__ */ jsx(RelationsLens, {
+						payload,
+						lang,
+						focus,
+						setFocus,
+						filters,
+						centre,
+						setCentre,
+						mode
+					}) : /* @__PURE__ */ jsx(KeepsakesLens, {
+						runId,
+						payload,
+						lang,
+						focus,
+						setFocus,
+						onChanged: () => void load()
+					})
+				}), focused ? /* @__PURE__ */ jsxs("div", {
+					className: "ews-detail",
+					role: "complementary",
+					children: [
+						/* @__PURE__ */ jsx("div", {
+							className: "ews-detail-name",
+							children: nodeLabel(focused)
+						}),
+						focused.kind === "event" ? /* @__PURE__ */ jsxs(Fragment, { children: [
+							/* @__PURE__ */ jsxs("div", {
+								className: "ews-detail-meta",
+								children: [mt(lang, "star.detail.turn", { n: focused.turn ?? 0 }), focused.summary ? ` · ${focused.summary}` : ""]
+							}),
+							focused.action ? /* @__PURE__ */ jsxs("div", {
+								className: "ews-detail-meta",
+								children: [
+									mt(lang, "star.detail.action"),
+									": ",
+									focused.action
+								]
+							}) : null,
+							/* @__PURE__ */ jsxs("div", {
+								className: "ews-detail-actions",
+								children: [/* @__PURE__ */ jsx("button", {
+									className: "ews-btn",
+									type: "button",
+									onClick: () => onJumpTurn(focused.turn ?? 1),
+									children: mt(lang, "star.detail.jump")
+								}), /* @__PURE__ */ jsx("button", {
+									className: "ews-btn",
+									type: "button",
+									disabled: isKept,
+									onClick: () => void keep(),
+									children: mt(lang, isKept ? "star.keep.kept" : "star.keep.this")
+								})]
+							})
+						] }) : /* @__PURE__ */ jsxs("div", {
+							className: "ews-detail-meta",
+							children: [focused.summary || (focused.aliases ?? []).join(" · "), focused.kind === "thread" ? ` · ${mt(lang, focused.open ? "star.detail.thread.open" : "star.detail.thread.done")}` : ""]
+						}),
+						/* @__PURE__ */ jsxs("div", {
+							className: "ews-detail-related",
+							children: [/* @__PURE__ */ jsx("span", {
+								className: "ews-kp-cites-label",
+								children: mt(lang, "star.detail.related")
+							}), neighbours(payload, focused.id).filter((n) => nodeVisible(n, filters)).map((n) => /* @__PURE__ */ jsx("button", {
+								className: "ews-chip ews-chip-" + n.kind,
+								type: "button",
+								onClick: () => setFocus(n.id),
+								children: nodeLabel(n)
+							}, n.id))]
+						})
+					]
+				}) : null]
+			}),
+			/* @__PURE__ */ jsx("div", {
+				className: "ews-foot",
+				children: mt(lang, "star.hint")
+			})
+		]
+	});
+}
+/** Module-scoped styles, injected with the overlay and gone with it. */
+function StarStyles() {
+	return /* @__PURE__ */ jsx("style", { children: CSS_TEXT });
+}
+var CSS_TEXT = `
+.ews-overlay {
+  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  background: var(--bg, #14151f); color: var(--fg, #e5e7eb); overflow: hidden;
+}
+.ews-head {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border, #2d2f3d);
+}
+.ews-title { font-weight: 600; }
+.ews-lenses { display: flex; gap: 4px; margin-inline: auto; }
+.ews-lens {
+  appearance: none; border: 1px solid var(--border, #2d2f3d); background: none;
+  color: inherit; font: inherit; padding: 5px 14px; border-radius: 999px; cursor: pointer;
+}
+.ews-lens-on {
+  border-color: var(--accent, #7c3aed);
+  background: color-mix(in oklab, var(--accent, #7c3aed) 18%, transparent);
+}
+.ews-btn {
+  appearance: none; border: 1px solid var(--border, #2d2f3d); background: none;
+  color: inherit; font: inherit; font-size: 13px; padding: 5px 12px;
+  border-radius: 8px; cursor: pointer;
+}
+.ews-btn:disabled { opacity: 0.5; cursor: default; }
+.ews-btn-danger { border-color: #b91c1c; color: #f87171; }
+.ews-toolbar {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 8px 16px; border-bottom: 1px solid var(--border, #2d2f3d); font-size: 13px;
+}
+.ews-filter { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.ews-mode { margin-inline-start: auto; }
+.ews-body { flex: 1; display: flex; min-height: 0; }
+.ews-lens-pane { flex: 1; overflow: auto; padding: 16px; }
+.ews-detail {
+  flex: 0 0 300px; overflow: auto; padding: 14px 16px;
+  border-inline-start: 1px solid var(--border, #2d2f3d);
+}
+.ews-detail-name { font-weight: 600; margin-bottom: 6px; }
+.ews-detail-meta { font-size: 13px; line-height: 1.6; color: var(--muted, #9ca3af); margin-bottom: 6px; }
+.ews-detail-actions { display: flex; gap: 8px; margin: 8px 0; }
+.ews-detail-related { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.ews-foot {
+  padding: 6px 16px 10px; font-size: 12px; color: var(--muted, #6b7280);
+  border-top: 1px solid var(--border, #2d2f3d);
+}
+.ews-empty { padding: 40px 20px; text-align: center; color: var(--muted, #9ca3af); line-height: 1.8; }
+.ews-node {
+  appearance: none; border: 0; background: none; color: inherit; font: inherit;
+  text-align: start; cursor: pointer; padding: 2px 4px; border-radius: 6px;
+}
+.ews-node-sel { background: color-mix(in oklab, var(--accent, #7c3aed) 22%, transparent); }
+.ews-chip {
+  appearance: none; border: 1px solid var(--border, #2d2f3d); background: none;
+  color: inherit; font: inherit; font-size: 12px; padding: 2px 10px;
+  border-radius: 999px; cursor: pointer;
+}
+.ews-chip-sel, .ews-chip:hover { border-color: var(--accent, #7c3aed); }
+.ews-chip-thread { border-style: dashed; }
+.ews-echo-ref {
+  appearance: none; border: 0; background: none; cursor: pointer; display: block;
+  font: inherit; font-size: 12px; font-style: italic; color: var(--accent, #7c3aed);
+  padding: 1px 4px; text-align: start;
+}
+/* 时间星座 */
+.ews-timeline { max-width: 640px; }
+.ews-tl-row { display: flex; gap: 12px; }
+.ews-tl-spine {
+  flex: 0 0 14px; display: flex; justify-content: center; position: relative;
+}
+.ews-tl-spine::before {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--border, #2d2f3d);
+}
+.ews-tl-dot {
+  position: relative; z-index: 1; width: 10px; height: 10px; border-radius: 50%;
+  margin-top: 8px; background: var(--muted, #6b7280);
+}
+.ews-tl-dot-major { width: 14px; height: 14px; background: var(--accent, #7c3aed); }
+.ews-tl-dot-sel { outline: 3px solid color-mix(in oklab, var(--accent, #7c3aed) 40%, transparent); }
+.ews-tl-body { flex: 1; padding-bottom: 18px; min-width: 0; }
+.ews-tl-turn { font-size: 12px; color: var(--muted, #9ca3af); margin-inline-end: 8px; }
+.ews-tl-title { font-weight: 500; }
+.ews-tl-cluster { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+/* 关系轨道 */
+.ews-centre-row {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px;
+  font-size: 13px;
+}
+.ews-centre-label { color: var(--muted, #9ca3af); }
+.ews-canvas { width: 100%; max-width: 640px; height: auto; display: block; margin: 0 auto; }
+.ews-orbit { fill: none; stroke: var(--border, #2d2f3d); stroke-dasharray: 3 5; }
+.ews-rel-line { stroke: color-mix(in oklab, var(--accent, #7c3aed) 45%, transparent); }
+.ews-star { cursor: pointer; }
+.ews-star circle { fill: var(--card, #1f2030); stroke: var(--border, #2d2f3d); stroke-width: 1.5; }
+.ews-star-centre circle, .ews-star-sel circle { stroke: var(--accent, #7c3aed); stroke-width: 2.5; }
+.ews-star text { fill: var(--fg, #e5e7eb); font-size: 12px; }
+.ews-rel-list { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+.ews-rel-row {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+  padding: 8px 10px; border: 1px solid var(--border, #2d2f3d); border-radius: 10px;
+}
+.ews-rel-kind { font-size: 13px; color: var(--muted, #9ca3af); }
+.ews-rel-srcs { font-size: 12px; display: inline-flex; gap: 4px; align-items: baseline; }
+/* 纪念地图 */
+.ews-kp-map { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.ews-kp {
+  padding: 12px 14px; border: 1px solid var(--border, #2d2f3d); border-radius: 12px;
+}
+.ews-kp-hot { border-color: var(--accent, #7c3aed); }
+.ews-kp-title { font-weight: 600; margin-bottom: 4px; }
+.ews-kp-title-edit, .ews-kp-thought-edit {
+  width: 100%; font: inherit; color: inherit; background: none;
+  border: 1px solid var(--border, #2d2f3d); border-radius: 8px; padding: 6px 8px;
+  margin-bottom: 6px;
+}
+.ews-kp-excerpt {
+  margin: 6px 0; padding: 6px 10px; font-size: 13px; line-height: 1.7;
+  border-inline-start: 3px solid var(--accent, #7c3aed);
+  color: var(--muted, #c4c7d0);
+}
+.ews-kp-excerpt-src { font-size: 11px; margin-top: 4px; color: var(--muted, #6b7280); }
+.ews-kp-thought { font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
+.ews-kp-cites { display: flex; flex-wrap: wrap; gap: 5px; align-items: baseline; margin: 6px 0; }
+.ews-kp-cites-label { font-size: 12px; color: var(--muted, #9ca3af); }
+.ews-kp-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.ews-kp-ask { font-size: 12px; color: var(--muted, #9ca3af); }
+/* Narrow screens: the detail panel becomes a bottom drawer (§8.3.4). */
+@media (max-width: 860px) {
+  .ews-body { flex-direction: column; }
+  .ews-detail {
+    flex: 0 0 auto; max-height: 42dvh;
+    border-inline-start: 0; border-top: 1px solid var(--border, #2d2f3d);
+  }
+  .ews-lenses { margin-inline: 0; }
+  .ews-head { flex-wrap: wrap; }
+}
+`;
+//#endregion
 //#region src/play.tsx
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
 *  this is about the page converging on its own rather than about latency. */
@@ -2283,8 +3179,17 @@ function TurnProgress({ g, label }) {
 * choice back then, how this turn answers it, and a jump to the source page. No
 * celebration, no sound, no modal — the prose stays the protagonist.
 */
-function EchoMark({ e, onJump }) {
+function EchoMark({ e, lang, runId, onJump }) {
 	const [open, setOpen] = useState(false);
+	const [kept, setKept] = useState(false);
+	const keep = async () => {
+		await api.createKeepsake(runId, {
+			kind: "echo",
+			title: e.title || e.sourceTitle,
+			cites: [e.sourceId, e.currentId].filter(Boolean)
+		});
+		setKept(true);
+	};
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-echo",
 		children: [/* @__PURE__ */ jsx("button", {
@@ -2319,17 +3224,27 @@ function EchoMark({ e, onJump }) {
 				}),
 				/* @__PURE__ */ jsxs("div", {
 					className: "ew-echo-actions",
-					children: [/* @__PURE__ */ jsx("button", {
-						className: "ew-btn ew-btn-sm",
-						type: "button",
-						onClick: () => onJump(e.sourceTurn),
-						children: t("play.echoJump")
-					}), /* @__PURE__ */ jsx("button", {
-						className: "ew-btn ew-btn-sm",
-						type: "button",
-						onClick: () => setOpen(false),
-						children: t("play.echoClose")
-					})]
+					children: [
+						/* @__PURE__ */ jsx("button", {
+							className: "ew-btn ew-btn-sm",
+							type: "button",
+							onClick: () => onJump(e.sourceTurn),
+							children: t("play.echoJump")
+						}),
+						/* @__PURE__ */ jsx("button", {
+							className: "ew-btn ew-btn-sm",
+							type: "button",
+							disabled: kept,
+							onClick: () => void keep().catch(() => {}),
+							children: mt(lang, kept ? "star.keep.kept" : "star.keep.this")
+						}),
+						/* @__PURE__ */ jsx("button", {
+							className: "ew-btn ew-btn-sm",
+							type: "button",
+							onClick: () => setOpen(false),
+							children: t("play.echoClose")
+						})
+					]
 				})
 			]
 		}) : null]
@@ -2346,6 +3261,7 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 	const [stalled, setStalled] = useState(false);
 	const [retry, setRetry] = useState(null);
 	const [drawer, setDrawer] = useState(false);
+	const [starOpen, setStarOpen] = useState(false);
 	const [back, setBack] = useState(false);
 	const loadedRun = useRef(null);
 	const [recapOpen, setRecapOpen] = useState(false);
@@ -2740,6 +3656,8 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 			className: "ew-echoes",
 			children: (v.echoes ?? []).map((e, i) => /* @__PURE__ */ jsx(EchoMark, {
 				e,
+				lang: v.language,
+				runId,
 				onJump: (turn) => setViewTurn(turn >= latest ? null : turn)
 			}, `${e.sourceId}-${i}`))
 		}) : null,
@@ -2893,6 +3811,12 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 			onClick: () => setDrawer((d) => !d),
 			children: drawer ? t("play.drawerClose") : t("play.drawerOpen")
 		}),
+		v.turn >= 1 ? /* @__PURE__ */ jsx("button", {
+			className: "ew-drawer",
+			type: "button",
+			onClick: () => setStarOpen(true),
+			children: mt(v.language, "star.title")
+		}) : null,
 		drawer ? /* @__PURE__ */ jsx("div", {
 			id: "ew-panels-drawer",
 			style: { marginTop: "10px" },
@@ -2903,6 +3827,15 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, refresh }) 
 		}) : null
 	] });
 	return /* @__PURE__ */ jsxs("div", { children: [
+		starOpen ? /* @__PURE__ */ jsx(StarMap, {
+			runId,
+			lang: v.language,
+			onClose: () => setStarOpen(false),
+			onJumpTurn: (turn) => {
+				setStarOpen(false);
+				setViewTurn(turn >= latest ? null : turn);
+			}
+		}) : null,
 		/* @__PURE__ */ jsxs("div", {
 			className: "ew-topbar",
 			children: [/* @__PURE__ */ jsx("button", {

@@ -21,6 +21,8 @@ const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
 import { History, LifeSummary } from './history'
+import { StarMap } from './memory'
+import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
 
 function Chevron({ dir }: { dir: 'l' | 'r' }) {
@@ -59,8 +61,26 @@ function TurnProgress({ g, label }: { g?: PlayView['generating']; label: string 
  * choice back then, how this turn answers it, and a jump to the source page. No
  * celebration, no sound, no modal — the prose stays the protagonist.
  */
-function EchoMark({ e, onJump }: { e: EchoMarker; onJump: (turn: number) => void }) {
+function EchoMark({
+  e, lang, runId, onJump,
+}: {
+  e: EchoMarker
+  lang: string
+  runId: string
+  onJump: (turn: number) => void
+}) {
   const [open, setOpen] = useState(false)
+  const [kept, setKept] = useState(false)
+  const keep = async () => {
+    // One tap keeps the WHOLE declared path (§8.2): the answering event and
+    // the source it echoes, cited by their canonical ids.
+    await api.createKeepsake(runId, {
+      kind: 'echo',
+      title: e.title || e.sourceTitle,
+      cites: [e.sourceId, e.currentId].filter(Boolean),
+    })
+    setKept(true)
+  }
   return (
     <div className="ew-echo">
       <button
@@ -104,6 +124,14 @@ function EchoMark({ e, onJump }: { e: EchoMarker; onJump: (turn: number) => void
             <button
               className="ew-btn ew-btn-sm"
               type="button"
+              disabled={kept}
+              onClick={() => void keep().catch(() => {})}
+            >
+              {mt(lang, kept ? 'star.keep.kept' : 'star.keep.this')}
+            </button>
+            <button
+              className="ew-btn ew-btn-sm"
+              type="button"
               onClick={() => setOpen(false)}
             >
               {t('play.echoClose')}
@@ -141,6 +169,9 @@ export function PlayPage({
   // exact same intent instead of making the player retype it.
   const [retry, setRetry] = useState<{ payload: { turn?: number; action?: string }; what: string } | null>(null)
   const [drawer, setDrawer] = useState(false)
+  // The life star map overlay (§8.3): opened from the secondary action area,
+  // never from the per-turn controls — it reads the life, it does not play it.
+  const [starOpen, setStarOpen] = useState(false)
   const [back, setBack] = useState(false)
   // A recap belongs to entering a life, not to every poll or newly written turn.
   // The ref distinguishes the first load of this run from subsequent refreshes.
@@ -535,6 +566,8 @@ export function PlayPage({
             <EchoMark
               key={`${e.sourceId}-${i}`}
               e={e}
+              lang={v.language}
+              runId={runId}
               onJump={(turn) => setViewTurn(turn >= latest ? null : turn)}
             />
           ))}
@@ -708,6 +741,15 @@ export function PlayPage({
       >
         {drawer ? t('play.drawerClose') : t('play.drawerOpen')}
       </button>
+      {v.turn >= 1 ? (
+        <button
+          className="ew-drawer"
+          type="button"
+          onClick={() => setStarOpen(true)}
+        >
+          {mt(v.language, 'star.title')}
+        </button>
+      ) : null}
       {drawer ? (
         <div id="ew-panels-drawer" style={{ marginTop: '10px' }}>
           {(v.panels ?? []).length ? panels : (
@@ -720,6 +762,17 @@ export function PlayPage({
 
   return (
     <div>
+      {starOpen ? (
+        <StarMap
+          runId={runId}
+          lang={v.language}
+          onClose={() => setStarOpen(false)}
+          onJumpTurn={(turn) => {
+            setStarOpen(false)
+            setViewTurn(turn >= latest ? null : turn)
+          }}
+        />
+      ) : null}
       <div className="ew-topbar">
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         {pager}

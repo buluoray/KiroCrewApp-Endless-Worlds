@@ -565,6 +565,115 @@ def event_neighbourhood(index: dict[str, Any], ids: list[str]) -> list[dict[str,
     return out
 
 
+# ── the life star map — one sparse payload, three lenses (design §8.3) ───
+
+
+def star_payload(
+    index: dict[str, Any],
+    keepsakes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The sparse, layout-agnostic subgraph all three views render.
+
+    One payload, three lenses: 时间星座 / 关系轨道 / 纪念地图 are LAYOUTS over
+    this data, never three queries — switching views must not refetch or change
+    what is visible (§8.3.1, §12.4).
+
+    Selection (dense storage, sparse presentation, §8.3): major events, events
+    that echo or were echoed, events a keepsake cites, events touching an open
+    thread — plus the entities directly involved in any included event. Nothing
+    else ships.
+
+    Disclosure is enforced HERE, server-side (§12.3): only ``known`` events may
+    enter the star map (§5.4). A hidden or foreshadowed event is absent from the
+    payload, so no client filter can leak it.
+    """
+    keepsakes = keepsakes or []
+    events = index["events"]
+
+    cited: set[str] = set()
+    for kp in keepsakes:
+        cited.update(str(c) for c in kp.get("cites") or [])
+
+    echo_sources: set[str] = set(index["echoedAt"])
+    open_threads = {
+        tid for tid, rec in index["threads"].items()
+        if rec["opened"] and not rec["resolved"]
+    }
+
+    picked_events: dict[str, dict[str, Any]] = {}
+    for cid, ev in events.items():
+        if ev["disclosure"] != "known":
+            continue
+        keep = (
+            ev["importance"] == "major"
+            or ev["echoes"]
+            or cid in echo_sources
+            or cid in cited
+            or any(th["id"] in open_threads for th in ev["threads"])
+        )
+        if keep:
+            picked_events[cid] = ev
+
+    # Entities ride only on the events that carried them in.
+    picked_entities: set[str] = set()
+    for ev in picked_events.values():
+        picked_entities.update(ev["participants"])
+        if ev["place"]:
+            picked_entities.add(ev["place"])
+        picked_entities.update(th["id"] for th in ev["threads"])
+    for kp in keepsakes:
+        picked_entities.update(str(e) for e in kp.get("entities") or [])
+
+    nodes: list[dict[str, Any]] = []
+    for cid in sorted(picked_events, key=lambda c: (picked_events[c]["turn"], c)):
+        ev = picked_events[cid]
+        nodes.append({
+            "id": cid, "kind": "event", "turn": ev["turn"],
+            "title": ev["title"], "summary": ev["summary"],
+            "importance": ev["importance"], "action": ev["action"],
+        })
+    for eid in sorted(picked_entities - {PLAYER}):
+        ent = index["entities"].get(eid)
+        if ent is None:
+            continue
+        nodes.append({
+            "id": eid, "kind": ent["kind"], "name": ent["name"],
+            "aliases": ent["aliases"], "summary": ent["summary"],
+            "open": eid in open_threads if ent["kind"] == "thread" else None,
+        })
+
+    edges: list[dict[str, Any]] = []
+    for cid, ev in sorted(picked_events.items(), key=lambda kv: (kv[1]["turn"], kv[0])):
+        for p in ev["participants"]:
+            if p in picked_entities and p != PLAYER:
+                edges.append({"from": p, "type": "participated_in", "to": cid})
+        if ev["place"] and ev["place"] in picked_entities:
+            edges.append({"from": cid, "type": "occurred_at", "to": ev["place"]})
+        for th in ev["threads"]:
+            if th["id"] in picked_entities:
+                edges.append({"from": cid, "type": th["effect"], "to": th["id"]})
+        for target in ev["echoes"]:
+            if target in picked_events:
+                edges.append({"from": cid, "type": "echoes", "to": target})
+
+    projection = project_relations(index)
+    relations = [
+        {"from": slot["from"], "type": slot["type"], "to": slot["to"],
+         "level": slot["level"], "value": slot["value"],
+         # The evidence trail (§4.3): the current reading must be able to open
+         # into the events that produced it. Only sources the player may see.
+         "sources": [c["reasonEvent"] for c in slot["changes"]
+                     if c["reasonEvent"] in picked_events]}
+        for slot in projection.values()
+        if slot["active"]
+        and slot["from"] in (picked_entities | {PLAYER})
+        and slot["to"] in (picked_entities | {PLAYER})
+    ]
+
+    return {"nodes": nodes, "edges": edges, "relations": relations}
+
+
+
 # ── the player-facing echo markers (design §7.3, §8.1) ──────────────────
 
 
@@ -582,6 +691,7 @@ def echo_markers(chronicle: list[dict[str, Any]]) -> list[dict[str, Any]]:
     memory = last.get("memory")
     if not isinstance(memory, dict):
         return []
+    turn = int(last.get("turn") or 0)
     index = build_index(chronicle[:-1])
     out: list[dict[str, Any]] = []
     for ev in memory.get("events") or []:
@@ -597,6 +707,9 @@ def echo_markers(chronicle: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "sourceTitle": src["title"],
                 "sourceSummary": src["summary"],
                 "sourceAction": src["action"],
+                # The answering event's own canonical id, so "collect this echo"
+                # can cite the WHOLE path (§8.2) rather than only its source.
+                "currentId": event_id(turn, str(ev.get("key") or "")),
                 "title": str(ev.get("title") or ""),
                 "summary": str(ev.get("summary") or ""),
             })

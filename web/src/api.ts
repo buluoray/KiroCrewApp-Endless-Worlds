@@ -84,9 +84,75 @@ export interface EchoMarker {
   sourceSummary: string
   /** The player's own words on the source turn, when it came from one. */
   sourceAction: string
+  /** The answering event's canonical id — what "collect this echo" cites
+   *  alongside the source, so the keepsake holds the whole path. */
+  currentId: string
   /** The current event that answers it. */
   title: string
   summary: string
+}
+
+// ── the life star map (design §8.3): one sparse payload, three lenses ──
+
+export type StarNodeKind =
+  | 'event' | 'character' | 'place' | 'group' | 'object' | 'thread'
+
+export interface StarNode {
+  id: string
+  kind: StarNodeKind
+  /** Events carry turn/title/summary; entities carry name/aliases. */
+  turn?: number
+  title?: string
+  summary?: string
+  importance?: string
+  action?: string
+  name?: string
+  aliases?: string[]
+  /** Threads only: still unresolved. */
+  open?: boolean | null
+}
+
+export interface StarEdge {
+  from: string
+  type: 'participated_in' | 'occurred_at' | 'opened' | 'advanced' | 'resolved' | 'echoes'
+  to: string
+}
+
+export interface StarRelation {
+  from: string
+  type: string
+  to: string
+  level: number
+  value: string
+  /** The events that produced the current reading — the §4.3 evidence trail. */
+  sources: string[]
+}
+
+export type MemoryView = 'life' | 'people' | 'keepsakes'
+
+export interface Keepsake {
+  id: string
+  kind: 'event' | 'echo' | 'excerpt'
+  title: string
+  thought: string
+  cites: string[]
+  entities: string[]
+  turn: number
+  spoiler: boolean
+  createdAt: number
+  excerpt?: string
+  excerptSha256?: string
+}
+
+export interface StarPayload {
+  runId: string
+  turn: number
+  nodes: StarNode[]
+  edges: StarEdge[]
+  relations: StarRelation[]
+  keepsakes: Keepsake[]
+  /** This life's last-used lens; the smart entry only sets the INITIAL one. */
+  view: MemoryView
 }
 
 export interface PlayView {
@@ -339,6 +405,14 @@ function post<T>(path: string, body: unknown): Promise<T> {
   })
 }
 
+function send<T>(method: 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  return json<T>(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+}
+
 export const api = {
   worlds: (language?: string) =>
     json<{ worlds: WorldRow[]; seeds: SeedReport }>(
@@ -460,5 +534,46 @@ export const api = {
   answerScene: (runId: string, sceneId: string, body: { choice: string; nonce: string }) =>
     post<{ accepted: boolean; action?: string; reason?: string }>(
       `/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}/answer`, body,
+    ),
+
+  /** The sparse graph all three star-map lenses share — one request per open. */
+  star: (runId: string) =>
+    json<StarPayload>(`/runs/${encodeURIComponent(runId)}/memory/star`),
+
+  /** Remember this life's last-used lens. Fire-and-forget metadata. */
+  setMemoryView: (runId: string, view: MemoryView) =>
+    send<{ runId: string; view: MemoryView }>(
+      'PATCH', `/runs/${encodeURIComponent(runId)}/preferences/memory-view`, { view },
+    ),
+
+  createKeepsake: (
+    runId: string,
+    body: {
+      kind: Keepsake['kind']
+      title: string
+      cites?: string[]
+      entities?: string[]
+      thought?: string
+      excerpt?: string
+      turn?: number
+      spoiler?: boolean
+    },
+  ) => post<Keepsake>(`/runs/${encodeURIComponent(runId)}/keepsakes`, body),
+
+  updateKeepsake: (
+    runId: string,
+    keepsakeId: string,
+    body: { title?: string; thought?: string; spoiler?: boolean },
+  ) =>
+    send<Keepsake>(
+      'PATCH',
+      `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`,
+      body,
+    ),
+
+  deleteKeepsake: (runId: string, keepsakeId: string) =>
+    send<{ deleted: string }>(
+      'DELETE',
+      `/runs/${encodeURIComponent(runId)}/keepsakes/${encodeURIComponent(keepsakeId)}`,
     ),
 }
