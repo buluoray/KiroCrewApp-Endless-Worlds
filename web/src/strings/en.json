@@ -1,5 +1,6 @@
 {
   "app.title": "Endless Worlds",
+  "app.language": "Interface language",
   "delete.cancel": "Keep it",
   "delete.changed": "A life was begun elsewhere, so the number changed. Look again before deciding.",
   "delete.counting": "Counting who is still alive in this world…",

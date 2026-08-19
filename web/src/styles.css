@@ -125,6 +125,12 @@
 .ew-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .ew-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
 @media (min-width: 768px) { .ew-head h2 { font-size: 19px; } }
+/* Interface-language dropdown: pushed to the far right of the title bar. */
+.ew-uilang {
+  margin-left: auto; min-height: 30px; padding: 0 8px; font-size: 13px;
+  color: var(--text, #e2e8f0); background: transparent;
+  border: 1px solid var(--border, #334155); border-radius: 8px; cursor: pointer;
+}
 
 /* A world name is user content and can be one long unbroken run; without this a
    phone gets a horizontal scrollbar on the whole page. */

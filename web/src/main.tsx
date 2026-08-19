@@ -17,6 +17,10 @@ import { Glyph } from './ui'
  *  and shares its localStorage. */
 const WHERE = 'endless-worlds:where'
 
+/** The player's standing UI-language pick from the header dropdown. Prefixed and
+ *  shared with the dashboard document like every other key this app keeps. */
+const LANG_KEY = 'endless-worlds:lang'
+
 type View = 'library' | 'detail' | 'opening' | 'live'
 
 interface Where {
@@ -71,11 +75,25 @@ export default function EndlessWorlds() {
   // (not in an effect) means a world of a different language re-renders the whole
   // tree already speaking it, rather than one frame late. `t()` reads this module
   // value, so no call site needs a hook.
-  const [lang, setLangState] = useState<Lang>('zh')
+  //
+  // The initial value is the player's own remembered pick (the header dropdown),
+  // so the shelf opens in the language they chose last rather than always zh.
+  const [lang, setLangState] = useState<Lang>(
+    () => asLang(localStorage.getItem(LANG_KEY) ?? undefined) ?? 'zh',
+  )
   setCurrentLanguage(lang)
   const applyLanguage = useCallback((code?: string) => {
     const next = asLang(code)
     if (next) setLangState(next)
+  }, [])
+  // The explicit language dropdown: unlike opening a world (which follows that
+  // world's language for the session), this is the player's standing choice, so it
+  // persists and becomes the default the app next opens in.
+  const chooseLanguage = useCallback((code: string) => {
+    const next = asLang(code)
+    if (!next) return
+    localStorage.setItem(LANG_KEY, next)
+    setLangState(next)
   }, [])
 
   const load = useCallback(async () => {
@@ -436,6 +454,15 @@ export default function EndlessWorlds() {
       <div className="ew-head">
         <Glyph />
         <h2>{t('app.title')}</h2>
+        <select
+          className="ew-uilang"
+          aria-label={t('app.language')}
+          value={lang}
+          onChange={(e) => chooseLanguage(e.target.value)}
+        >
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
       </div>
 
       {note ? (
