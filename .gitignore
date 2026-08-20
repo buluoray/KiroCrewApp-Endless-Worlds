@@ -13,6 +13,10 @@ installed.json
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+
+# Local Kiro/agent dev config — machine-specific, never shipped.
+.kiro/
 
 # Node — only present once a bundled renderer is introduced.
 node_modules/
