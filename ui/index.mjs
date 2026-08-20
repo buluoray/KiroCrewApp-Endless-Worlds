@@ -6482,6 +6482,17 @@ var LANG_KEY = "endless-worlds:lang";
 *  fact, so it is kept here rather than asked of the backend. */
 var WIDTH_KEY = "endless-worlds:width";
 var RAIL_KEY = "endless-worlds:rail";
+/** The FIRST-RUN default UI language: follow the Crew, fall back to English.
+*
+*  KiroCrew's LanguageProvider sets `<html lang>` to the resolved dashboard
+*  language, and this app mounts into that same document, so `documentElement.lang`
+*  is the Crew's OWN UI language rather than the raw browser locale;
+*  `navigator.language` is only a standalone/dev fallback. This app ships zh + en,
+*  so any Crew language it has no table for falls to English. A remembered explicit
+*  pick and world-follow both still override this default. */
+function crewLanguageDefault() {
+	return asLang((document.documentElement.lang || navigator.language || "").slice(0, 2).toLowerCase()) ?? "en";
+}
 var remember = (where) => {
 	try {
 		localStorage.setItem(WHERE, JSON.stringify(where));
@@ -6571,7 +6582,7 @@ function EndlessWorlds() {
 	/** Which life's deletion is being confirmed, or null. */
 	const [doomedLife, setDoomedLife] = useState(null);
 	const [note, setNote] = useState("");
-	const [lang, setLangState] = useState(() => asLang(localStorage.getItem(LANG_KEY) ?? void 0) ?? "zh");
+	const [lang, setLangState] = useState(() => asLang(localStorage.getItem(LANG_KEY) ?? void 0) ?? crewLanguageDefault());
 	const [langLocked, setLangLocked] = useState(() => localStorage.getItem(LANG_KEY) != null);
 	setCurrentLanguage(lang);
 	const applyLanguage = useCallback((code) => {

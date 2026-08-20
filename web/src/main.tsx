@@ -34,6 +34,21 @@ const LANG_KEY = 'endless-worlds:lang'
 const WIDTH_KEY = 'endless-worlds:width'
 const RAIL_KEY = 'endless-worlds:rail'
 
+/** The FIRST-RUN default UI language: follow the Crew, fall back to English.
+ *
+ *  KiroCrew's LanguageProvider sets `<html lang>` to the resolved dashboard
+ *  language, and this app mounts into that same document, so `documentElement.lang`
+ *  is the Crew's OWN UI language rather than the raw browser locale;
+ *  `navigator.language` is only a standalone/dev fallback. This app ships zh + en,
+ *  so any Crew language it has no table for falls to English. A remembered explicit
+ *  pick and world-follow both still override this default. */
+function crewLanguageDefault(): Lang {
+  const code = (document.documentElement.lang || navigator.language || '')
+    .slice(0, 2)
+    .toLowerCase()
+  return asLang(code) ?? 'en'
+}
+
 type View = 'library' | 'detail' | 'opening' | 'live' | 'create' | 'draft'
 
 interface Where {
@@ -163,10 +178,12 @@ export default function EndlessWorlds() {
   // tree already speaking it, rather than one frame late. `t()` reads this module
   // value, so no call site needs a hook.
   //
-  // The initial value is the player's own remembered pick (the header dropdown),
-  // so the shelf opens in the language they chose last rather than always zh.
+  // The initial value is the player's own remembered pick (the header dropdown);
+  // absent one, the app opens in the Crew's UI language and falls back to English,
+  // rather than always zh. Opening a world still follows that world's language
+  // until the player makes an explicit pick.
   const [lang, setLangState] = useState<Lang>(
-    () => asLang(localStorage.getItem(LANG_KEY) ?? undefined) ?? 'zh',
+    () => asLang(localStorage.getItem(LANG_KEY) ?? undefined) ?? crewLanguageDefault(),
   )
   // Whether the player made an EXPLICIT choice (the header dropdown). Once they
   // have, it overrides world-follow: opening a world no longer flips the chrome to

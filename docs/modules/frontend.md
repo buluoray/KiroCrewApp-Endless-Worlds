@@ -42,7 +42,11 @@ guarantee.
   an effect) so a differently-languaged world re-renders the whole tree already
   speaking it; `t()` reads a module value so no call site needs a hook. An
   explicit dropdown pick sets `langLocked` and persists, and that lock overrides
-  the otherwise-automatic follow of a world's own language. The play view reading
+  the otherwise-automatic follow of a world's own language. The first-run default
+  (no remembered pick) follows the Crew's UI language via
+  `document.documentElement.lang` — the dashboard language KiroCrew's own provider
+  sets on the shared document — falling back to `navigator.language` and then
+  English, since the app ships only zh + en. The play view reading
   the language without a dead type assertion is pinned by
   `test_rail.py::test_the_play_view_reads_the_language_without_a_type_assertion`,
   and both tables offering the same strings by
