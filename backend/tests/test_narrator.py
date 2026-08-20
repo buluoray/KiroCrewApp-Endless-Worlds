@@ -340,6 +340,30 @@ def test_the_narrators_prompt_leaks_no_implementation_vocabulary_to_the_player()
         )
 
 
+def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
+    """The narrator chooses an image from the turn's meaning; it is not trained to
+    stamp the same gradient/vignette/grain stack onto every page. Safety belongs
+    to ``compile_backdrop`` — this prompt contract protects visual diversity."""
+    prompt = json.loads(AGENT_JSON.read_text(encoding="utf-8"))["prompt"]
+
+    for required in (
+        "IRREVERSIBLE CHANGE",
+        "one visual thesis",
+        "OPTIONAL tools, never required layers",
+        "previous two you authored",
+        "MEANING HAS CHANGED",
+        "zero or one motion system",
+    ):
+        assert required in prompt
+
+    for old_recipe in (
+        "Recipe, adapted so no two scenes look alike",
+        "faint feTurbulence grain (opacity about 0.05)",
+        "roughly 0.08 to 0.2",
+    ):
+        assert old_recipe not in prompt
+
+
 # -- fakes vs the real thing ---------------------------------------------
 
 

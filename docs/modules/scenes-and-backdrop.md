@@ -192,3 +192,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   restored per page (`test_backdrop_is_bound_to_the_turn_and_restores_per_page`); a
   corrupt store file reads as no background, never an error
   (`test_store_treats_a_corrupt_file_as_no_background`).
+
+- **Backdrop guidance is an art brief, not a rendering recipe.** The packaged
+  narrator begins with the turn's irreversible change, chooses one visual thesis
+  and dominant image, and treats gradients, patterns, grain, vignettes, filters,
+  and motion as optional media rather than required layers. A new backdrop differs
+  from the previous two in composition, palette logic, filter stack, and motion
+  language; a motif may recur when its meaning changes, because semantic recurrence
+  is continuity rather than wallpaper. Reading calm comes from composition and
+  contrast instead of making every layer uniformly faint, and motion embodies at
+  most one scene verb with stillness around it. Enforced by the `prompt` in
+  `agents/narrator.json`; pinned by
+  `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
