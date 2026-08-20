@@ -24,9 +24,11 @@ jobs:
           python -m pip install --upgrade pip
           # The suite tests against the REAL host AppStorage rather than a stub
           # (see backend/tests/conftest.py), so the gateway package must be
-          # importable. Installing it also pulls the runtime deps the backend
-          # imports (aiohttp, etc.). pytest itself is the only extra.
-          pip install pytest kirocrew
+          # importable. It is not published to PyPI, so install it from its
+          # public source; this also pulls the runtime deps the backend imports
+          # (aiohttp, etc.). pytest itself is the only extra.
+          pip install pytest
+          pip install "git+https://github.com/kirodotdev/KiroCrew.git"
 
       - name: Run full backend test suite
         working-directory: backend
