@@ -274,6 +274,37 @@ def test_a_month_being_written_blocks_the_delete(world):
 # -- the cascade ----------------------------------------------------------
 
 
+def test_a_world_that_would_fail_halfway_is_refused_whole(world):
+    """delete_run is irreversible and the lives loop cannot roll back — so a
+    world holding one undeletable life must be refused with EVERY life intact,
+    not left on the shelf minus the lives the loop got through."""
+    import os
+    import stat
+
+    healthy = a_life(world)
+    locked = a_life(world)
+    locked_dir = world["data"] / "runs" / locked
+    assert locked_dir.is_dir(), "the pre-flight needs a real directory to judge"
+    mode = locked_dir.stat().st_mode
+    locked_dir.chmod(stat.S_IREAD | stat.S_IEXEC)  # unwritable: children can't go
+    if os.access(locked_dir, os.W_OK):
+        pytest.skip("running as a user the chmod cannot restrict (root/CAP_DAC)")
+
+    try:
+        res = delete(world, lives=2)
+
+        assert res.status == 409
+        body = body_of(res)
+        assert body["code"] == "lives_not_erasable"
+        assert [f["runId"] for f in body["failed"]] == [locked]
+        # The whole point: NOTHING was destroyed, including the healthy life.
+        index_ids = {r.get("runId") for r in world["store"].read_index()}
+        assert index_ids == {healthy, locked}
+        assert (world["data"] / "runs" / healthy).is_dir()
+    finally:
+        locked_dir.chmod(mode)
+
+
 def test_deleting_a_world_erases_the_lives_lived_in_it(world):
     run_id = a_life(world)
     world["store"].mark_briefed(run_id, slot="endless-run-x")

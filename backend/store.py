@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
 import uuid
@@ -406,6 +407,32 @@ class RunStore:
         self._kv.set(self._state_key(run_id), state)
         self.upsert_index({**summary, "runId": run_id})
         return run_id
+
+    def deletable(self, run_id: str) -> str | None:
+        """Why :meth:`delete_run` would fail for this life, or ``None`` if it
+        should succeed.
+
+        The non-destructive half of a bulk delete's all-or-nothing story: a world
+        delete erases lives one at a time and cannot roll one back, so every life
+        is checked HERE before the first is touched. Covers the systematic
+        failure modes — a malformed id and an unwritable run directory tree; a
+        failure between the check and the delete is still possible but is a
+        race, not the common case.
+        """
+        try:
+            _check_run_id(run_id)
+        except StoreError as exc:
+            return str(exc)
+        run_dir = self._runs_dir / run_id
+        if not run_dir.is_dir():
+            return None  # nothing on disk to fail on
+        # rmdir/unlink of a child needs WRITE on its parent directory; the tree
+        # is small (a run holds a handful of files), so walking it is cheap.
+        dirs = [run_dir] + [p for p in run_dir.rglob("*") if p.is_dir()]
+        for d in dirs:
+            if not os.access(d, os.W_OK | os.X_OK):
+                return f"no permission to clear {d.name}"
+        return None
 
     def delete_run(self, run_id: str) -> None:
         """Erase one life: state, rollback point, bookkeeping, chronicle, index row.

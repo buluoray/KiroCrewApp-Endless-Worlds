@@ -520,6 +520,28 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
     store = _store(ctx)
     _app = getattr(request, "app", None)
     state_obj = _app.get("state") if _app is not None else None
+
+    # All-or-nothing where it can be: delete_run is irreversible and this loop
+    # cannot roll back, so every life is pre-flighted BEFORE the first one is
+    # destroyed. A world that would fail halfway is refused whole — with all its
+    # lives intact — instead of surviving on the shelf minus the lives the loop
+    # got through, the exact partial outcome the `lives` precondition promises
+    # the player cannot happen.
+    undeletable = [
+        {"runId": str(life["runId"]), "problem": reason}
+        for life in facts["lives"]
+        if (reason := store.deletable(str(life["runId"]))) is not None
+    ]
+    if undeletable:
+        return web.json_response(
+            {
+                "error": "some lives cannot be erased, so nothing was deleted",
+                "code": "lives_not_erasable",
+                "failed": undeletable,
+            },
+            status=409,
+        )
+
     failed: list[dict[str, str]] = []
     removed: list[str] = []
     for life in facts["lives"]:
@@ -539,10 +561,14 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
     # shelf row that can only ever produce "this world could not be read" — and the
     # player has no way left to reach the world that would have cleaned it up.
     if failed:
+        # Reachable only by a failure that raced past the pre-flight above —
+        # rare, but the destruction already done is real, so say so explicitly
+        # rather than letting "the world was kept" read as "nothing happened".
         return web.json_response(
             {
                 "error": "some lives could not be erased, so the world was kept",
                 "code": "lives_not_erased",
+                "partial": True,
                 "failed": failed,
                 "livesRemoved": removed,
             },

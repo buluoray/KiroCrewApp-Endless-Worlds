@@ -119,6 +119,17 @@ processes self-locate the same data dir so routes and tools see one set of files
   more than what the player was shown. Preconditions travel as body fields
   (`deleteWorld(id, lives)`, `deleteLife(runId, turn)`).
 
+- **A world delete is refused whole when any of its lives cannot be erased.**
+  `delete_run` is irreversible and the lives loop cannot roll back, so
+  `delete_world` pre-flights every life through `store.deletable()` (id
+  validity, directory-tree writability) *before* the first destructive call and
+  answers `409 lives_not_erasable` with everything intact — the partial outcome
+  the `lives` precondition promises cannot happen. A failure that races past
+  the pre-flight still aborts the loop, keeps the world, and reports itself
+  with `partial: true` plus the exact `livesRemoved`, so the truth is stated
+  rather than smoothed over. Pinned (mutation-verified) by
+  `test_a_world_that_would_fail_halfway_is_refused_whole`.
+
 - **Gateway internals are imported inside the handler.** `advance_run_turn` and
   `open_run` import `kiro_crew.dashboard.chat_runner._run_chat` *inside* the
   handler body, not at module top — exactly one code path touches gateway
