@@ -602,6 +602,23 @@ def test_a_run_prefixed_id_reaches_the_handler_instead_of_being_refused(app):
     assert prefixed == bare, "a run-prefixed id must resolve the same run as the bare id"
 
 
+def test_a_memory_event_missing_a_field_is_salvaged_not_schema_refused(app):
+    """Memory never blocks the turn at the SCHEMA layer either: an event missing
+    title passes the structure-only schema and is dropped by sanitize_memory, so the
+    prose/state/choices still commit with a warning — the whole call is not refused."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
+               choices=[{"id": "go", "label": "go"}], state={"alive": True},
+               memory={"events": [{"key": "k", "summary": "s", "disclosure": "known"}]})
+    assert out.get("committed") is True, "the turn commits despite the titleless event"
+    assert out.get("ok") is not False, "the call is not schema-refused"
+    (entry,) = store.read_chronicle(run)
+    assert "memory" not in entry, "the titleless event was dropped, nothing recorded"
+    fields = {w["field"] for w in out.get("warnings") or [] if w.get("panel") == "memory"}
+    assert "memory.events[0].title" in fields, "the drop is surfaced as a warning"
+
+
 def test_milestones_are_reached_once_and_then_permanent(app):
     """An achievement is recorded the turn its condition first holds, and stays
     recorded afterwards even if the condition later goes false (app-owned)."""

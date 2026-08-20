@@ -155,7 +155,11 @@ _TOOLS: list[dict[str, Any]] = [
                             "maxItems": 12,
                             "items": {
                                 "type": "object",
-                                "required": ["id", "kind", "name"],
+                                # No `required`: memory is enrichment and must never
+                                # block a turn at the schema layer. sanitize_memory is
+                                # the content gate — it drops a malformed sub-item and
+                                # commits the rest. The schema still bounds types and
+                                # rejects unknown fields for a clean message.
                                 "additionalProperties": False,
                                 "properties": {
                                     "id": {"type": "string", "maxLength": 64},
@@ -178,7 +182,7 @@ _TOOLS: list[dict[str, Any]] = [
                             "maxItems": 6,
                             "items": {
                                 "type": "object",
-                                "required": ["key", "title", "summary", "disclosure"],
+                                # No `required` — see the entities note above.
                                 "additionalProperties": False,
                                 "properties": {
                                     "key": {"type": "string", "maxLength": 64},
@@ -199,7 +203,6 @@ _TOOLS: list[dict[str, Any]] = [
                                         "maxItems": 4,
                                         "items": {
                                             "type": "object",
-                                            "required": ["id", "effect"],
                                             "additionalProperties": False,
                                             "properties": {
                                                 "id": {"type": "string", "maxLength": 64},
@@ -230,7 +233,7 @@ _TOOLS: list[dict[str, Any]] = [
                             "maxItems": 12,
                             "items": {
                                 "type": "object",
-                                "required": ["from", "type", "to", "change"],
+                                # No `required` — see the entities note above.
                                 "additionalProperties": False,
                                 "properties": {
                                     "from": {"type": "string", "maxLength": 64},
