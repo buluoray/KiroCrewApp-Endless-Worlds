@@ -449,6 +449,27 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "endless_commit_fallback_backdrop",
+        "description": (
+            "Emergency page-art recovery for the NARRATOR only. Use this solely "
+            "when an internal recovery prompt says illustrator attempts failed. "
+            "Commit one safe self-contained SVG for the exact runId and turn in "
+            "that prompt. The server refuses this tool unless that page's persisted "
+            "fallback gate is open."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "turn", "markup"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "turn": {"type": "integer", "minimum": 0},
+                "markup": {"type": "string", "maxLength": 24000},
+                "buttons": {"type": "string", "maxLength": 8000},
+            },
+        },
+    },
+    {
         "name": "endless_clear_backdrop",
         "description": (
             "Remove the background art, returning the story to the plain page. "
@@ -1508,9 +1529,40 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
-    """The illustrator's commit: validate the SVG and hang it on ``turn``."""
+    """The illustrator's commit: validate the SVG and publish its waiting page."""
+    run_id = args["runId"]
     turn = int(args["turn"])
-    version = _backdrop_store(args["runId"]).set(args["markup"], args.get("buttons"), turn)
+    version = _backdrop_store(run_id).set(args["markup"], args.get("buttons"), turn)
+    try:
+        store = _store()
+        request = store.read_backdrop_request(run_id)
+        if request and int(request.get("turn") or 0) == turn:
+            store.clear_backdrop_request(run_id)
+    except StoreError:
+        # BackdropStore deliberately accepts human-shaped ids in isolated tooling;
+        # recovery bookkeeping uses the stricter production run-id contract. Art
+        # that already validated and stored must not be rolled back over cleanup.
+        pass
+    return {"backdrop": "committed", "version": version, "turn": turn}
+
+
+def _commit_fallback_backdrop(args: dict[str, Any]) -> dict[str, Any]:
+    """Rare narrator-authored art, accepted only after worker recovery failed."""
+    run_id = args["runId"]
+    turn = int(args["turn"])
+    store = _store()
+    request = store.read_backdrop_request(run_id)
+    if not (
+        request
+        and request.get("fallbackAllowed") is True
+        and int(request.get("turn") or 0) == turn
+    ):
+        raise BackdropError(
+            "direct narrator backdrop commit is available only for the page "
+            "whose illustrator recovery failed"
+        )
+    version = _backdrop_store(run_id).set(args["markup"], args.get("buttons"), turn)
+    store.clear_backdrop_request(run_id)
     return {"backdrop": "committed", "version": version, "turn": turn}
 
 
@@ -1598,6 +1650,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_dismiss_scene": _dismiss_scene,
     "endless_paint_backdrop": _paint_backdrop,
     "endless_commit_backdrop": _commit_backdrop,
+    "endless_commit_fallback_backdrop": _commit_fallback_backdrop,
     "endless_clear_backdrop": _clear_backdrop,
     "endless_export_world": _export_world,
     "endless_read_draft": _read_draft,

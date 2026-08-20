@@ -33,13 +33,19 @@ argument.
 
 - **Tools are scoped per tool, not per server, so each agent carries only its own
   tool schemas.** The refs are `@endless-worlds:endless-mcp/<tool>`, not the bare
-  server: the narrator lists the eight it uses (`endless_read_runtime`,
-  `endless_advance_turn`, the four scene tools, `endless_paint_backdrop`,
-  `endless_clear_backdrop`), the illustrator only `endless_commit_backdrop`, and the
-  worldsmith `endless_read_draft`/`endless_submit_world_draft`/`endless_export_world`.
-  Advertising the whole server put every tool's description in every agent's
-  every-turn context, so the narrator paid for the worldsmith's and illustrator's
-  tools it never calls. The SERVER half of the ref must still be the namespaced key
+  server: the narrator lists its runtime/turn/scene tools,
+  `endless_paint_backdrop`, `endless_clear_backdrop`, and the exceptional
+  `endless_commit_fallback_backdrop`; the illustrator lists only
+  `endless_commit_backdrop`, and the worldsmith lists only
+  `endless_read_draft`/`endless_submit_world_draft`/`endless_export_world`.
+  The fallback capability does not turn direct drawing into a normal narrator path:
+  its prompt forbids ordinary use, and its MCP handler refuses every call unless two
+  illustrator attempts opened a persisted gate for that exact run and turn. This
+  keeps SVG out of normal narrator turns while allowing invisible recovery instead
+  of exposing an agent failure to the player. Advertising the whole server put every
+  tool's description in every agent's every-turn context, so the narrator paid for
+  the worldsmith's and illustrator's tools it never calls. The SERVER half of the
+  ref must still be the namespaced key
   `endless-worlds:endless-mcp` (`OWN_SERVER_REF`), never the bare `@endless-mcp`:
   registration writes every app server under `f"{app_name}:{server_name}"` and merges
   those entries, unrenamed, into the materialized agent's `mcpServers`; kiro-cli

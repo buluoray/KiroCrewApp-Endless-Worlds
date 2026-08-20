@@ -65,8 +65,9 @@ def world_file(header: dict | None = None) -> str:
 class FakeRequest:
     """Only what the handlers touch: an authenticated user, path params, a body."""
 
-    def __init__(self, *, match=None, body=None, user="someone"):
+    def __init__(self, *, match=None, body=None, user="someone", query=None):
         self.match_info = match or {}
+        self.query = query or {}
         self._body = body
         self._extra = {"user": user}
 
@@ -398,3 +399,111 @@ def test_a_world_with_no_seed_is_reported_as_unrecoverable(world):
     ))
 
     assert facts["restorable"] is False
+
+
+def test_requested_art_withholds_the_new_page_until_its_exact_commit(world):
+    """The store may hold turn 2, but GET publishes turn 1 until turn 2 art lands."""
+    from backdrop import BackdropStore
+
+    store = world["store"]
+    run_id = store.create_run(
+        {"turn": 1, "worldId": "test-world", "style": "standard", "status": {"age": "one"}},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    store.append_turn(run_id, {"turn": 1, "prose": "the old page"})
+    store.commit_state(
+        run_id,
+        {"turn": 2, "worldId": "test-world", "style": "standard", "status": {"age": "two"}},
+    )
+    store.append_turn(run_id, {"turn": 2, "prose": "the hidden page"})
+    store.request_backdrop(run_id, turn=2, brief="a red gate closes")
+
+    waiting = body_of(call(
+        routes_mod.get_run, world["ctx"], match={"run_id": run_id}
+    ))
+    assert waiting["turn"] == 1
+    assert waiting["prose"] == "the old page"
+    assert waiting["generating"]["stage"] == "painting"
+    waiting_history = body_of(call(
+        routes_mod.get_chronicle, world["ctx"], match={"run_id": run_id}
+    ))
+    assert [entry["turn"] for entry in waiting_history["turns"]] == [1]
+
+    BackdropStore(world["data"], run_id).set(
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+        turn=2,
+    )
+    store.clear_backdrop_request(run_id)
+
+    published = body_of(call(
+        routes_mod.get_run, world["ctx"], match={"run_id": run_id}
+    ))
+    assert published["turn"] == 2
+    assert published["prose"] == "the hidden page"
+    assert published["generating"] is None
+    assert published["backdrop"]["version"] == 1
+    published_history = body_of(call(
+        routes_mod.get_chronicle, world["ctx"], match={"run_id": run_id}
+    ))
+    assert [entry["turn"] for entry in published_history["turns"]] == [2, 1]
+
+
+def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(
+    world, monkeypatch
+):
+    from backdrop import BackdropStore
+
+    store = world["store"]
+    run_id = store.create_run(
+        {"turn": 1, "worldId": "test-world", "style": "standard"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    store.request_backdrop(run_id, turn=1, brief="a red gate closes")
+
+    class FinishedWithoutArt:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, task, *, agent, silent, model):
+            self.calls.append((task, agent, silent, model))
+            return f"spawn-{len(self.calls)}"
+
+        def is_done(self, _spawn_id):
+            return True
+
+    spawn = FinishedWithoutArt()
+    world["ctx"].spawn = spawn
+    slot = object()
+    prompts = []
+
+    monkeypatch.setattr(
+        routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (slot, False)
+    )
+
+    def fake_dispatcher(_runner):
+        def dispatch(_state, got_slot, prompt):
+            assert got_slot is slot
+            gated = store.read_backdrop_request(run_id)
+            assert gated["fallbackAllowed"] is True
+            prompts.append(prompt)
+            BackdropStore(world["data"], run_id).set(
+                '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+                turn=1,
+            )
+            store.clear_backdrop_request(run_id)
+            return True
+        return dispatch
+
+    monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
+    monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
+    asyncio.run(routes_mod._recover_backdrop(
+        world["ctx"], store, object(), run_id,
+        painter_model="paint-model", narrator_model="story-model", reasoning_effort="high",
+    ))
+
+    assert len(spawn.calls) == 2
+    assert all(call[1] == "endless-illustrator" for call in spawn.calls)
+    assert len(prompts) == 1
+    assert "do NOT narrate" in prompts[0]
+    assert "endless_commit_fallback_backdrop" in prompts[0]
+    assert store.read_backdrop_request(run_id) is None

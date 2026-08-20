@@ -207,3 +207,47 @@ def test_a_second_backdrop_on_the_same_turn_replaces_that_pages_entry(tmp_path):
     b.set(OK_SVG, turn=3)
     # Two sets on turn 3 leave ONE entry for that page, not two.
     assert len(b._load()) == 1
+
+
+def test_exact_requires_art_committed_for_that_page(tmp_path):
+    store = BackdropStore(tmp_path, "run-abc")
+    store.set(_svg("#111"), turn=1)
+    assert store.at(2) is not None, "the previous art remains effective"
+    assert store.exact(2) is None, "inherited art cannot publish a newly briefed page"
+    store.set(_svg("#222"), turn=2)
+    assert "#222" in store.exact(2)["markup"]
+
+
+def test_successful_illustrator_commit_clears_the_waiting_request(data):
+    from kiro_crew.apps.app_storage import AppStorage
+    from store import RunStore
+
+    run_id = "a" * 32
+    runs = RunStore(AppStorage("endless-worlds", data), data)
+    runs.request_backdrop(run_id, turn=1, brief="a closed red gate")
+    out = _call("endless_commit_backdrop", runId=run_id, turn=1, markup=_svg("#111"))
+    assert out["ok"] is True
+    assert runs.read_backdrop_request(run_id) is None
+
+
+def test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate(data):
+    from kiro_crew.apps.app_storage import AppStorage
+    from store import RunStore
+
+    run_id = "b" * 32
+    runs = RunStore(AppStorage("endless-worlds", data), data)
+    runs.request_backdrop(run_id, turn=1, brief="a closed red gate")
+
+    refused = _call(
+        "endless_commit_fallback_backdrop", runId=run_id, turn=1, markup=_svg("#111")
+    )
+    assert refused["ok"] is False
+    assert BackdropStore(data, run_id).exact(1) is None
+
+    runs.update_backdrop_request(run_id, fallbackAllowed=True)
+    accepted = _call(
+        "endless_commit_fallback_backdrop", runId=run_id, turn=1, markup=_svg("#222")
+    )
+    assert accepted["ok"] is True
+    assert "#222" in BackdropStore(data, run_id).exact(1)["markup"]
+    assert runs.read_backdrop_request(run_id) is None

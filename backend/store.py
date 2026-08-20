@@ -324,28 +324,51 @@ class RunStore:
         return f"backdrop-request-{run_id}"
 
     def request_backdrop(self, run_id: str, *, turn: int, brief: str) -> None:
-        """Record the narrator's BRIEF for a backdrop, for the illustrator to draw.
+        """Record the narrator's BRIEF until that page's art actually commits.
 
-        The narrator sends a short brief and moves on; the SVG is never authored in
-        its session (that is the whole point — 24k of art neither accumulates in nor
-        slows its turn). The app backend reads this after the turn commits and spawns
-        the illustrator, which draws and commits the art directly. Bound to ``turn``
-        so the art lands on the page it belongs to.
+        A first request starts a recovery record. If the narrator is later asked to
+        recover a failed illustration and supplies a simpler brief for the SAME turn,
+        the server keeps the fallback gate but resets illustrator attempts for the
+        replacement direction. The record is cleared by a successful commit, never
+        merely by dispatching an agent.
         """
         _check_run_id(run_id)
+        prior = self.read_backdrop_request(run_id)
+        recovering = bool(
+            prior
+            and int(prior.get("turn") or 0) == int(turn)
+            and prior.get("fallbackAllowed")
+        )
         self._kv.set(
             self._backdrop_request_key(run_id),
-            {"turn": int(turn), "brief": str(brief), "askedAt": time.time()},
+            {
+                "turn": int(turn),
+                "brief": str(brief),
+                "askedAt": time.time(),
+                "attempts": 0,
+                "fallbackAllowed": recovering,
+                "narratorNotified": recovering,
+            },
         )
 
     def read_backdrop_request(self, run_id: str) -> dict[str, Any] | None:
-        """The pending backdrop brief, or ``None``."""
+        """The pending backdrop brief/recovery record, or ``None``."""
         _check_run_id(run_id)
         raw = self._kv.get(self._backdrop_request_key(run_id))
         return raw if isinstance(raw, dict) else None
 
+    def update_backdrop_request(self, run_id: str, **changes: Any) -> dict[str, Any] | None:
+        """Patch a live recovery record and return it; a missing record stays missing."""
+        _check_run_id(run_id)
+        current = self.read_backdrop_request(run_id)
+        if current is None:
+            return None
+        current.update(changes)
+        self._kv.set(self._backdrop_request_key(run_id), current)
+        return current
+
     def clear_backdrop_request(self, run_id: str) -> None:
-        """Forget the backdrop brief once the illustrator has been dispatched."""
+        """Forget the backdrop brief only after its page art commits."""
         _check_run_id(run_id)
         self._kv.delete(self._backdrop_request_key(run_id))
 
@@ -465,6 +488,7 @@ class RunStore:
         self._kv.delete(self._prev_key(run_id))
         self._kv.delete(self._brief_key(run_id))
         self._kv.delete(self._pending_key(run_id))
+        self._kv.delete(self._backdrop_request_key(run_id))
         rows = [r for r in self.read_index() if r.get("runId") != run_id]
         self._kv.set(_INDEX_KEY, {"runs": rows})
         run_dir = self._runs_dir / run_id

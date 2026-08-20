@@ -9,6 +9,7 @@ catch-all ``/api/apps/{app_name}/{path:.*}`` shadows it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -147,6 +148,7 @@ from chapters import opened_since  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
 from memory_routes import memory_routes  # noqa: E402
 from narrator import (  # noqa: E402
+    ensure_narrator_slot_ex,
     ensure_worldsmith_slot,
     purge_narrator_session,
     release_narrator_slot,
@@ -177,50 +179,192 @@ ROUTE_CONTRACT = 11
 logger = logging.getLogger(__name__)
 
 
-async def _paint_backdrop_if_requested(
-    ctx: AppContext, store: RunStore, run_id: str, model: str
-) -> None:
-    """Fire-and-forget the illustrator for a backdrop the narrator asked for.
+#: Requested art is part of its page, not optional decoration arriving later.
+#: Tasks are process-local accelerators; the durable request lets ``get_run``
+#: restart recovery after a dropped HTTP request or gateway restart.
+_BACKDROP_RECOVERY_TASKS: dict[str, asyncio.Task[None]] = {}
+_BACKDROP_ILLUSTRATOR_ATTEMPTS = 2
+_BACKDROP_ATTEMPT_SECS = 180.0
+_BACKDROP_POLL_SECS = 0.25
 
-    The narrator calls ``endless_paint_backdrop`` (which records only a short brief)
-    BEFORE it commits, so the 24k SVG is never authored in — nor slows — its own
-    session. Here, once the turn has committed, we hand that brief to a throwaway
-    illustrator subagent through the host's sanctioned ``ctx.spawn`` (gated by
-    ``permissions.spawn``): it draws the SVG and commits it directly via
-    ``endless_commit_backdrop``, and never reports back. The play page's per-page
-    poll + double-buffer pick the art up when it lands, a beat later.
 
-    Best-effort throughout: the turn already committed and a backdrop is optional,
-    so nothing here may raise. The request is cleared BEFORE dispatch so a failed
-    illustrator is not re-spawned on the next commit — a re-brief is the narrator's
-    to make, not ours to retry.
-    """
+def _backdrop_is_pending(
+    ctx: AppContext, store: RunStore, run_id: str, state: dict[str, Any] | None = None
+) -> bool:
+    """Whether the committed page is withheld for its explicitly requested art."""
     request = store.read_backdrop_request(run_id)
     if not request:
-        return
+        return False
+    current = state or store.read_state(run_id)
+    turn = int(current.get("turn") or 0)
+    if int(request.get("turn") or 0) != turn:
+        return False
+    return BackdropStore(ctx.data_dir, run_id).exact(turn) is None
+
+
+async def _wait_for_backdrop(
+    ctx: AppContext, store: RunStore, run_id: str, turn: int, spawn_id: str
+) -> bool:
+    """Wait for exact page art, or until this illustrator has ended."""
     spawn = getattr(ctx, "spawn", None)
-    turn = int(request.get("turn") or 0)
-    brief = str(request.get("brief") or "")
-    store.clear_backdrop_request(run_id)
-    if spawn is None:
-        logger.info(
-            "endless-worlds: ctx.spawn unavailable (permissions.spawn?); "
-            "skipped backdrop for run %s turn %s",
-            run_id, turn,
-        )
-        return
-    task = (
-        "Paint the backdrop for one page of a life, then commit it with "
-        "endless_commit_backdrop using EXACTLY this runId and turn.\n"
-        f"runId: {run_id}\nturn: {turn}\n\nBrief:\n{brief}"
-    )
+    deadline = asyncio.get_running_loop().time() + _BACKDROP_ATTEMPT_SECS
+    while asyncio.get_running_loop().time() < deadline:
+        if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
+            store.clear_backdrop_request(run_id)
+            return True
+        if spawn is not None and spawn.is_done(spawn_id):
+            return False
+        await asyncio.sleep(_BACKDROP_POLL_SECS)
+    return False
+
+
+def _narrator_runner() -> Any:
+    """The platform runner, imported lazily so backend unit tests stay standalone."""
+    from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
+
+    return _run_chat
+
+
+async def _recover_backdrop(
+    ctx: AppContext,
+    store: RunStore,
+    state_obj: Any,
+    run_id: str,
+    *,
+    painter_model: str,
+    narrator_model: str,
+    reasoning_effort: str,
+) -> None:
+    """Land requested art without exposing orchestration failures to the player.
+
+    Two independent illustrators try first. If neither commits the exact turn, the
+    same narrator conversation receives an internal repair prompt: it may issue a
+    simpler brief (starting a fresh illustrator cycle) or draw through the
+    server-gated direct fallback. The ordinary generation state stays on screen.
+    """
     try:
-        await spawn.run(task, agent="endless-illustrator", silent=True, model=model)
-    except Exception as exc:  # noqa: BLE001 — art is optional; the turn is committed
-        logger.warning(
-            "endless-worlds: illustrator spawn failed for run %s turn %s: %s",
-            run_id, turn, exc,
+        while True:
+            request = store.read_backdrop_request(run_id)
+            if not request:
+                return
+            turn = int(request.get("turn") or 0)
+            if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
+                store.clear_backdrop_request(run_id)
+                return
+
+            attempts = int(request.get("attempts") or 0)
+            spawn = getattr(ctx, "spawn", None)
+            if attempts < _BACKDROP_ILLUSTRATOR_ATTEMPTS and spawn is not None:
+                attempt = attempts + 1
+                store.update_backdrop_request(run_id, attempts=attempt)
+                task = (
+                    "Paint the backdrop for one page of a life, then commit it with "
+                    "endless_commit_backdrop using EXACTLY this runId and turn. "
+                    f"This is invisible recovery attempt {attempt}; draw directly "
+                    "from the brief and use no research.\n"
+                    f"runId: {run_id}\nturn: {turn}\n\nBrief:\n"
+                    f"{str(request.get('brief') or '')}"
+                )
+                try:
+                    spawn_id = await spawn.run(
+                        task,
+                        agent="endless-illustrator",
+                        silent=True,
+                        model=painter_model,
+                    )
+                except Exception as exc:  # noqa: BLE001 — continue recovery
+                    logger.warning(
+                        "endless-worlds: illustrator attempt %s failed for %s/%s: %s",
+                        attempt,
+                        run_id,
+                        turn,
+                        exc,
+                    )
+                    continue
+                if await _wait_for_backdrop(ctx, store, run_id, turn, spawn_id):
+                    return
+                continue
+
+            # The workers could not land art. Ask the narrator that wrote this page
+            # to simplify the direction or use the exceptional direct fallback.
+            if state_obj is None:
+                return  # a later real gateway GET restarts the durable request
+            request = store.update_backdrop_request(
+                run_id, fallbackAllowed=True, narratorNotified=True
+            ) or request
+            marker = float(request.get("askedAt") or 0.0)
+            slot, _fresh = ensure_narrator_slot_ex(
+                state_obj,
+                run_id,
+                project=str(ctx.data_dir / "runs" / run_id),
+                model=narrator_model,
+                reasoning_effort=reasoning_effort,
+            )
+            prompt = (
+                f"Internal page-art recovery for runId {run_id}, turn {turn}. "
+                "The prose/state are already committed; do NOT narrate or call "
+                "endless_advance_turn. Two illustrators ended without committing art. "
+                "Recover invisibly: either call endless_paint_backdrop with a NEW, "
+                "simpler brief, or draw one safe SVG yourself and call "
+                "endless_commit_fallback_backdrop with this exact runId and turn. "
+                "Do not explain the failure and do not write an ordinary reply."
+            )
+            make_dispatcher(_narrator_runner())(state_obj, slot, prompt)
+
+            # A replacement brief changes askedAt and resets attempts; a direct
+            # fallback clears the request. Re-notify after a bounded silent stall.
+            deadline = asyncio.get_running_loop().time() + _BACKDROP_ATTEMPT_SECS
+            while asyncio.get_running_loop().time() < deadline:
+                if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
+                    store.clear_backdrop_request(run_id)
+                    return
+                latest = store.read_backdrop_request(run_id)
+                if latest is None:
+                    return
+                if float(latest.get("askedAt") or 0.0) > marker:
+                    break
+                await asyncio.sleep(_BACKDROP_POLL_SECS)
+            else:
+                store.update_backdrop_request(run_id, narratorNotified=False)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — GET can resume the durable request
+        logger.exception(
+            "endless-worlds: backdrop recovery paused for run %s: %s", run_id, exc
         )
+
+
+def _ensure_backdrop_recovery(
+    ctx: AppContext,
+    store: RunStore,
+    state_obj: Any,
+    run_id: str,
+    settings: dict[str, str],
+) -> None:
+    """Ensure one recovery task per run; safe from POST and every polling GET."""
+    if not _backdrop_is_pending(ctx, store, run_id):
+        return
+    current = _BACKDROP_RECOVERY_TASKS.get(run_id)
+    if current is not None and not current.done():
+        return
+    task = asyncio.create_task(
+        _recover_backdrop(
+            ctx,
+            store,
+            state_obj,
+            run_id,
+            painter_model=settings.get("painterModel") or "",
+            narrator_model=settings.get("model") or "",
+            reasoning_effort=settings.get("reasoningEffort") or "",
+        )
+    )
+    _BACKDROP_RECOVERY_TASKS[run_id] = task
+
+    def _forget(done: asyncio.Task[None]) -> None:
+        if _BACKDROP_RECOVERY_TASKS.get(run_id) is done:
+            _BACKDROP_RECOVERY_TASKS.pop(run_id, None)
+
+    task.add_done_callback(_forget)
 
 #: Seeds ship in the install tree, one level up from backend/.
 _SEEDS_DIR = _HERE.parent / "seeds"
@@ -912,6 +1056,15 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
     if err is not None or run_state is None:
         return err or web.json_response({"error": "no such life"}, status=404)
 
+    if _backdrop_is_pending(ctx, store, run_id, run_state):
+        _cfg = read_settings(ctx.data_dir)
+        _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)
+        return web.json_response({
+            "advanced": False,
+            "turn": int(run_state.get("turn") or 0),
+            "reason": "generating",
+        })
+
     if isinstance(wanted, int) and not isinstance(wanted, bool):
         done = already_committed(store, run_id, wanted)
         if done is not None:
@@ -962,18 +1115,30 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         reasoning_effort=_cfg["reasoningEffort"],
     )
 
-    # A backdrop the narrator briefed this turn is painted off the critical path by
-    # a throwaway illustrator, so the art never entered the narrator's own session.
+    # The prose may be committed, but requested art is the other half of this page.
+    # Recover it while GET keeps publishing the previous page.
     if outcome.advanced:
-        await _paint_backdrop_if_requested(ctx, store, run_id, _cfg.get("painterModel") or "")
+        _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)
 
+    withheld = outcome.advanced and _backdrop_is_pending(ctx, store, run_id)
+    visible_state = (
+        store.read_prev(run_id) or store.read_state(run_id)
+        if withheld
+        else store.read_state(run_id)
+    )
     return web.json_response({
+        # `advanced` remains true so the initiating client clears its submitted
+        # action; the page bytes themselves remain withheld until GET publishes.
         "advanced": outcome.advanced,
         "turn": outcome.turn,
         "reason": outcome.reason,
-        "prose": outcome.prose,
-        "state": store.read_state(run_id),
-        "scenes": SceneLedger(ctx.data_dir, run_id).mounted() if outcome.advanced else [],
+        "prose": "" if withheld else outcome.prose,
+        "state": visible_state,
+        "scenes": (
+            SceneLedger(ctx.data_dir, run_id).mounted()
+            if outcome.advanced and not withheld
+            else []
+        ),
     })
 
 
@@ -1188,13 +1353,19 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         deadline_secs=OPENING_DEADLINE_SECS,
     )
     if outcome.advanced:
-        await _paint_backdrop_if_requested(ctx, store, run_id, _cfg.get("painterModel") or "")
+        _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)
+    withheld = outcome.advanced and _backdrop_is_pending(ctx, store, run_id)
+    visible_state = (
+        store.read_prev(run_id) or store.read_state(run_id)
+        if withheld
+        else store.read_state(run_id)
+    )
     return web.json_response({
         "advanced": outcome.advanced,
         "turn": outcome.turn,
         "reason": outcome.reason,
-        "prose": outcome.prose,
-        "state": store.read_state(run_id),
+        "prose": "" if withheld else outcome.prose,
+        "state": visible_state,
         # A failed opening leaves the run retryable rather than half-created.
         "retryable": not outcome.advanced,
         "generating": outcome.reason in ("generating", "timeout"),
@@ -1309,6 +1480,17 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     if err is not None or state is None:
         return err or web.json_response({"error": "no such life"}, status=404)
 
+    committed_state = state
+    generation = generating(store, run_id, _gateway_state(request))
+    art_pending = _backdrop_is_pending(ctx, store, run_id, committed_state)
+    if art_pending:
+        _ensure_backdrop_recovery(
+            ctx, store, _gateway_state(request), run_id, read_settings(ctx.data_dir)
+        )
+        previous = store.read_prev(run_id)
+        if previous is not None:
+            state = previous
+
     world_id = state.get("worldId")
     if not isinstance(world_id, str) or not world_id:
         return web.json_response({"error": "this life has no world"}, status=422)
@@ -1322,7 +1504,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     # Chapters the world opened on the last committed month, in its own headings.
     # Compared against the prior state so "open since birth" is not reported; empty
     # on a life's first month (no prior state).
-    prev = store.read_prev(run_id)
+    prev = None if art_pending else store.read_prev(run_id)
     unlocked: list[str] = []
     if prev:
         headings = {c.id: c.heading for c in pack.template.chapters}
@@ -1333,7 +1515,9 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     # one reached so far (for the ending recap).
     mile_by_id = {m.id: m.label for m in pack.template.milestones}
     reached_ids = [i for i in (state.get("milestones") or []) if isinstance(i, str)]
-    prev_reached = {i for i in (prev.get("milestones") or []) if isinstance(i, str)}
+    prev_reached = {
+        i for i in ((prev.get("milestones") or []) if prev else []) if isinstance(i, str)
+    }
     milestones_all = [mile_by_id[i] for i in reached_ids if i in mile_by_id]
     milestones_reached = [
         mile_by_id[i] for i in reached_ids if i in mile_by_id and i not in prev_reached
@@ -1342,8 +1526,15 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     view = build_play_view(
         pack.template,
         state,
-        chronicle=store.read_chronicle(run_id),
-        scenes=SceneLedger(ctx.data_dir, run_id).mounted(),
+        chronicle=[
+            entry
+            for entry in store.read_chronicle(run_id)
+            if int(entry.get("turn") or 0) <= int(state.get("turn") or 0)
+        ],
+        # New scenes may already have been mounted by the hidden page. Do not leak
+        # them over the previous prose; an existing client keeps its current frames,
+        # and a returning client sees none until the new page publishes.
+        scenes=[] if art_pending else SceneLedger(ctx.data_dir, run_id).mounted(),
         unlocked=unlocked,
         milestones_reached=milestones_reached,
         milestones=milestones_all,
@@ -1355,7 +1546,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     view["language"] = pack.template.language
     # What a returning player is owed: leaving the page while a turn was being
     # written used to look identical to never having asked for it.
-    view["generating"] = generating(store, run_id, _gateway_state(request))
+    view["generating"] = generation
     # The current background, if the narrator has set one. The frontend loads the
     # compiled HTML into a scriptless, behind-text sandbox frame; `version` is the
     # cache-buster so a replaced background actually swaps.
@@ -1602,6 +1793,12 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
         return web.json_response({"error": "no such life"}, status=404)
 
     entries = store.read_chronicle(run_id)
+    if _backdrop_is_pending(ctx, store, run_id):
+        visible_turn = max(0, int(store.read_state(run_id).get("turn") or 0) - 1)
+        entries = [
+            e for e in entries
+            if int(e.get("turn") or 0) <= visible_turn
+        ]
     # Turn 0 is the app's own record (the legacy bridge, design §9), not a page
     # of the story: it has no prose and nobody lived it. The star map still
     # shows the inheritance — through the graph, where it belongs.

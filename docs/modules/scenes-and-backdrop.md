@@ -117,14 +117,30 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_scene_document_is_response_sandboxed_even_when_navigated_directly` and
   `test_the_scene_is_loaded_as_a_sandboxed_src_document`.
 
-- **A backdrop only takes effect on the page it belongs to — never mid-read.**
-  The narrator stores the NEXT page's backdrop while the turn is still being
-  written (tagged with the pending turn by `_backdrop_turn`), and the play page
-  polls every 3s during generation — so every read path resolves by turn, never
-  "latest": the run view pins its backdrop to the committed turn
-  (`BackdropStore.at(view["turn"])` in `get_run`), and the live page passes
-  `?turn=` on both the backdrop image and the `part=buttons` motif URL. The new
-  art appears exactly when the new page does.
+- **A requested backdrop publishes atomically with its page — never mid-read and
+  never prose-first.** The narrator records a short brief for the pending turn and
+  commits the turn without authoring SVG. The committed state remains internal
+  while that durable brief exists: `get_run` serves the previous state and
+  turn-truncated chronicle with the ordinary generation progress, and a second turn
+  is refused. `BackdropStore.exact(turn)` distinguishes art created for this page
+  from an older backdrop that merely remains effective through `at(turn)`. Only the
+  exact commit clears the brief; the next poll then reveals prose, state, choices,
+  button motif, and backdrop together. The live page still pins both image URLs to
+  `?turn=` and double-buffers image decoding, so publication never flashes a blank
+  background.
+
+- **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
+  successful commit, not on dispatch, so a dropped request or gateway restart can
+  resume recovery. The backend tries two fresh illustrators; if both finish without
+  an exact commit, it queues an internal repair message in the same narrator slot.
+  The narrator may send a simpler brief or draw directly through the separate
+  `endless_commit_fallback_backdrop` capability. That handler requires a persisted
+  same-run/same-turn fallback gate, so merely possessing the tool cannot bypass the
+  illustrator during an ordinary turn. The player sees only the existing generation
+  state, never an implementation failure or retry control. Pinned by
+  `test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate`,
+  `test_successful_illustrator_commit_clears_the_waiting_request`, and
+  `test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate`.
 
 - **One turn in flight, across every surface.** A scene answer dispatches from
   `main.tsx` (`onSceneChoice`), not from the play page, so the page's own `busy`

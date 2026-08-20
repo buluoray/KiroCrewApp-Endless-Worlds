@@ -193,3 +193,27 @@ turn 200 as at turn 1.
   briefing state machine sends the rulebook and declaration shape only when the
   slot is fresh or a different slot was last briefed, so turn 2 never re-pushes the
   rulebook.
+
+- **A requested backdrop is part of the turn's publication boundary.** The narrator
+  may commit state, prose, and chronicle before the illustrator finishes, but
+  `get_run` continues to build the prior page from `read_prev` and a turn-truncated
+  chronicle while the durable backdrop request remains. `generating()` reports the
+  ordinary `painting` stage, and `advance_run_turn` refuses another action, so no
+  client can observe or advance past the hidden page. Only an exact-turn backdrop
+  commit clears the request and publishes prose, panels, choices, and art together.
+  Enforced by `routes._backdrop_is_pending` / `routes.get_run` and
+  `turn.generating`; pinned by
+  `test_requested_art_withholds_the_new_page_until_its_exact_commit` and
+  `test_a_committed_page_stays_generating_while_its_requested_art_is_pending`.
+
+- **Illustration failure is recovered behind the normal generation state.** A
+  durable request survives the HTTP request and a gateway restart; `get_run`
+  re-arms one recovery task per run. Two independent illustrator attempts are
+  allowed. If neither commits the exact page, the same narrator slot receives an
+  internal repair prompt and may issue a simpler brief or use
+  `endless_commit_fallback_backdrop`. That direct tool is independently refused
+  unless the persisted failure gate is open for the same run and turn. No agent
+  failure or retry copy is exposed to the player. Enforced by
+  `routes._recover_backdrop` and `mcp_server._commit_fallback_backdrop`; pinned by
+  `test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate` and
+  `test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate`.

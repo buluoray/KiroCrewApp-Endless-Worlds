@@ -289,8 +289,9 @@ export interface PlayView {
     askedAt: number
     /** When the narrator called endless_read_runtime (0 if not yet). */
     readAt?: number
-    /** Coarse in-flight stage: 'reading' the life, then 'writing' the month. */
-    stage?: 'reading' | 'writing'
+    /** Coarse in-flight stage: reading the life, writing the month, then painting
+     *  requested art before the complete page is published. */
+    stage?: 'reading' | 'writing' | 'painting'
     /** What the player asked for (the tapped choice's label, or their typed
      *  action) — from the server's pending record, so it survives navigation. */
     action?: string

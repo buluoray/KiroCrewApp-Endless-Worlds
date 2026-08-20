@@ -407,9 +407,16 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     ):
         assert required in prompt, f"illustrator prompt missing: {required!r}"
 
-    # The narrator delegates and never authors SVG itself.
-    narrator = json.loads(AGENT_JSON.read_text(encoding="utf-8"))["prompt"]
+    # The narrator delegates during every normal turn. Direct SVG exists only as a
+    # separately gated recovery capability after two worker failures; keeping the
+    # illustrator recipe out of this prompt still prevents routine self-drawing.
+    narrator_agent = json.loads(AGENT_JSON.read_text(encoding="utf-8"))
+    narrator = narrator_agent["prompt"]
+    fallback = OWN_SERVER_REF + "/endless_commit_fallback_backdrop"
     assert "endless_paint_backdrop" in narrator
+    assert fallback in narrator_agent["tools"]
+    assert fallback in narrator_agent["allowedTools"]
+    assert "Never call endless_commit_fallback_backdrop during a normal turn" in narrator
     assert "endless_set_backdrop" not in narrator
     for recipe in ("viewBox='0 0 800 600'", "feTurbulence", "<animateTransform>"):
         assert recipe not in narrator, f"narrator still carries SVG recipe: {recipe!r}"

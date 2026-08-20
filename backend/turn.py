@@ -421,7 +421,30 @@ def generating(
     path to clear, so this stays safe to call from list loops.
     """
     state = store.read_state(run_id)
-    wanted = int(state.get("turn") or 0) + 1
+    committed = int(state.get("turn") or 0)
+
+    # The narrator may already have committed the prose while the page is still
+    # waiting for art it explicitly requested. That is one generation transaction
+    # from the player's perspective: keep the ordinary waiting state active until
+    # the exact-turn backdrop commit clears the request. No illustrator failure or
+    # retry detail crosses this boundary.
+    art = store.read_backdrop_request(run_id)
+    if art and int(art.get("turn") or 0) == committed:
+        return {
+            "turn": committed,
+            "slot": "",
+            "askedAt": float(art.get("askedAt") or 0.0),
+            "readAt": float(art.get("askedAt") or 0.0),
+            "stage": "painting",
+            "action": "",
+            # Five steps maps to TurnProgress's existing 92% cap: the page is
+            # waiting on its final visual half, so progress must not jump backwards
+            # after the narrator already completed several tools.
+            "steps": 5,
+            "lastTool": "endless_paint_backdrop",
+        }
+
+    wanted = committed + 1
     live = _in_flight(store, run_id, wanted)
     if live is None:
         return None

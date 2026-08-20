@@ -213,6 +213,21 @@ class BackdropStore:
                 break
         return self._view(chosen)
 
+    def exact(self, turn: int) -> dict[str, Any] | None:
+        """The background explicitly committed for ``turn``, not an inherited one.
+
+        Atomic page reveal needs this stricter question: ``at(turn)`` may return the
+        previous page's still-effective art, which does not prove that an illustrator
+        finished the new page the narrator explicitly briefed.
+        """
+        for entry in reversed(self._load()):
+            entry_turn = int(entry.get("turn") or 0)
+            if entry_turn == int(turn):
+                return self._view(entry)
+            if entry_turn < int(turn):
+                break
+        return None
+
     def version_at(self, turn: int) -> int:
         """The version effective on ``turn`` (0 when the page has no background). Used
         to stamp each chronicle turn so the history reader restores that page's

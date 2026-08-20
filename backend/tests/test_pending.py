@@ -497,3 +497,16 @@ def test_a_life_being_written_is_not_shown_as_one_that_stalled():
             f"{where} checks awaitingOpening before generating, so a month being "
             "written reads as a life that never started"
         )
+
+
+def test_a_committed_page_stays_generating_while_its_requested_art_is_pending(store, run):
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "the gate closed"})
+    store.request_backdrop(run, turn=1, brief="a closed red gate")
+
+    live = generating(store, run)
+    assert live is not None
+    assert live["turn"] == 1
+    assert live["stage"] == "painting"
+    assert live["steps"] == 5, "painting must stay at the existing 92% progress cap"
+    assert live["lastTool"] == "endless_paint_backdrop"
