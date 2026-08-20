@@ -344,6 +344,18 @@ def test_the_agent_is_registered_in_the_manifest():
     assert any(str(a).endswith("narrator.json") for a in manifest["agents"])
 
 
+def test_the_system_prompt_carries_the_pull_and_fingerprint_instruction():
+    """The per-turn message no longer repeats "call endless_read_runtime / pass the
+    fingerprint as since" (that was ~300 chars of duplication every turn). The
+    instruction must therefore live in the SYSTEM prompt, which is present on every
+    turn regardless of compaction — otherwise nothing tells the narrator to look."""
+    prompt = json.loads(AGENT_JSON.read_text(encoding="utf-8"))["prompt"]
+    assert "endless_read_runtime" in prompt, "the system prompt must tell it to pull"
+    assert "fingerprint" in prompt and "since" in prompt, (
+        "the delta-read rules must live in the system prompt now"
+    )
+
+
 def test_the_narrators_prompt_leaks_no_implementation_vocabulary_to_the_player():
     """R25.2 — the prompt tells the narrator to avoid these words, so it may
     name them in a prohibition, but it must not instruct the narrator to SHOW

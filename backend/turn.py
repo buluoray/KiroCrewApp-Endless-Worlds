@@ -122,10 +122,13 @@ def compose_prompt(
     # and `endless_read_runtime` already served them — the prompt simply made calling it
     # pointless.
     #
-    # What stays pushed is only what a tool cannot guarantee: the identity of the run,
-    # which turn is being asked for, and the player's own words. An instruction the
-    # narrator has to fetch is an instruction it can fail to fetch.
-    parts += ["", text("turn.pull")]
+    # The INSTRUCTION to pull (call endless_read_runtime first, and the fingerprint
+    # rules) is not repeated here either: it is verbatim in the narrator's SYSTEM
+    # prompt (agents/narrator.json), which is present on every turn regardless of
+    # compaction, so restating it per turn was ~300 characters of pure duplication.
+    # What stays pushed is only what a tool cannot guarantee and the system prompt
+    # cannot carry: the identity of THIS run, which turn is being asked for, and the
+    # player's own words for this turn.
 
     if style:
         parts += ["", text("turn.style", style=style)]

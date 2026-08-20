@@ -295,6 +295,42 @@ def test_always_lore_rides_only_a_full_read_not_a_delta(app):
     assert ids == {"dragon"}, f"always-lore must be dropped on a delta read; got {ids}"
 
 
+WORLD_MANY_LORE = """---
+{"id": "wm", "title": "WM", "version": "1.0", "language": "en",
+ "clock": {"unit": "month", "label": "{year}"},
+ "styles": [{"id": "s", "label": "S", "default": true}],
+ "opening": [{"id": "name", "label": "Name", "kind": "text"}],
+ "panels": [{"id": "status", "always": true,
+             "fields": [{"id": "age", "label": "Age", "primitive": "field"}]}],
+ "lore": [
+   {"id": "l1", "keys": ["dragon"], "text": "one"},
+   {"id": "l2", "keys": ["dragon"], "text": "two"},
+   {"id": "l3", "keys": ["dragon"], "text": "three"},
+   {"id": "l4", "keys": ["dragon"], "text": "four"},
+   {"id": "l5", "keys": ["dragon"], "text": "five"},
+   {"id": "l6", "keys": ["dragon"], "text": "six"}
+ ],
+ "endings": [{"id": "died", "when": "state.alive == false"}]}
+---
+勇者不总是赢。
+"""
+
+
+def test_lore_is_capped_and_carries_no_per_turn_note(app):
+    """A theme-heavy action can match many lore entries; the read returns at most
+    MAX_LORE of them and never the loreNote/memoryNote instructions (those live in
+    the system prompt / tool description), so it stops dumping the setting wholesale."""
+    (app / "worlds" / "wm.md").write_text(WORLD_MANY_LORE, encoding="utf-8")
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "wm"}, {"runId": "r1"})
+    store.mark_pending(run, turn=5, slot="", action="I hunt the dragon")
+
+    out = call("endless_read_runtime", runId=run)
+    assert len(out.get("lore", [])) == srv.MAX_LORE, "lore must be capped, not dumped whole"
+    assert "loreNote" not in out, "the lore rule lives in the system prompt now"
+    assert "memoryNote" not in out, "the echoes rule lives in the tool description now"
+
+
 # -- scenes ---------------------------------------------------------------
 
 

@@ -994,6 +994,11 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
 #: something to be handed unasked.
 RECENT_TURNS = 12
 
+#: How many lore entries one read may surface. A theme-heavy turn can match many
+#: keyword entries at once (measured: 9 full entries), which is the wholesale dump
+#: the narrator's prompt forbids; the cap keeps only the most relevant few.
+MAX_LORE = 4
+
 
 def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     """What the narrator needs to know, pulled rather than pushed.
@@ -1057,11 +1062,27 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 entries = read_world(lore_path.read_text(encoding="utf-8")).template.lore
                 if entries:
                     pending = store.read_pending(run_id) or {}
-                    hay = (
-                        str(pending.get("action") or "")
-                        + "\n"
-                        + "\n".join(str(e.get("prose") or "") for e in lived[-recent:])
+                    action_low = str(pending.get("action") or "").lower()
+                    prose_low = "\n".join(
+                        str(e.get("prose") or "") for e in lived[-recent:]
                     ).lower()
+                    # Rank what surfaces so the few we send are the most relevant:
+                    # entries named in the player's ACTION first, then ones only in
+                    # recent prose, then `always` entries (full reads only). Capped —
+                    # dumping every keyword match (measured: 9 full entries on a
+                    # theme-heavy turn) is exactly the "never dump it wholesale" the
+                    # narrator's own prompt already forbids, so the cap enforces it
+                    # instead of restating it in a per-turn note.
+                    ranked: list[tuple[int, Any]] = []
+                    for e in entries:
+                        keys = [k.lower() for k in e.keys]
+                        if action_low and any(k in action_low for k in keys):
+                            ranked.append((0, e))
+                        elif prose_low and any(k in prose_low for k in keys):
+                            ranked.append((1, e))
+                        elif e.always and full_read:
+                            ranked.append((2, e))
+                    ranked.sort(key=lambda t: t[0])
                     matched = [
                         {
                             "id": e.id,
@@ -1069,18 +1090,10 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                             **({"summary": e.summary} if e.summary else {}),
                             "text": e.text,
                         }
-                        for e in entries
-                        if (e.always and full_read) or any(k.lower() in hay for k in e.keys)
+                        for _, e in ranked[:MAX_LORE]
                     ]
                     if matched:
                         out["lore"] = matched
-                        out["loreNote"] = (
-                            "Setting this world keeps in reserve, surfaced because it is "
-                            "relevant now — a name, place, or force mentioned in the recent "
-                            "months or in the player's action. Treat it as authoritative "
-                            "background and weave in only what this moment needs; never dump "
-                            "it wholesale."
-                        )
     except Exception:  # noqa: BLE001
         pass  # lore is an enrichment; a failure here must never break a runtime read
 
@@ -1098,13 +1111,16 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             action=str(pending.get("action") or ""),
         )
         if candidates:
-            out["memoryCandidates"] = candidates
-            out["memoryNote"] = (
-                "Old events of this life that may naturally come due now. Use one "
-                "only when the story truly answers it, and declare its id in the "
-                "new event's `echoes` when you do. Never claim something happened "
-                "that is not recorded here or in the chronicle."
-            )
+            # Drop the internal scoring fields (`reasons`, `lastEchoedTurn`): they
+            # exist for the recall ranking, not for the narrator, which acts on the
+            # event's id/title/summary. The "declare echoes when you use one" rule
+            # lives in the endless_advance_turn tool description, so no per-turn
+            # memoryNote is needed.
+            out["memoryCandidates"] = [
+                {k: v for k, v in c.items() if k not in ("reasons", "lastEchoedTurn")}
+                for c in candidates
+                if isinstance(c, dict)
+            ]
     wanted_events = args.get("memoryEvents") or []
     if wanted_events:
         out["memoryEvents"] = memory_graph.event_neighbourhood(

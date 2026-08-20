@@ -139,8 +139,9 @@ def test_the_next_turn_does_not_repeat_it(store, run):
     assert Content("en")("turn.ask", turn=2) in sent[1], (
         "the narrator must still be told which month it is writing"
     )
-    assert Content("en")("turn.pull") in sent[1], (
-        "with the state no longer pushed, nothing would send the narrator to look"
+    assert Content("en")("turn.pull") not in sent[1], (
+        "the pull instruction is in the system prompt (narrator.json), not repeated "
+        "each turn"
     )
 
 

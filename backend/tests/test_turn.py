@@ -113,7 +113,10 @@ def test_the_prompt_carries_the_law_and_the_players_words_and_little_else():
 
     assert RULEBOOK in prompt, "the world's law is still pushed"
     assert T("turn.ask", turn=4) in prompt, "the narrator must be told which turn"
-    assert T("turn.pull") in prompt, "nothing tells the narrator to go and look"
+    assert T("turn.pull") not in prompt, (
+        "the pull/fingerprint instruction is in the system prompt (narrator.json); "
+        "repeating it per turn was pure duplication"
+    )
 
     assert FACT not in prompt, "the state is being pushed again"
     assert PROSE not in prompt, "the chronicle is being pushed again"
@@ -184,7 +187,7 @@ def test_an_empty_state_is_not_described_at_all():
         run_id="run-1", language=LANG, rulebook="", state={}, chronicle=[],
     )
     assert T("turn.state.empty") not in prompt
-    assert T("turn.pull") in prompt, "the narrator must still be sent to look"
+    assert T("turn.pull") not in prompt, "the pull instruction lives in the system prompt now"
 
 def test_a_turn_is_charged_against_the_background_turn_cap():
     """Calling the chat runner directly would skip the cap, which crew_runtime
