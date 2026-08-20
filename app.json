@@ -2,9 +2,18 @@
   "name": "endless-worlds",
   "displayName": "Endless Worlds",
   "version": "0.4.0",
-  "description": "Live an entire life, one text turn at a time, in worlds an AI dreams up around your choices — be a blade-master, a smuggler, a monarch, or something no one has tried. Bring your own setting or start from the flagship world, Age of Sword and Flame.",
+  "description": "Live an entire life inside an AI-simulated world that remembers what you did. Choose a path or write your own action; other people pursue their own goals, consequences can return years later, and every turn can reshape your relationships, status, and fate. Begin in the Age of Sword and Flame, explore other world packs, or turn a one-line idea or pasted setting into a playable world of your own.",
   "author": "rayrayxu",
-  "tags": ["game", "simulation", "narrative"],
+  "tags": ["game", "simulation", "interactive-fiction", "role-playing", "worldbuilding"],
+  "highlights": [
+    "Live a complete life turn by turn, with persistent state and consequences that can resurface years later",
+    "Choose from first-person actions or write anything you want — the narrator adapts without forcing a fixed plot",
+    "The world moves without waiting for you: characters pursue goals, conflicts evolve, and luck never guarantees victory",
+    "Illustrated story pages and fateful choices pair prose with animated art, revealed together as one complete scene",
+    "Create a playable world from a one-line idea or pasted rulebook; the Worldsmith cleans, compiles, and validates it for you",
+    "Revisit your life through its chronicle and star map, with milestones, keepsakes, and shareable story cards",
+    "Private by design: each life has an isolated narrator that cannot read your files, personal memory, or other conversations"
+  ],
   "ui": {
     "entry": "index.mjs",
     "pages": [
