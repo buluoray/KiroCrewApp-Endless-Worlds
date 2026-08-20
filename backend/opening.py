@@ -62,17 +62,41 @@ def build_initial_state(
     answers: dict[str, Any],
     *,
     style: str = "",
+    role: str = "",
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
     """Validate the player's answers and produce the state a run starts from.
 
     Validates EVERYTHING before building anything: a half-validated opening would
-    create a run whose first turn contradicts what the player chose.
+    create a run whose first turn contradicts what the player chose. A chosen `role`
+    presets the opening: its `grants` fill matching opening groups the player left
+    blank (the player's own answer always wins), and any grant that is not an opening
+    group is kept as `granted` so the narrator and panels still see it.
     """
     if not isinstance(answers, dict):
         raise OpeningError("answers", "an object keyed by opening group")
 
     known = {g.id: g for g in template.opening}
+
+    role_id = ""
+    granted_extra: dict[str, Any] = {}
+    if role:
+        role_obj = next((r for r in template.roles if r.id == role), None)
+        if role_obj is None:
+            raise OpeningError("role", "one of this world's declared roles")
+        role_id = role_obj.id
+        answers = dict(answers)  # never mutate the caller's dict
+        for gk, gv in role_obj.grants.items():
+            group = known.get(gk)
+            # A grant only pre-fills a real, player-answerable group the player has
+            # not already answered; a world-decided (random) group is never preset,
+            # and a grant for something the world does not ask becomes `granted`.
+            if group is not None and not group.random:
+                if answers.get(gk) in (None, ""):
+                    answers[gk] = gv
+            else:
+                granted_extra[gk] = gv
+
     for key in answers:
         if key not in known:
             raise OpeningError(f"answers.{key}", "not something this world asks")
@@ -94,7 +118,7 @@ def build_initial_state(
             continue
         resolved[group.id] = _coerce(group, raw)
 
-    return {
+    state: dict[str, Any] = {
         "worldId": template.id,
         "turn": 0,
         "style": _resolve_style(template, style),
@@ -104,6 +128,13 @@ def build_initial_state(
         # leaves something to retry rather than a half-created life (R2.9).
         "status": "awaiting-opening",
     }
+    # A chosen role is a permanent fact of the life (app-owned, carried forward),
+    # and its non-group grants seed state the narrator honours from turn one.
+    if role_id:
+        state["role"] = role_id
+    if granted_extra:
+        state["granted"] = granted_extra
+    return state
 
 
 def compose_opening_prompt(*, template: Template, run_id: str) -> str:

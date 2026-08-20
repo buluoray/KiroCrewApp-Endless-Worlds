@@ -51,11 +51,13 @@ def call(name, **args):
 # -- the surface is closed ------------------------------------------------
 
 
-def test_the_surface_is_exactly_the_seven_declared_tools():
+def test_the_surface_is_exactly_the_declared_tools():
     assert {t["name"] for t in srv.list_tools()} == {
         "endless_advance_turn", "endless_read_runtime", "endless_mount_scene",
         "endless_update_scene", "endless_await_scene", "endless_dismiss_scene",
-        "endless_make_pack",
+        "endless_set_backdrop", "endless_clear_backdrop",
+        "endless_export_world",
+        "endless_read_draft", "endless_submit_world_draft",
     }
     assert set(srv._HANDLERS) == {t["name"] for t in srv.list_tools()}
 
@@ -179,9 +181,11 @@ def test_a_replayed_turn_changes_nothing(app):
     mistake, so it is a no-op rather than a double-apply or a scolding."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=2, prose="a", state={"v": 1})
+    call("endless_advance_turn", runId=run, turn=2, prose="a", state={"v": 1},
+         choices=[{"id": "go", "label": "go on"}])
 
-    again = call("endless_advance_turn", runId=run, turn=2, prose="b", state={"v": 999})
+    again = call("endless_advance_turn", runId=run, turn=2, prose="b", state={"v": 999},
+                 choices=[{"id": "go", "label": "go on"}])
 
     assert again["committed"] is False
     assert store.read_state(run)["v"] == 1
@@ -191,7 +195,8 @@ def test_a_replayed_turn_changes_nothing(app):
 def test_the_turn_number_is_stamped_by_the_server_not_trusted_from_state(app):
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=2, prose="a", state={"turn": 87})
+    call("endless_advance_turn", runId=run, turn=2, prose="a", state={"turn": 87},
+         choices=[{"id": "go", "label": "go on"}])
     assert store.read_state(run)["turn"] == 2
 
 
@@ -207,7 +212,9 @@ def test_read_runtime_returns_state_world_and_scenes(app):
 
     assert out["turn"] == 4
     assert out["world"]["title"] == "W"
-    assert out["scenes"] == [{"sceneId": "map", "asks": True, "answered": False}]
+    assert out["scenes"] == [
+        {"sceneId": "map", "asks": True, "answered": False, "region": "", "label": ""}
+    ]
     assert "rulebook" not in out, "the rulebook is opt-in; it is large"
 
     with_prose = call("endless_read_runtime", runId=run, includeProse=True)
@@ -291,22 +298,22 @@ def test_the_ledger_lives_under_the_run_not_beside_it(app):
 # -- packs ----------------------------------------------------------------
 
 
-def test_make_pack_exports_one_portable_file(app):
-    out = call("endless_make_pack", worldId="w")
+def test_export_world_writes_one_portable_file(app):
+    out = call("endless_export_world", worldId="w")
     assert out["ok"] is True
     exported = Path(out["path"])
     assert exported.is_file()
     assert "勇者不总是赢" in exported.read_text(encoding="utf-8")
 
 
-def test_make_pack_refuses_a_path_dressed_as_a_world_id(app):
+def test_export_world_refuses_a_path_dressed_as_a_world_id(app):
     for bad in ("../../etc/passwd", "a/b", ".hidden"):
-        out = call("endless_make_pack", worldId=bad)
+        out = call("endless_export_world", worldId=bad)
         assert out["ok"] is False, bad
 
 
-def test_make_pack_on_an_absent_world_is_a_clean_error(app):
-    out = call("endless_make_pack", worldId="nope")
+def test_export_world_on_an_absent_world_is_a_clean_error(app):
+    out = call("endless_export_world", worldId="nope")
     assert out["ok"] is False and "nope" in out["error"]
 
 
@@ -377,7 +384,8 @@ def test_a_commit_keeps_the_keys_the_narrator_never_declares(app):
 
     # Exactly what the narrator sent: story state, keyed its own way, no worldId.
     call("endless_advance_turn", runId=run, turn=1, prose="他出生了。",
-         state={"时间": "312年·狼月", "年龄": "0岁"})
+         state={"时间": "312年·狼月", "年龄": "0岁"},
+         choices=[{"id": "go", "label": "去看看"}])
 
     after = store.read_state(run)
     assert after["worldId"] == "w", "the life lost its world"
@@ -392,7 +400,8 @@ def test_the_narrator_can_still_change_a_reserved_key_by_declaring_it(app):
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w", "status": "awaiting-opening"},
                            {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=1, prose="p", state={"status": "alive"})
+    call("endless_advance_turn", runId=run, turn=1, prose="p", state={"status": "alive"},
+         choices=[{"id": "go", "label": "go on"}])
     assert store.read_state(run)["status"] == "alive"
 
 
@@ -406,3 +415,52 @@ def test_a_field_the_narrator_stops_declaring_is_gone(app):
     after = store.read_state(run)
     assert "债务" not in after
     assert after["worldId"] == "w"
+
+
+def test_milestones_are_reached_once_and_then_permanent(app):
+    """An achievement is recorded the turn its condition first holds, and stays
+    recorded afterwards even if the condition later goes false (app-owned)."""
+    from compile import accept_compiled_header
+    header = {
+        "id": "m", "title": "M", "version": "1.0", "language": "en",
+        "clock": {"unit": "month", "label": "{year}"},
+        "styles": [{"id": "s", "label": "S", "default": True}],
+        "opening": [{"id": "name", "label": "Name", "kind": "text"}],
+        "panels": [{"id": "status", "always": True,
+                    "fields": [{"id": "age", "label": "Age", "primitive": "field"}]}],
+        "endings": [{"id": "died", "when": "state.dead == true"}],
+        "milestones": [{"id": "adult", "label": "Came of age", "when": "state.age >= 18"}],
+    }
+    res = accept_compiled_header("prose\n", header)
+    assert res.ok, res.problem
+    (srv._DATA / "worlds" / "m.md").write_text(res.world_text, encoding="utf-8")
+
+    state = {"worldId": "m", "age": 20}
+    srv._apply_milestones("r", state, {})
+    assert state["milestones"] == ["adult"]
+
+    # Permanent: reached before, condition now false → still there, not duplicated.
+    later = {"worldId": "m", "age": 5}
+    srv._apply_milestones("r", later, {"milestones": ["adult"]})
+    assert later["milestones"] == ["adult"]
+
+
+def test_resolve_handoff_selects_named_entries_and_stars() -> None:
+    from types import SimpleNamespace
+
+    from template import Lore, Role, System
+
+    tmpl = SimpleNamespace(
+        hand_to_agent=["lore.keep", "systems.*"],
+        lore=[
+            Lore(id="keep", keys=["x"], text="body", name="Keep", summary="a fort"),
+            Lore(id="other", keys=["y"], text="b2"),
+        ],
+        systems=[System(id="xp", kind="accrual", into="state.xp")],
+        roles=[Role(id="r1", name="R1")],
+    )
+    out = srv._resolve_handoff(tmpl)
+    assert [e["id"] for e in out["lore"]] == ["keep"]      # only the named lore
+    assert out["lore"][0]["summary"] == "a fort"
+    assert [s["id"] for s in out["systems"]] == ["xp"]     # systems.* = all
+    assert "roles" not in out                               # roles not referenced

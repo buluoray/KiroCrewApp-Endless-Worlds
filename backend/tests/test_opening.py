@@ -21,7 +21,7 @@ from opening import (  # noqa: E402
 )
 from world import read_world  # noqa: E402
 
-FLAGSHIP = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 
 @pytest.fixture(scope="module")
@@ -196,3 +196,37 @@ def test_the_opening_prompt_names_the_run(tpl):
     named the run and the narrator invented an id its commit was then refused for."""
     prompt = compose_opening_prompt(template=tpl, run_id="9856fa638614440fbc7171ba8fe896c5")
     assert "9856fa638614440fbc7171ba8fe896c5" in prompt
+
+
+# -- roles preset the opening and land grants -----------------------------
+
+ZOMBIE = _BACKEND.parent / "seeds" / "last-echoes-zombie-sim.md"
+
+
+def test_a_role_presets_matching_opening_groups_and_records_the_choice() -> None:
+    from template import parse_template
+
+    t = parse_template(ZOMBIE.read_text(encoding="utf-8"))
+    st = build_initial_state(t, {}, role="medic")
+    assert st["role"] == "medic"
+    # the medic grant fills the matching opening groups the player left blank
+    assert st["opening"]["occupation"] == "医生"
+    assert st["opening"]["start-skills"]  # granted, non-empty
+
+
+def test_a_player_answer_wins_over_a_role_grant() -> None:
+    from template import parse_template
+
+    t = parse_template(ZOMBIE.read_text(encoding="utf-8"))
+    st = build_initial_state(t, {"occupation": "程序员"}, role="medic")
+    assert st["opening"]["occupation"] == "程序员"
+
+
+def test_an_unknown_role_is_refused() -> None:
+    import pytest
+
+    from template import parse_template
+
+    t = parse_template(ZOMBIE.read_text(encoding="utf-8"))
+    with pytest.raises(OpeningError):
+        build_initial_state(t, {}, role="does-not-exist")

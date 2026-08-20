@@ -104,6 +104,15 @@ one panel — it blanks the whole page.
   component and no per-world code. `test_build_play_view_appends_pack_panels_after_the_primitive_ones`
   pins the position and `test_no_packs_leaves_the_view_unchanged` pins the no-op case.
 
+- **Every pack panel carries a region, on the rendered and the degraded path alike.**
+  The phone tab bar buckets panels by `region` and drops region-less ones (they only
+  reach the desktop reading drawer), so a pack panel without one is invisible on the
+  app's primary form factor. `_pack_region` honors a region the pack declares for
+  itself and floors at the canonical `pack` bucket, which the tab bar already orders
+  and labels in both locales. Pinned by
+  `test_pack_panels_default_to_the_canonical_pack_region` (both paths) and
+  `test_pack_declared_region_wins_over_the_default`.
+
 - **A bad pack degrades that one panel and never breaks the turn.** Each pack renders
   inside its own `try/except` in `render_pack_panels`; a malformed pack, an unknown
   primitive, an unresolvable path, or a pack declaring a contract newer than this

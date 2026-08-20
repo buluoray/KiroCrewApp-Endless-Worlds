@@ -54,7 +54,7 @@ _TOKEN_RE = re.compile(
   | (?P<rparen>\))
   | (?P<str>'[^']*'|"[^"]*")
   | (?P<num>-?\d+(?:\.\d+)?)
-  | (?P<word>[A-Za-z_][A-Za-z0-9_.]*)
+  | (?P<word>[A-Za-z_][A-Za-z0-9_.-]*)
     """,
     re.VERBOSE,
 )
@@ -340,6 +340,9 @@ class Panel:
     fields: list[PanelField]
     always: bool = False
     when: Condition | None = None
+    #: The phone system-tab this panel groups under (status/world/pack/tasks, or a
+    #: world's own word). Empty falls into the default 系统 bucket on the bar.
+    region: str = ""
 
     def visible(self, state: dict[str, Any]) -> bool:
         if self.always or self.when is None:
@@ -368,6 +371,22 @@ class Style:
 class Ending:
     id: str
     when: Condition
+
+
+@dataclass
+class Milestone:
+    """A named achievement the world declares. Its `when` is evaluated with the same
+    interpreter as panels and endings; the FIRST turn it becomes true, the milestone
+    is reached — and once reached it is permanent, recorded in run state so it stays
+    even if the condition later goes false (a crown kept in the record after a
+    dethroning). A long-play hook at almost no mechanism cost."""
+
+    id: str
+    label: str
+    when: Condition
+    #: A milestone whose label would spoil the life it marks. Reserved for a future
+    #: "not yet reached" list; a reached milestone is always shown, spoiler or not.
+    spoiler: bool = False
 
 
 @dataclass
@@ -409,6 +428,74 @@ class Chapter:
 
 
 @dataclass
+class Lore:
+    """A lorebook entry: setting the world keeps in reserve and surfaces only when a
+    keyword appears (a name, place, faction, or force mentioned in recent prose or in
+    the player's action). Complements CHAPTERS — a chapter gates on STATE, a lore
+    entry gates on KEYWORDS — and unlike a chapter its text is carried inline rather
+    than naming a slice of the main rulebook, so it can hold background the rulebook
+    never spells out."""
+
+    id: str
+    #: Case-insensitive substrings that surface this entry. Empty only when `always`.
+    keys: list[str]
+    #: The setting to surface, in the world's own language.
+    text: str
+    #: Surfaced every turn regardless of keys — for a handful of ever-relevant facts.
+    always: bool = False
+    #: Display title for the setting view; falls back to the id when empty.
+    name: str = ""
+    #: One-line shown first in the setting view and handed to the narrator.
+    summary: str = ""
+    #: Free grouping label for the setting view (place/faction/person/…). NOT an
+    #: enum — the world names its own concepts and the backend does not validate them.
+    category: str = ""
+    #: Optional edges to other entries by id, ``[{to, label?}]`` — drawn as a graph.
+    relations: list[dict[str, str]] = dc_field(default_factory=list)
+    #: Optional spoiler gate: while set, the entry is hidden from the PLAYER's setting
+    #: view until the condition holds in a life. The narrator always sees it (it is the
+    #: author of the setting); this only governs what the reader may browse.
+    reveal: "Condition | None" = None
+
+
+#: The mechanics the backend knows how to run. A world may declare any of these;
+#: an unknown kind is a structural error (surfaced in warnings, never silent).
+SYSTEM_KINDS = ("accrual", "resource", "decay", "unlock")
+
+
+@dataclass
+class System:
+    """A world mechanic the BACKEND manages, not the narrator. Declared once in the
+    header and applied at commit off the narrator's declared gains, writing derived
+    state the narrator may read but not overwrite (so a duel is deadly in the fiction
+    and the numbers are the app's, never the model's). See
+    docs/design/world-as-data.md."""
+
+    id: str
+    kind: str                       # one of SYSTEM_KINDS
+    into: str                       # dotted state path the system owns, e.g. state.hero.xp
+    source: str = "gains"           # where deltas come from (accrual/resource); only "gains" for now
+    tiers: list[dict[str, Any]] = dc_field(default_factory=list)  # [{at, name}] for accrual
+    tier_into: str = ""             # dotted state path for the derived tier name
+    floor: float | None = None
+    cap: float | None = None
+    per_turn: float = 0.0
+    when: "Condition | None" = None  # for unlock
+
+
+@dataclass
+class Role:
+    """A starting archetype the world offers — any concept the world likes. When the
+    player takes one, ``grants`` seeds the opening state; the narrator honours it. The
+    backend does not validate what a role IS, only that it has a slug id."""
+
+    id: str
+    name: str = ""
+    summary: str = ""
+    grants: dict[str, Any] = dc_field(default_factory=dict)
+
+
+@dataclass
 class Template:
     id: str
     title: str
@@ -429,6 +516,19 @@ class Template:
     #: has not been split — the whole prose is one always-disclosed body, which is
     #: exactly how every pack behaved before chapters existed.
     chapters: list[Chapter] = dc_field(default_factory=list)
+    #: Declared lorebook entries — keyword-triggered setting, complementing chapters.
+    lore: list[Lore] = dc_field(default_factory=list)
+    #: Declared systems — mechanics the BACKEND manages (experience, resources, decay,
+    #: unlocks). The narrator declares events/gains; the backend computes derived state.
+    systems: list["System"] = dc_field(default_factory=list)
+    #: Declared starting archetypes the world offers; a chosen one seeds opening state.
+    roles: list["Role"] = dc_field(default_factory=list)
+    #: References (``lore.<id>`` / ``systems.<id>`` / ``roles.<id>`` / ``kind.*``) the
+    #: world hands the narrator at the opening turn — what the agent receives, and when.
+    hand_to_agent: list[str] = dc_field(default_factory=list)
+    #: Declared achievements, evaluated with the when-interpreter and recorded once
+    #: reached. Empty means the world has none.
+    milestones: list[Milestone] = dc_field(default_factory=list)
     source_path: str | None = None
 
     @property
@@ -486,6 +586,178 @@ def _parse_chapters(raw: Any, prose: str) -> list["Chapter"]:
                 when=Condition.parse(str(when_src)) if when_src else None,
             )
         )
+    return out
+
+
+def _parse_lore(raw: Any) -> list["Lore"]:
+    """Declared lorebook entries. Absent/empty is fine — a world may have none.
+
+    Unlike a chapter, a lore entry carries its text INLINE rather than naming a
+    prose heading, so it is not checked against the prose. Each needs a slug id, a
+    non-empty text, and — unless it is `always` — at least one key, because an entry
+    with neither keys nor `always` could never surface."""
+    if raw in (None, [], {}):
+        return []
+    if not isinstance(raw, list):
+        raise TemplateError("lore", "a list of lore entries")
+
+    out: list[Lore] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise TemplateError(f"lore[{i}]", "an object with an id, keys, and text")
+        lid = str(_require(item, "id", str, f"lore {i}")).strip()
+        text = str(_require(item, "text", str, f"lore {lid}")).strip()
+        if not lid or not text:
+            raise TemplateError(f"lore[{i}]", "a non-empty id and text")
+        if lid in seen:
+            raise TemplateError(f"lore[{lid}]", "an id no other lore entry uses")
+        seen.add(lid)
+        always = bool(item.get("always", False))
+        raw_keys = item.get("keys") or []
+        if not isinstance(raw_keys, list):
+            raise TemplateError(f"lore[{lid}].keys", "a list of keyword strings")
+        keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+        if not keys and not always:
+            raise TemplateError(
+                f"lore[{lid}]",
+                "at least one key, or always:true — an entry with neither never surfaces",
+            )
+        # Optional structured enrichment — all free-form, none validated as a concept.
+        name = str(item.get("name") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        category = str(item.get("category") or "").strip()
+        relations: list[dict[str, str]] = []
+        for rel in item.get("relations") or []:
+            if isinstance(rel, dict) and str(rel.get("to") or "").strip():
+                edge = {"to": str(rel["to"]).strip()}
+                if str(rel.get("label") or "").strip():
+                    edge["label"] = str(rel["label"]).strip()
+                relations.append(edge)
+        reveal_src = item.get("reveal")
+        reveal = Condition.parse(reveal_src) if isinstance(reveal_src, str) and reveal_src.strip() else None
+        out.append(Lore(
+            id=lid, keys=keys, text=text, always=always,
+            name=name, summary=summary, category=category,
+            relations=relations, reveal=reveal,
+        ))
+    return out
+
+
+def _parse_systems(raw: Any) -> list["System"]:
+    """Declared backend-managed systems. Absent/empty is fine. STRUCTURE is validated
+    (kind, dotted state paths, numeric knobs, an unlock's condition); the world's own
+    concepts (tier names, what the system models) are not."""
+    if raw in (None, [], {}):
+        return []
+    if not isinstance(raw, list):
+        raise TemplateError("systems", "a list of systems")
+
+    def _state_path(value: Any, field: str) -> str:
+        s = str(value or "").strip()
+        if not s.startswith("state.") or len(s) <= len("state."):
+            raise TemplateError(field, "a dotted state path like state.hero.xp")
+        return s
+
+    out: list[System] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise TemplateError(f"systems[{i}]", "an object with id, kind, and into")
+        sid = str(_require(item, "id", str, f"system {i}")).strip()
+        if not _ID_RE.match(sid):
+            raise TemplateError(f"systems[{i}].id", "a lowercase-hyphen slug")
+        if sid in seen:
+            raise TemplateError(f"systems[{sid}]", "an id no other system uses")
+        seen.add(sid)
+        kind = str(_require(item, "kind", str, f"system {sid} kind")).strip()
+        if kind not in SYSTEM_KINDS:
+            raise TemplateError(f"systems[{sid}].kind", f"one of {list(SYSTEM_KINDS)}, got {kind!r}")
+        into = _state_path(_require(item, "into", str, f"system {sid} into"), f"systems[{sid}].into")
+        source = str(item.get("source") or "gains").strip()
+        if source != "gains":
+            raise TemplateError(f"systems[{sid}].source", "only 'gains' is supported for now")
+
+        def _numopt(key: str) -> "float | None":
+            v = item.get(key)
+            if v is None:
+                return None
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise TemplateError(f"systems[{sid}].{key}", "a number")
+            return float(v)
+
+        floor = _numopt("floor")
+        cap = _numopt("cap")
+        per_turn = _numopt("perTurn") or 0.0
+        tiers: list[dict[str, Any]] = []
+        for j, tr in enumerate(item.get("tiers") or []):
+            at = tr.get("at") if isinstance(tr, dict) else None
+            if not isinstance(at, (int, float)) or isinstance(at, bool):
+                raise TemplateError(f"systems[{sid}].tiers[{j}]", "an object with a numeric `at`")
+            tiers.append({"at": float(at), "name": str(tr.get("name") or "").strip()})
+        tier_into = str(item.get("tierInto") or "").strip()
+        if tier_into:
+            tier_into = _state_path(tier_into, f"systems[{sid}].tierInto")
+        when_src = item.get("when")
+        when = Condition.parse(when_src) if isinstance(when_src, str) and when_src.strip() else None
+        if kind == "unlock" and when is None:
+            raise TemplateError(f"systems[{sid}]", "an unlock system needs a `when` condition")
+        out.append(System(
+            id=sid, kind=kind, into=into, source=source, tiers=tiers,
+            tier_into=tier_into, floor=floor, cap=cap, per_turn=per_turn, when=when,
+        ))
+    return out
+
+
+_HANDOFF_RE = re.compile(r"^(lore|systems|roles)\.([a-z0-9][a-z0-9-]*|\*)$")
+
+
+def _parse_roles(raw: Any) -> list["Role"]:
+    """Declared starting archetypes. Absent/empty is fine. Only the slug id is
+    validated; name/summary/grants are the world's own free-form content."""
+    if raw in (None, [], {}):
+        return []
+    if not isinstance(raw, list):
+        raise TemplateError("roles", "a list of roles")
+    out: list[Role] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise TemplateError(f"roles[{i}]", "an object with an id")
+        rid = str(_require(item, "id", str, f"role {i}")).strip()
+        if not _ID_RE.match(rid):
+            raise TemplateError(f"roles[{i}].id", "a lowercase-hyphen slug")
+        if rid in seen:
+            raise TemplateError(f"roles[{rid}]", "an id no other role uses")
+        seen.add(rid)
+        grants = item.get("grants")
+        out.append(Role(
+            id=rid,
+            name=str(item.get("name") or "").strip(),
+            summary=str(item.get("summary") or "").strip(),
+            grants=grants if isinstance(grants, dict) else {},
+        ))
+    return out
+
+
+def _parse_handoff(raw: Any) -> list[str]:
+    """References the world hands the narrator at the opening — ``lore.<id>``,
+    ``systems.<id>``, ``roles.<id>``, or ``<kind>.*`` for all of a kind. Structure is
+    validated (the ref shape); an id need not resolve (a world may name an entry it
+    later adds), so a dangling ref simply contributes nothing at read time."""
+    if raw in (None, [], {}):
+        return []
+    if not isinstance(raw, list):
+        raise TemplateError("handToAgent", "a list of lore./systems./roles. references")
+    out: list[str] = []
+    for i, ref in enumerate(raw):
+        s = str(ref or "").strip()
+        if not _HANDOFF_RE.match(s):
+            raise TemplateError(
+                f"handToAgent[{i}]",
+                "a reference like lore.<id>, systems.<id>, roles.<id>, or <kind>.*",
+            )
+        out.append(s)
     return out
 
 
@@ -585,8 +857,10 @@ def _parse_panels(raw: Any) -> list[Panel]:
         if not always and not when_src:
             raise TemplateError(f"panels[{i}]", "needs always: true or a when expression")
         always_count += 1 if always else 0
+        region_src = item.get("region")
+        region = region_src.strip() if isinstance(region_src, str) else ""
         panels.append(
-            Panel(pid, label, fields, always, Condition.parse(when_src) if when_src else None)
+            Panel(pid, label, fields, always, Condition.parse(when_src) if when_src else None, region)
         )
     if always_count == 0:
         raise TemplateError("panels", "exactly one panel must set always: true")
@@ -604,6 +878,35 @@ def _parse_endings(raw: Any) -> list[Ending]:
         when_src = _require(item, "when", str, "a when expression")
         endings.append(Ending(eid, Condition.parse(when_src)))
     return endings
+
+
+def _parse_milestones(raw: Any) -> list[Milestone]:
+    """Declared achievements. Absent/empty is fine — most worlds add these later.
+
+    Each needs a slug id, a player-facing label, and a `when` condition (the same
+    tiny language endings use). Unlike an ending, a milestone does not finish a
+    life; it is a marker reached along the way."""
+    if raw in (None, [], {}):
+        return []
+    if not isinstance(raw, list):
+        raise TemplateError("milestones", "a list of milestone declarations")
+    out: list[Milestone] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise TemplateError(f"milestones[{i}]", "an object with an id, label, and when")
+        mid = _require_id(item, f"milestones[{i}]")
+        if mid in seen:
+            raise TemplateError(f"milestones[{mid}]", "an id no other milestone uses")
+        seen.add(mid)
+        label = str(_require(item, "label", str, "a player-facing label")).strip()
+        if not label:
+            raise TemplateError(f"milestones[{mid}].label", "a non-empty label")
+        when_src = _require(item, "when", str, "a when expression")
+        out.append(
+            Milestone(mid, label, Condition.parse(when_src), bool(item.get("spoiler", False)))
+        )
+    return out
 
 
 def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
@@ -674,5 +977,10 @@ def parse_template(text: str, *, source_path: str | None = None) -> Template:
         save_schema=list(header.get("save") or []),
         prose=prose,
         chapters=_parse_chapters(header.get("chapters"), prose),
+        lore=_parse_lore(header.get("lore")),
+        systems=_parse_systems(header.get("systems")),
+        roles=_parse_roles(header.get("roles")),
+        hand_to_agent=_parse_handoff(header.get("handToAgent")),
+        milestones=_parse_milestones(header.get("milestones")),
         source_path=source_path,
     )

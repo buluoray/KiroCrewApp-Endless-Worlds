@@ -80,6 +80,18 @@ processes self-locate the same data dir so routes and tools see one set of files
   authz. This is uniform across all endpoint groups — health/settings, worlds,
   runs/lives, scenes, backdrop, world-drafts, and the spliced memory routes.
 
+- **A gone or damaged life answers a status code, never a 500.**
+  `store.read_state` never returns a falsy value — it raises — so a bare
+  `if not state:` guard after it is dead code and the exception becomes a 500 on
+  a surface the play page polls every 3 seconds. Every player-reachable handler
+  that loads run state goes through `_load_run_state`, which maps `StoreError`
+  to `404` ("no such life") and `CorruptRunState` to `422` ("this life is
+  damaged"); `answer_scene` maps its `SceneLedgerError` on construction to `404`
+  the same way. `advance_run_turn` loads state *before* its `already_committed`
+  chronicle scan so a ghost life cannot 500 out of the scan either. Pinned by
+  `test_route_errors.py` (ghost life polls as 404 everywhere, damaged life as
+  422, malformed id as 4xx).
+
 - **Create-then-open and draft-then-compile are split for retryability.**
   `create_run` writes the life to disk *before* asking the narrator for the
   opening turn, and `open_run` is a separate idempotent call (turn ≥ 1 returns the

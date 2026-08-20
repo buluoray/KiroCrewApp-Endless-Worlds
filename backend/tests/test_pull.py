@@ -280,16 +280,16 @@ def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_
     the player, the anti-halo signal (R7) that would otherwise be lost."""
     import mcp_server as srv
 
-    flagship = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    flagship = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
     if not flagship.is_file():
         pytest.skip("flagship seed not present")
 
     data = tmp_path / "data"
     (data / "worlds").mkdir(parents=True, exist_ok=True)
-    (data / "worlds" / "jianhuo-jiyuan.md").write_text(
+    (data / "worlds" / "age-of-sword-and-flame.md").write_text(
         flagship.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    run = store.create_run({"turn": 0, "worldId": "jianhuo-jiyuan"}, {"worldId": "jianhuo-jiyuan"})
+    run = store.create_run({"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"})
     monkeypatch.setattr(srv, "_store", lambda: store)
     monkeypatch.setattr(srv, "_DATA", data)
 
@@ -335,16 +335,16 @@ def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, m
     warning naming the ids it should have used, so the narrator self-corrects."""
     import mcp_server as srv
 
-    flagship = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    flagship = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
     if not flagship.is_file():
         pytest.skip("flagship seed not present")
     data = tmp_path / "data"
     (data / "worlds").mkdir(parents=True, exist_ok=True)
-    (data / "worlds" / "jianhuo-jiyuan.md").write_text(
+    (data / "worlds" / "age-of-sword-and-flame.md").write_text(
         flagship.read_text(encoding="utf-8"), encoding="utf-8"
     )
     run = store.create_run(
-        {"turn": 0, "worldId": "jianhuo-jiyuan"}, {"worldId": "jianhuo-jiyuan"}
+        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"}
     )
     monkeypatch.setattr(srv, "_store", lambda: store)
     monkeypatch.setattr(srv, "_DATA", data)
@@ -353,7 +353,8 @@ def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, m
 
     bad = srv._advance_turn({
         "runId": run, "turn": 1, "prose": "p",
-        "state": {"worldId": "jianhuo-jiyuan", "Made Up Section": {"whatever": "x"}},
+        "choices": [{"id": "look", "label": "look around"}],
+        "state": {"worldId": "age-of-sword-and-flame", "Made Up Section": {"whatever": "x"}},
     })
     assert bad["committed"] is True, "the month lands regardless"
     warned = bad.get("warnings") or []
@@ -363,10 +364,74 @@ def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, m
     # A status keyed correctly (even partially) does not warn.
     ok = srv._advance_turn({
         "runId": run, "turn": 2, "prose": "p",
-        "state": {"worldId": "jianhuo-jiyuan", "status": {"time": "Year 1"}},
+        "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Year 1"}},
+        "choices": [{"id": "go", "label": "go on"}],
     })
     assert ok["committed"] is True
     assert "warnings" not in ok
+
+
+def test_a_living_turn_with_no_choices_is_refused(store, tmp_path, monkeypatch):
+    """A turn with no choices and no ending is a dead page; refused BEFORE it commits,
+    so the player is never handed a page with nothing to do. `ending: true` is the
+    escape hatch for a terminal turn."""
+    import mcp_server as srv
+
+    flagship = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
+    if not flagship.is_file():
+        pytest.skip("flagship seed not present")
+    data = tmp_path / "data"
+    (data / "worlds").mkdir(parents=True, exist_ok=True)
+    (data / "worlds" / "age-of-sword-and-flame.md").write_text(
+        flagship.read_text(encoding="utf-8"), encoding="utf-8")
+    run = store.create_run(
+        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"})
+    monkeypatch.setattr(srv, "_store", lambda: store)
+    monkeypatch.setattr(srv, "_DATA", data)
+    store.mark_pending(run, turn=1, slot="s")
+    store.note_runtime_read(run, turn=1)
+
+    out = srv._advance_turn({
+        "runId": run, "turn": 1, "prose": "p",
+        "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
+    })
+    assert out["committed"] is False and out["reason"] == "choices-required"
+    assert int(store.read_state(run).get("turn") or 0) == 0, "nothing committed"
+    assert store.read_chronicle(run) == []
+
+    done = srv._advance_turn({
+        "runId": run, "turn": 1, "prose": "the end", "ending": True,
+        "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
+    })
+    assert done["committed"] is True
+    assert store.read_chronicle(run)[0]["choices"] == []
+
+
+def test_a_declared_ending_lets_a_turn_omit_choices(store, tmp_path, monkeypatch):
+    """No marker needed when the committed state fires a declared world ending
+    (flagship: line-ended when alive is false and there is no heir)."""
+    import mcp_server as srv
+
+    flagship = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
+    if not flagship.is_file():
+        pytest.skip("flagship seed not present")
+    data = tmp_path / "data"
+    (data / "worlds").mkdir(parents=True, exist_ok=True)
+    (data / "worlds" / "age-of-sword-and-flame.md").write_text(
+        flagship.read_text(encoding="utf-8"), encoding="utf-8")
+    run = store.create_run(
+        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"})
+    monkeypatch.setattr(srv, "_store", lambda: store)
+    monkeypatch.setattr(srv, "_DATA", data)
+    store.mark_pending(run, turn=1, slot="s")
+    store.note_runtime_read(run, turn=1)
+
+    out = srv._advance_turn({
+        "runId": run, "turn": 1, "prose": "she dies with no heir",
+        "state": {"worldId": "age-of-sword-and-flame",
+                  "alive": False, "lineage": {"hasHeir": False}},
+    })
+    assert out["committed"] is True, "a terminal state may omit choices without a marker"
 
 
 def test_a_full_read_surfaces_the_players_opening_answers(store, tmp_path, monkeypatch):
@@ -374,17 +439,17 @@ def test_a_full_read_surfaces_the_players_opening_answers(store, tmp_path, monke
     opening groups carry the chosen value, not just the question."""
     import mcp_server as srv
 
-    flagship = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    flagship = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
     if not flagship.is_file():
         pytest.skip("flagship seed not present")
     data = tmp_path / "data"
     (data / "worlds").mkdir(parents=True, exist_ok=True)
-    (data / "worlds" / "jianhuo-jiyuan.md").write_text(
+    (data / "worlds" / "age-of-sword-and-flame.md").write_text(
         flagship.read_text(encoding="utf-8"), encoding="utf-8"
     )
     run = store.create_run(
-        {"turn": 0, "worldId": "jianhuo-jiyuan", "opening": {"sex": "Female", "name": "Aria"}},
-        {"worldId": "jianhuo-jiyuan"},
+        {"turn": 0, "worldId": "age-of-sword-and-flame", "opening": {"sex": "Female", "name": "Aria"}},
+        {"worldId": "age-of-sword-and-flame"},
     )
     monkeypatch.setattr(srv, "_store", lambda: store)
     monkeypatch.setattr(srv, "_DATA", data)

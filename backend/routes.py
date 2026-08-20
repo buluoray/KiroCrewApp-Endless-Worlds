@@ -144,11 +144,18 @@ from chapters import brief as world_brief  # noqa: E402
 from chapters import opened_since  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
 from memory_routes import memory_routes  # noqa: E402
-from narrator import purge_narrator_session, release_narrator_slot  # noqa: E402
+from narrator import (  # noqa: E402
+    ensure_worldsmith_slot,
+    purge_narrator_session,
+    release_narrator_slot,
+    release_worldsmith_slot,
+    worldsmith_slot_key,
+)
+from drafts import DraftError, DraftStore, worldsmith_prompt  # noqa: E402
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
 from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
-from store import RunStore  # noqa: E402
+from store import CorruptRunState, RunStore, StoreError  # noqa: E402
 from turn import (  # noqa: E402
     advance_turn,
     already_committed,
@@ -158,11 +165,12 @@ from turn import (  # noqa: E402
     OPENING_DEADLINE_SECS,
 )
 from view import build_play_view, resolve_ending, world_detail  # noqa: E402
+from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
 from widget import SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
 #: Bumped independently of app.json; identifies the route contract the UI expects.
-ROUTE_CONTRACT = 9
+ROUTE_CONTRACT = 10
 
 #: Seeds ship in the install tree, one level up from backend/.
 _SEEDS_DIR = _HERE.parent / "seeds"
@@ -176,6 +184,12 @@ def _library(ctx: AppContext) -> WorldLibrary:
     return WorldLibrary(ctx.data_dir, _SEEDS_DIR)
 
 
+def _drafts(ctx: AppContext) -> DraftStore:
+    """The world-draft store — the same files the MCP server reaches from its own
+    process (both self-locate from the app data dir)."""
+    return DraftStore(ctx.data_dir)
+
+
 def _store(ctx: AppContext) -> RunStore:
     """The turn loop's store.
 
@@ -186,6 +200,24 @@ def _store(ctx: AppContext) -> RunStore:
     if ctx.storage is None:
         raise RuntimeError("ctx.storage is None — permissions.storage not declared")
     return RunStore(ctx.storage, ctx.data_dir)
+
+
+def _load_run_state(
+    store: RunStore, run_id: str
+) -> tuple[dict[str, Any] | None, web.Response | None]:
+    """State or a clean error response — exactly one of the pair is None.
+
+    ``read_state`` never returns a falsy value: it raises. An unguarded call in a
+    handler turns a deleted life into a 500 on every poll (the play page polls
+    ``GET /runs/{id}`` on a 3s loop), so the SPA can never learn the life is gone.
+    Route each store exception to the status the client can act on instead.
+    """
+    try:
+        return store.read_state(run_id), None
+    except CorruptRunState:
+        return None, web.json_response({"error": "this life is damaged"}, status=422)
+    except StoreError:
+        return None, web.json_response({"error": "no such life"}, status=404)
 
 
 async def health(request: web.Request, ctx: AppContext) -> web.Response:
@@ -756,6 +788,12 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
 
     store = _store(ctx)
 
+    # State first: a missing/damaged life must answer 404/422 here, not surface
+    # as a 500 out of `already_committed`'s chronicle scan below.
+    run_state, err = _load_run_state(store, run_id)
+    if err is not None or run_state is None:
+        return err or web.json_response({"error": "no such life"}, status=404)
+
     if isinstance(wanted, int) and not isinstance(wanted, bool):
         done = already_committed(store, run_id, wanted)
         if done is not None:
@@ -764,7 +802,6 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
                  "prose": done.get("prose", ""), "choices": done.get("choices") or []}
             )
 
-    run_state = store.read_state(run_id)
     world_id = run_state.get("worldId")
     if not isinstance(world_id, str) or not world_id:
         return web.json_response({"error": "this life has no world"}, status=422)
@@ -839,6 +876,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
     world_id = body.get("worldId")
     answers = body.get("answers") if isinstance(body.get("answers"), dict) else {}
     style = str(body.get("style") or "")
+    role = str(body.get("role") or "")
     language = body.get("language") if isinstance(body.get("language"), str) else None
 
     # "Live this again": copy a prior life's opening as the starting point. Only the
@@ -864,6 +902,8 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
                 }
         if not style:
             style = str(src.get("style") or "")
+        if not role:
+            role = str(src.get("role") or "")
         if not language:
             src_lang = src.get("language")
             if isinstance(src_lang, str) and src_lang:
@@ -890,7 +930,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
         )
 
     try:
-        state = build_initial_state(pack.template, answers, style=style)
+        state = build_initial_state(pack.template, answers, style=style, role=role)
     except OpeningError as exc:
         return web.json_response(
             {"field": exc.field, "expected": exc.expected}, status=400
@@ -983,7 +1023,9 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
 
     run_id = request.match_info.get("run_id", "")
     store = _store(ctx)
-    run_state = store.read_state(run_id)
+    run_state, err = _load_run_state(store, run_id)
+    if err is not None or run_state is None:
+        return err or web.json_response({"error": "no such life"}, status=404)
 
     if int(run_state.get("turn") or 0) >= 1:
         # Already opened. A retry after a slow success must not narrate a second
@@ -1114,6 +1156,14 @@ async def list_runs(request: web.Request, ctx: AppContext) -> web.Response:
                 row["generating"] = generating(store, rid) is not None
             except Exception:  # noqa: BLE001 — a broken row must not blank the shelf
                 row["generating"] = False
+            # The life's backdrop version, so the shelf card can show the same
+            # background the play page does. Its own try/except: a missing or
+            # damaged backdrop leaves the card plain, never blanks the shelf.
+            try:
+                bd = BackdropStore(ctx.data_dir, rid).current()
+                row["backdrop"] = {"version": bd["version"]} if bd else None
+            except Exception:  # noqa: BLE001
+                row["backdrop"] = None
     rows.sort(key=lambda r: r.get("lastPlayed") or 0, reverse=True)
     return web.json_response({"runs": rows})
 
@@ -1130,9 +1180,9 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
 
     run_id = request.match_info.get("run_id", "")
     store = _store(ctx)
-    state = store.read_state(run_id)
-    if not state:
-        return web.json_response({"error": "no such life"}, status=404)
+    state, err = _load_run_state(store, run_id)
+    if err is not None or state is None:
+        return err or web.json_response({"error": "no such life"}, status=404)
 
     world_id = state.get("worldId")
     if not isinstance(world_id, str) or not world_id:
@@ -1153,12 +1203,26 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
         headings = {c.id: c.heading for c in pack.template.chapters}
         unlocked = [headings[i] for i in opened_since(pack.template, prev, state) if i in headings]
 
+    # Milestones: ids reached live in run state; map to the world's labels. `reached`
+    # is only those new since the prior committed month (for a toast); `all` is every
+    # one reached so far (for the ending recap).
+    mile_by_id = {m.id: m.label for m in pack.template.milestones}
+    reached_ids = [i for i in (state.get("milestones") or []) if isinstance(i, str)]
+    prev_reached = {i for i in (prev.get("milestones") or []) if isinstance(i, str)}
+    milestones_all = [mile_by_id[i] for i in reached_ids if i in mile_by_id]
+    milestones_reached = [
+        mile_by_id[i] for i in reached_ids if i in mile_by_id and i not in prev_reached
+    ]
+
     view = build_play_view(
         pack.template,
         state,
         chronicle=store.read_chronicle(run_id),
         scenes=SceneLedger(ctx.data_dir, run_id).mounted(),
         unlocked=unlocked,
+        milestones_reached=milestones_reached,
+        milestones=milestones_all,
+        capability_packs=pack.capability_packs,
     )
     view["runId"] = run_id
     view["worldId"] = world_id
@@ -1167,6 +1231,18 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     # What a returning player is owed: leaving the page while a turn was being
     # written used to look identical to never having asked for it.
     view["generating"] = generating(store, run_id)
+    # The current background, if the narrator has set one. The frontend loads the
+    # compiled HTML into a scriptless, behind-text sandbox frame; `version` is the
+    # cache-buster so a replaced background actually swaps.
+    try:
+        backdrop = BackdropStore(ctx.data_dir, run_id).current()
+    except BackdropError:
+        backdrop = None
+    view["backdrop"] = (
+        {"version": backdrop["version"], "buttons": bool(backdrop.get("buttons"))}
+        if backdrop
+        else None
+    )
     view["awaitingOpening"] = state.get("status") == "awaiting-opening" and view["turn"] == 0
     return web.json_response(view)
 
@@ -1187,9 +1263,9 @@ async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
     scene_id = request.match_info.get("scene_id", "")
 
     store = _store(ctx)
-    state = store.read_state(run_id)
-    if not state:
-        return web.json_response({"error": "no such life"}, status=404)
+    state, err = _load_run_state(store, run_id)
+    if err is not None or state is None:
+        return err or web.json_response({"error": "no such life"}, status=404)
 
     ledger = SceneLedger(ctx.data_dir, run_id)
     try:
@@ -1218,6 +1294,60 @@ async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
         content_type="text/plain",
         charset="utf-8",
         headers={"Cache-Control": "no-store", "X-Scene-Cached": "1" if cached else "0"},
+    )
+
+
+async def get_backdrop(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/backdrop`` — the current background, as an SVG image.
+
+    Served as ``image/svg+xml`` so the play page shows it in a plain ``<img>``. An
+    SVG in an image context runs no script and fetches nothing external, so the
+    narrator's markup is inert without needing a sandbox — and an image renders and
+    sizes reliably on iOS, unlike the sandboxed srcdoc iframe this replaced.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    _state, err = _load_run_state(store, run_id)
+    if err is not None:
+        return err
+
+    try:
+        bstore = BackdropStore(ctx.data_dir, run_id)
+        # ``?turn=N`` restores the background effective on that page (re-reading the
+        # history); default is the latest, which is what the live page and home want.
+        turn_q = request.query.get("turn")
+        if turn_q is not None and turn_q.isdigit():
+            current = bstore.at(int(turn_q))
+        else:
+            current = bstore.current()
+    except BackdropError as exc:
+        return web.json_response({"error": str(exc)}, status=422)
+    if current is None:
+        return web.json_response({"error": "no backdrop"}, status=404)
+
+    # ``?part=buttons`` serves the common choice-button motif; default is the
+    # full-page backdrop. Both are stored together and versioned together.
+    part = request.query.get("part")
+    source = current.get("buttons") if part == "buttons" else current.get("markup")
+    if not source:
+        return web.json_response({"error": "not set"}, status=404)
+
+    try:
+        svg = compile_backdrop(source)
+    except BackdropError as exc:
+        # A stored SVG that no longer validates (e.g. an older HTML one from before
+        # the SVG-image model): refuse rather than serve it, and the page simply
+        # shows no background.
+        return web.json_response({"error": str(exc)}, status=422)
+
+    return web.Response(
+        text=svg,
+        content_type="image/svg+xml",
+        charset="utf-8",
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1252,7 +1382,12 @@ async def answer_scene(request: web.Request, ctx: AppContext) -> web.Response:
     if not isinstance(body, dict):
         body = {}
 
-    ledger = SceneLedger(ctx.data_dir, run_id)
+    try:
+        ledger = SceneLedger(ctx.data_dir, run_id)
+    except SceneLedgerError as exc:
+        # A malformed run id fails the ledger's own id check; that is a client
+        # error, not a crash (the sibling scene routes already answer this way).
+        return web.json_response({"accepted": False, "reason": str(exc)}, status=404)
 
     def refuse(reason: str, status: int = 422) -> web.Response:
         try:
@@ -1352,6 +1487,14 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
     limit = max(1, min(_int_param(request, "limit", default=CHRONICLE_PAGE), 100))
     page = list(reversed(entries))[:limit]
 
+    # Each page carries the backdrop that was effective ON that turn, so re-reading
+    # the history restores the scene each page had rather than only the latest.
+    bstore = BackdropStore(ctx.data_dir, run_id)
+
+    def _bd(turn: int) -> dict[str, int] | None:
+        v = bstore.version_at(turn)
+        return {"version": v} if v else None
+
     return web.json_response({
         "runId": run_id,
         "turns": [
@@ -1378,6 +1521,8 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
                     for g in (e.get("gains") or [])
                     if isinstance(g, dict) and g.get("field")
                 ][:12],
+                # The scene this page had, so the history reader can restore it.
+                "backdrop": _bd(int(e.get("turn") or 0)),
             }
             for e in page
         ],
@@ -1409,6 +1554,200 @@ def _int_param(request: web.Request, name: str, *, default: int) -> int:
         return default
 
 
+def _retitle(world_text: str, title: str) -> str:
+    """Override the display title in a serialized world file's JSON header, leaving
+    the prose and every other field byte-for-byte. Used when the player renames a
+    world in the review screen before installing it."""
+    import json
+
+    if not world_text.startswith("---\n"):
+        return world_text
+    marker = "\n---\n"
+    end = world_text.find(marker, 3)
+    if end == -1:
+        return world_text
+    try:
+        header = json.loads(world_text[4:end])
+    except ValueError:
+        return world_text
+    if not isinstance(header, dict):
+        return world_text
+    header["title"] = title
+    prose = world_text[end + len(marker):]
+    return f"---\n{json.dumps(header, ensure_ascii=False, indent=2)}\n---\n{prose}"
+
+
+async def create_world_draft(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /world-drafts`` — stash pasted text as a draft, BEFORE any agent runs.
+
+    Split from ``/compile`` for the same reason a life's creation is split from its
+    opening (R2.9): a failed or slow compile leaves a retryable draft rather than
+    nothing, and a retry never produces a second draft.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "expected an object"}, status=400)
+    text = body.get("text")
+    if not isinstance(text, str):
+        text = ""
+    title = str(body.get("title") or "")[:120]
+    try:
+        draft_id = _drafts(ctx).create(text, title=title)
+    except DraftError as exc:
+        return web.json_response({"error": str(exc), "code": "bad_draft"}, status=400)
+    return web.json_response({"draftId": draft_id}, status=201)
+
+
+async def compile_world_draft(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /world-drafts/{id}/compile`` — dispatch the worldsmith on a draft.
+
+    Mirrors ``open_run``: the pending marker is written BEFORE dispatch so the
+    draft reads as generating immediately, and a draft already in flight is not
+    dispatched twice.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    state_obj = request.app.get("state")
+    if state_obj is None:
+        return web.json_response({"error": "no chat runtime"}, status=503)
+    draft_id = request.match_info.get("draft_id", "")
+    store = _drafts(ctx)
+    try:
+        record = store.record(draft_id)
+    except DraftError:
+        return web.json_response({"error": "no such draft"}, status=404)
+    status = record.get("status")
+    if status == "installed":
+        return web.json_response({"dispatched": False, "reason": "installed"})
+    if status == "generating":
+        return web.json_response({"dispatched": False, "reason": "generating"})
+
+    from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
+
+    cfg = read_settings(ctx.data_dir)
+    try:
+        slot = ensure_worldsmith_slot(
+            state_obj,
+            draft_id,
+            project=str(ctx.data_dir / "world-drafts" / draft_id),
+            model=cfg["model"],
+            reasoning_effort=cfg["reasoningEffort"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response(
+            {"error": "could not start the worldsmith", "detail": str(exc)}, status=503
+        )
+    store.mark_pending(draft_id)  # BEFORE dispatch, never after
+    make_dispatcher(_run_chat)(state_obj, slot, worldsmith_prompt(draft_id))
+    return web.json_response({"dispatched": True})
+
+
+async def list_world_drafts(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /world-drafts`` — the shelf's in-progress and ready-to-review drafts."""
+    if request.get("user") is None:
+        return _unauthorized()
+    return web.json_response({"drafts": _drafts(ctx).list()})
+
+
+async def get_world_draft(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /world-drafts/{id}`` — the review payload (status, preview, warnings)
+    plus the worldsmith's slot key, so the UI can offer a jump-to-chat."""
+    if request.get("user") is None:
+        return _unauthorized()
+    draft_id = request.match_info.get("draft_id", "")
+    try:
+        record = _drafts(ctx).record(draft_id)
+    except DraftError:
+        return web.json_response({"error": "no such draft"}, status=404)
+    try:
+        slot_key = worldsmith_slot_key(draft_id)
+    except Exception:  # noqa: BLE001
+        slot_key = ""
+    return web.json_response({
+        "draftId": record.get("draftId", draft_id),
+        "title": record.get("title") or "",
+        "status": record.get("status", "new"),
+        "steps": int(record.get("steps") or 0),
+        "stage": record.get("stage") or "",
+        "lastTool": record.get("lastTool") or "",
+        "problem": record.get("problem") or "",
+        "field": record.get("field") or "",
+        "worldId": record.get("worldId") or "",
+        "preview": record.get("preview") or None,
+        "warnings": record.get("warnings") or [],
+        "dropped": record.get("dropped") or [],
+        "slotKey": slot_key,
+    })
+
+
+async def install_world_draft(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /world-drafts/{id}/install`` — put the reviewed world on the shelf.
+
+    Optional body ``{title}`` renames the world's display title first. Refused if
+    the draft is not ``ready`` or its id collides with an existing world.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    title = str(body.get("title") or "").strip()[:120]
+    draft_id = request.match_info.get("draft_id", "")
+    store = _drafts(ctx)
+    try:
+        record = store.record(draft_id)
+    except DraftError:
+        return web.json_response({"error": "no such draft"}, status=404)
+    if record.get("status") != "ready":
+        return web.json_response(
+            {"error": "this world isn't ready to add yet", "code": "not_ready"}, status=409
+        )
+    try:
+        world_text = store.world_text(draft_id)
+    except DraftError as exc:
+        return web.json_response({"error": str(exc), "code": "not_ready"}, status=409)
+    if title:
+        world_text = _retitle(world_text, title)
+    try:
+        world_id = _library(ctx).install(world_text)
+    except LibraryError as exc:
+        return web.json_response({"error": str(exc), "code": "install_failed"}, status=409)
+    store.mark_installed(draft_id, world_id)
+    state_obj = request.app.get("state")
+    if state_obj is not None:
+        try:
+            release_worldsmith_slot(state_obj, draft_id)
+        except Exception:  # noqa: BLE001
+            pass
+    return web.json_response({"worldId": world_id})
+
+
+async def discard_world_draft(request: web.Request, ctx: AppContext) -> web.Response:
+    """``DELETE /world-drafts/{id}`` — throw a draft away. Idempotent."""
+    if request.get("user") is None:
+        return _unauthorized()
+    draft_id = request.match_info.get("draft_id", "")
+    try:
+        _drafts(ctx).delete(draft_id)
+    except DraftError:
+        pass
+    state_obj = request.app.get("state")
+    if state_obj is not None:
+        try:
+            release_worldsmith_slot(state_obj, draft_id)
+        except Exception:  # noqa: BLE001
+            pass
+    return web.json_response({"deleted": True})
+
+
 def register_routes(ctx: AppContext) -> list[AppRoute]:
     """Declare this app's HTTP surface.
 
@@ -1431,6 +1770,7 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         AppRoute(method="POST", path="/runs/{run_id}/delete", handler=delete_life),
         AppRoute(method="POST", path="/runs/{run_id}/meta", handler=set_life_meta),
         AppRoute(method="GET", path="/runs/{run_id}/scenes/{scene_id}", handler=get_scene),
+        AppRoute(method="GET", path="/runs/{run_id}/backdrop", handler=get_backdrop),
         AppRoute(
             method="POST",
             path="/runs/{run_id}/scenes/{scene_id}/answer",
@@ -1441,6 +1781,19 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
             method="GET", path="/runs/{run_id}/chronicle", handler=get_chronicle
         ),
         AppRoute(method="POST", path="/runs/{run_id}/turn", handler=advance_run_turn),
+        # World drafts: paste raw text → background worldsmith cleans+compiles →
+        # review → install. Mirrors the life-creation job (create, then a separate
+        # retryable compile), so a slow or failed compile leaves a retryable draft.
+        AppRoute(method="GET", path="/world-drafts", handler=list_world_drafts),
+        AppRoute(method="POST", path="/world-drafts", handler=create_world_draft),
+        AppRoute(method="GET", path="/world-drafts/{draft_id}", handler=get_world_draft),
+        AppRoute(
+            method="POST", path="/world-drafts/{draft_id}/compile", handler=compile_world_draft
+        ),
+        AppRoute(
+            method="POST", path="/world-drafts/{draft_id}/install", handler=install_world_draft
+        ),
+        AppRoute(method="DELETE", path="/world-drafts/{draft_id}", handler=discard_world_draft),
         # The life star map + keepsakes (design §8.2/§8.3); handlers live in
         # memory_routes.py so the player meaning layer stays apart from the
         # turn loop.

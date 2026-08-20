@@ -29,7 +29,7 @@ from compile import (  # noqa: E402
 from template import FIELD_PRIMITIVES, OPENING_KINDS  # noqa: E402
 from world import HAND_COMPILED, read_world  # noqa: E402
 
-FLAGSHIP = _BACKEND.parent / "templates" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "templates" / "age-of-sword-and-flame.md"
 
 PROSE = "第一章\n\n世界不围绕玩家存在。\n【时间】XXX年·XXX月\n"
 
@@ -113,7 +113,10 @@ def test_the_result_round_trips_through_the_world_reader() -> None:
 @pytest.mark.parametrize(
     "mutate,expect_field",
     [
-        (lambda h: {**h, "id": "Test_World"}, "template.id"),
+        # An id that cannot be salvaged into a slug (nothing alphanumeric to keep)
+        # is still refused. A merely mis-cased one (Test_World) is now auto-fixed —
+        # see test_camelcase_ids_are_normalized_and_when_references_follow.
+        (lambda h: {**h, "id": "!!!"}, "template.id"),
         (lambda h: {k: v for k, v in h.items() if k != "clock"}, "clock"),
         (lambda h: {k: v for k, v in h.items() if k != "language"}, "language"),
         (lambda h: {**h, "version": 1.10}, "version"),
@@ -272,3 +275,50 @@ def test_the_compiler_recovers_the_flagship_structure_from_its_prose_alone() -> 
     # assert len(res.pack.template.styles) == 6
     # assert len(res.pack.template.opening) >= 12
     assert prose
+
+
+# -- id auto-normalization (camelCase -> slug), references follow -----------
+
+
+def test_camelcase_ids_are_normalized_and_when_references_follow() -> None:
+    """A camelCase id is the most common first-try compiler mistake. It is fixed
+    before the gate, and every `when` that references it follows the rename — as a
+    path segment AND (for a matching literal) as a string — so nothing dangles."""
+    header = json.loads(json.dumps(GOOD))
+    header["opening"].append({"id": "birthCity", "label": "出生城", "kind": "text"})
+    header["panels"].append({
+        "id": "cityPanel",
+        "when": 'state.birthCity == "riverport"',
+        "fields": [{"id": "cityMood", "label": "民心", "primitive": "stat"}],
+    })
+    result = accept_compiled_header(PROSE, header)
+    assert result.ok, result.problem
+    t = result.pack.template
+
+    ids = {o.id for o in t.opening} | {p.id for p in t.panels}
+    assert "birth-city" in ids and "birthCity" not in ids
+    assert "city-panel" in {p.id for p in t.panels}
+    assert "city-mood" in {f.id for p in t.panels for f in p.fields}
+
+    # The panel that gated on the camelCase id now gates on the slug — and the
+    # rewritten `when` (with a hyphen in the path) still tokenises and evaluates
+    # against state stored under that slug.
+    city = next(p for p in t.panels if p.id == "city-panel")
+    assert city.when is not None
+    assert city.when.evaluate({"birth-city": "riverport"}) is True
+    assert city.when.evaluate({"birth-city": "elsewhere"}) is False
+
+    # A free runtime key in a `when` (magic.awakened is not a declared id) is left
+    # exactly as written even while other ids are being renamed.
+    magic = next(p for p in t.panels if p.id == "magic")
+    assert magic.when is not None
+    assert "state.magic.awakened" in magic.when.referenced_paths()
+
+    # The normalization is surfaced, not silent.
+    assert any("normalized id" in w for w in result.warnings)
+
+
+def test_a_header_of_clean_slugs_is_left_untouched() -> None:
+    result = accept_compiled_header(PROSE, json.loads(json.dumps(GOOD)))
+    assert result.ok, result.problem
+    assert not any("normalized id" in w for w in result.warnings)

@@ -1,9 +1,9 @@
-"""Guards on the desktop rail.
+"""Guards on the desktop shelf drawer.
 
-The rail exists because navigation and reading were sharing one axis: the shelf, a
+The drawer exists because navigation and reading were sharing one axis: the shelf, a
 world, the opening screen and the live turn were all the same 900px column, so
 switching between two lives meant going back to a list. Splitting the axes is the
-kind of change that is easy to get right once and then lose, in two specific ways
+kind of change that is easy to get right once and then lose, in three specific ways
 these tests are aimed at.
 
 The first is regressing the phone. The narrow layout was not a compromise to be
@@ -11,9 +11,14 @@ undone -- it is the baseline the desktop is added on top of -- so a rail that
 renders at phone widths would be a strict loss, and it would be invisible to anyone
 developing on a desktop.
 
-The second is letting the reading measure grow with the window. A life is read, not
+The second is letting the reading measure grow on its own. A life is read, not
 scanned; prose set to the full width of a 2560px monitor is unreadable, and the
-failure looks like "the app uses the space well" in a screenshot.
+failure looks like "the app uses the space well" in a screenshot. A reader may lift
+the cap deliberately -- that is a stored preference, and the guard is that nothing
+else can.
+
+The third is the corner. The top-left slot carries the phone's "back to the shelf"
+or the desktop's "shelf" opener, never both and never neither.
 """
 
 from __future__ import annotations
@@ -57,10 +62,15 @@ def test_the_rail_only_appears_above_the_desktop_breakpoint():
     )
 
 
-def test_the_reading_column_does_not_grow_with_the_window():
-    """The measure is capped, and capped in ``ch`` -- a character-relative unit, so
-    it tracks the font rather than a pixel guess that breaks when the theme's type
-    size changes."""
+def test_the_reading_column_does_not_grow_with_the_window_on_its_own():
+    """The measure is capped by default, and capped in ``ch`` -- a character-relative
+    unit, so it tracks the font rather than a pixel guess that breaks when the
+    theme's type size changes.
+
+    "On its own" is the whole content of this guard now. A reader may lift the cap
+    (see the fluid-width tests below) and that is a choice they made; what must never
+    happen is the layout widening the prose because a monitor happened to be wide.
+    """
     css = styles()
     main = re.search(r"\.ew-main\s*\{([^}]*)\}", css)
     assert main, "the reading column needs its own rule"
@@ -75,20 +85,181 @@ def test_the_reading_column_does_not_grow_with_the_window():
         )
 
 
-def test_the_cap_moved_off_the_root_so_the_rail_sits_outside_the_measure():
-    """A rail inside a 900px cap would eat the prose column rather than sit beside
-    it. The desktop block therefore has to raise the root's own cap."""
+def test_the_cap_is_lifted_only_by_the_readers_own_choice():
+    """``max-width: none`` on the reading column must be qualified by the preference
+    class. An unqualified one anywhere would restore exactly the failure the cap
+    exists for -- prose set to the full width of a 2560px monitor -- and it would look
+    like "the app uses the space well" in a screenshot."""
+    css = styles()
+    # Comments first, then the media-query wrappers. Both defeat a rule-level scan
+    # and both did: a comment is swallowed into the following selector, so a rule
+    # whose comment merely MENTIONS the preference class read as though the selector
+    # carried it — and a media query's own `{` desyncs the brace pairing, which hid
+    # every rule inside one. This test passed a real regression on both counts.
+    flat = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    flat = re.sub(r"@media[^{]*\{", "", flat)
+    seen = 0
+    for rule in re.finditer(r"([^{}\n][^{}]*)\{([^}]*)\}", flat):
+        selector, body = rule.group(1).strip(), rule.group(2)
+        if not re.search(r"\.ew-main\b", selector):
+            continue
+        seen += 1
+        if re.search(r"max-width:\s*none", body):
+            assert "ew-w-fluid" in selector, (
+                "the measure is uncapped by " + selector + ", which no reader asked for"
+            )
+    assert seen >= 2, (
+        f"the scan found {seen} rules for the reading column; it should see both the "
+        "default cap and the reader's override, so it is not actually checking them"
+    )
+
+
+def test_the_two_width_modes_are_the_only_two_and_one_of_them_is_stored():
+    """The choice is a standing preference, not a per-visit toggle: a reader who set
+    a measure and came back to the app's own default would have to set it again every
+    session, which reads as the setting not working."""
+    src = module("main.tsx")
+    assert "endless-worlds:width" in src, "the width choice is not persisted anywhere"
+    assert re.search(r"localStorage\.setItem\(WIDTH_KEY", src), (
+        "the width choice is read but never written"
+    )
+    assert re.search(r"ew-w-' \+ readWidth", src), (
+        "the chosen width never reaches the stylesheet"
+    )
+    rail = module("rail.tsx")
+    assert re.search(r"ReadWidth = 'fluid' \| 'fixed'", rail), (
+        "the width type must name exactly the two modes the stylesheet implements"
+    )
+    css = styles()
+    assert ".ew-w-fluid" in css, "the fluid mode has no rule at all"
+
+
+def test_the_shelf_drawer_rests_closed_and_unmounts_when_it_is():
+    """The shelf is a collapsible drawer: open by DEFAULT so the landing shows it,
+    with the open/closed choice PERSISTED across loads (the reader closes it for
+    reading room and it stays closed until they reopen it). Two invariants remain
+    from the old closed-by-default drawer and still matter: it must UNMOUNT when
+    closed (one merely hidden with CSS while mounted is stranded over the story by
+    a resize down to phone width, where its opener no longer renders), and it must
+    be dismissible from the keyboard."""
+    src = module("main.tsx")
+    assert "railOpen" in src and "RAIL_KEY" in src, "the drawer state is not tracked"
+    # Open by default, reading its remembered state; closed only when so stored.
+    assert re.search(r"RAIL_KEY\)\s*!==\s*'closed'", src), (
+        "the drawer must default open and read its remembered state"
+    )
+    assert re.search(r"setItem\(RAIL_KEY", src), "the open/closed choice is not persisted"
+    rail = module("rail.tsx")
+    assert re.search(r"if \(!open\) return null", rail), (
+        "the drawer stays mounted while closed, so a resize can strand it"
+    )
+    assert "'Escape'" in rail, (
+        "a drawer covering the story must be dismissible from the keyboard"
+    )
+
+
+def test_the_desktop_opener_exists_only_where_the_inline_back_button_is_hidden():
+    """The top-left corner carries exactly one control at every width: the phone's
+    "back to the shelf", or the desktop's "shelf". Both showing is the two-back-
+    buttons bug in a new costume; neither showing strands the reader."""
+    css = styles()
+    bare = re.search(r"^\.ew-shelfbtn\s*\{([^}]*)\}", css, re.MULTILINE)
+    assert bare and "display: none" in bare.group(1), (
+        "the opener renders at phone widths, where it would sit beside the inline "
+        "back button"
+    )
+    wide = re.search(
+        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
+    )
+    assert wide, "no rule block at the desktop breakpoint"
+    assert re.search(r"\.ew-shelfbtn\s*\{[^}]*display:\s*inline-flex", wide.group(1)), (
+        "with the inline back button hidden at this width, nothing opens the shelf"
+    )
+
+
+def test_the_drawer_pushes_the_story_instead_of_covering_it():
+    """The drawer must open IN FLOW -- a grid column that moves the story right --
+    and never as a viewport-fixed overlay.
+
+    This is not taste. The app is mounted inside the dashboard's own content region,
+    which is itself offset right by the dashboard's sidebar, so `position: fixed;
+    left: 0` resolves against the VIEWPORT and paints the panel outside the area the
+    app can be seen in. It rendered, it was in the DOM, and the reader could not look
+    at it -- which is exactly how this shipped once.
+    """
+    css = styles()
+    flat = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    flat = re.sub(r"@media[^{]*\{", "", flat)
+    for rule in re.finditer(r"([^{}\n][^{}]*)\{([^}]*)\}", flat):
+        selector, body = rule.group(1).strip(), rule.group(2)
+        if not re.search(r"\.ew-rail\b", selector):
+            continue
+        assert not re.search(r"position:\s*fixed", body), (
+            selector + " pins the shelf to the viewport, which is not where this app "
+            "lives"
+        )
+    # And the push itself: the open state has to give the story its own track.
+    wide = re.search(
+        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
+    )
+    assert wide, "no rule block at the desktop breakpoint"
+    grid = re.search(
+        r"\.ew-shell-open\s*\{[^}]*grid-template-columns:\s*([^;]+);", wide.group(1)
+    )
+    assert grid, "the open drawer does not create a column for itself"
+    assert "minmax(0" in grid.group(1), (
+        "the story's track must be minmax(0, …) or a long unbroken world title "
+        "widens it and pushes the prose off the page"
+    )
+
+
+def test_the_cap_moved_off_the_root_so_the_measure_owns_the_page():
+    """A 900px root cap would leave a desktop reading in a phone's column. The
+    desktop block therefore has to release the root's own cap and let the reading
+    column set the measure -- either by widening it or by dropping it entirely, which
+    is what the full-bleed backdrop needs."""
     css = styles()
     wide = re.search(
         rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
     )
     assert wide, "no rule block at the desktop breakpoint"
-    root = re.search(r"\.ew-root\s*\{[^}]*max-width:\s*(\d+)px", wide.group(1))
-    assert root, "the desktop block must widen .ew-root"
-    assert int(root.group(1)) > 900, (
-        "the root cap must exceed the phone/tablet 900px, or the rail is taken out "
-        "of the reading column instead of added beside it"
+    root = re.search(
+        r"\.ew-root\s*\{[^}]*max-width:\s*(none|\d+px)", wide.group(1)
     )
+    assert root, "the desktop block must release .ew-root's phone/tablet cap"
+    if root.group(1) != "none":
+        assert int(root.group(1).removesuffix("px")) > 900, (
+            "the root cap must exceed the phone/tablet 900px, or a desktop reads the "
+            "story in a column sized for a phone"
+        )
+
+
+def test_the_star_map_has_a_way_in_at_every_width():
+    """A way into the star map at every width. The desktop opens it from the right
+    aside's tab strip; a phone opens it from the bottom bar's 星图 tab. The old bug
+    was the opener borrowing `.ew-drawer` (hidden above 900px, so the desktop had no
+    entrance at all) -- so neither entrance may sit on a class a width query hides."""
+    src = module("play.tsx")
+    star = re.search(r"setStarOpen\(true\)", src)
+    assert star, "nothing opens the star map on the desktop aside"
+    # The opener may be a multi-line handler, so look back a generous window.
+    button = src[max(0, star.start() - 600):star.start()]
+    assert 'className="ew-aside-tab"' in button, (
+        "the desktop star opener lives on the right-aside tab strip"
+    )
+    # The phone entrance is the bottom bar's built-in 星图 tab.
+    bar = module("tabbar.tsx")
+    assert "'starmap'" in bar and "tab.starmap" in bar, (
+        "the phone bottom bar must carry a 星图 tab"
+    )
+    # Neither entrance's own class may be hidden by a width query.
+    css = styles()
+    for cls in (".ew-aside-tab", ".ew-tab"):
+        for rule in re.finditer(r"([^{}\n][^{}]*)\{([^}]*)\}", css):
+            if cls in rule.group(1) and "focus" not in rule.group(1):
+                assert "display: none" not in rule.group(2), (
+                    "a star map entrance is hidden by " + rule.group(1).strip()
+                )
 
 
 def test_the_rail_marks_exactly_one_row_as_current():

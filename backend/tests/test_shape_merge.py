@@ -36,7 +36,7 @@ from srcguard import code_only  # noqa: E402
 from view import _shape, build_play_view  # noqa: E402
 from world import read_world  # noqa: E402
 
-FLAGSHIP = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 #: The keys ``build_play_view`` writes from the world's OWN declaration, before the
 #: shaped value is spread over them. A shaper emitting any of these overwrites what

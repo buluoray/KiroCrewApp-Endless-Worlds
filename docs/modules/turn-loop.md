@@ -18,8 +18,8 @@ turn 200 as at turn 1.
 | `backend/turn.py` | the turn loop: `advance_turn()` (dispatch + poll), `compose_prompt()`, `_addressing()`, `declaration_shape()`, `already_committed()`, the briefing state machine, and the deadline / stale constants |
 | `backend/opening.py` | `compose_opening_prompt()` — the opening turn's prompt, passed to the same `advance_turn()` via `prompt_override` so the wait and idempotence are not forked |
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
-| `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first and stamps the turn number itself |
-| `backend/memory_graph.py` | validates the structured `memory` block whole, against the same commit |
+| `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
+| `backend/memory_graph.py` | validates the structured `memory` block; a failure is dropped and warned, never blocking the commit |
 | `content/{en,zh}.json` | every line the prompt is built from (`turn.pull`, `turn.ask`, `turn.action.*`, `shape.*`, `opening.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
 
 ## Load-bearing contracts
@@ -86,6 +86,18 @@ turn 200 as at turn 1.
   `test_a_replayed_turn_changes_nothing`, and
   `test_the_turn_number_is_stamped_by_the_server_not_trusted_from_state`.
 
+- **The commit poll requires the wanted turn's own chronicle line, not just the
+  counter.** A commit is two writes — `commit_state` bumps `state.turn`, then
+  `append_turn` adds the chronicle line — and `_await_commit` can poll into the
+  gap between them. The counter alone would hand back `chronicle[-1]`, the
+  *previous* month's prose, as if it were this one; requiring the entry whose
+  `turn == wanted` makes the poll wait out the gap instead. The writer order is
+  deliberately NOT reversed: `already_committed` gates on the counter before
+  scanning the chronicle, so a chronicle-first crash would leave a duplicate
+  entry a rebuilt memory graph double-counts, while a counter-first crash leaves
+  only a prose hole. Pinned (mutation-verified) by
+  `test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous`.
+
 - **The pending record is written before the narrator is dispatched.** The
   ordering closes the window between speaking to the narrator and the commit: a
   request that dies in that gap would otherwise be indistinguishable from one
@@ -122,19 +134,37 @@ turn 200 as at turn 1.
   never player-facing text (`test_the_outcome_carries_a_machine_reason_not_player_facing_text`);
   phrasing lives in the content tables.
 
-- **The structured `memory` block is validated whole, or nothing commits.** A turn
+- **The structured `memory` block is enrichment, and never blocks a turn.** A turn
   may declare entities (stable ids reused every appearance), events (each with a
   closed `disclosure`), relations, and `echoes` naming a prior event's canonical
   id — and it is the *declaration*, not the prose, that makes the world's memory of
-  an event real. The whole block is validated against the same commit that writes
-  the prose: a malformed block commits nothing, a declared echo becomes a
-  traceable marker, and prose alone never fabricates one. Enforced by
-  `memory_graph`; pinned by `test_malformed_memory_commits_nothing`,
+  an event real. Memory is validated but NON-BLOCKING at BOTH layers. At the schema
+  layer (`call_tool`), a `memory` sent as a JSON **string** — the double-encoding a
+  narrator sometimes emits — is recovered to an object, and an unrecoverable string
+  is dropped, rather than the whole call being refused on a type mismatch. At the
+  semantic layer (`_advance_turn`), a block that fails `validate_memory` is dropped
+  (not recorded) and surfaced as a non-blocking `panel: "memory"` warning, while the
+  prose, choices, and state still commit — the same "enrichment never blocks a
+  committed turn" contract milestones and systems already have. Facts are never
+  back-filled from prose. Enforced by `mcp_server.call_tool` + `_advance_turn` +
+  `memory_graph`; pinned by `test_malformed_memory_commits_the_turn_but_drops_the_block`,
+  `test_memory_sent_as_a_json_string_is_recovered`,
+  `test_memory_sent_as_a_non_json_string_is_dropped_not_fatal`,
   `test_the_design_example_validates_whole`,
   `test_a_declared_echo_becomes_a_traceable_marker`,
   `test_prose_alone_never_fabricates_a_marker`, and
-  `test_a_retried_turn_never_duplicates_nodes_or_edges`; a whole malformed turn
-  applies nothing (`test_a_malformed_turn_applies_nothing`).
+  `test_a_retried_turn_never_duplicates_nodes_or_edges`.
+
+- **A living turn MUST offer `choices`; only a terminal turn may omit them.** A
+  committed turn with no choices and no ending is a dead page the player cannot act
+  on, so it is refused BEFORE anything commits (machine reason `choices-required`)
+  unless the turn is terminal: the narrator passes `ending: true`, or the committed
+  state fires a declared world ending (`endings[].when`). This is the one place the
+  turn contract is strict where memory is lenient — choices are the interaction
+  itself, not enrichment. The gate runs only when the world pack loads, so a
+  synthetic turn with no world is left alone. Enforced by `_advance_turn`; pinned by
+  `test_a_living_turn_with_no_choices_is_refused` and
+  `test_a_declared_ending_lets_a_turn_omit_choices`.
 
 - **The opening turn reuses the same loop.** `compose_opening_prompt()` builds a
   different prompt but hands it to the same `advance_turn()` via `prompt_override`,

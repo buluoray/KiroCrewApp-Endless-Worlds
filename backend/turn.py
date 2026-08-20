@@ -351,14 +351,23 @@ async def _await_commit(
     The store is what is watched, not the narrator: a commit is the only thing that
     counts as a turn, so a narrator that finishes talking without committing has
     not produced one.
+
+    A commit is TWO writes (``commit_state`` bumps the counter, ``append_turn``
+    adds the chronicle line) and this poll can land in the gap between them — so
+    the counter alone is not the signal. Requiring the chronicle entry for the
+    wanted turn itself, rather than trusting ``[-1]``, is what keeps a poll in
+    that gap from returning the previous month's prose as if it were this one.
     """
     deadline = time.monotonic() + deadline_secs
     while time.monotonic() < deadline:
         await asyncio.sleep(_POLL_SECS)
         now = store.read_state(run_id)
         if int(now.get("turn") or 0) >= wanted:
-            chronicle = store.read_chronicle(run_id)
-            return chronicle[-1].get("prose", "") if chronicle else ""
+            for entry in reversed(store.read_chronicle(run_id)):
+                if int(entry.get("turn") or 0) == wanted:
+                    return entry.get("prose", "")
+            # Counter is ahead of the chronicle: mid-commit gap. Keep polling —
+            # the append lands on the next tick in the normal case.
     return None
 
 

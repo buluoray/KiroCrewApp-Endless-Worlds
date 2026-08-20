@@ -25,16 +25,28 @@ interface SceneMessage {
  * see a scene at all.
  */
 export function SceneSlot({
-  runId, sceneId, onChoice,
+  runId, sceneId, asks, visible = true, onChoice,
 }: {
   runId: string | null
   sceneId: string
+  /** Whether this scene asks the player something. An asking scene is scrolled
+   *  into view when it mounts, so it is never missed at the foot of a long page. */
+  asks?: boolean
+  /** Whether the scene's tab is the one on screen. Hidden with display:none (never
+   *  unmounted) so switching tabs does not reload the frame. Default true keeps the
+   *  desktop, which shows every scene inline, unchanged. */
+  visible?: boolean
   onChoice: (sceneId: string, choice: string, nonce: string) => void
 }) {
   const [everNeeded, setEverNeeded] = useState(false)
   const [html, setHtml] = useState('')
   const [full, setFull] = useState(false)
   const [failed, setFailed] = useState(false)
+  /** Set the instant the player acts, cleared when the scene changes — so a scene
+   *  tap has immediate feedback instead of looking dead for the seconds a turn
+   *  takes. (M0.4) */
+  const [sending, setSending] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (sceneId) setEverNeeded(true)
@@ -72,7 +84,17 @@ export function SceneSlot({
   const answered = useRef(false)
   useEffect(() => {
     answered.current = false
+    setSending(false)  // a fresh scene (or an updated one) clears the sending state
   }, [sceneId, html])
+
+  // An asking scene that arrives at the foot of a long page is easy to miss, and
+  // there was no feedback that a turn was even in progress. Bring it into view when
+  // its picture lands. Display-only scenes (a map, a ledger) do not steal focus. (M0.4)
+  useEffect(() => {
+    if (html && sceneId && asks) {
+      wrapRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [html, sceneId, asks])
 
   useEffect(() => {
     if (!everNeeded) return undefined
@@ -88,6 +110,7 @@ export function SceneSlot({
       if (typeof d.choice !== 'string' || !d.choice) return
       if (answered.current) return
       answered.current = true
+      setSending(true)
       onChoice(sceneId, d.choice, d.nonce)
     }
     window.addEventListener('message', onMessage)
@@ -109,10 +132,17 @@ export function SceneSlot({
   const loading = !!sceneId && !html && !failed
 
   return (
-    <div className="ew-slot-wrap" style={on ? undefined : { margin: 0 }}>
+    <div
+      className={`ew-slot-wrap${full ? ' ew-slot-wrap-full' : ''}`}
+      ref={wrapRef}
+      style={!visible ? { display: 'none' } : on ? undefined : { margin: 0 }}
+    >
       {failed && sceneId ? <div className="ew-note">{t('play.sceneFailed')}</div> : null}
       {loading ? (
         <div className="ew-note" role="status" aria-live="polite">{t('play.sceneLoading')}</div>
+      ) : null}
+      {sending ? (
+        <div className="ew-note" role="status" aria-live="polite">{t('play.sceneSending')}</div>
       ) : null}
 
       {/* Once it exists it is never removed, never re-keyed and never moved — hidden

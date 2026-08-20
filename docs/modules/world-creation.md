@@ -101,12 +101,26 @@ but never import each other; `drafts.py` is stdlib-only.
   (`_DRAFT_ID_RE`) and caps the raw text (`MAX_RAW_BYTES`), and records are written
   atomically.
 
-- **A stale `generating` record self-heals to `failed`.** `_resolve` treats a
-  `generating` record older than `STALE_SECS` as `failed`, so a dead gateway leaves a
-  retryable draft rather than an eternal spinner. The bound is set to exceed the
+- **A stale record self-heals to `failed`, whichever way it got stuck.** `_resolve`
+  treats a `generating` record older than `STALE_SECS` as `failed`, so a dead gateway
+  leaves a retryable draft rather than an eternal spinner; a record stranded at `new`
+  past the same bound is judged the same way, because a lost compile dispatch (the
+  client navigated away mid-fire, or the chat runtime refused the slot before
+  `mark_pending` ran) otherwise leaves the review polling a frozen progress bar
+  forever. The judgement is read-side only — the raw record is never rewritten, so a
+  retry can still move it to `generating`
+  (`test_resolution_never_writes_back`). The bound is set to exceed the
   request deadline; `test_the_staleness_bound_exceeds_the_request_deadline` pins that
-  relationship and `test_a_stale_record_does_not_wedge_the_life_forever` pins the
-  self-heal for the turn-generation store that shares this pattern.
+  relationship, `test_a_stale_record_does_not_wedge_the_life_forever` pins the
+  self-heal for the turn-generation store that shares this pattern, and
+  `test_a_draft_stranded_at_new_reads_as_failed_after_the_stale_bound` pins the
+  `new`-side clause.
+
+- **The review screen recovers a lost dispatch itself.** On loading a draft still
+  `new`, `WorldDraftReview` re-fires the compile once per mount (safe: the route
+  short-circuits `generating`/`installed`), and the failed screen carries a
+  "try again" button re-dispatching through the same path — so no failure mode
+  ends at a screen with nothing to press but "discard".
 
 - **A failed draft carries exactly the two fields the gate emits.** `store_failed`
   records the `problem` and the offending `field` from the `CompileResult`, so the

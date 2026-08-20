@@ -22,6 +22,7 @@ interface Draft {
   answers?: Record<string, string>
   customs?: Record<string, string>
   style?: string
+  role?: string
   page?: number
   run?: string | null
   /** When the draft was last written, for expiry. Absent on pre-TTL drafts, which
@@ -146,6 +147,7 @@ export function OpeningScreen({
   const [style, setStyle] = useState<string>(
     draft.style ?? (styleRows.find((s) => s.default) ?? styleRows[0])?.id ?? '',
   )
+  const [role, setRole] = useState<string>(draft.role ?? '')
   const [page, setPage] = useState(draft.page ?? 0)
   const [busy, setBusy] = useState<'' | 'creating' | 'opening'>('')
   const [failed, setFailed] = useState<string | null>(null)
@@ -166,12 +168,12 @@ export function OpeningScreen({
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ answers, customs, style, page, run, savedAt: Date.now() }),
+        JSON.stringify({ answers, customs, style, role, page, run, savedAt: Date.now() }),
       )
     } catch {
       /* private mode: a draft is a convenience, not the life */
     }
-  }, [draftKey, answers, customs, style, page, run])
+  }, [draftKey, answers, customs, style, role, page, run])
 
   const clearDraft = () => {
     try {
@@ -187,6 +189,7 @@ export function OpeningScreen({
     setAnswers({})
     setCustoms({})
     setStyle(defaultStyle)
+    setRole('')
     setPage(0)
     setRestored(false)
   }
@@ -258,6 +261,7 @@ export function OpeningScreen({
     try {
       const created = await api.createRun({
         worldId: world.worldId, style, answers: payload(), language: world.language,
+        role: role || undefined,
       })
       // The life exists now, with its own id already handed to the narrator by the
       // opening prompt. Fire the first turn WITHOUT blocking this screen and hand
@@ -319,6 +323,31 @@ export function OpeningScreen({
           >
             {t('note.dismiss')}
           </button>
+        </div>
+      ) : null}
+
+      {page === 0 && (world.roles?.length ?? 0) > 0 ? (
+        <div className="ew-group">
+          <div className="ew-glabel">{t('opening.roleLabel')}</div>
+          <div className="ew-ghint">{t('opening.roleHint')}</div>
+          <div className="ew-chips">
+            {(world.roles ?? []).map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={`ew-opt${role === r.id ? ' ew-opt-on' : ''}`}
+                aria-pressed={role === r.id}
+                onClick={() => setRole(role === r.id ? '' : r.id)}
+              >
+                {r.name}
+              </button>
+            ))}
+          </div>
+          {role ? (
+            <div className="ew-role-sum" style={{ marginTop: '8px' }}>
+              {(world.roles ?? []).find((r) => r.id === role)?.summary}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

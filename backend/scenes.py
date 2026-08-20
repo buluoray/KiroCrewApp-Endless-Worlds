@@ -68,12 +68,25 @@ class SceneLedger:
 
     # -- the surface the scene tools get ---------------------------------
 
-    def mount(self, scene_id: str, spec: dict[str, Any], *, asks: bool = False) -> str:
+    def mount(
+        self,
+        scene_id: str,
+        spec: dict[str, Any],
+        *,
+        asks: bool = False,
+        region: str = "",
+        label: str = "",
+    ) -> str:
         """Mount a scene and return its nonce.
 
         A fresh nonce per mount is what makes a stale frame harmless: a scene that
         was remounted with a new question must not be answerable by a click that
         was aimed at the old one, and the frame cannot know it has been replaced.
+
+        ``region`` groups the scene under one of the play page's system tabs on a
+        phone (``status`` / ``world`` / ``pack`` / ``tasks``, or a custom bucket);
+        ``label`` is the short tab/name shown for it. Both are optional and a bare
+        remount keeps whatever the scene already had.
         """
         self._check(scene_id, "scene id")
         if not isinstance(spec, dict):
@@ -87,6 +100,8 @@ class SceneLedger:
             "spec": spec,
             "asks": asks,
             "nonce": nonce,
+            "region": str(region or existing.get("region") or ""),
+            "label": str(label or existing.get("label") or ""),
             # A remount clears a stale answer: the question on screen is new, so
             # an answer to the previous one is not an answer to this.
             "answer": None,
@@ -147,7 +162,13 @@ class SceneLedger:
         """What is on screen right now, spec included so the narrator can see
         what it already showed rather than re-describing it from memory."""
         return [
-            {"sceneId": sid, "asks": bool(e.get("asks")), "answered": e.get("answer") is not None}
+            {
+                "sceneId": sid,
+                "asks": bool(e.get("asks")),
+                "answered": e.get("answer") is not None,
+                "region": str(e.get("region") or ""),
+                "label": str(e.get("label") or ""),
+            }
             for sid, e in sorted(self._read().items())
             if isinstance(e, dict)
         ]

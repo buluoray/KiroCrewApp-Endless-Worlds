@@ -23,7 +23,7 @@ deletion.
 | `kv/briefed-<runId>.json` | `{ slot, at }` rulebook-delivery marker |
 | `kv/pending-<runId>.json` | in-flight-turn record (`turn`, `slot`, `askedAt`, `action`, `readAt?`, `readTurn?`, …) |
 | `runs/<runId>/chronicle.jsonl` | append-only, one JSON line per committed turn |
-| `mcp_server.py` (`_advance_turn`) | applies `RESERVED_STATE_KEYS` carry-forward and milestone rebuild on each commit |
+| `mcp_server.py` (`_advance_turn`) | applies `RESERVED_STATE_KEYS` carry-forward, then the milestone rebuild and the systems engine, on each commit |
 
 ## Identity fields
 
@@ -53,6 +53,25 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   set is the only thing standing between a terse turn and an unopenable life.
   Enforced by `mcp_server._advance_turn`; the pending record's exclusion from
   the set is pinned by `test_pending.test_the_record_lives_outside_the_state`.
+
+- **Systems compute derived state at commit, and read their base from the PRIOR
+  committed state — so the number is the app's, not the narrator's.** After the
+  reserved-key carry-forward and the milestone rebuild, `_advance_turn` runs the
+  world's declared `systems` (`systems.apply_systems`) against the narrator's
+  `gains` for this turn, reading each system's base value from the prior committed
+  state and overwriting its `into` path in the state about to be committed. Because
+  the base is the last committed value (not the narrator's fresh declaration, which
+  could echo or invent one), a system-owned field is the app's regardless of what
+  the narrator wrote — the same ownership `state.milestones` has, extended to any
+  `state.…` path a system declares. The pass is best-effort: a world with no systems
+  is a no-op, and one bad system never blocks the turn. Load-bearing because it is
+  what stops a narrator from inflating a level, a purse, or an unlock. Enforced by
+  `mcp_server._advance_turn` + `systems.apply_systems`; pinned by
+  `test_systems.test_accrual_adds_matched_gains_and_derives_the_tier`,
+  `test_systems.test_resource_consumes_signed_gains_and_clamps_to_floor`,
+  `test_systems.test_decay_drifts_each_turn_within_bounds`,
+  `test_systems.test_unlock_is_monotonic`, and
+  `test_systems.test_backend_owns_the_value_over_the_narrator_declaration`.
 
 - **`commit_state` writes `prev` before `state`.** The outgoing state is copied
   to `prev` first, then the new state is written. A crash between the two leaves

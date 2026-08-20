@@ -262,6 +262,38 @@ def test_a_returning_request_attaches_to_the_first_narrators_turn(store, run):
 # ── the record is judged, not trusted ───────────────────────────────────────
 
 
+def test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous(store, run):
+    """A commit is two writes — the turn counter, then the chronicle line. A poll
+    landing between them must keep waiting for the wanted turn's own entry, not
+    hand back ``chronicle[-1]`` (the PREVIOUS month) as if it were this one."""
+    state = store.read_state(run)
+    store.commit_state(run, {**state, "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "old prose"})
+
+    def half_committed(state_obj, slot, prompt):
+        # A narrator mid-commit: the counter moves, the chronicle line has not.
+        s = store.read_state(run)
+        store.commit_state(run, {**s, "turn": 2})
+        return True
+
+    async def scenario():
+        task = asyncio.ensure_future(
+            _advance(store, run, half_committed, deadline_secs=2.5)
+        )
+        # Long enough that polls land in the gap first (poll tick is 0.25s),
+        # generous enough not to flake on a slow runner.
+        await asyncio.sleep(0.6)
+        store.append_turn(run, {"turn": 2, "prose": "new prose"})
+        return await task
+
+    out = asyncio.run(scenario())
+    assert out.advanced and out.turn == 2
+    assert out.prose == "new prose", (
+        f"got {out.prose!r} — a poll in the counter/chronicle gap returned the "
+        "previous month's text as this month's"
+    )
+
+
 def test_a_stale_record_does_not_wedge_the_life_forever(store, run):
     """A gateway that dies between the mark and the commit leaves a record nobody
     will ever clear. A life permanently unable to take its next turn is worse than a

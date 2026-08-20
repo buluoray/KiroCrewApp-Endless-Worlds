@@ -419,3 +419,142 @@ def test_one_broken_template_does_not_affect_a_good_one() -> None:
     with pytest.raises(TemplateError):
         parse_template(build(HEADER.replace("primitive: field", "primitive: nope")))
     assert parse_template(build()).id == good.id
+
+
+# -- lore (keyword-triggered setting) -------------------------------------
+
+
+def _with_block(extra: str) -> str:
+    """HEADER with an extra top-level YAML block inserted before the closing ---."""
+    return HEADER.rsplit("\n---", 1)[0] + "\n" + extra + "\n---"
+
+
+def test_lore_parses_keyword_and_always_entries() -> None:
+    header = _with_block(
+        "lore:\n"
+        "  - { id: emberguard, keys: [Emberguard, the Guard], text: An order of fire-sworn knights }\n"
+        "  - { id: calendar, text: The year turns in four seasons, always: true }"
+    )
+    t = parse_template(build(header))
+    assert [entry.id for entry in t.lore] == ["emberguard", "calendar"]
+    assert t.lore[0].keys == ["Emberguard", "the Guard"]
+    assert t.lore[0].always is False
+    assert t.lore[1].always is True
+
+
+def test_a_lore_entry_with_no_keys_and_not_always_is_refused() -> None:
+    header = _with_block("lore:\n  - { id: orphan, text: Never surfaces }")
+    with pytest.raises(TemplateError):
+        parse_template(build(header))
+
+
+def test_absent_lore_is_not_an_error() -> None:
+    assert parse_template(build()).lore == []
+
+
+# -- milestones (achievements) --------------------------------------------
+
+
+def test_milestones_parse_with_id_label_and_when():
+    header = _with_block(
+        "milestones:\n"
+        "  - { id: adult, label: 成年, when: state.age >= 18 }\n"
+        "  - { id: crowned, label: 加冕, when: \"state.rank == 'king'\", spoiler: true }"
+    )
+    t = parse_template(build(header))
+    assert [m.id for m in t.milestones] == ["adult", "crowned"]
+    assert t.milestones[0].label == "成年"
+    assert t.milestones[1].spoiler is True
+    assert t.milestones[0].when.evaluate({"age": 20}) is True
+    assert t.milestones[0].when.evaluate({"age": 5}) is False
+
+
+def test_a_milestone_without_a_label_is_refused():
+    with pytest.raises(TemplateError):
+        parse_template(build(_with_block("milestones:\n  - { id: adult, when: state.age >= 18 }")))
+
+
+def test_a_milestone_without_a_when_is_refused():
+    with pytest.raises(TemplateError):
+        parse_template(build(_with_block("milestones:\n  - { id: adult, label: 成年 }")))
+
+
+def test_absent_milestones_is_not_an_error():
+    assert parse_template(build()).milestones == []
+
+
+def test_lore_carries_optional_structure_and_reveal() -> None:
+    """A lore entry may carry name/summary/category/relations and an optional reveal
+    gate; the old flat shape (id/keys/text) is still valid."""
+    header = _with_block(
+        "lore:\n"
+        "  - { id: keep, keys: [Greywing], text: A fortress on the march.,"
+        " name: Greywing Keep, summary: The last lit fort., category: place,"
+        " relations: [{ to: house-ash, label: sworn to }] }\n"
+        "  - { id: omen, always: true, text: A cold that will not warm.,"
+        " reveal: state.magic.awakened == true }"
+    )
+    t = parse_template(header)
+    keep = t.lore[0]
+    assert keep.name == "Greywing Keep"
+    assert keep.summary == "The last lit fort."
+    assert keep.category == "place"
+    assert keep.relations == [{"to": "house-ash", "label": "sworn to"}]
+    assert keep.reveal is None
+    # A spoiler-gated entry keeps its condition; the narrator still sees it.
+    assert t.lore[1].reveal is not None
+
+
+# -- systems (backend-managed mechanics) ----------------------------------
+
+def test_systems_parse_and_validate_structure() -> None:
+    header = _with_block(
+        "systems:\n"
+        "  - { id: xp, kind: accrual, into: state.hero.xp,"
+        " tiers: [{ at: 0, name: novice }, { at: 100, name: veteran }], tierInto: state.hero.rank }\n"
+        "  - { id: food, kind: resource, into: state.base.food, floor: 0, cap: 20, perTurn: -1 }\n"
+        "  - { id: awoken, kind: unlock, into: state.magic.on, when: state.trials.done == true }"
+    )
+    t = parse_template(header)
+    assert [s.id for s in t.systems] == ["xp", "food", "awoken"]
+    assert t.systems[0].kind == "accrual" and t.systems[0].tier_into == "state.hero.rank"
+    assert t.systems[1].floor == 0 and t.systems[1].cap == 20 and t.systems[1].per_turn == -1
+    assert t.systems[2].when is not None
+
+
+def test_an_unknown_system_kind_is_refused() -> None:
+    import pytest
+    with pytest.raises(TemplateError):
+        parse_template(_with_block("systems:\n  - { id: x, kind: teleport, into: state.x }"))
+
+
+def test_an_unlock_without_a_condition_is_refused() -> None:
+    import pytest
+    with pytest.raises(TemplateError):
+        parse_template(_with_block("systems:\n  - { id: x, kind: unlock, into: state.x }"))
+
+
+def test_absent_systems_is_not_an_error() -> None:
+    assert parse_template(build()).systems == []
+
+
+# -- roles + opening hand-off ---------------------------------------------
+
+def test_roles_parse_with_open_vocabulary() -> None:
+    header = _with_block(
+        "roles:\n"
+        "  - { id: nightwatch, name: Nightwatch, summary: keep the gate,"
+        " grants: { occupation: nightwatch, location: greywing-keep } }"
+    )
+    t = parse_template(header)
+    assert t.roles[0].id == "nightwatch"
+    assert t.roles[0].name == "Nightwatch"
+    assert t.roles[0].grants == {"occupation": "nightwatch", "location": "greywing-keep"}
+
+
+def test_handoff_refs_parse_and_reject_a_bad_shape() -> None:
+    import pytest
+    t = parse_template(_with_block('handToAgent: [lore.keep, systems.xp, "roles.*"]'))
+    assert t.hand_to_agent == ["lore.keep", "systems.xp", "roles.*"]
+    with pytest.raises(TemplateError):
+        parse_template(_with_block("handToAgent: [panels.status]"))

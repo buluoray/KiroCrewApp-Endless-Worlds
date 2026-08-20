@@ -199,14 +199,14 @@ def test_reading_an_absent_world_is_a_clean_error(lib: WorldLibrary) -> None:
 
 
 def test_the_shipped_flagship_seed_installs_and_lists(tmp_path: Path) -> None:
-    if not (REAL_SEEDS / "jianhuo-jiyuan.md").is_file():
+    if not (REAL_SEEDS / "age-of-sword-and-flame.md").is_file():
         pytest.skip("flagship seed not present")
     lib = WorldLibrary(tmp_path / "data", REAL_SEEDS)
 
     report = lib.ensure_seeds_installed()
-    assert "jianhuo-jiyuan" in report.installed
+    assert "age-of-sword-and-flame" in report.installed
 
-    row = next(r for r in lib.list_worlds() if r["worldId"] == "jianhuo-jiyuan")
+    row = next(r for r in lib.list_worlds() if r["worldId"] == "age-of-sword-and-flame")
     assert row["usable"] is True
     assert row["title"] == "剑火纪元·西方幻想人生模拟器"
     assert row["panelCount"] == 6

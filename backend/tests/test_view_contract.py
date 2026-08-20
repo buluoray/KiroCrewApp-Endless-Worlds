@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import uisrc  # noqa: E402
 
-FLAGSHIP = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 
 @pytest.fixture(scope="module")
@@ -113,7 +113,7 @@ def test_the_play_view_carries_every_field_the_ui_reads(ui_src, pack):
     # Overlaid by the route, exactly as get_run does.
     view.update({
         "runId": "r", "worldId": "w", "title": "t", "awaitingOpening": False,
-        "language": "en", "generating": None,
+        "language": "en", "generating": None, "backdrop": None,
     })
     read = _reads(uisrc.module("play.tsx"), "v") - _LOCAL
     missing = sorted(read - set(view))
@@ -136,6 +136,9 @@ def test_the_life_list_carries_every_field_the_ui_reads(ui_src):
         # Player-set metadata, carried on the index row and spread by list_runs.
         "label": "",
         "archived": False,
+        # The life's narrator backdrop version, set per row by list_runs so the
+        # shelf card can show the same background the play page does.
+        "backdrop": None,
     }
     # Both readers of a life row, not just the shelf. The rail was added later and
     # reads the same shape; checking only one of them would let the other drift,

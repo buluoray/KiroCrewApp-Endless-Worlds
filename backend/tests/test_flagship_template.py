@@ -17,7 +17,7 @@ sys.path.insert(0, str(_BACKEND))
 
 from template import FIELD_PRIMITIVES, parse_template  # noqa: E402
 
-TEMPLATE_PATH = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+TEMPLATE_PATH = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 
 @pytest.fixture(scope="module")
@@ -28,23 +28,33 @@ def flagship():
 
 
 def test_it_loads(flagship) -> None:
-    assert flagship.id == "jianhuo-jiyuan"
+    assert flagship.id == "age-of-sword-and-flame"
     assert flagship.language == "zh"
     assert flagship.version == "1.0"
 
 
-def test_the_prose_rulebook_is_carried_whole(flagship) -> None:
-    """R14.1 — 174 chapters reach the narrator, not a summary of them."""
+def test_prose_carries_core_rules_while_facts_live_in_lore(flagship) -> None:
+    """R14.1, data-first form — the raw rulebook's world FACTS were extracted into
+    `lore` (browsable + keyword/hand-off), so the prose the narrator reads is now the
+    PREAMBLE plus the core narrative rules, not the 170-odd raw reference chapters.
+    """
     prose = flagship.prose
+    # The framing the book opens with is kept as the preamble.
     assert "第一章 · 核心定位" in prose
-    assert "第一百七十四章 · 正式启动界面" in prose
-    assert "【世界不围绕玩家存在】" in prose
-    # The prose is long-form by nature; a truncating regression would show here
-    # long before any behavioural test noticed. Note the units: the file is
-    # ~39 KB of UTF-8 *bytes*, which is ~15 K *characters* because CJK costs 3
-    # bytes each — do not conflate the two when tightening this bound.
-    assert len(prose) > 14_000, f"prose looks truncated: {len(prose)} chars"
-    assert len(prose.encode("utf-8")) > 38_000, "prose byte length looks wrong"
+    # The load-bearing narrative laws stay in prose, in the world's own words.
+    assert "世界第一原则" in prose
+    assert "世界不围绕玩家存在" in prose
+    assert "终极原则" in prose
+    # App plumbing the app itself performs was stripped, not carried, and the
+    # heading-referenced reference chapters became data.
+    assert "第一百七十四章 · 正式启动界面" not in prose
+    assert "存档系统" not in prose
+    # A truncation regression still shows here, but the floor now sits at the cleaned
+    # size — the raw paste's reference chapters are lore now, not prose.
+    assert len(prose) > 2_000, f"prose looks truncated: {len(prose)} chars"
+    # The world's facts moved into structured lore entries (was ~8, now the full set).
+    assert len(flagship.lore) >= 40, f"world facts not extracted to lore: {len(flagship.lore)}"
+    assert any(e.id == "races-and-culture" for e in flagship.lore)
 
 
 def test_clock_and_lineage_match_the_prose(flagship) -> None:

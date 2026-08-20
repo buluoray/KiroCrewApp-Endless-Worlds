@@ -47,10 +47,24 @@ MAX_ELEMENTS = 60
 MAX_TEXT = 400
 MAX_ROWS = 40
 MAX_COLUMNS = 6
+#: A relationship graph's ceilings. Nodes are laid out by the backend on a ring,
+#: so past a couple dozen the labels overlap and it stops being readable — the cap
+#: is a legibility bound, not only a safety one.
+MAX_NODES = 24
+MAX_EDGES = 60
+#: How deep a tree may nest before it is refused as either a cycle or unreadable.
+MAX_TREE_DEPTH = 12
 
 #: The closed set. A kind absent here is refused, never skipped.
 ELEMENT_KINDS: frozenset[str] = frozenset(
-    {"heading", "text", "note", "stat", "bar", "keyvalue", "list", "table", "choice", "divider"}
+    {
+        "heading", "text", "note", "stat", "bar", "keyvalue", "list", "table",
+        "choice", "divider",
+        # Spatial / relational kinds. The narrator declares STRUCTURE (cells,
+        # nodes, edges, parents) and never geometry — every coordinate below is
+        # computed here, so a scene map cannot smuggle markup or a layout exploit.
+        "grid", "links", "tree",
+    }
 )
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -125,6 +139,22 @@ button {
   font: inherit; color: inherit; cursor: pointer;
   background: #1f2030; border: 1px solid #2d2f3d; border-radius: 8px;
 }
+.grid { display: grid; gap: 6px; margin: 8px 0; }
+.gc {
+  background: #1f2030; border: 1px solid #2d2f3d; border-radius: 6px;
+  padding: 8px; min-height: 44px; font-size: 12px; box-sizing: border-box;
+}
+.gc.gm { border-color: #7c3aed; background: #241d3a; }
+.gn { display: block; color: #6b7280; font-size: 11px; margin-top: 2px; }
+.lkwrap { margin: 8px 0; }
+svg.lk { width: 100%; height: auto; display: block; }
+.lke { stroke: #2d2f3d; stroke-width: 1.2; }
+.lkl { fill: #6b7280; font-size: 9px; text-anchor: middle; }
+.lkn { fill: #7c3aed; }
+.lknt { fill: #e2e8f0; font-size: 10px; text-anchor: middle; }
+ul.tree, ul.tree ul { list-style: none; margin: 4px 0; padding-left: 14px; border-left: 1px solid #2d2f3d; }
+ul.tree li { padding: 3px 0; }
+.tn { color: #6b7280; font-size: 11px; }
 </style>"""
 
 
@@ -270,6 +300,125 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
             ) + "</tr>"
         return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
+    if kind == "grid":
+        cols = el.get("columns")
+        if not isinstance(cols, int) or isinstance(cols, bool) or not (1 <= cols <= 8):
+            raise SceneSpecError(f"{where}.columns", "an integer 1–8")
+        cells = el.get("cells")
+        if not isinstance(cells, list) or not cells:
+            raise SceneSpecError(f"{where}.cells", "a non-empty array")
+        if len(cells) > MAX_ROWS:
+            raise SceneSpecError(f"{where}.cells", f"at most {MAX_ROWS} cells")
+        out = []
+        for cn, c in enumerate(cells):
+            if not isinstance(c, dict):
+                raise SceneSpecError(f"{where}.cells[{cn}]", "an object")
+            label = _esc(_text(c.get("label"), f"{where}.cells[{cn}].label", cap=64))
+            note = c.get("note")
+            note_html = (
+                f'<span class="gn">{_esc(_text(note, f"{where}.cells[{cn}].note", cap=64))}</span>'
+                if note not in (None, "") else ""
+            )
+            # `columns` is a validated int and `mark` a bool — the only non-narrator
+            # values that reach markup, so no coordinate or class is ever author text.
+            mark = " gm" if bool(c.get("mark")) else ""
+            out.append(f'<div class="gc{mark}">{label}{note_html}</div>')
+        return (
+            f'<div class="grid" style="grid-template-columns:repeat({cols},1fr)">'
+            + "".join(out) + "</div>"
+        )
+
+    if kind == "links":
+        nodes = el.get("nodes")
+        edges = el.get("edges")
+        if not isinstance(nodes, list) or not nodes:
+            raise SceneSpecError(f"{where}.nodes", "a non-empty array")
+        if len(nodes) > MAX_NODES:
+            raise SceneSpecError(f"{where}.nodes", f"at most {MAX_NODES} nodes")
+        seen: dict[str, str] = {}
+        parsed_nodes: list[tuple[str, str]] = []
+        for nn, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                raise SceneSpecError(f"{where}.nodes[{nn}]", "an object")
+            nid = n.get("id")
+            if not isinstance(nid, str) or not _ID_RE.match(nid):
+                raise SceneSpecError(f"{where}.nodes[{nn}].id", "a slug (a-z, 0-9, hyphen)")
+            if nid in seen:
+                raise SceneSpecError(f"{where}.nodes[{nn}].id", "an id no other node uses")
+            label = _text(n.get("label"), f"{where}.nodes[{nn}].label", cap=48)
+            seen[nid] = label
+            parsed_nodes.append((nid, label))
+        if not isinstance(edges, list):
+            raise SceneSpecError(f"{where}.edges", "an array")
+        if len(edges) > MAX_EDGES:
+            raise SceneSpecError(f"{where}.edges", f"at most {MAX_EDGES} edges")
+        parsed_edges: list[tuple[str, str, str]] = []
+        for en, e in enumerate(edges):
+            if not isinstance(e, dict):
+                raise SceneSpecError(f"{where}.edges[{en}]", "an object")
+            a, b = e.get("from"), e.get("to")
+            if a not in seen or b not in seen:
+                raise SceneSpecError(
+                    f"{where}.edges[{en}]", "from and to must be declared node ids"
+                )
+            lbl = e.get("label")
+            elabel = _text(lbl, f"{where}.edges[{en}].label", cap=32) if lbl not in (None, "") else ""
+            parsed_edges.append((a, b, elabel))
+        return _render_links(parsed_nodes, parsed_edges)
+
+    if kind == "tree":
+        nodes = el.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            raise SceneSpecError(f"{where}.nodes", "a non-empty array")
+        if len(nodes) > MAX_ROWS:
+            raise SceneSpecError(f"{where}.nodes", f"at most {MAX_ROWS} nodes")
+        byid: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for nn, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                raise SceneSpecError(f"{where}.nodes[{nn}]", "an object")
+            nid = n.get("id")
+            if not isinstance(nid, str) or not _ID_RE.match(nid):
+                raise SceneSpecError(f"{where}.nodes[{nn}].id", "a slug (a-z, 0-9, hyphen)")
+            if nid in byid:
+                raise SceneSpecError(f"{where}.nodes[{nn}].id", "an id no other node uses")
+            label = _text(n.get("label"), f"{where}.nodes[{nn}].label", cap=64)
+            note = n.get("note")
+            note_s = _text(note, f"{where}.nodes[{nn}].note", cap=64) if note not in (None, "") else ""
+            parent = n.get("parent")
+            if parent not in (None, "") and not isinstance(parent, str):
+                raise SceneSpecError(f"{where}.nodes[{nn}].parent", "a node id or omitted")
+            byid[nid] = {"label": label, "note": note_s, "parent": (parent or None), "children": []}
+            order.append(nid)
+        roots: list[str] = []
+        for nid in order:
+            parent = byid[nid]["parent"]
+            if parent is None:
+                roots.append(nid)
+            elif parent not in byid:
+                raise SceneSpecError(f"{where}", f"parent {parent!r} is not a declared node")
+            else:
+                byid[parent]["children"].append(nid)
+        if not roots:
+            raise SceneSpecError(f"{where}.nodes", "at least one root (a node with no parent)")
+        visited: set[str] = set()
+
+        def _branch(nid: str, depth: int) -> str:
+            if nid in visited or depth > MAX_TREE_DEPTH:
+                raise SceneSpecError(f"{where}", "a cycle or a hierarchy nested too deep")
+            visited.add(nid)
+            node = byid[nid]
+            note_html = f' <span class="tn">{_esc(node["note"])}</span>' if node["note"] else ""
+            inner = f'{_esc(node["label"])}{note_html}'
+            if node["children"]:
+                inner += "<ul>" + "".join(_branch(k, depth + 1) for k in node["children"]) + "</ul>"
+            return f"<li>{inner}</li>"
+
+        tree_html = '<ul class="tree">' + "".join(_branch(r, 0) for r in roots) + "</ul>"
+        if len(visited) != len(byid):
+            raise SceneSpecError(f"{where}.nodes", "every node must be reachable — no orphans or cycles")
+        return tree_html
+
     # choice
     cid = el.get("id")
     if not isinstance(cid, str) or not _ID_RE.match(cid):
@@ -277,6 +426,44 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
     label = _esc(_text(el.get("label"), f"{where}.label"))
     # The id rides in a data attribute, never in generated script.
     return f'<button type="button" data-choice="{_esc(cid)}">{label}</button>'
+
+
+def _render_links(nodes: list[tuple[str, str]], edges: list[tuple[str, str, str]]) -> str:
+    """A relationship graph as inline SVG, laid out by the backend on a ring.
+
+    The narrator supplies nodes and edges and NEVER a coordinate — every x/y here
+    is computed from the node's ring position, so this stays inside the same trust
+    boundary as the rest of the compiler: structure from the narrator, geometry
+    from the app. Labels are the only narrator strings and each is escaped."""
+    import math
+
+    n = len(nodes)
+    w, h = 320.0, 220.0
+    cx, cy = w / 2, h / 2
+    radius = min(w, h) / 2 - 34
+    pos: dict[str, tuple[float, float]] = {}
+    for i, (nid, _label) in enumerate(nodes):
+        # A lone node sits at the centre; otherwise evenly spaced from the top.
+        if n == 1:
+            pos[nid] = (cx, cy)
+        else:
+            ang = -math.pi / 2 + 2 * math.pi * i / n
+            pos[nid] = (cx + radius * math.cos(ang), cy + radius * math.sin(ang))
+    parts = [f'<svg class="lk" viewBox="0 0 {w:.0f} {h:.0f}" role="img">']
+    for a, b, lbl in edges:  # edges first, so nodes draw on top
+        x1, y1 = pos[a]
+        x2, y2 = pos[b]
+        parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" class="lke"/>')
+        if lbl:
+            parts.append(
+                f'<text x="{(x1 + x2) / 2:.1f}" y="{(y1 + y2) / 2:.1f}" class="lkl">{_esc(lbl)}</text>'
+            )
+    for nid, label in nodes:
+        x, y = pos[nid]
+        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" class="lkn"/>')
+        parts.append(f'<text x="{x:.1f}" y="{y - 9:.1f}" class="lknt">{_esc(label)}</text>')
+    parts.append("</svg>")
+    return '<div class="lkwrap">' + "".join(parts) + "</div>"
 
 
 def compile_scene(

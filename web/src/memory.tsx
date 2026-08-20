@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { MemoryView, StarPayload } from './api'
 import { api } from './api'
+import { Backdrop } from './backdrop'
 import {
   ALL_FILTERS, mt, neighbours, nodeById, nodeLabel, nodeVisible,
   type StarFilters,
@@ -28,7 +29,7 @@ const FILTER_KEYS: Array<keyof StarFilters> = [
 ]
 
 export function StarMap({
-  runId, lang, onClose, onJumpTurn, initialFocus,
+  runId, lang, onClose, onJumpTurn, initialFocus, backdrop,
 }: {
   runId: string
   lang: string
@@ -36,6 +37,9 @@ export function StarMap({
   /** Jump the play page's pager to a turn; the overlay closes with it. */
   onJumpTurn: (turn: number) => void
   initialFocus?: string
+  /** The life's narrator backdrop, shown behind the star map the same way the
+   *  play page shows it behind the story. Null = plain panel. */
+  backdrop?: { version: number } | null
 }) {
   const [payload, setPayload] = useState<StarPayload | null>(null)
   const [lens, setLens] = useState<MemoryView | null>(null)
@@ -64,6 +68,7 @@ export function StarMap({
     return (
       <div className="ews-overlay" role="dialog" aria-modal="true">
         <StarStyles />
+        {backdrop ? <Backdrop runId={runId} version={backdrop.version} /> : null}
         <div className="ews-head">
           <button className="ews-btn" type="button" onClick={onClose}>
             {mt(lang, 'star.close')}
@@ -94,6 +99,7 @@ export function StarMap({
     <div className="ews-overlay" role="dialog" aria-modal="true"
       aria-label={mt(lang, 'star.title')}>
       <StarStyles />
+      {backdrop ? <Backdrop runId={runId} version={backdrop.version} /> : null}
       <div className="ews-head">
         <div className="ews-title">{mt(lang, 'star.title')}</div>
         {/* The lens switcher is always visible and never locked (§8.3.2). */}
@@ -235,6 +241,10 @@ const CSS_TEXT = `
   display: flex; flex-direction: column;
   background: var(--bg, #14151f); color: var(--fg, #e5e7eb); overflow: hidden;
 }
+/* When a life backdrop is mounted it sits at z-index 0 inside the overlay (same
+ * as .ew-backdrop at the root); lift every other child above it so the map reads
+ * over the backdrop instead of under it. */
+.ews-overlay > *:not(.ew-backdrop) { position: relative; z-index: 1; }
 .ews-head {
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;
   border-bottom: 1px solid var(--border, #2d2f3d);

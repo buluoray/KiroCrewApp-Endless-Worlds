@@ -24,7 +24,7 @@ from world import (  # noqa: E402
     summarize,
 )
 
-FLAGSHIP = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 MINIMAL_HEADER = {
     "id": "test-world",
@@ -275,7 +275,7 @@ def test_installing_the_real_flagship_seed_keeps_its_prose_intact() -> None:
     installed = read_world(install_seed(seed_text))
 
     assert installed.prose == original.prose
-    assert installed.id == "jianhuo-jiyuan"
+    assert installed.id == "age-of-sword-and-flame"
     assert len(installed.template.panels) == 6
     assert len(installed.template.opening) == 13
     assert installed.is_stale() is False

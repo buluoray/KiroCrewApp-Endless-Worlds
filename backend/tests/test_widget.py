@@ -162,6 +162,11 @@ def test_every_declared_kind_actually_compiles():
         "table": {"kind": "table", "columns": ["名字"], "rows": [["母亲"]]},
         "choice": {"kind": "choice", "id": "go", "label": "走"},
         "divider": {"kind": "divider"},
+        "grid": {"kind": "grid", "columns": 2, "cells": [{"label": "王庭"}, {"label": "矿脉"}]},
+        "links": {"kind": "links", "nodes": [{"id": "a", "label": "王"}, {"id": "b", "label": "臣"}],
+                  "edges": [{"from": "a", "to": "b"}]},
+        "tree": {"kind": "tree", "nodes": [{"id": "r", "label": "祖"},
+                 {"id": "c", "label": "子", "parent": "r"}]},
     }
     assert set(samples) == set(ELEMENT_KINDS), "a kind has no sample here"
     for kind, el in samples.items():
@@ -321,3 +326,71 @@ def test_no_box_drawing_character_survives_into_a_scene():
     out = compile_scene("map", spec, STATE)
     for ch in "╔═╗╚╝█░│─":
         assert ch not in out, f"{ch!r} reached the DOM"
+
+
+# -- spatial / relational kinds: structure in, geometry computed here ------
+
+
+def _scene(el: dict) -> str:
+    return compile_scene("map", {"elements": [el]}, STATE)
+
+
+def test_grid_lays_cells_into_columns_and_escapes_labels():
+    out = _scene({"kind": "grid", "columns": 3, "cells": [
+        {"label": "王庭", "mark": True}, {"label": "<b>矿脉</b>", "note": "危险"},
+    ]})
+    assert "grid-template-columns:repeat(3,1fr)" in out
+    assert "gc gm" in out                      # the marked cell
+    assert "<b>矿脉</b>" not in out             # label escaped
+    assert "&lt;b&gt;矿脉&lt;/b&gt;" in out
+    assert "危险" in out
+
+
+def test_grid_rejects_out_of_range_columns():
+    with pytest.raises(SceneSpecError):
+        _scene({"kind": "grid", "columns": 9, "cells": [{"label": "x"}]})
+
+
+def test_links_draws_svg_from_nodes_and_edges_with_no_author_coordinates():
+    out = _scene({"kind": "links",
+                  "nodes": [{"id": "a", "label": "国王"}, {"id": "b", "label": "叛军"}],
+                  "edges": [{"from": "a", "to": "b", "label": "敌对"}]})
+    assert "<svg" in out and "class=\"lk\"" in out
+    assert "<line" in out and "<circle" in out
+    assert "国王" in out and "敌对" in out
+    # geometry is the app's: the spec carried no x/y, and coordinates appear anyway
+    assert re.search(r'cx="[0-9.]+"', out)
+
+
+def test_links_rejects_an_edge_to_an_unknown_node():
+    with pytest.raises(SceneSpecError):
+        _scene({"kind": "links", "nodes": [{"id": "a", "label": "A"}],
+                "edges": [{"from": "a", "to": "ghost"}]})
+
+
+def test_tree_nests_children_under_parents_and_escapes():
+    out = _scene({"kind": "tree", "nodes": [
+        {"id": "root", "label": "始祖"},
+        {"id": "kid", "label": "<i>长子</i>", "parent": "root", "note": "储君"},
+    ]})
+    assert 'class="tree"' in out
+    assert out.count("<ul") >= 2               # root list + one nested
+    assert "<i>长子</i>" not in out
+    assert "储君" in out
+
+
+def test_tree_rejects_a_cycle():
+    with pytest.raises(SceneSpecError):
+        _scene({"kind": "tree", "nodes": [
+            {"id": "a", "label": "A", "parent": "b"},
+            {"id": "b", "label": "B", "parent": "a"},
+        ]})
+
+
+def test_tree_rejects_an_unknown_parent():
+    with pytest.raises(SceneSpecError):
+        _scene({"kind": "tree", "nodes": [{"id": "a", "label": "A", "parent": "ghost"}]})
+
+
+def test_the_new_kinds_are_in_the_closed_set():
+    assert {"grid", "links", "tree"} <= ELEMENT_KINDS

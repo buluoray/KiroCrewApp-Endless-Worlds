@@ -7,6 +7,35 @@
 
 export const API = '/api/apps/endless-worlds'
 
+/**
+ * Fold a `/api/models` payload into the picker's `{ id, name }` rows.
+ *
+ * Tolerates both a bare array and a `{ models: [...] }` wrapper, and both the
+ * `model_id` / `model_name` keys kiro-cli's `--list-models` emits and a plain
+ * `id` / `name` — reading the kiro-cli keys FIRST. A row filtering out on a
+ * missing `id` is what once left the picker showing only "Default (auto)".
+ *
+ * Exported so it can fold the response whether it arrives via the App SDK client
+ * (`useAppApi().get`) or the bare-fetch fallback below.
+ */
+export function normalizeModels(raw: unknown): Array<{ id: string; name?: string }> {
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { models?: unknown })?.models)
+      ? (raw as { models: unknown[] }).models
+      : []
+  return list
+    .map((m) => {
+      if (typeof m === 'string') return { id: m }
+      const o = m as {
+        model_id?: string; model_name?: string; id?: string; name?: string
+      }
+      const id = o.model_id || o.model_name || o.id || ''
+      return { id, name: o.model_name || o.name || id }
+    })
+    .filter((m) => m && typeof m.id === 'string' && m.id)
+}
+
 export type Primitive =
   | 'field' | 'stat' | 'rank' | 'people' | 'trend' | 'resource' | 'inventory' | 'threads'
 
@@ -45,6 +74,14 @@ export interface PanelView {
   always: boolean
   empty: boolean
   fields: ShapedField[]
+  /** The phone system-tab this panel groups under (status/world/pack/tasks or a
+   *  world's own word); empty falls into the default 系统 bucket. */
+  region?: string
+  // Present on a capability-pack panel (composed from primitives, not a template
+  // panel). `degraded` marks a pack that could not render and fell back to a
+  // labelled value list — never surfaced to the player (R5.9), kept for tooling.
+  pack?: boolean
+  degraded?: boolean
 }
 
 export interface DigestRow {
@@ -57,11 +94,23 @@ export interface SceneRow {
   sceneId: string
   asks: boolean
   answered: boolean
+  /** The system tab this scene groups under on a phone (status/world/pack/tasks
+   *  or a world's own word); empty falls into the default 系统 bucket. */
+  region?: string
+  /** Short tab/name the narrator gave this scene's region. */
+  label?: string
 }
 
 export interface Choice {
   id: string
   label: string
+  /** The narrator marks a choice that could lead to a major event or turning
+   *  point; the play page gives it a distinctive, ornate look. */
+  fateful?: boolean
+  /** A tiny narrator-designed SVG (validated server-side), shown as an inert
+   *  image behind the button label — the story agent's own special pattern for a
+   *  fateful choice. */
+  art?: string
 }
 
 export interface OpeningReveal {
@@ -219,6 +268,10 @@ export interface PlayView {
   /** Chapter headings the world opened this month, in its own words. The play page
    *  shows them as a quiet "a new chapter opens" marker. */
   unlocked: string[]
+  /** Milestones (achievement labels) reached THIS month — shown as a marker. */
+  milestonesReached: string[]
+  /** Every milestone reached so far, for the ending recap. */
+  milestones: string[]
   /** Which declared ending this life reached, or the narrator's own marker. Empty
    *  while the life continues. The play page shows a terminal screen when set. */
   endingId: string
@@ -252,6 +305,9 @@ export interface PlayView {
   digest: DigestRow[]
   panels: PanelView[]
   scenes: SceneRow[]
+  /** The narrator-set background for this life, or null. `buttons` is true when a
+   *  common choice-button motif was set with it (loaded via ?part=buttons). */
+  backdrop: { version: number; buttons?: boolean } | null
 }
 
 export interface OpeningGroup {
@@ -309,7 +365,28 @@ export interface WorldDetail extends WorldRow {
   digest: string[]
   endings: string[]
   save: string[]
+  /** The world's setting as structure — public entries (no reveal gate), for the
+   *  reader's setting view. Grouped by `category`; `relations` are edges by id. */
+  lore: LoreEntry[]
+  /** Starting archetypes the world offers; picking one presets the opening and
+   *  seeds initial state from its grants (grants stay server-side). */
+  roles: RoleRow[]
   prose?: string
+}
+
+export interface RoleRow {
+  id: string
+  name: string
+  summary: string
+}
+
+export interface LoreEntry {
+  id: string
+  name: string
+  summary: string
+  category: string
+  text: string
+  relations: Array<{ to: string; label?: string }>
 }
 
 export interface LifeRowData {
@@ -332,6 +409,9 @@ export interface LifeRowData {
   /** A month being written right now. The shelf marks it so a life in progress is
    *  not mistaken for one that stalled. */
   generating?: boolean
+  /** The life's narrator backdrop version, so the shelf card can show the same
+   *  background the play page does. Null/absent = plain card. */
+  backdrop?: { version: number } | null
 }
 
 export interface PastTurn {
@@ -344,6 +424,9 @@ export interface PastTurn {
   events: string[]
   /** What the month credited a gain to, with its source when the narrator named one. */
   gains: Array<{ field: string; amount: string; source: string }>
+  /** The backdrop that was effective on this page, so re-reading it restores the
+   *  scene it had. Null when the page had no background. */
+  backdrop?: { version: number } | null
 }
 
 export interface Chronicle {
@@ -420,6 +503,54 @@ export interface DeletionFacts {
  * refreshed facts the dialog has to re-render. A code the UI cannot read is a
  * message the player never gets.
  */
+/** A world being built from pasted text — a row on the shelf while it compiles. */
+export type WorldDraftStatus = 'new' | 'generating' | 'ready' | 'failed' | 'installed'
+
+export interface WorldDraftRow {
+  draftId: string
+  title: string
+  status: WorldDraftStatus
+  steps: number
+  lastTool: string
+  stage: string
+  problem: string
+}
+
+/** What the compiled world will contain — the review payload, in the world's own
+ *  words (mirrors backend compile.preview). */
+export interface WorldPreview {
+  title: string
+  promise: string
+  possibilities: string[]
+  language: string
+  clock: string
+  lineage: boolean
+  styles: string[]
+  chapters: Array<{ heading: string; brief: boolean; when: string }>
+  opening: string[]
+  panels: Array<{ label: string; always: boolean; fields: string[] }>
+  digest: string[]
+  endings: number
+}
+
+export interface WorldDraftDetail {
+  draftId: string
+  title: string
+  status: WorldDraftStatus
+  steps: number
+  stage: string
+  lastTool: string
+  problem: string
+  field: string
+  worldId: string
+  preview: WorldPreview | null
+  warnings: string[]
+  /** What the worldsmith removed as unplayable, so the review can show it. */
+  dropped: string[]
+  /** The worldsmith's chat-slot key, so the UI can offer a jump-to-chat. */
+  slotKey: string
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -479,37 +610,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  /** The gateway's advertised model list (same-origin dashboard endpoint, not the
-   *  app base). Returns [] rather than throwing when the list is unavailable
-   *  (signed out / gateway restart), so the picker degrades to "keep default". */
+  /** The gateway's advertised model list. `/api/models` is a CORE dashboard
+   *  route (not under the app base), so the app's path-scoped session cookie does
+   *  NOT authorize it — the App SDK client (`useAppApi().get`) is the authorized
+   *  path (it injects an app token and gates on the declared `permissions.api`).
+   *  This bare-fetch helper is the fallback for a host too old to expose the SDK;
+   *  it returns [] rather than throwing when the list is unavailable, so the
+   *  picker degrades to "keep default". */
   models: async (): Promise<Array<{ id: string; name?: string }>> => {
     try {
       const res = await fetch('/api/models')
       if (!res.ok) return []
-      const raw = (await res.json()) as unknown
-      // Core answers with a bare array today, but tolerate a `{ models: [...] }`
-      // wrapper too, so a future shape drift on this endpoint doesn't silently
-      // empty the picker (the same field-drift risk that first broke it).
-      const list = Array.isArray(raw)
-        ? raw
-        : Array.isArray((raw as { models?: unknown })?.models)
-          ? (raw as { models: unknown[] }).models
-          : []
-      // The gateway forwards kiro-cli's own `--list-models` rows verbatim, which
-      // are keyed `model_id` / `model_name` (NOT `id` / `name`). Read those first
-      // and only fall back to `id` / `name`, so the picker isn't emptied by a
-      // shape mismatch — the whole list filtering out on a missing `id` is what
-      // left this picker showing only "Default (auto)".
-      return list
-        .map((m) => {
-          if (typeof m === 'string') return { id: m }
-          const o = m as {
-            model_id?: string; model_name?: string; id?: string; name?: string
-          }
-          const id = o.model_id || o.model_name || o.id || ''
-          return { id, name: o.model_name || o.name || id }
-        })
-        .filter((m) => m && typeof m.id === 'string' && m.id)
+      return normalizeModels(await res.json())
     } catch {
       return []
     }
@@ -555,6 +667,24 @@ export const api = {
     post<{ worldId: string; restored: boolean }>(
       `/worlds/${encodeURIComponent(id)}/restore`, {},
     ),
+
+  // ── world drafts: paste → worldsmith cleans+compiles → review → install ──
+  worldDrafts: () => json<{ drafts: WorldDraftRow[] }>('/world-drafts'),
+  worldDraft: (id: string) =>
+    json<WorldDraftDetail>(`/world-drafts/${encodeURIComponent(id)}`),
+  createWorldDraft: (text: string, title = '') =>
+    post<{ draftId: string }>('/world-drafts', { text, title }),
+  compileWorldDraft: (id: string) =>
+    post<{ dispatched: boolean; reason?: string }>(
+      `/world-drafts/${encodeURIComponent(id)}/compile`, {},
+    ),
+  /** Optional `title` renames the world's display title before installing it. */
+  installWorldDraft: (id: string, title = '') =>
+    post<{ worldId: string }>(
+      `/world-drafts/${encodeURIComponent(id)}/install`, title ? { title } : {},
+    ),
+  discardWorldDraft: (id: string) =>
+    send<{ deleted: boolean }>('DELETE', `/world-drafts/${encodeURIComponent(id)}`),
   runs: () => json<{ runs: LifeRowData[] }>('/runs'),
   run: (id: string) => json<PlayView>(`/runs/${encodeURIComponent(id)}`),
 
@@ -577,6 +707,9 @@ export const api = {
       worldId?: string
       style?: string
       answers?: Record<string, string>
+      /** A chosen starting archetype (`WorldDetail.roles[].id`); presets the
+       *  opening and seeds initial state from its grants, server-side. */
+      role?: string
       /** Which language to live this life in — one of the world's `languages`.
        *  Binds the run to that language's rulebook and UI for its whole life. */
       language?: string
@@ -618,6 +751,15 @@ export const api = {
     const res = await fetch(
       `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}`,
     )
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.text()
+  },
+
+  /** The compiled background HTML for a life, as text for a sandbox frame's
+   *  srcdoc. Throws on any non-2xx (incl. 404 = no backdrop) so the caller
+   *  simply shows no background. */
+  backdrop: async (runId: string): Promise<string> => {
+    const res = await fetch(`${API}/runs/${encodeURIComponent(runId)}/backdrop`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return res.text()
   },

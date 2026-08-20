@@ -25,6 +25,7 @@ from typing import Any
 
 from halo import gate_digest
 from memory_graph import echo_markers
+from packs import render_pack_panels
 from template import Template
 
 #: Box-drawing, block and geometric characters — the ones a template uses to
@@ -296,6 +297,28 @@ def world_detail(pack: Any, *, include_prose: bool = False) -> dict[str, Any]:
         "digest": list(t.digest_categories),
         "endings": [e.id for e in t.endings],
         "save": list(t.save_schema),
+        # The world's setting as structure, for the reader's setting view. Only
+        # entries with no `reveal` gate are public on the detail page; spoiler-gated
+        # ones stay hidden until a life unlocks them. `text` is included so the view
+        # can expand an entry without a second fetch.
+        "lore": [
+            {
+                "id": e.id,
+                "name": e.name or e.id,
+                "summary": e.summary,
+                "category": e.category,
+                "text": e.text,
+                "relations": list(e.relations),
+            }
+            for e in t.lore
+            if e.reveal is None
+        ],
+        # Starting archetypes the world offers (grants stay server-side; the UI shows
+        # the name + summary, and the narrator seeds state from grants at the opening).
+        "roles": [
+            {"id": r.id, "name": r.name or r.id, "summary": r.summary}
+            for r in t.roles
+        ],
     }
     if include_prose:
         body["prose"] = pack.prose
@@ -386,6 +409,9 @@ def build_play_view(
     chronicle: list[dict[str, Any]] | None = None,
     scenes: list[dict[str, Any]] | None = None,
     unlocked: list[str] | None = None,
+    milestones_reached: list[str] | None = None,
+    milestones: list[str] | None = None,
+    capability_packs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Everything the play page renders, with nothing left for it to decide."""
     chronicle = chronicle or []
@@ -411,11 +437,17 @@ def build_play_view(
             "id": panel.id,
             "label": panel.label,
             "always": panel.always,
+            "region": panel.region,
             "fields": fields,
             # A panel where the narrator has said nothing yet is still shown, but
             # the UI can quiet it down rather than presenting a wall of dashes.
             "empty": all(f["kind"] == "gap" for f in fields),
         })
+
+    # Capability packs render as additional panels, shaped by the same primitives
+    # so the play page draws them with no per-world code. A malformed pack degrades
+    # to a labelled value list rather than breaking the view (design §7.2, R5.9).
+    panels.extend(render_pack_panels(capability_packs, state, shape=_shape))
 
     ending_id = resolve_ending(template, state)
 
@@ -486,6 +518,11 @@ def build_play_view(
         # words. Computed by the route (it needs the prior state); the play page
         # shows them as a quiet "a new chapter opens" marker.
         "unlocked": list(unlocked or []),
+        # Milestones reached THIS month (labels) for a toast, and every one reached
+        # so far (labels) for the ending recap. The ids live in run state; the route
+        # maps them to the world's own labels.
+        "milestonesReached": list(milestones_reached or []),
+        "milestones": list(milestones or []),
     }
 
 

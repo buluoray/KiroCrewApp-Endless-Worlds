@@ -55,7 +55,7 @@ def test_the_chronicle_is_its_own_route_not_a_field_on_the_play_view():
     from view import build_play_view
     from world import read_world
 
-    seed = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+    seed = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
     if not seed.is_file():
         pytest.skip("flagship seed not present")
     pack = read_world(seed.read_text(encoding="utf-8"))
@@ -138,16 +138,22 @@ def test_the_ui_shows_the_action_it_is_sent():
 
 
 def test_the_shelf_list_is_hidden_where_the_rail_shows_it():
-    """The rail lists every life and every world. The same list in the reading column
-    is the same information twice, side by side."""
+    """The rail lists every life by name, so repeating the life rows in the reading
+    column is the same information twice. Only the LIVES are hidden beside the rail,
+    though — the world COVER tiles stay in the main column, because a name in the
+    rail is not the cover, and the landing's job is to invite you into a world."""
     css = styles()
     wide = re.search(
         rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
     )
     assert wide, "no rule block at the rail's breakpoint"
-    assert re.search(r"\.ew-shelflist\s*\{[^}]*display:\s*none", wide.group(1)), (
-        "the shelf list is still rendered beside the rail that already lists it"
-    )
+    assert re.search(
+        r"\.ew-shell-open \.ew-shelf-lives\s*\{[^}]*display:\s*none", wide.group(1)
+    ), "the life rows are still rendered beside the rail that already lists them"
+    # The world covers must NOT be hidden — they are the landing, not a duplicate.
+    assert not re.search(
+        r"\.ew-shell-open \.ew-shelf-worlds\s*\{[^}]*display:\s*none", wide.group(1)
+    ), "the world covers should stay in the main column when the rail is open"
 
     bare = re.search(r"^\.ew-shelflist\s*\{([^}]*)\}", css, re.MULTILINE)
     if bare:

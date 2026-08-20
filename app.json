@@ -20,7 +20,7 @@
       "routes": "backend.routes:register_routes"
     }
   },
-  "agents": ["agents/narrator.json"],
+  "agents": ["agents/narrator.json", "agents/worldsmith.json"],
   "mcpServers": {
     "endless-mcp": {
       "command": "python3",
@@ -38,7 +38,8 @@
       "/api/apps/endless-worlds",
       "/api/apps/endless-worlds/*",
       "/api/chat",
-      "/api/chat/*"
+      "/api/chat/*",
+      "/api/models"
     ]
   }
 }

@@ -3,7 +3,7 @@
 A world is a single file. `world.py` owns the on-disk *pack* (a JSON header the
 machine manages plus prose the human writes, appended byte-for-byte); `template.py`
 owns the *schema* that header parses into (panels, opening groups, endings,
-milestones, lore, clock); and `chapters.py` owns how that prose is cut into the
+milestones, lore, systems, roles, clock); and `chapters.py` owns how that prose is cut into the
 slices a single life is allowed to read. The unifying decision across all three:
 a world declares only what the app must render or enforce, the prose is never
 parsed for meaning, and every gate the world writes is evaluated by an eval-free
@@ -16,7 +16,8 @@ to run before that pack fails mid-play.
 | Path | What it is |
 |---|---|
 | `world.py` | pack file format — `read_world`/`serialize_world` round-trip, CONTRACT gate, `is_stale` provenance, widget-spec upsert, `install_seed`, `summarize` |
-| `template.py` | header schema — `Template`, `_parse_panels`/`_parse_opening`/`_parse_endings`/`_parse_milestones`/`_parse_lore`, `_require_version`/`_require_id`, and the `Condition` interpreter |
+| `template.py` | header schema — `Template`, `_parse_panels`/`_parse_opening`/`_parse_endings`/`_parse_milestones`/`_parse_lore`/`_parse_systems`/`_parse_roles`/`_parse_handoff`, `_require_version`/`_require_id`, and the `Condition` interpreter |
+| `systems.py` | the systems engine — `apply_systems` writes derived state at commit off the narrator's `gains` and the prior state |
 | `chapters.py` | prose partition — `bodies`, `brief`, `read_chapter`, `contents`, `opened_since` |
 | `data/worlds/<worldId>.md` | an installed pack; `<worldId>.<lang>.md` is an optional language variant |
 | `seeds/<name>.md` | hand-authored seed packs, normalized into `data/worlds` on install |
@@ -75,7 +76,7 @@ one Library-shelf row (`worldId`, `title`, `version`, `language`, `lineage`,
 One file, front matter (`split_front_matter`) plus verbatim prose. `Template`
 carries `id, title, version, clock_unit/label, lineage, styles, opening, panels,
 endings, digest_categories/rumours, save_schema, prose, chapters, lore,
-milestones`.
+systems, roles, hand_to_agent, milestones`.
 
 - **`version` must be a quoted string.** `_require_version` refuses an unquoted
   version. YAML 1.1 turns `1.10` into the float `1.1` — a different version — and
@@ -126,6 +127,42 @@ milestones`.
   Enforced by `template._parse_lore`; pinned by
   `test_template.test_lore_parses_keyword_and_always_entries` and
   `test_template.test_a_lore_entry_with_no_keys_and_not_always_is_refused`.
+
+- **A lore entry carries optional structure, and `reveal` is what gates the
+  setting view.** Beyond `id`/`text`/`keys`, an entry may declare
+  `name`/`summary`/`category`/`relations`/`reveal` — all free-form (the world's own
+  vocabulary, never validated against a concept list). `view.world_detail` exposes
+  only entries whose `reveal is None` as the player-browsable "world setting", so a
+  spoiler entry (one with a `reveal` condition) is injected to the narrator by
+  keyword but never listed in the public setting view. Load-bearing because it is
+  the single field separating background a player may read up front from a reveal
+  the story must earn. Enforced by `template._parse_lore` + `view.world_detail`;
+  pinned by `test_template.test_lore_carries_optional_structure_and_reveal`.
+
+- **Systems are the mechanics the backend runs; the narrator declares events, not
+  numbers.** `_parse_systems` takes `id` + `kind` (one of `SYSTEM_KINDS` =
+  accrual/resource/decay/unlock) + `into` (a dotted `state.…` path the system owns),
+  plus per-kind knobs (`tiers`/`tierInto`, `floor`/`cap`/`perTurn`, `when`). An
+  unknown kind is refused and an `unlock` without a `when` is refused; the world's
+  own concepts (tier names, what a system models) are not validated. Load-bearing
+  because it is the boundary that keeps every world number the app's rather than the
+  model's. Enforced by `template._parse_systems`; pinned by
+  `test_template.test_systems_parse_and_validate_structure`,
+  `test_template.test_an_unknown_system_kind_is_refused`,
+  `test_template.test_an_unlock_without_a_condition_is_refused`, and
+  `test_template.test_absent_systems_is_not_an_error`.
+
+- **Roles are open-vocabulary archetypes; only the slug id is validated.**
+  `_parse_roles` takes `id` (a slug) + free-form `name`/`summary`/`grants`; `grants`
+  is the opening state a life of that role begins with, and the backend never
+  validates what a role *is*. `handToAgent` (`_parse_handoff`) is a list of
+  `lore.<id>` / `systems.<id>` / `roles.<id>` / `<kind>.*` references whose *shape*
+  is validated while a dangling id is tolerated (a world may name an entry it later
+  adds). Load-bearing because open vocabulary is the whole premise — the app
+  enforces structure and playability, never the world's concept set. Enforced by
+  `template._parse_roles`/`_parse_handoff`; pinned by
+  `test_template.test_roles_parse_with_open_vocabulary` and
+  `test_template.test_handoff_refs_parse_and_reject_a_bad_shape`.
 
 - **The `when` interpreter cannot execute code and is depth-capped.**
   `Condition.parse` is a recursive-descent parser over a tiny grammar — paths,

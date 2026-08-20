@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, "backend")
 
-SEED = pathlib.Path("seeds/jianhuo-jiyuan.md")
+SEED = pathlib.Path("seeds/age-of-sword-and-flame.md")
 
 # (id, heading, always, when)
 #

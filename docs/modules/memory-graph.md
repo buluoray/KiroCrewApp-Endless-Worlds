@@ -42,19 +42,27 @@ meaning half (keepsakes, story cards, star lenses) is in
   uniqueness the caller must guarantee (`test_duplicate_event_key_in_one_turn_is_refused`),
   and ids from another run cannot be forged.
 
-- **Whole-block atomic validation — never a half-written turn.**
+- **Whole-block validation, but a failure never blocks the turn.**
   `validate_memory(memory, index, *, turn)` validates the *entire* `memory` block
-  before anything commits; any failure raises `MemoryRejected(field, expected)`
-  with an exact path (e.g. `memory.events[0].echoes[1]`) and the whole tool call
-  fails. Unknown references are refused rather than auto-created
+  and any failure raises `MemoryRejected(field, expected)` with an exact path (e.g.
+  `memory.events[0].echoes[1]`). The block is all-or-nothing as a UNIT — a partially
+  valid block is never half-recorded — but the caller (`mcp_server._advance_turn`)
+  treats memory as enrichment: on `MemoryRejected` it DROPS the block, commits the
+  turn's prose/choices/state anyway, and surfaces a non-blocking `panel: "memory"`
+  warning so the narrator re-declares the facts later. So "atomic" means the memory
+  record is whole-or-absent, not that a bad block aborts the turn. Unknown references
+  are refused rather than auto-created
   (`test_unknown_participant_is_refused_by_path`); an entity kind never changes
   without an explicit merge (`test_an_entity_kind_never_changes_without_a_merge`),
   and same-name-different-id is never auto-merged
   (`test_same_name_different_id_is_never_merged`); `disclosure` is required and
   closed (`test_disclosure_is_required_and_closed`); a `place` reference must
-  resolve to a `place` (`test_a_place_reference_must_actually_be_a_place`). The
-  tool surface confirms nothing leaks on failure:
-  `test_malformed_memory_commits_nothing` (state turn stays 0, chronicle empty).
+  resolve to a `place` (`test_a_place_reference_must_actually_be_a_place`). At the
+  tool surface a malformed block is dropped, not recorded, while the turn commits:
+  `test_malformed_memory_commits_the_turn_but_drops_the_block` (turn lands, chronicle
+  entry carries no `memory`), and a `memory` sent as a JSON string is recovered or
+  else dropped (`test_memory_sent_as_a_json_string_is_recovered`,
+  `test_memory_sent_as_a_non_json_string_is_dropped_not_fatal`).
 
 - **Append-only and `(runId, turn)` idempotent — a retry never duplicates.**
   Replaying a key for a turn already recorded is refused (`already recorded for

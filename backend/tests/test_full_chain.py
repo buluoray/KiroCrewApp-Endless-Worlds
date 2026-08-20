@@ -91,7 +91,8 @@ def call(name, **args):
 
 
 def narrate(run, turn, prose, state, memory=None):
-    args = {"runId": run, "turn": turn, "prose": prose, "state": state}
+    args = {"runId": run, "turn": turn, "prose": prose, "state": state,
+            "choices": [{"id": "go", "label": "go on"}]}
     if memory is not None:
         args["memory"] = memory
     out = call("endless_advance_turn", **args)

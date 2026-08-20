@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { LifeRowData, OpeningGroup, WorldDetail, WorldRow } from './api'
-import { api } from './api'
+import type { LifeRowData, LoreEntry, OpeningGroup, WorldDetail, WorldRow } from './api'
+import { api, API } from './api'
 import { t } from './strings'
 import { Chip, Prose } from './ui'
 
@@ -77,26 +77,25 @@ export function WorldCard({
 
   return (
     <button className="ew-card ew-world-card" type="button" onClick={() => onOpen(world.worldId)}>
-      <div className="ew-titlerow">
-        <span className="ew-title">{world.title}</span>
+      <div className="ew-world-band">
+        <span className="ew-world-band-title">{world.title}</span>
         {world.lineage ? <Chip accent>{t('world.lineage')}</Chip> : null}
-        {world.stale ? <Chip>{t('world.stale')}</Chip> : null}
       </div>
-      <div className="ew-world-promise">{promise}</div>
-      {possibilities.length ? (
-        <div className="ew-world-possibilities">
-          <div className="ew-world-possibilities-label">{t('world.cardPossibilities')}</div>
-          {possibilities.map((possibility) => (
-            <div className="ew-world-possibility" key={possibility}>{possibility}</div>
-          ))}
+      <div className="ew-world-body">
+        <div className="ew-world-promise">{promise}</div>
+        {possibilities.length ? (
+          <div className="ew-world-possibilities">
+            {possibilities.map((possibility) => (
+              <span className="ew-world-possibility" key={possibility}>{possibility}</span>
+            ))}
+          </div>
+        ) : null}
+        <div className="ew-world-card-footer">
+          <span className="ew-meta">
+            {plays > 0 ? t('world.plays', { n: plays }) : t('world.cardUntold')}
+          </span>
+          <span className="ew-world-enter">{t('world.cardEnter')} →</span>
         </div>
-      ) : null}
-      {world.stalenessNote ? <div className="ew-meta">{world.stalenessNote}</div> : null}
-      <div className="ew-world-card-footer">
-        <span className="ew-meta">
-          {plays > 0 ? t('world.plays', { n: plays }) : t('world.cardUntold')}
-        </span>
-        <span className="ew-world-enter">{t('world.cardEnter')} →</span>
       </div>
     </button>
   )
@@ -211,6 +210,16 @@ export function LifeRow({
   // click can be swallowed by the outer one.
   return (
     <div className="ew-card ew-card-row">
+      {run.backdrop ? (
+        <img
+          className="ew-card-bg"
+          src={`${API}/runs/${encodeURIComponent(run.runId)}/backdrop?v=${run.backdrop.version}`}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+        />
+      ) : null}
+      {run.backdrop ? <div className="ew-card-bg-scrim" aria-hidden="true" /> : null}
       <button
         className="ew-card-open"
         type="button"
@@ -255,24 +264,102 @@ export function LifeRow({
               <MenuGlyph />
             </button>
             {menuOpen ? (
-              <div className="ew-menu" role="menu">
-                {actions.map((a) => (
-                  <button
-                    key={a.key}
-                    className="ew-menu-item"
-                    role="menuitem"
-                    type="button"
-                    aria-label={a.aria}
-                    onClick={() => { setMenuOpen(false); a.onClick() }}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </div>
+              <>
+                {/* A full-viewport backdrop under the menu. Without it a tap that
+                    lands outside the menu (or an iOS remove-on-tap ghost click after
+                    choosing an item) falls straight through to the life row beneath
+                    and opens it — the "click-through to the row below" bug. The
+                    backdrop sits above every row (z-index) and below the menu, so it
+                    absorbs those taps and closes the menu. */}
+                <div
+                  className="ew-menu-backdrop"
+                  aria-hidden="true"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="ew-menu" role="menu">
+                  {actions.map((a) => (
+                    <button
+                      key={a.key}
+                      className="ew-menu-item"
+                      role="menuitem"
+                      type="button"
+                      aria-label={a.aria}
+                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); a.onClick() }}
+                      onTouchEnd={(e) => {
+                        // iOS/WKWebView: a tap that unmounts this item lets the
+                        // trailing synthetic click fall through to the life row's
+                        // open button beneath — the "click-through" bug. preventDefault
+                        // on touchend cancels that synthetic click sequence entirely
+                        // (touchend is not a React passive listener), so we run the
+                        // action here for touch and let onClick handle mouse.
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setMenuOpen(false)
+                        a.onClick()
+                      }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </>
             ) : null}
           </div>
         </>
       ) : null}
+    </div>
+  )
+}
+
+/** The world's setting as a browsable, grouped structure — the reader-facing face
+ *  of the world's `lore`. Grouped by category; each entry expands to its body, and
+ *  its relations to other entries are shown as a small edge list. */
+function WorldSetting({ lore }: { lore: LoreEntry[] }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const names = new Map(lore.map((e) => [e.id, e.name]))
+  const order: string[] = []
+  const groups = new Map<string, LoreEntry[]>()
+  for (const e of lore) {
+    const cat = e.category || t('world.settingOther')
+    if (!groups.has(cat)) { groups.set(cat, []); order.push(cat) }
+    groups.get(cat)!.push(e)
+  }
+  return (
+    <div className="ew-setting" style={{ marginTop: '18px' }}>
+      <div className="ew-section">{t('world.setting')}</div>
+      {order.map((cat) => (
+        <div className="ew-setting-group" key={cat}>
+          <div className="ew-glabel">{cat}</div>
+          {(groups.get(cat) ?? []).map((e) => (
+            <div className="ew-setting-entry" key={e.id}>
+              <button
+                className="ew-setting-head"
+                type="button"
+                aria-expanded={!!open[e.id]}
+                onClick={() => setOpen((o) => ({ ...o, [e.id]: !o[e.id] }))}
+              >
+                <span className="ew-setting-name">{e.name}</span>
+                {e.summary ? <span className="ew-setting-sum">{e.summary}</span> : null}
+                <span className="ew-setting-caret" aria-hidden="true" />
+              </button>
+              {open[e.id] ? (
+                <div className="ew-setting-body">
+                  <Prose text={e.text} />
+                  {e.relations.length ? (
+                    <div className="ew-setting-rel">
+                      {e.relations.map((r, i) => (
+                        <span className="ew-chip" key={`${r.to}-${i}`}>
+                          {r.label ? `${r.label} · ` : ''}{names.get(r.to) ?? r.to}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -297,7 +384,7 @@ export function WorldDetailView({
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
-  const [lore, setLore] = useState(false)
+  const [laws, setLaws] = useState(false)
   // The language the player is reading this world in. Starts at the app's chosen
   // language; a pick from the toggle re-fetches the variant so labels AND lore
   // switch together, which is the whole point of the choice.
@@ -307,7 +394,8 @@ export function WorldDetailView({
     let alive = true
     setWorld(null)
     setError(null)
-    // Ask for the world's own prose too, so the detail page can offer its lore.
+    // The detail page shows structured `lore` AND, as "world laws", the cleaned
+    // core-rule prose — so it fetches the prose too.
     api.world(worldId, true, language)
       .then((w) => { if (alive) { setWorld(w); if (w.language) onLanguage?.(w.language) } })
       .catch((e: Error) => { if (alive) setError(e.message) })
@@ -422,19 +510,39 @@ export function WorldDetailView({
         })}
       </div>
 
+      {world.lore?.length ? <WorldSetting lore={world.lore} /> : null}
+
+      {world.roles?.length ? (
+        <div className="ew-roles" style={{ marginTop: '18px' }}>
+          <div className="ew-section">{t('world.roles')}</div>
+          <div className="ew-block">
+            {(world.roles ?? []).map((r) => (
+              <div className="ew-role" key={r.id}>
+                <span className="ew-role-name">{r.name}</span>
+                {r.summary ? <span className="ew-role-sum">{r.summary}</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {world.prose ? (
-        <>
-          <button
-            className="ew-section ew-section-toggle"
-            type="button"
-            style={{ marginTop: '18px' }}
-            aria-expanded={lore}
-            onClick={() => setLore((v) => !v)}
-          >
-            {lore ? t('world.loreHide') : t('world.loreShow')}
-          </button>
-          {lore ? <div className="ew-block"><Prose text={world.prose} /></div> : null}
-        </>
+        <div className="ew-setting" style={{ marginTop: '18px' }}>
+          <div className="ew-setting-entry">
+            <button
+              className="ew-setting-head"
+              type="button"
+              aria-expanded={laws}
+              onClick={() => setLaws((v) => !v)}
+            >
+              <span className="ew-setting-name">{t('world.laws')}</span>
+              <span className="ew-setting-caret" aria-hidden="true" />
+            </button>
+            {laws ? (
+              <div className="ew-setting-body"><Prose text={world.prose} /></div>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <div className="ew-bar">

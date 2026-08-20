@@ -258,6 +258,92 @@ def ensure_narrator_slot_ex(
     return slot, True
 
 
+# ── the worldsmith: a second agent, driven the same way ────────────────────
+#
+# Compiling a pasted rulebook into a playable world is the same kind of job as a
+# turn — an app-owned chat slot, memory sealed, driven by _run_chat and answering
+# through the app's MCP server — but a DIFFERENT agent (its prompt is the compiler
+# brief + the framework's playability contract, not a life narration) and keyed on
+# the draft, not a run. It reuses the narrator's guards rather than inventing new
+# ones; a compiler slot has no life to be sealed FROM, but temporary memory is
+# still correct (it must not read or write the player's memory either).
+
+#: Must equal agents/worldsmith.json's ``name``.
+WORLDSMITH_AGENT = "endless-worldsmith"
+
+#: Distinct from ``_SLOT_PREFIX`` so ``is_narrator_slot`` never claims a draft slot
+#: and vice versa.
+_DRAFT_SLOT_PREFIX = "endless-worlddraft-"
+
+#: A draft id reaches here from stored app state; validated before it becomes a
+#: slot key. Same shape as drafts._DRAFT_ID_RE (kept local to avoid an import).
+_DRAFT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def worldsmith_slot_key(draft_id: str) -> str:
+    if not isinstance(draft_id, str) or not _DRAFT_ID_RE.match(draft_id):
+        raise BadRunId(f"not a draft id: {draft_id!r}")
+    return f"{_DRAFT_SLOT_PREFIX}{draft_id}"
+
+
+def is_worldsmith_slot(slot_key: str) -> bool:
+    return isinstance(slot_key, str) and slot_key.startswith(_DRAFT_SLOT_PREFIX)
+
+
+def ensure_worldsmith_slot(
+    state: Any, draft_id: str, *, project: str = "", model: str = "", reasoning_effort: str = ""
+) -> Any:
+    """The draft's worldsmith slot, created if absent. Mirrors
+    ``ensure_narrator_slot_ex`` (same ownership + memory-mode guards) but binds the
+    worldsmith agent and keys on the draft."""
+    slot_key = worldsmith_slot_key(draft_id)
+
+    existing = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
+    if existing is not None:
+        owner = getattr(existing, "_app", "") or ""
+        if owner != APP_NAME:
+            raise SlotOwnedByAnother(
+                f"{slot_key} is held by {owner or 'nobody'}; refusing to take it over"
+            )
+        if getattr(existing, "memory_mode", "") != MEMORY_MODE:
+            raise MemoryModeConflict(
+                f"{slot_key} has memory_mode="
+                f"{getattr(existing, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
+            )
+        _apply_choice(existing, model, reasoning_effort)
+        return existing
+
+    slot = state.get_or_create_slot(
+        name=slot_key,
+        agent=WORLDSMITH_AGENT,
+        app=APP_NAME,
+        memory_mode=MEMORY_MODE,
+    )
+    if project:
+        slot.project = project
+    _apply_choice(slot, model, reasoning_effort)
+    return slot
+
+
+def release_worldsmith_slot(state: Any, draft_id: str) -> bool:
+    """Drop a draft's worldsmith slot when the draft is discarded or installed.
+    Best-effort; only ever removes a slot this app owns."""
+    try:
+        slot_key = worldsmith_slot_key(draft_id)
+    except BadRunId:
+        return False
+    slots = getattr(state, "_slots", None)
+    if not isinstance(slots, dict):
+        return False
+    slot = slots.get(slot_key)
+    if slot is None:
+        return False
+    if (getattr(slot, "_app", "") or "") != APP_NAME:
+        return False
+    slots.pop(slot_key, None)
+    return True
+
+
 def _apply_choice(slot: Any, model: str, reasoning_effort: str) -> None:
     """Set the player's chosen model / reasoning effort on the slot.
 

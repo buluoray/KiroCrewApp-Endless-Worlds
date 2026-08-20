@@ -71,6 +71,7 @@ except Exception as exc:  # noqa: BLE001
         _IMPORT_ERROR = f"cannot import kiro_crew.apps.app_storage: {exc}"
 
 from scenes import SceneLedger, SceneLedgerError  # noqa: E402
+from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
 from chapters import (  # noqa: E402
     ChapterError,
     brief,
@@ -82,8 +83,11 @@ from halo import attribution, compose_restraint, event_density  # noqa: E402
 import memory_graph  # noqa: E402
 from store import RunStore, StoreError  # noqa: E402
 from turn import declaration_shape  # noqa: E402
+from systems import apply_systems  # noqa: E402
 from view import always_panels_empty  # noqa: E402
 from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
+from compile import COMPILER_BRIEF, CLEANING_CONTRACT, accept_compiled_header, preview  # noqa: E402
+from drafts import DraftError, DraftStore  # noqa: E402
 
 
 # ── errors ───────────────────────────────────────────────────────────────
@@ -108,7 +112,9 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "endless_advance_turn",
         "description": (
             "Commit one turn: the prose the player reads, the state that follows, "
-            "and the choices offered. THE ONLY call that changes a life. Declare "
+            "and the choices offered. THE ONLY call that changes a life. A living "
+            "turn MUST include `choices`; omit them only on a terminal turn, marked "
+            "`ending: true` or via state that fires a world ending. Declare "
             "state in full — a field you leave out reads to the player as a fact "
             "that vanished. Idempotent per (runId, turn): re-sending a turn you "
             "already committed changes nothing. The optional `memory` block is how "
@@ -127,6 +133,10 @@ _TOOLS: list[dict[str, Any]] = [
                 "turn": {"type": "integer", "minimum": 1},
                 "prose": {"type": "string", "maxLength": 20000},
                 "state": {"type": "object"},
+                # Terminal marker. A living turn MUST include `choices`; only a
+                # terminal turn may omit them, and it says so with `ending: true`
+                # (or by declaring state that fires a declared world ending).
+                "ending": {"type": "boolean"},
                 "memory": {
                     "type": "object",
                     "additionalProperties": False,
@@ -257,6 +267,13 @@ _TOOLS: list[dict[str, Any]] = [
                         "properties": {
                             "id": {"type": "string", "maxLength": 64},
                             "label": {"type": "string", "maxLength": 200},
+                            # Marks a choice that could lead to a major event or
+                            # turning point — the UI gives it a distinctive look.
+                            "fateful": {"type": "boolean"},
+                            # An optional tiny SVG you design for a fateful choice,
+                            # shown as an inert image behind the button label. Same
+                            # rules as a backdrop; validated, and dropped if invalid.
+                            "art": {"type": "string", "maxLength": 6000},
                         },
                     },
                 },
@@ -320,9 +337,20 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_mount_scene",
         "description": (
-            "Put a purpose-built scene in front of the player — a map, a ledger, a "
-            "choice laid out as something other than a list. You describe what it "
-            "should show and what it may ask; you never write its markup."
+            "Put a purpose-built scene in front of the player — a region map, a "
+            "relationship web, a family or skill tree, a ledger, a choice laid out "
+            "as something other than a list. `spec` is {title?, elements:[...]}, and "
+            "each element is one of these kinds: heading, text, note, stat, bar, "
+            "keyvalue, list, table, choice, divider, grid, links, tree. For a map use "
+            "`grid` ({columns, cells:[{label, note?, mark?}]}); for a relationship web "
+            "use `links` ({nodes:[{id, label}], edges:[{from, to, label?}]}); for a "
+            "hierarchy use `tree` ({nodes:[{id, label, parent?, note?}]}). You give the "
+            "STRUCTURE — cells, nodes, edges, parents — and NEVER any coordinates or "
+            "markup; the app computes every position and draws it. Optionally set "
+            "`region` to group this scene under a system tab on a phone — one of "
+            "`status` (the person), `world` (the world around them), `pack` (what "
+            "they carry), `tasks` (what is open), or your own word for anything else "
+            "— and `label` for that tab's short name; both are optional."
         ),
         "inputSchema": {
             "type": "object",
@@ -333,6 +361,8 @@ _TOOLS: list[dict[str, Any]] = [
                 "sceneId": {"type": "string", "maxLength": 64},
                 "spec": {"type": "object"},
                 "asks": {"type": "boolean"},
+                "region": {"type": "string", "maxLength": 24},
+                "label": {"type": "string", "maxLength": 24},
             },
         },
     },
@@ -381,11 +411,50 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "endless_make_pack",
+        "name": "endless_set_backdrop",
+        "description": (
+            "Set the background art behind the story for this life — a single "
+            "self-contained SVG image (gradients, patterns, filters) that sets the "
+            "mood of the current scene. Optionally also pass `buttons`: a second SVG "
+            "you design as the COMMON motif shown behind the ordinary choice buttons "
+            "this scene — it is set and replaced TOGETHER with the backdrop, so the "
+            "buttons always match the scene. Both are shown as inert images: no "
+            "script, no interactivity. Setting a new one replaces the old — CHANGE "
+            "it at every major event or turning point and at significant jumps in "
+            "time or place. Refused if either is not an <svg> document or carries "
+            "script, an event handler, <foreignObject>, or an external link."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "markup"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "markup": {"type": "string", "maxLength": 24000},
+                "buttons": {"type": "string", "maxLength": 8000},
+            },
+        },
+    },
+    {
+        "name": "endless_clear_backdrop",
+        "description": (
+            "Remove the background art, returning the story to the plain page. "
+            "Idempotent — clearing when there is none is fine."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId"],
+            "additionalProperties": False,
+            "properties": {"runId": _RUN_ID},
+        },
+    },
+    {
+        "name": "endless_export_world",
         "description": (
             "Export a world as one portable file — its rulebook, its compiled "
             "structure, and any scenes built for it — so it can be replayed or "
-            "handed to someone else."
+            "handed to someone else. This writes out the WHOLE world; it does not "
+            "generate a capability pack (that is compilation, done at import)."
         ),
         "inputSchema": {
             "type": "object",
@@ -393,6 +462,47 @@ _TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
             "properties": {
                 "worldId": {"type": "string", "maxLength": 64},
+            },
+        },
+    },
+    {
+        "name": "endless_read_draft",
+        "description": (
+            "Read the raw text a player pasted to turn into a new world. Returns it "
+            "verbatim as `rawText`. You then clean and compile it and call "
+            "endless_submit_world_draft. Read-only."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["draftId"],
+            "additionalProperties": False,
+            "properties": {"draftId": {"type": "string", "maxLength": 72}},
+        },
+    },
+    {
+        "name": "endless_submit_world_draft",
+        "description": (
+            "Store your compiled world for the player to review. Pass the draftId, "
+            "the CLEANED rulebook `prose` (kept verbatim for play — strip anything "
+            "that is not playable in this framework), and the compiled `header` (an "
+            "object shaped per your brief). Every id in the header — the world id and "
+            "every nested id (styles, opening, panels, fields, endings, chapters, "
+            "lore) — must be a lowercase-hyphen slug like `birth-city`, never "
+            "`birthCity`; that is the most common first-try error. Optionally pass "
+            "`dropped`: short notes on what you removed as unplayable, shown to the "
+            "player in the review. The header is validated exactly like a hand-written "
+            "world; on failure the draft records the problem so it can be fixed — by "
+            "you on a retry, or by the player talking to you in chat."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["draftId", "prose", "header"],
+            "additionalProperties": False,
+            "properties": {
+                "draftId": {"type": "string", "maxLength": 72},
+                "prose": {"type": "string", "maxLength": 600000},
+                "header": {"type": "object"},
+                "dropped": {"type": "array", "items": {"type": "string"}},
             },
         },
     },
@@ -498,6 +608,12 @@ def _store() -> RunStore:
     return RunStore(AppStorage(APP_NAME, _DATA), _DATA)
 
 
+def _drafts() -> DraftStore:
+    """World-draft store, self-located from this process's own data dir — the same
+    files the backend route process created."""
+    return DraftStore(_DATA)
+
+
 def _scene_ledger(run_id: str) -> SceneLedger:
     """A handle that can reach ``scenes.json`` and nothing else.
 
@@ -507,6 +623,50 @@ def _scene_ledger(run_id: str) -> SceneLedger:
     return SceneLedger(_DATA, run_id)
 
 
+def _backdrop_store(run_id: str) -> BackdropStore:
+    """A handle that can reach ``backdrop.json`` and nothing else — the same
+    one-file confinement the scene ledger has, so a backdrop call can never write
+    panels, chronicle, or facts."""
+    return BackdropStore(_DATA, run_id)
+
+
+def _backdrop_turn(run_id: str) -> int:
+    """The page a backdrop being set/cleared belongs to — the turn the narrator is
+    writing. That is the in-flight (pending) turn when one is being written, else the
+    latest committed turn. Binding by this turn is what lets re-reading a page
+    restore the scene it had. Best-effort: falls back to 0 if the store is
+    unavailable, so setting a backdrop never fails over turn bookkeeping."""
+    try:
+        store = _store()
+        committed = int((store.read_state(run_id) or {}).get("turn") or 0)
+        pending = store.read_pending(run_id) or {}
+        pend_turn = int(pending.get("turn") or 0)
+        return pend_turn if pend_turn > committed else committed
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _clean_choices(choices: list[Any]) -> list[Any]:
+    """Validate any narrator-designed choice ``art`` (a small SVG shown behind the
+    button) exactly as a backdrop is validated, and DROP art that fails rather than
+    refusing the turn — a fateful choice losing its art still narrates a real month,
+    and its label and ``fateful`` flag are untouched. Non-dict entries pass through.
+    """
+    out: list[Any] = []
+    for c in choices:
+        if not isinstance(c, dict):
+            out.append(c)
+            continue
+        art = c.get("art")
+        if isinstance(art, str) and art.strip():
+            try:
+                c = {**c, "art": compile_backdrop(art)}
+            except BackdropError:
+                c = {k: v for k, v in c.items() if k != "art"}
+        out.append(c)
+    return out
+
+
 # ── handlers ─────────────────────────────────────────────────────────────
 
 
@@ -514,7 +674,109 @@ def _scene_ledger(run_id: str) -> SceneLedger:
 #: story — so a commit carries them forward instead of letting a full-state
 #: declaration drop them. Losing ``worldId`` this way made a life unreadable the
 #: moment its first turn landed: the play view could no longer find its world.
-RESERVED_STATE_KEYS = ("worldId", "style", "language", "opening", "status")
+RESERVED_STATE_KEYS = ("worldId", "style", "language", "opening", "status", "role", "granted", "milestones")
+
+
+def _apply_milestones(run_id: str, state: dict[str, Any], prev: dict[str, Any]) -> None:
+    """Record any milestones newly reached this turn into a reserved state key.
+
+    Achievements are permanent and app-owned: the achieved set is rebuilt from the
+    PRIOR committed state (not the narrator's declaration, which must not be able to
+    grant or revoke one), then any milestone whose `when` is now true is added and
+    never removed. Evaluated with the same interpreter as endings. Best-effort — a
+    world with no milestones, or a bad condition, simply records nothing."""
+    world_id = state.get("worldId")
+    if not isinstance(world_id, str) or not world_id:
+        return
+    worlds = _DATA / "worlds"
+    language = state.get("language")
+    path = worlds / f"{world_id}.md"
+    if isinstance(language, str) and language:
+        variant = worlds / f"{world_id}.{language}.md"
+        if variant.is_file():
+            path = variant
+    if not path.is_file():
+        return
+    milestones = read_world(path.read_text(encoding="utf-8")).template.milestones
+    if not milestones:
+        return
+    achieved = [m for m in (prev.get("milestones") or []) if isinstance(m, str)]
+    have = set(achieved)
+    for m in milestones:
+        if m.id in have:
+            continue
+        try:
+            if m.when.evaluate(state):
+                achieved.append(m.id)
+                have.add(m.id)
+        except Exception:  # noqa: BLE001
+            pass
+    state["milestones"] = achieved
+
+
+def _apply_systems(
+    run_id: str, state: dict[str, Any], prev: dict[str, Any], gains: list[Any]
+) -> None:
+    """Apply the world's declared systems at commit, writing derived state the
+    narrator may read but not own. Reads base values from the PRIOR committed state
+    so a value is the app's regardless of what the narrator declared. Best-effort — a
+    world with no systems does nothing, and a bad system never blocks the turn."""
+    world_id = state.get("worldId")
+    if not isinstance(world_id, str) or not world_id:
+        return
+    worlds = _DATA / "worlds"
+    language = state.get("language")
+    path = worlds / f"{world_id}.md"
+    if isinstance(language, str) and language:
+        variant = worlds / f"{world_id}.{language}.md"
+        if variant.is_file():
+            path = variant
+    if not path.is_file():
+        return
+    template = read_world(path.read_text(encoding="utf-8")).template
+    if template.systems:
+        apply_systems(template, state, prev, gains)
+
+
+def _resolve_handoff(template: Any) -> dict[str, Any]:
+    """What the world hands the narrator at the opening (`handToAgent`): the named
+    lore / systems / roles, resolved to payloads. `<kind>.*` takes all of a kind. A
+    ref that resolves to nothing simply contributes nothing — never an error."""
+    refs = getattr(template, "hand_to_agent", None) or []
+    if not refs:
+        return {}
+    stars: set[str] = set()
+    want: dict[str, set[str]] = {"lore": set(), "systems": set(), "roles": set()}
+    for r in refs:
+        kind, _, ident = str(r).partition(".")
+        if ident == "*":
+            stars.add(kind)
+        elif kind in want:
+            want[kind].add(ident)
+
+    def picked(kind: str, ident: str) -> bool:
+        return kind in stars or ident in want[kind]
+
+    out: dict[str, Any] = {}
+    lore = [
+        {"id": e.id, "name": e.name or e.id, "summary": e.summary, "text": e.text}
+        for e in template.lore if picked("lore", e.id)
+    ]
+    systems = [
+        {"id": s.id, "kind": s.kind, "into": s.into}
+        for s in template.systems if picked("systems", s.id)
+    ]
+    roles = [
+        {"id": r.id, "name": r.name or r.id, "summary": r.summary, "grants": r.grants}
+        for r in template.roles if picked("roles", r.id)
+    ]
+    if lore:
+        out["lore"] = lore
+    if systems:
+        out["systems"] = systems
+    if roles:
+        out["roles"] = roles
+    return out
 
 
 def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
@@ -556,34 +818,35 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                 "detail": (
                     "Call endless_read_runtime for this run before committing a turn. "
                     "The prompt carries only the player's words; the state of this "
-                    "life reaches you no other way."
+                    "life reaches you no other way. Then resend the WHOLE call — "
+                    "prose, choices, state (and memory) — not just part of it."
                 ),
             }
 
-    # The world's memory, validated BEFORE anything commits (design §5.3): a
-    # memory block that fails refuses the WHOLE call — prose included — so there
-    # is never a turn whose story landed while its facts did not. The narrator
-    # may drop the block and resubmit; the turn then simply contributed no
-    # structured memory, and nothing is ever back-filled from prose.
+    # The world's memory is enrichment, not the story (like milestones and systems):
+    # a block that fails validation is DROPPED and the turn still commits, so a stray
+    # formatting slip (e.g. a space inside a CJK id) never costs the prose and choices
+    # the narrator already wrote. The failure is surfaced as a non-blocking warning so
+    # the narrator re-declares those facts in a later turn. Facts are never back-filled
+    # from prose, so a turn without the block simply records no structured memory.
     memory = args.get("memory")
+    memory_warning: "dict[str, Any] | None" = None
     if memory is not None:
         index = memory_graph.build_index(store.read_chronicle(run_id))
         try:
             memory_graph.validate_memory(memory, index, turn=turn)
         except memory_graph.MemoryRejected as exc:
-            return {
-                "committed": False,
-                "turn": committed,
-                "reason": "memory-rejected",
+            memory_warning = {
+                "panel": "memory",
                 "field": exc.field,
                 "expected": exc.expected,
                 "detail": (
-                    "Nothing was committed. Fix the named field and resend the "
-                    "whole call, or resend it without `memory` — facts are never "
-                    "taken from prose, so a turn without the block simply "
-                    "records no structured memory."
+                    f"The memory block was DROPPED (not recorded) because {exc.field} "
+                    "was invalid; the turn committed without it. Re-declare those "
+                    "facts in a later turn's `memory` block."
                 ),
             }
+            memory = None
 
     state = dict(args["state"])
     # The declaration is the story's whole state, so it REPLACES the previous one
@@ -594,6 +857,56 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         if key in current and key not in state:
             state[key] = current[key]
     state["turn"] = turn
+    # Record milestones reached this turn (permanent, app-owned) before committing.
+    try:
+        _apply_milestones(run_id, state, current)
+    except Exception:  # noqa: BLE001
+        pass  # an achievement is a reward, never a reason to block a committed turn
+    # Then the world's systems: mechanics the backend runs off this turn's gains and
+    # the prior state, writing derived keys (xp/level, resources, unlocks) the
+    # narrator declared but does not own.
+    try:
+        _apply_systems(run_id, state, current, args.get("gains") or [])
+    except Exception:  # noqa: BLE001
+        pass  # a system is enrichment; a bad one never blocks a committed turn
+
+    # Load the world pack once (reused for the choices gate and the panel warnings).
+    pack = None
+    _wid = state.get("worldId")
+    if isinstance(_wid, str) and _wid:
+        try:
+            _worlds = _DATA / "worlds"
+            _lang = state.get("language")
+            _path = _worlds / f"{_wid}.md"
+            if isinstance(_lang, str) and _lang and (_worlds / f"{_wid}.{_lang}.md").is_file():
+                _path = _worlds / f"{_wid}.{_lang}.md"
+            if _path.is_file():
+                pack = read_world(_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            pack = None
+
+    # A living turn MUST offer choices; only a terminal turn may omit them. Refuse a
+    # choiceless non-ending turn BEFORE anything commits, so the player is never handed
+    # a page with no action. Terminal = the narrator passes `ending: true`, or the
+    # committed state fires a declared world ending. Gated on a loadable pack: a
+    # synthetic turn with no world cannot be judged for endings and is left alone.
+    choices = _clean_choices(args.get("choices") or [])
+    if not choices and pack is not None:
+        fired = any(
+            e.when is not None and e.when.evaluate(state) for e in pack.template.endings
+        )
+        if args.get("ending") is not True and not fired:
+            return {
+                "committed": False,
+                "turn": committed,
+                "reason": "choices-required",
+                "detail": (
+                    "This turn has no `choices`, so the player would have nothing to "
+                    "do. Resend the WHOLE call with `choices`. If the life or world "
+                    "has ended, pass `ending: true` (or declare state that fires a "
+                    "world ending) — only a terminal turn may omit choices."
+                ),
+            }
     store.commit_state(run_id, state)
     # What the player asked for, recovered from the in-flight record the app wrote
     # before speaking. The narrator is told the intent in prose and never echoes it
@@ -606,7 +919,7 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         "turn": turn,
         "prose": args["prose"],
         "action": action,
-        "choices": args.get("choices") or [],
+        "choices": choices,
         # What this turn marked notable, and what it credited a gain to. Both
         # are how the anti-halo readings become measurable; `source` is
         # deliberately NOT required — a narrator that forgot to say where five
@@ -622,37 +935,29 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         entry["memory"] = memory
     store.append_turn(run_id, entry)
     result: dict[str, Any] = {"committed": True, "turn": turn}
-    # Non-blocking correction. The turn is committed either way — a live month is
-    # never held hostage to a schema quibble — but if the narrator declared state
-    # yet an always-on panel still resolved to entirely blank, it almost certainly
-    # keyed the fields by a renamed name or a label the panel does not read. Tell
-    # it, with the exact ids, so it self-corrects next turn instead of drawing the
-    # status into the prose (which is where the broken frames came from).
+    # Non-blocking corrections: a dropped memory block, and an always-on panel that
+    # resolved blank (renamed field ids). The turn is committed either way. (A
+    # choiceless non-ending turn is refused ABOVE, before commit, not warned here.)
+    warnings: list[dict[str, Any]] = []
+    if memory_warning is not None:
+        warnings.append(memory_warning)
     declared = any(k not in RESERVED_STATE_KEYS and k != "turn" for k in state)
-    world_id = state.get("worldId")
-    if declared and isinstance(world_id, str) and world_id:
+    if pack is not None and declared:
         try:
-            worlds = _DATA / "worlds"
-            language = state.get("language")
-            path = worlds / f"{world_id}.md"
-            if isinstance(language, str) and language:
-                variant = worlds / f"{world_id}.{language}.md"
-                if variant.is_file():
-                    path = variant
-            if path.is_file():
-                pack = read_world(path.read_text(encoding="utf-8"))
-                empties = always_panels_empty(pack.template, state)
-                if empties:
-                    result["warnings"] = empties
-                    result["hint"] = (
-                        "A panel below came out blank even though you declared state. "
-                        "Declare each field by the exact id shown in `declareById`, "
-                        "inside the `state` you pass here (at the top level, or nested "
-                        "under `state.<panel>`) — a value under a renamed key or a "
-                        "label does not reach the panel and shows as empty."
-                    )
+            empties = always_panels_empty(pack.template, state)
+            if empties:
+                warnings.extend(empties)
+                result["hint"] = (
+                    "A panel below came out blank even though you declared state. "
+                    "Declare each field by the exact id shown in `declareById`, "
+                    "inside the `state` you pass here (at the top level, or nested "
+                    "under `state.<panel>`) — a value under a renamed key or a "
+                    "label does not reach the panel and shows as empty."
+                )
         except Exception:  # noqa: BLE001
             pass  # a warning is a nicety; never let it disturb a committed turn
+    if warnings:
+        result["warnings"] = warnings
     return result
 
 
@@ -699,6 +1004,53 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
         "fingerprint": fingerprint,
         "scenes": _scene_ledger(run_id).mounted(),
     }
+
+    # Lorebook — keyword-triggered setting, complementing the state-gated chapters.
+    # The world's reserve of background, surfaced only when a name/place/force it
+    # names shows up in the recent months or the player's action this turn (matched
+    # case-insensitively as substrings); `always` entries surface every turn. This
+    # is the lighter, ST-lorebook-style companion to chapters: chapters gate on
+    # STATE, lore on KEYWORDS.
+    try:
+        world_id = state.get("worldId")
+        if isinstance(world_id, str) and world_id:
+            worlds = _DATA / "worlds"
+            language = state.get("language")
+            lore_path = worlds / f"{world_id}.md"
+            if isinstance(language, str) and language:
+                variant = worlds / f"{world_id}.{language}.md"
+                if variant.is_file():
+                    lore_path = variant
+            if lore_path.is_file():
+                entries = read_world(lore_path.read_text(encoding="utf-8")).template.lore
+                if entries:
+                    pending = store.read_pending(run_id) or {}
+                    hay = (
+                        str(pending.get("action") or "")
+                        + "\n"
+                        + "\n".join(str(e.get("prose") or "") for e in lived[-recent:])
+                    ).lower()
+                    matched = [
+                        {
+                            "id": e.id,
+                            **({"name": e.name} if e.name else {}),
+                            **({"summary": e.summary} if e.summary else {}),
+                            "text": e.text,
+                        }
+                        for e in entries
+                        if e.always or any(k.lower() in hay for k in e.keys)
+                    ]
+                    if matched:
+                        out["lore"] = matched
+                        out["loreNote"] = (
+                            "Setting this world keeps in reserve, surfaced because it is "
+                            "relevant now — a name, place, or force mentioned in the recent "
+                            "months or in the player's action. Treat it as authoritative "
+                            "background and weave in only what this moment needs; never dump "
+                            "it wholesale."
+                        )
+    except Exception:  # noqa: BLE001
+        pass  # lore is an enrichment; a failure here must never break a runtime read
 
     # The world's memory, recalled — never pushed whole (design §7.1). The
     # system offers a handful of old events scored by deterministic rules; the
@@ -843,6 +1195,19 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                         entry["value"] = str(val)
                     opening_out.append(entry)
                 out["opening"] = opening_out
+                # What the world hands the narrator at the opening: the lore/systems/
+                # roles it named in `handToAgent`. Turn 1 has no prior prose for
+                # keyword injection to match, so this is how the opening's setting and
+                # mechanics reach the narrator; a chosen role's grants seed the state.
+                handoff = _resolve_handoff(pack.template)
+                if handoff:
+                    out["handToAgent"] = handoff
+                    out["handToAgentNote"] = (
+                        "What this world hands you to open with — its key setting, the "
+                        "systems the app runs for you, and the starting archetypes. Weave "
+                        "the setting in as it becomes relevant; if the player took a role, "
+                        "honour its grants in the state you declare."
+                    )
             else:
                 newly = opened_since(pack.template, baseline, state)
                 if newly:
@@ -879,7 +1244,13 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
 
 def _mount_scene(args: dict[str, Any]) -> dict[str, Any]:
     ledger = _scene_ledger(args["runId"])
-    ledger.mount(args["sceneId"], args["spec"], asks=bool(args.get("asks")))
+    ledger.mount(
+        args["sceneId"],
+        args["spec"],
+        asks=bool(args.get("asks")),
+        region=str(args.get("region") or ""),
+        label=str(args.get("label") or ""),
+    )
     # The nonce is NOT returned to the narrator: it is the page's proof that a
     # click came from the frame currently on screen, and a narrator holding it
     # could forge an answer to its own question.
@@ -913,7 +1284,18 @@ def _dismiss_scene(args: dict[str, Any]) -> dict[str, Any]:
     return {"dismissed": args["sceneId"]}
 
 
-def _make_pack(args: dict[str, Any]) -> dict[str, Any]:
+def _set_backdrop(args: dict[str, Any]) -> dict[str, Any]:
+    turn = _backdrop_turn(args["runId"])
+    version = _backdrop_store(args["runId"]).set(args["markup"], args.get("buttons"), turn)
+    return {"backdrop": "set", "version": version, "turn": turn}
+
+
+def _clear_backdrop(args: dict[str, Any]) -> dict[str, Any]:
+    _backdrop_store(args["runId"]).clear(_backdrop_turn(args["runId"]))
+    return {"backdrop": "cleared"}
+
+
+def _export_world(args: dict[str, Any]) -> dict[str, Any]:
     world_id = args["worldId"]
     if not world_id or "/" in world_id or "\\" in world_id or world_id.startswith("."):
         raise ToolInputError("arguments.worldId", "a world id, not a path")
@@ -921,14 +1303,66 @@ def _make_pack(args: dict[str, Any]) -> dict[str, Any]:
     if not path.is_file():
         raise WorldError(f"no such world: {world_id}")
 
-    pack = read_world(path.read_text(encoding="utf-8"))
+    world = read_world(path.read_text(encoding="utf-8"))
     out_dir = _DATA / "exports"
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{world_id}.md"
     tmp = target.with_suffix(".md.tmp")
-    tmp.write_text(serialize_world(pack), encoding="utf-8")
+    tmp.write_text(serialize_world(world), encoding="utf-8")
     os.replace(tmp, target)
     return {"worldId": world_id, "path": str(target), "bytes": target.stat().st_size}
+
+
+def _read_draft(args: dict[str, Any]) -> dict[str, Any]:
+    """Hand the worldsmith the pasted text AND the authoritative spec to follow.
+
+    The brief is assembled from ``compile.py`` (COMPILER_BRIEF for structure +
+    CLEANING_CONTRACT for playability), never duplicated into the agent prompt, so
+    the one place the header spec lives is the same one the gate enforces.
+    """
+    draft_id = args["draftId"]
+    store = _drafts()
+    raw = store.read_raw(draft_id)
+    store.note_step(draft_id, "endless_read_draft", stage="reading")
+    return {"rawText": raw, "brief": f"{COMPILER_BRIEF}\n\n{CLEANING_CONTRACT}"}
+
+
+def _submit_world_draft(args: dict[str, Any]) -> dict[str, Any]:
+    """Validate the worldsmith's compiled world and store it for review.
+
+    The header is checked by ``accept_compiled_header`` — the SAME gate a
+    hand-written world goes through — so an unplayable structure (a bad primitive,
+    a panel with no `always`, an illegal `when`) is refused here rather than at
+    play time. A refusal is stored as the draft's problem, not raised, so the
+    review page can say what could not be worked out.
+    """
+    draft_id = args["draftId"]
+    prose = args["prose"]
+    header = args["header"]
+    dropped = [d for d in (args.get("dropped") or []) if isinstance(d, str)]
+    store = _drafts()
+    store.note_step(draft_id, "endless_submit_world_draft", stage="writing")
+
+    result = accept_compiled_header(prose, header)
+    if not result.ok or result.pack is None or result.world_text is None:
+        store.store_failed(
+            draft_id,
+            result.problem or "the world could not be compiled",
+            field=result.field or "",
+        )
+        return {"stored": True, "accepted": False, "problem": result.problem, "field": result.field}
+
+    world_id = result.pack.template.id
+    store.store_ready(
+        draft_id,
+        world_text=result.world_text,
+        world_id=world_id,
+        preview=preview(result.pack),
+        warnings=result.warnings,
+        referenced_paths=result.referenced_paths,
+        dropped=dropped,
+    )
+    return {"stored": True, "accepted": True, "worldId": world_id, "warnings": result.warnings}
 
 
 _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
@@ -938,7 +1372,11 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_update_scene": _update_scene,
     "endless_await_scene": _await_scene,
     "endless_dismiss_scene": _dismiss_scene,
-    "endless_make_pack": _make_pack,
+    "endless_set_backdrop": _set_backdrop,
+    "endless_clear_backdrop": _clear_backdrop,
+    "endless_export_world": _export_world,
+    "endless_read_draft": _read_draft,
+    "endless_submit_world_draft": _submit_world_draft,
 }
 
 
@@ -957,6 +1395,23 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
     field is something it can fix on the next attempt.
     """
     try:
+        # Memory is enrichment, never a reason to fail a turn — even at the schema
+        # layer. A narrator that double-encodes the block sends `memory` as a JSON
+        # STRING; recover it to an object. A string that is not a JSON object is
+        # dropped so the turn still commits (the handler then records no structured
+        # memory), rather than the whole call being refused on a type mismatch.
+        if name == "endless_advance_turn" and isinstance(args.get("memory"), str):
+            raw = args["memory"].strip()
+            parsed: Any = None
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                except Exception:  # noqa: BLE001
+                    parsed = None
+            if isinstance(parsed, dict):
+                args["memory"] = parsed
+            else:
+                args.pop("memory", None)
         _validate(name, args)
     except ToolInputError as exc:
         return json.dumps(
@@ -986,7 +1441,7 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
             {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False},
             ensure_ascii=False,
         )
-    except (StoreError, WorldError, SceneLedgerError) as exc:
+    except (StoreError, WorldError, SceneLedgerError, BackdropError, DraftError) as exc:
         return json.dumps(
             {"ok": False, "error": str(exc), "applied": False}, ensure_ascii=False
         )

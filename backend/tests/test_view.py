@@ -18,7 +18,7 @@ from template import FIELD_PRIMITIVES  # noqa: E402
 from view import build_play_view, strip_terminal_framing  # noqa: E402
 from world import read_world  # noqa: E402
 
-FLAGSHIP = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 
 @pytest.fixture(scope="module")

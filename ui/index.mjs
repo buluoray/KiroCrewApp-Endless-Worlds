@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+import { createPortal } from "react-dom";
 //#region src/api.ts
 /** The app's HTTP surface, and the shapes it answers with.
 *
@@ -9,14 +10,27 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 */
 var API = "/api/apps/endless-worlds";
 /**
-* A failed request, with the server's own answer kept.
+* Fold a `/api/models` payload into the picker's `{ id, name }` rows.
 *
-* The previous helper threw `new Error('HTTP 409')` and dropped the body, which is
-* fine while every failure is just "it did not work". Deletion is not: its 409s
-* carry the reason (the lives changed under you / a month is being written) and the
-* refreshed facts the dialog has to re-render. A code the UI cannot read is a
-* message the player never gets.
+* Tolerates both a bare array and a `{ models: [...] }` wrapper, and both the
+* `model_id` / `model_name` keys kiro-cli's `--list-models` emits and a plain
+* `id` / `name` — reading the kiro-cli keys FIRST. A row filtering out on a
+* missing `id` is what once left the picker showing only "Default (auto)".
+*
+* Exported so it can fold the response whether it arrives via the App SDK client
+* (`useAppApi().get`) or the bare-fetch fallback below.
 */
+function normalizeModels(raw) {
+	return (Array.isArray(raw) ? raw : Array.isArray(raw?.models) ? raw.models : []).map((m) => {
+		if (typeof m === "string") return { id: m };
+		const o = m;
+		const id = o.model_id || o.model_name || o.id || "";
+		return {
+			id,
+			name: o.model_name || o.name || id
+		};
+	}).filter((m) => m && typeof m.id === "string" && m.id);
+}
 var ApiError = class extends Error {
 	status;
 	body;
@@ -64,15 +78,18 @@ var api = {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body)
 	}),
-	/** The gateway's advertised model list (same-origin dashboard endpoint, not the
-	*  app base). Returns [] rather than throwing when the list is unavailable
-	*  (signed out / gateway restart), so the picker degrades to "keep default". */
+	/** The gateway's advertised model list. `/api/models` is a CORE dashboard
+	*  route (not under the app base), so the app's path-scoped session cookie does
+	*  NOT authorize it — the App SDK client (`useAppApi().get`) is the authorized
+	*  path (it injects an app token and gates on the declared `permissions.api`).
+	*  This bare-fetch helper is the fallback for a host too old to expose the SDK;
+	*  it returns [] rather than throwing when the list is unavailable, so the
+	*  picker degrades to "keep default". */
 	models: async () => {
 		try {
 			const res = await fetch("/api/models");
 			if (!res.ok) return [];
-			const raw = await res.json();
-			return (Array.isArray(raw) ? raw : []).map((m) => typeof m === "string" ? { id: m } : m).filter((m) => m && typeof m.id === "string" && m.id);
+			return normalizeModels(await res.json());
 		} catch {
 			return [];
 		}
@@ -104,6 +121,16 @@ var api = {
 	*  story. Pass `label: ""` to clear a custom name. */
 	setLifeMeta: (runId, body) => post(`/runs/${encodeURIComponent(runId)}/meta`, body),
 	restoreWorld: (id) => post(`/worlds/${encodeURIComponent(id)}/restore`, {}),
+	worldDrafts: () => json("/world-drafts"),
+	worldDraft: (id) => json(`/world-drafts/${encodeURIComponent(id)}`),
+	createWorldDraft: (text, title = "") => post("/world-drafts", {
+		text,
+		title
+	}),
+	compileWorldDraft: (id) => post(`/world-drafts/${encodeURIComponent(id)}/compile`, {}),
+	/** Optional `title` renames the world's display title before installing it. */
+	installWorldDraft: (id, title = "") => post(`/world-drafts/${encodeURIComponent(id)}/install`, title ? { title } : {}),
+	discardWorldDraft: (id) => send("DELETE", `/world-drafts/${encodeURIComponent(id)}`),
 	runs: () => json("/runs"),
 	run: (id) => json(`/runs/${encodeURIComponent(id)}`),
 	/** The months already lived. `before` is a turn NUMBER, not an offset: an offset
@@ -127,6 +154,14 @@ var api = {
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		return res.text();
 	},
+	/** The compiled background HTML for a life, as text for a sandbox frame's
+	*  srcdoc. Throws on any non-2xx (incl. 404 = no backdrop) so the caller
+	*  simply shows no background. */
+	backdrop: async (runId) => {
+		const res = await fetch(`${API}/runs/${encodeURIComponent(runId)}/backdrop`);
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		return res.text();
+	},
 	answerScene: (runId, sceneId, body) => post(`/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}/answer`, body),
 	/** The sparse graph all three star-map lenses share — one request per open. */
 	star: (runId) => json(`/runs/${encodeURIComponent(runId)}/memory/star`),
@@ -147,7 +182,53 @@ var api = {
 var TABLES$1 = {
 	zh: {
 		"app.title": "无限世界",
+		"app.tagline": "走进 AI 创造的世界，经历独一无二的一生。",
 		"app.language": "界面语言",
+		"create.title": "创建一个世界",
+		"create.subtitle": "粘贴设定 / 规则书，或只写一个点子（一本小说、一句 premise），它会研究并整理成可玩的世界",
+		"create.heading": "粘贴设定，或只写一个点子",
+		"create.placeholder": "粘贴任何文字，或只写一个点子：\n· 一份世界观设定 / 规则书\n· 一本小说、电影、游戏的名字\n· 一句脑洞或 premise\n它会（必要时上网研究）把它变成一个可以开始人生的世界，去掉不适合游玩的部分，再给你过目。",
+		"create.hint": "不用担心格式或长短。哪怕只有一句话或一个作品名，它也会研究并扩写成完整世界；要自己画的界面、纯数值计算等本框架玩不了的内容会被丢掉。",
+		"create.submit": "开始整理 →",
+		"create.submitting": "整理中…",
+		"create.cancel": "取消",
+		"create.count": "{n} 字",
+		"create.failed": "没能开始整理，请重试",
+		"worldDraft.generating": "正在整理你的世界…",
+		"worldDraft.reading": "读取设定",
+		"worldDraft.writing": "整理结构",
+		"worldDraft.steps": "已处理 {n} 步",
+		"worldDraft.ready": "整理好了 · 点按过目",
+		"worldDraft.readyChip": "待过目",
+		"worldDraft.failed": "没能整理成世界",
+		"worldDraft.untitled": "未命名的世界",
+		"worldDraft.discard": "放弃",
+		"worldDraft.discardAria": "放弃草稿 {title}",
+		"review.heading": "整理好了 · 过目",
+		"review.titleLabel": "世界名（可改）",
+		"review.promise": "承诺",
+		"review.clock": "时钟",
+		"review.styles": "风格",
+		"review.opening": "开场",
+		"review.endings": "结局",
+		"review.endingsN": "{n} 种结局",
+		"review.dropped": "已整理 / 丢弃",
+		"review.warnings": "提示",
+		"review.jump": "想改设定？在对话里继续调整 →",
+		"review.jumpHint": "在 KiroCrew 对话侧栏找到「世界工匠」会话，直接告诉它要改什么；改完回到这里刷新即可。",
+		"review.jumpMessage": "我想继续调整世界草稿「{title}」（草稿号 {id}）。请先读取它，我想改的是：",
+		"review.accept": "接受并加入书架",
+		"review.installing": "正在加入…",
+		"review.discard": "放弃",
+		"review.retry": "再试一次",
+		"review.back": "返回",
+		"review.leave": "先离开（稍后回来看）",
+		"review.stillWorking": "还在整理这个世界，可以先离开，稍后回来。",
+		"review.gone": "这个草稿不见了。",
+		"review.installFailed": "没能加入书架，请重试或调整后再试。",
+		"review.discardFailed": "没能放弃，请重试。",
+		"review.failedGeneric": "这段文字没能整理成一个可玩的世界。",
+		"review.failedHint": "可以去对话里告诉「世界工匠」怎么改，或放弃重来。",
 		"settings.open": "设置",
 		"settings.title": "叙事者设置",
 		"settings.close": "关闭",
@@ -157,9 +238,9 @@ var TABLES$1 = {
 		"settings.effortDefault": "默认",
 		"settings.save": "保存",
 		"settings.saved": "已保存",
-		"settings.note": "在每条人生的下一回合生效（包括进行中的那条）。",
+		"settings.note": "从每条人生的下一回合起生效，包括正在进行的那一条。",
 		"delete.cancel": "不删了",
-		"delete.changed": "这次没有删掉：这个世界里的人生数目变了。请重新看一遍再决定。",
+		"delete.changed": "这次没有删掉：这个世界里的人生条数变了。请再确认一遍。",
 		"delete.counting": "正在数这个世界里有几条人生…",
 		"delete.done": "世界已删除。",
 		"delete.doneRestorable": "以后还能把它装回书架。",
@@ -169,7 +250,7 @@ var TABLES$1 = {
 		"delete.goNoLives": "删除这个世界",
 		"delete.inFlight": "这次没有删掉：这个世界还有一个回合没写完。等写完再试一次。",
 		"delete.noLives": "这个世界里还没有人活过。删掉它，书架上就没有它了。",
-		"delete.restorable": "这个世界是应用自带的，删掉之后还能装回来——但装回来的是出厂的样子，你改过的地方回不来，已经消失的人生也不会回来。",
+		"delete.restorable": "这个世界是应用自带的，删掉之后还能装回来——但装回来的是最初的样子：你改过的地方和被删掉的人生都不会回来。",
 		"delete.title": "删除「{world}」？",
 		"delete.typeToConfirm": "继续之前，请把世界的名字打一遍：{world}",
 		"delete.withLives": "这个世界里有 {n} 条人生。删掉它，这些人生连同它们已经写下的一切一起消失。",
@@ -181,7 +262,7 @@ var TABLES$1 = {
 		"history.eventsOnly": "只看大事",
 		"history.jump": "跳转",
 		"history.jumpPlaceholder": "跳到第几回合",
-		"history.noEvents": "这条人生还没有标记出大事。",
+		"history.noEvents": "这条人生还没有留下大事。",
 		"history.noMatches": "没有找到包含「{q}」的回合。",
 		"history.none": "还没有什么可回顾的——这才是第一个回合。",
 		"history.open": "往回读这条人生",
@@ -193,31 +274,31 @@ var TABLES$1 = {
 		"history.summaryTitle": "这一生的大事",
 		"history.unreadable": "这条人生的过往读不出来。",
 		"history.via": "（来自 {source}）",
-		"library.backendHint": "{path} → {error}。404 说明后端模块没有加载，需要把模块停用再启用一次。",
+		"library.backendHint": "书架暂时打不开：{error}。如果错误码是 404，请停用后重新启用这个应用。请求地址：{path}",
 		"library.backendSilent": "后端还没有响应。",
 		"library.empty": "书架还是空的。第一个世界，正等你推门。",
 		"library.lives": "你正在过的人生",
-		"library.newerSeed": "「{world}」有更新的版本（{installed} → {available}）。你手上这份不变。",
+		"library.newerSeed": "「{world}」有了新版本（{installed} → {available}）。你手上的版本不会改变。",
 		"library.otherWorlds": "别的世界",
 		"library.preparing": "书架正在打开…",
-		"library.removed": "「{world}」已被你移除。",
+		"library.removed": "「{world}」已从书架移除。",
 		"library.restore": "装回书架",
 		"library.retry": "重试",
 		"life.archive": "归档",
 		"life.delete.aria": "删除人生：{name}",
-		"life.delete.changed": "这条人生在别处又往前走了一个回合，回合数变了。请重新看一遍再决定。",
+		"life.delete.changed": "这条人生的回合数刚刚变了。请再确认一遍。",
 		"life.delete.done": "人生已删除（活了 {n} 个回合）。",
 		"life.delete.doneUnborn": "那条还没出生的人生已删除。",
 		"life.delete.forever": "它的世界会留下，别的人生也不受影响。但这条人生再也找不回来——它的编年史只有这一份，没有别的副本。",
-		"life.delete.go": "结束这条人生",
+		"life.delete.go": "删除这条人生",
 		"life.delete.inFlight": "这次没有删掉：这条人生还有一个回合没写完。等写完再试一次。",
-		"life.delete.months": "「{name}」已经活了 {n} 个回合。删掉它，这些回合写下的一切都会消失。",
+		"life.delete.months": "「{name}」已经活了 {n} 个回合。删掉它，这些回合里写下的一切都会消失。",
 		"life.delete.reading": "正在看这条人生走到了哪一页…",
 		"life.delete.short": "删除",
 		"life.actions": "{name} 的操作",
-		"life.delete.title": "结束这条人生？",
+		"life.delete.title": "删除这条人生？",
 		"life.delete.typeToConfirm": "继续之前，请把这条人生的名字打一遍：{name}",
-		"life.delete.unborn": "「{name}」还没有出生。删掉它，你留下的开局设定也一起没有。",
+		"life.delete.unborn": "「{name}」还没有出生。删掉它，你留下的开局设定也会一起消失。",
 		"life.delete.unreadable": "这条人生已经读不出来了。它打不开，所以只能从这里删掉。",
 		"life.ended": "已落幕",
 		"life.generating": "这一页正在写…",
@@ -229,32 +310,34 @@ var TABLES$1 = {
 		"life.turn": "第 {turn} 回合",
 		"life.unarchive": "取消归档",
 		"life.unborn": "序章还没开始",
-		"life.unreadable": "这一世读不出来了",
+		"life.unreadable": "这条人生读不出来了",
 		"life.waiting": "等你继续",
 		"note.dismiss": "知道了",
 		"opening.arranging": "这一世的序章正在展开。",
 		"opening.backToShelf": "回到书架",
 		"opening.begin": "开始这一世",
 		"opening.beginning": "正在翻开序章…",
-		"opening.continueBirth": "接着出生",
+		"opening.continueBirth": "继续序章",
 		"opening.custom": "自定义…",
-		"opening.customPlaceholder": "写下你自己的",
+		"opening.customPlaceholder": "写下你自己的答案",
 		"opening.hintPick": "挑一个，或者留空让世界替你决定。",
 		"opening.hintText": "留空则由世界决定。",
 		"opening.keptSafe": "你选的一切都还在。",
 		"opening.next": "下一页",
-		"opening.notStarted": "序章还没有开始。你留下的选择都好好收着。",
+		"opening.notStarted": "序章还没有开始。你留下的选择都替你收好了。",
 		"opening.page": "第 {page} / {pages} 页",
 		"opening.prev": "上一页",
 		"opening.reset": "全部重置",
 		"opening.restored": "已恢复你上次的选择。",
 		"opening.retry": "再试一次",
 		"opening.rollAll": "全部随机",
+		"opening.roleHint": "选一个开局原型(可选);它会预填一部分开局,你仍可修改。",
+		"opening.roleLabel": "开局原型",
 		"opening.rollPage": "本页随机",
 		"opening.rollOne": "随机 {label}",
 		"opening.sealed": "这一项由世界定下，不由你选。等你出生时才会知道。",
 		"opening.silent": "这一世没能开始。",
-		"opening.styleHint": "决定这个世界会怎样对待你。",
+		"opening.styleHint": "会影响这个世界怎样对待你。",
 		"opening.styleLabel": "这一世怎么讲给你听",
 		"opening.summaryTitle": "这一世的样子",
 		"opening.summaryWorld": "交给世界决定",
@@ -276,14 +359,14 @@ var TABLES$1 = {
 		"opening.waiting.15": "一切都在成为过去，而你即将从此刻开始…",
 		"play.act": "去做",
 		"play.acting": "…",
-		"play.actionPlaceholder": "或者，做点别的。",
+		"play.actionPlaceholder": "或者，写下别的做法…",
 		"play.back": "← 回到书架",
 		"play.birthRevealHint": "这不是你的选择，却会成为这条人生的一部分。",
 		"play.birthRevealTitle": "出生时，世界替你决定了",
 		"play.confirmAct": "按你写的去做？",
-		"play.confirmAsk": "就这么做？",
+		"play.confirmAsk": "确定要这么做吗？",
 		"play.confirmNo": "再想想",
-		"play.confirmYes": "就这么做",
+		"play.confirmYes": "确定",
 		"play.drawerClose": "收起",
 		"play.drawerOpen": "看看这一刻的自己",
 		"play.endedBadge": "这一生落幕了。",
@@ -291,34 +374,35 @@ var TABLES$1 = {
 		"play.endedReplay": "在这个世界再活一次",
 		"play.endedReplaySame": "以同样的开局再活一次",
 		"play.endedShelf": "回到书架",
-		"play.echoLine": "往事回响 · 这回应了第 {turn} 页发生的事",
+		"play.echoLine": "往事回响 · 回应的是第 {turn} 页发生的事",
 		"play.echoThen": "当时",
 		"play.echoYouDid": "你当时的选择",
 		"play.echoNow": "此刻",
 		"play.echoJump": "回到那一页",
-		"play.echoClose": "收起",
+		"play.echoClose": "收起回响",
 		"play.generating": "下一页正在落笔。放心离开，归来时故事还在这里。",
 		"play.nothingToShow": "这一刻还没有什么可看的——有些面板要等条件满足了才会出现。",
 		"play.opening": "正在翻到你留下的那一页…",
 		"play.retry": "再试一次",
 		"play.rumour": "传闻",
-		"play.rumourSuffix": " —— 只是听说",
+		"play.rumourSuffix": "——只是听说",
 		"play.sceneFailed": "这一幕没能画出来。",
 		"play.sceneLoading": "这一幕正在画…",
+		"play.sceneSending": "正在回应你的选择…",
 		"play.sceneTitle": "景象",
 		"play.silent": "（这一页还没有内容。）",
-		"play.stalled": "这一页没有写出来。你写的内容还留着，再试一次。",
+		"play.stalled": "这一页没写出来。你写的内容还留着，可以再试一次。",
 		"play.turn": "第 {turn} 回合",
 		"play.page": "第 {n} 页",
 		"play.prevTurn": "上一回合",
 		"play.recapDismiss": "先收起",
-		"play.recapLastChoice": "你上次选择：",
-		"play.recapNow": "眼前仍可走的方向",
+		"play.recapLastChoice": "你上次的选择：",
 		"play.recapRecent": "最近留下的痕迹",
 		"play.recapTitle": "回来时，这条人生正停在这里",
 		"play.nextTurn": "下一回合",
 		"play.unlocked": "新篇已启：{heading}",
-		"play.unlockedMeaning": "从现在起，与这一篇有关的人物、规则和后果，真正进入了这条人生。",
+		"play.milestone": "达成里程碑 · {label}",
+		"play.unlockedMeaning": "从现在起，与这一篇有关的人物、规则和后果，都可以进入这条人生。",
 		"play.waiting.0": "选择已定，后续正在推演…",
 		"play.waiting.1": "下一步正在暗处成形…",
 		"play.waiting.2": "后果正一层层铺开…",
@@ -335,46 +419,61 @@ var TABLES$1 = {
 		"play.waiting.13": "笔没有停，下一行却还藏在纸背…",
 		"play.waiting.14": "答案尚未显露，变化已经开始…",
 		"play.waiting.15": "故事正在收拢这一回的余音…",
-		"play.zoomIn": "展开",
-		"play.zoomOut": "收起",
+		"play.zoomIn": "全屏查看",
+		"play.zoomOut": "退出全屏",
 		"rail.broken": "另有 {n} 个世界读不出来",
+		"rail.close": "关闭",
 		"rail.label": "世界与人生",
-		"rail.shelf": "← 回到书架",
-		"rail.styles": "{n} 种风格",
+		"rail.open": "书架",
+		"rail.shelf": "← 书架",
+		"rail.styles": "{n} 种叙事风格",
+		"rail.width": "正文宽度",
+		"rail.width.fixed": "固定宽度",
+		"rail.width.fluid": "跟随窗口",
 		"rail.worlds": "世界",
 		"shelf.archived": "已归档（{n}）",
 		"shelf.continue": "接着过下去",
 		"shelf.ended": "已落幕的人生",
-		"shelf.pick": "从左边挑一条人生，或者开一个世界。",
+		"shelf.pick": "点左上角的「书架」挑一条人生，或者选一个世界开始新人生。",
 		"unit.day": "日",
 		"unit.month": "月",
 		"unit.season": "季",
+		"tab.label": "页面导航",
+		"tab.more": "更多",
+		"tab.pack": "背包",
+		"tab.reading": "书页",
+		"tab.starmap": "星图",
+		"tab.status": "状态",
+		"tab.system": "系统",
+		"tab.tasks": "任务",
+		"tab.world": "世界",
 		"unit.week": "周",
 		"unit.year": "年",
 		"world.back": "← 返回世界列表",
-		"world.cardEnter": "看看这一生会走向哪里",
+		"world.cardEnter": "看看这一生可能走向哪里",
 		"world.cardFallback": "一段尚未活过的人生，正等着你决定它的方向。",
 		"world.cardPossibilities": "在这里，你可能会",
 		"world.cardUntold": "这段人生还没有开始",
 		"world.delete": "删除这个世界",
 		"world.detailLineage": " · 可传承数代",
-		"world.detailMeta": "{turn} · {styles} 种模拟风格{lineage}",
-		"world.digest": "每回合的世界简报",
-		"world.endings": "{endings} 种结局条件 · 存档会记下 {save} 类内容",
+		"world.detailMeta": "{turn} · {styles} 种叙事风格{lineage}",
+		"world.digest": "世界每回合都在变化",
+		"world.endings": "{endings} 种结局条件 · 会记住 {save} 类经历",
+		"world.laws": "世界法则",
 		"world.lineage": "可传承数代",
-		"world.loreHide": "收起世界设定",
-		"world.loreShow": "读读这个世界的设定",
-		"world.languagePick": "用哪种语言游玩",
-		"world.needsNewerCore": "这个世界需要更新版本的应用（需要 {needed}，当前 {local}）。",
+		"world.languagePick": "这个世界用哪种语言讲述",
+		"world.needsNewerCore": "这个世界需要更高版本的应用（最低 {needed}，当前 {local}）。",
 		"world.opening": "开局会问你的事",
-		"world.worldDecidesHint": "标出来的项由世界决定，你选不了。",
+		"world.worldDecidesHint": "带标记的选项由世界决定，无法手动选择。",
 		"world.panelAlways": "始终显示",
 		"world.panelConditional": "满足条件才显示",
 		"world.panelFields": "{count} 项",
 		"world.panels": "你会看到的面板",
 		"world.play": "在这个世界活一次",
+		"world.roles": "开局原型",
+		"world.setting": "世界设定",
+		"world.settingOther": "其它",
 		"world.plays": "你在这里活过 {n} 次",
-		"world.stale": "设定有改动",
 		"world.summary": "{groups} 项开局设定 · {panels} 组面板 · {turn}",
 		"world.turnUnit": "以{unit}为一回合",
 		"world.unopenable": "这个世界打不开：{problem}",
@@ -382,7 +481,53 @@ var TABLES$1 = {
 	},
 	en: {
 		"app.title": "Endless Worlds",
+		"app.tagline": "Live a whole life — in a world written by AI, different every time.",
 		"app.language": "Interface language",
+		"create.title": "Create a world",
+		"create.subtitle": "Paste a setting or rulebook — or just an idea (a novel's name, a premise) — and it researches and shapes it into a playable world",
+		"create.heading": "Paste a setting, or just an idea",
+		"create.placeholder": "Paste anything, or just an idea:\n· a worldbuilding doc / rulebook\n· the name of a novel, film, or game\n· a one-line premise or prompt\nIt turns that into a world you can start a life in (researching it online when needed), dropping whatever can't be played, then shows you the result.",
+		"create.hint": "Don't worry about format or length. Even a single line or a title is enough — it researches and expands it into a full world; things this framework can't play (drawn interfaces, dice math) are dropped.",
+		"create.submit": "Shape it →",
+		"create.submitting": "Working…",
+		"create.cancel": "Cancel",
+		"create.count": "{n} chars",
+		"create.failed": "Couldn't start — try again",
+		"worldDraft.generating": "Shaping your world…",
+		"worldDraft.reading": "Reading the text",
+		"worldDraft.writing": "Working out the structure",
+		"worldDraft.steps": "{n} steps so far",
+		"worldDraft.ready": "Ready · tap to review",
+		"worldDraft.readyChip": "To review",
+		"worldDraft.failed": "Couldn't make a world",
+		"worldDraft.untitled": "Untitled world",
+		"worldDraft.discard": "Discard",
+		"worldDraft.discardAria": "Discard draft {title}",
+		"review.heading": "Ready to review",
+		"review.titleLabel": "World name (editable)",
+		"review.promise": "Promise",
+		"review.clock": "Clock",
+		"review.styles": "Styles",
+		"review.opening": "Opening",
+		"review.endings": "Endings",
+		"review.endingsN": "{n} endings",
+		"review.dropped": "Cleaned up / dropped",
+		"review.warnings": "Notes",
+		"review.jump": "Want changes? Keep adjusting in chat →",
+		"review.jumpHint": "Find the \"worldsmith\" session in the KiroCrew chat sidebar and tell it what to change; refresh here when it's done.",
+		"review.jumpMessage": "I'd like to keep adjusting the world draft \"{title}\" (draft {id}). Please read it first — here's what I want to change:",
+		"review.accept": "Accept & add to shelf",
+		"review.installing": "Adding…",
+		"review.discard": "Discard",
+		"review.retry": "Try again",
+		"review.back": "Back",
+		"review.leave": "Leave for now",
+		"review.stillWorking": "Still shaping this world — you can leave and come back.",
+		"review.gone": "This draft is gone.",
+		"review.installFailed": "Couldn't add it to the shelf — try again.",
+		"review.discardFailed": "Couldn't discard — try again.",
+		"review.failedGeneric": "This text couldn't be shaped into a playable world.",
+		"review.failedHint": "Tell the worldsmith how to change it in chat, or discard and start over.",
 		"settings.open": "Settings",
 		"settings.title": "Narrator settings",
 		"settings.close": "Close",
@@ -485,6 +630,8 @@ var TABLES$1 = {
 		"opening.restored": "Your last choices are back.",
 		"opening.retry": "Try again",
 		"opening.rollAll": "Roll everything",
+		"opening.roleHint": "Pick a starting archetype (optional) — it presets part of the opening, which you can still change.",
+		"opening.roleLabel": "Starting archetype",
 		"opening.rollPage": "Roll this page",
 		"opening.rollOne": "Roll {label}",
 		"opening.sealed": "The world decides this one, not you. You will find out when this life begins.",
@@ -540,6 +687,7 @@ var TABLES$1 = {
 		"play.rumourSuffix": " — only hearsay",
 		"play.sceneFailed": "This scene could not be drawn.",
 		"play.sceneLoading": "This scene is being drawn…",
+		"play.sceneSending": "Responding to your choice…",
 		"play.sceneTitle": "Scene",
 		"play.silent": "(There is nothing on this page yet.)",
 		"play.stalled": "This page did not come through. Your words are still here — try again.",
@@ -548,11 +696,11 @@ var TABLES$1 = {
 		"play.prevTurn": "Previous turn",
 		"play.recapDismiss": "Hide for now",
 		"play.recapLastChoice": "Last time, you chose:",
-		"play.recapNow": "Paths still open",
 		"play.recapRecent": "What the last turns left behind",
 		"play.recapTitle": "Where this life left off",
 		"play.nextTurn": "Next turn",
 		"play.unlocked": "A new chapter opens: {heading}",
+		"play.milestone": "Milestone reached · {label}",
 		"play.unlockedMeaning": "From now on, the people, rules, and consequences behind this chapter can enter this life.",
 		"play.waiting.0": "your choice is set; what follows is being worked out…",
 		"play.waiting.1": "the next step is taking shape out of sight…",
@@ -573,17 +721,31 @@ var TABLES$1 = {
 		"play.zoomIn": "Expand",
 		"play.zoomOut": "Collapse",
 		"rail.broken": "{n} more worlds could not be read",
+		"rail.close": "Close",
 		"rail.label": "Worlds and lives",
-		"rail.shelf": "← Back to the shelf",
+		"rail.open": "Shelf",
+		"rail.shelf": "← Home",
 		"rail.styles": "{n} styles",
+		"rail.width": "Text width",
+		"rail.width.fixed": "Fixed measure",
+		"rail.width.fluid": "Follow the window",
 		"rail.worlds": "Worlds",
 		"shelf.archived": "Archived ({n})",
 		"shelf.continue": "Carry on",
 		"shelf.ended": "Lives that have ended",
-		"shelf.pick": "Pick a life on the left, or open a world.",
+		"shelf.pick": "Open the shelf, top left, to pick a life — or open a world.",
 		"unit.day": "day",
 		"unit.month": "month",
 		"unit.season": "season",
+		"tab.label": "Sections",
+		"tab.more": "More",
+		"tab.pack": "Pack",
+		"tab.reading": "Story",
+		"tab.starmap": "Star map",
+		"tab.status": "Status",
+		"tab.system": "Systems",
+		"tab.tasks": "Tasks",
+		"tab.world": "World",
 		"unit.week": "week",
 		"unit.year": "year",
 		"world.back": "← Back to the worlds",
@@ -596,9 +758,8 @@ var TABLES$1 = {
 		"world.detailMeta": "{turn} · {styles} styles{lineage}",
 		"world.digest": "What the world reports each turn",
 		"world.endings": "{endings} ending conditions · saves record {save} kinds of content",
+		"world.laws": "World laws",
 		"world.lineage": "Can continue across generations",
-		"world.loreHide": "Hide this world's lore",
-		"world.loreShow": "Read this world's lore",
 		"world.languagePick": "Language for this world",
 		"world.needsNewerCore": "This world needs a newer version of the app (it asks for {needed}, this is {local}).",
 		"world.opening": "What the world will ask you",
@@ -608,8 +769,10 @@ var TABLES$1 = {
 		"world.panelFields": "{count} entries",
 		"world.panels": "What you will see",
 		"world.play": "Live a life here",
+		"world.roles": "Starting archetypes",
+		"world.setting": "The world",
+		"world.settingOther": "Other",
 		"world.plays": "You have lived here {n} times",
-		"world.stale": "The rulebook has changed",
 		"world.summary": "{groups} opening settings · {panels} panels · {turn}",
 		"world.turnUnit": "one {unit} per turn",
 		"world.unopenable": "This world cannot be opened: {problem}",
@@ -1180,6 +1343,498 @@ function Waiting({ label }) {
 	});
 }
 //#endregion
+//#region src/create-world.tsx
+/** Creating a world from pasted text.
+*
+* The player pastes any text; a background "worldsmith" agent cleans out whatever
+* this framework cannot play and compiles the rest into a world. The job mirrors
+* life-creation: it runs on the server, so the player can leave and come back to a
+* draft still being worked, then review and install it. This file holds the four
+* surfaces — the shelf entry, the in-progress/ready card, the paste screen, and the
+* review — while main.tsx owns the view switching and the shelf poll.
+*/
+/** Where the half-typed paste is kept, so closing the screen does not lose it.
+*  Prefixed because this app shares the dashboard's localStorage. */
+var CREATE_DRAFT_KEY = "endless-worlds:create-draft";
+/** How often a generating draft is re-checked while the player watches. Matches
+*  the play page's GENERATING_POLL_MS. */
+var DRAFT_POLL_MS = 3e3;
+/** The always-present entry at the top of the worlds shelf. */
+function CreateWorldCard({ onClick }) {
+	return /* @__PURE__ */ jsxs("button", {
+		className: "ew-card ew-card-create",
+		type: "button",
+		onClick,
+		children: [/* @__PURE__ */ jsx("span", {
+			className: "ew-create-plus",
+			"aria-hidden": "true",
+			children: "+"
+		}), /* @__PURE__ */ jsxs("span", {
+			className: "ew-create-text",
+			children: [/* @__PURE__ */ jsx("span", {
+				className: "ew-create-title",
+				children: t("create.title")
+			}), /* @__PURE__ */ jsx("span", {
+				className: "ew-create-sub",
+				children: t("create.subtitle")
+			})]
+		})]
+	});
+}
+function draftWhere(d) {
+	if (d.status === "ready") return t("worldDraft.ready");
+	if (d.status === "failed") return d.problem || t("worldDraft.failed");
+	const stage = d.stage === "writing" ? t("worldDraft.writing") : t("worldDraft.reading");
+	return d.steps > 0 ? `${stage} · ${t("worldDraft.steps", { n: d.steps })}` : stage;
+}
+/** A world being built (or one that finished and is waiting to be reviewed). */
+function WorldDraftCard({ draft, onOpen, onDiscard }) {
+	const generating = draft.status === "generating";
+	const pct = Math.min(12 + draft.steps * 16, 92);
+	return /* @__PURE__ */ jsxs("div", {
+		className: `ew-card ew-card-draft ew-card-draft-${draft.status}`,
+		children: [/* @__PURE__ */ jsxs("button", {
+			className: "ew-card-open",
+			type: "button",
+			disabled: generating,
+			onClick: () => onOpen(draft.draftId),
+			children: [
+				/* @__PURE__ */ jsxs("div", {
+					className: "ew-titlerow",
+					children: [/* @__PURE__ */ jsx("span", {
+						className: "ew-title",
+						children: draft.title || t("worldDraft.untitled")
+					}), draft.status === "ready" ? /* @__PURE__ */ jsx(Chip, {
+						accent: true,
+						children: t("worldDraft.readyChip")
+					}) : null]
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-meta",
+					children: draftWhere(draft)
+				}),
+				generating ? /* @__PURE__ */ jsx("div", {
+					className: "ew-progress",
+					role: "status",
+					"aria-live": "polite",
+					children: /* @__PURE__ */ jsx("div", {
+						className: "ew-progress-track",
+						children: /* @__PURE__ */ jsx("div", {
+							className: "ew-progress-fill",
+							style: { width: `${pct}%` }
+						})
+					})
+				}) : null
+			]
+		}), /* @__PURE__ */ jsx("div", {
+			className: "ew-life-actions",
+			children: /* @__PURE__ */ jsx("button", {
+				className: "ew-btn ew-btn-quiet ew-card-drop",
+				type: "button",
+				"aria-label": t("worldDraft.discardAria", { title: draft.title || "" }),
+				onClick: () => onDiscard(draft.draftId),
+				children: t("worldDraft.discard")
+			})
+		})]
+	});
+}
+/** The paste screen (view === 'create'). */
+function CreateWorldScreen({ onCancel, onCreated }) {
+	const [text, setText] = useState(() => {
+		try {
+			return window.localStorage.getItem(CREATE_DRAFT_KEY) ?? "";
+		} catch {
+			return "";
+		}
+	});
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState("");
+	useEffect(() => {
+		try {
+			if (text) window.localStorage.setItem(CREATE_DRAFT_KEY, text);
+			else window.localStorage.removeItem(CREATE_DRAFT_KEY);
+		} catch {}
+	}, [text]);
+	const submit = async () => {
+		const body = text.trim();
+		if (!body || busy) return;
+		setBusy(true);
+		setError("");
+		try {
+			const { draftId } = await api.createWorldDraft(body);
+			api.compileWorldDraft(draftId);
+			try {
+				window.localStorage.removeItem(CREATE_DRAFT_KEY);
+			} catch {}
+			onCreated(draftId);
+		} catch (e) {
+			setBusy(false);
+			setError(e?.body?.error || t("create.failed"));
+		}
+	};
+	const count = [...text.trim()].length;
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ew-create",
+		children: [
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-section",
+				children: t("create.heading")
+			}),
+			/* @__PURE__ */ jsx("textarea", {
+				className: "ew-create-ta",
+				value: text,
+				onChange: (e) => setText(e.target.value),
+				placeholder: t("create.placeholder"),
+				autoFocus: true,
+				spellCheck: false
+			}),
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-create-hint",
+				children: t("create.hint")
+			}),
+			error ? /* @__PURE__ */ jsx("div", {
+				className: "ew-note ew-note-row",
+				children: error
+			}) : null,
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-bar",
+				children: [
+					/* @__PURE__ */ jsx("button", {
+						className: "ew-btn ew-btn-quiet",
+						type: "button",
+						onClick: onCancel,
+						disabled: busy,
+						children: t("create.cancel")
+					}),
+					/* @__PURE__ */ jsx("button", {
+						className: "ew-btn ew-btn-go",
+						type: "button",
+						onClick: () => void submit(),
+						disabled: busy || count === 0,
+						children: busy ? t("create.submitting") : t("create.submit")
+					}),
+					/* @__PURE__ */ jsx("span", {
+						className: "ew-create-count",
+						children: t("create.count", { n: count })
+					})
+				]
+			})
+		]
+	});
+}
+/** The worldsmith agent, as registered by app.json — the agent a jump-to-chat
+*  launches so the player keeps adjusting the SAME draft (its tools act by
+*  draftId, so a fresh chat carrying the id can read and re-submit it). */
+var WORLDSMITH_AGENT = "endless-worldsmith";
+/** The host App SDK, reached defensively through the window module map (an older
+*  host may not expose the chat launcher — the UI degrades to an inline hint). */
+var appSdk$1 = window.__kirocrew_modules?.["@kirocrew/app-sdk"];
+/** The review screen (view === 'draft'). Polls until the worldsmith is done, then
+*  shows what the world will contain and offers accept / discard / jump-to-chat. */
+function WorldDraftReview({ draftId, onInstalled, onDiscarded, onBack }) {
+	const [draft, setDraft] = useState(null);
+	const [error, setError] = useState("");
+	const [title, setTitle] = useState("");
+	const [busy, setBusy] = useState("");
+	const [chatHint, setChatHint] = useState(false);
+	const titleTouched = useRef(false);
+	const kicked = useRef(false);
+	const launcher = appSdk$1?.useChatLauncher?.() ?? null;
+	const kickCompile = async () => {
+		try {
+			await api.compileWorldDraft(draftId);
+		} catch {
+			setDraft((d) => d ? {
+				...d,
+				status: "failed",
+				problem: d.problem || ""
+			} : d);
+		}
+	};
+	const retry = async () => {
+		kicked.current = true;
+		setDraft((d) => d ? {
+			...d,
+			status: "generating"
+		} : d);
+		await kickCompile();
+		load();
+	};
+	const load = async () => {
+		try {
+			const d = await api.worldDraft(draftId);
+			setDraft(d);
+			if (d.status === "new" && !kicked.current) {
+				kicked.current = true;
+				kickCompile();
+			}
+			if (!titleTouched.current) setTitle(d.preview?.title || d.title || "");
+		} catch {
+			setError(t("review.gone"));
+		}
+	};
+	useEffect(() => {
+		load();
+	}, [draftId]);
+	const generating = draft?.status === "generating" || draft?.status === "new";
+	useEffect(() => {
+		if (!generating) return void 0;
+		const timer = window.setInterval(() => {
+			load();
+		}, DRAFT_POLL_MS);
+		return () => window.clearInterval(timer);
+	}, [generating, draftId]);
+	const install = async () => {
+		if (busy) return;
+		setBusy("installing");
+		try {
+			const { worldId } = await api.installWorldDraft(draftId, title.trim());
+			onInstalled(worldId);
+		} catch (e) {
+			setBusy("");
+			setError(e?.body?.error || t("review.installFailed"));
+		}
+	};
+	const discard = async () => {
+		if (busy) return;
+		setBusy("discarding");
+		try {
+			await api.discardWorldDraft(draftId);
+			onDiscarded();
+		} catch {
+			setBusy("");
+			setError(t("review.discardFailed"));
+		}
+	};
+	/** Keep adjusting in the dashboard chat: launch the worldsmith with a message
+	*  naming this draft, so it can re-read and re-submit it. Falls back to an inline
+	*  hint on a host without the launcher. */
+	const jumpToChat = () => {
+		if (!draft) return;
+		if (launcher) {
+			launcher.openChat({
+				agent: WORLDSMITH_AGENT,
+				message: t("review.jumpMessage", {
+					title: draft.title || draft.preview?.title || "",
+					id: draft.draftId
+				})
+			});
+			return;
+		}
+		setChatHint(true);
+	};
+	if (error) return /* @__PURE__ */ jsxs("div", {
+		className: "ew-create",
+		children: [/* @__PURE__ */ jsx("div", {
+			className: "ew-note ew-note-row",
+			children: error
+		}), /* @__PURE__ */ jsx("div", {
+			className: "ew-bar",
+			children: /* @__PURE__ */ jsx("button", {
+				className: "ew-btn ew-btn-quiet",
+				type: "button",
+				onClick: onBack,
+				children: t("review.back")
+			})
+		})]
+	});
+	if (!draft || generating) {
+		const steps = draft?.steps ?? 0;
+		const pct = Math.min(12 + steps * 16, 92);
+		return /* @__PURE__ */ jsxs("div", {
+			className: "ew-create",
+			children: [
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-section",
+					children: t("worldDraft.generating")
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-meta",
+					children: t("review.stillWorking")
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-progress",
+					role: "status",
+					"aria-live": "polite",
+					children: /* @__PURE__ */ jsx("div", {
+						className: "ew-progress-track",
+						children: /* @__PURE__ */ jsx("div", {
+							className: "ew-progress-fill",
+							style: { width: `${pct}%` }
+						})
+					})
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-bar",
+					children: /* @__PURE__ */ jsx("button", {
+						className: "ew-btn ew-btn-quiet",
+						type: "button",
+						onClick: onBack,
+						children: t("review.leave")
+					})
+				})
+			]
+		});
+	}
+	if (draft.status === "failed") return /* @__PURE__ */ jsxs("div", {
+		className: "ew-create",
+		children: [
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-section",
+				children: t("worldDraft.failed")
+			}),
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-note",
+				children: draft.problem || t("review.failedGeneric")
+			}),
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-create-hint",
+				children: t("review.failedHint")
+			}),
+			/* @__PURE__ */ jsx("button", {
+				className: "ew-draft-jump",
+				type: "button",
+				onClick: jumpToChat,
+				children: t("review.jump")
+			}),
+			chatHint ? /* @__PURE__ */ jsx("div", {
+				className: "ew-create-hint",
+				children: t("review.jumpHint")
+			}) : null,
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-bar",
+				children: [/* @__PURE__ */ jsx("button", {
+					className: "ew-btn",
+					type: "button",
+					onClick: () => void retry(),
+					disabled: !!busy,
+					children: t("review.retry")
+				}), /* @__PURE__ */ jsx("button", {
+					className: "ew-btn ew-btn-quiet",
+					type: "button",
+					onClick: () => void discard(),
+					disabled: !!busy,
+					children: t("review.discard")
+				})]
+			})
+		]
+	});
+	const p = draft.preview;
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ew-create",
+		children: [
+			/* @__PURE__ */ jsx("div", {
+				className: "ew-section",
+				children: t("review.heading")
+			}),
+			/* @__PURE__ */ jsx("label", {
+				className: "ew-create-titlelabel",
+				htmlFor: "ew-world-title",
+				children: t("review.titleLabel")
+			}),
+			/* @__PURE__ */ jsx("input", {
+				id: "ew-world-title",
+				className: "ew-title-edit",
+				value: title,
+				maxLength: 80,
+				onChange: (e) => {
+					titleTouched.current = true;
+					setTitle(e.target.value);
+				}
+			}),
+			p ? /* @__PURE__ */ jsxs("div", {
+				className: "ew-review",
+				children: [
+					p.promise ? /* @__PURE__ */ jsxs("div", {
+						className: "ew-kv",
+						children: [/* @__PURE__ */ jsx("span", {
+							className: "ew-k",
+							children: t("review.promise")
+						}), /* @__PURE__ */ jsx("span", { children: p.promise })]
+					}) : null,
+					/* @__PURE__ */ jsxs("div", {
+						className: "ew-kv",
+						children: [/* @__PURE__ */ jsx("span", {
+							className: "ew-k",
+							children: t("review.clock")
+						}), /* @__PURE__ */ jsx("span", { children: p.clock })]
+					}),
+					p.styles.length ? /* @__PURE__ */ jsxs("div", {
+						className: "ew-kv",
+						children: [/* @__PURE__ */ jsx("span", {
+							className: "ew-k",
+							children: t("review.styles")
+						}), /* @__PURE__ */ jsx("span", {
+							className: "ew-chips",
+							children: p.styles.map((s) => /* @__PURE__ */ jsx(Chip, { children: s }, s))
+						})]
+					}) : null,
+					p.opening.length ? /* @__PURE__ */ jsxs("div", {
+						className: "ew-kv",
+						children: [/* @__PURE__ */ jsx("span", {
+							className: "ew-k",
+							children: t("review.opening")
+						}), /* @__PURE__ */ jsx("span", { children: p.opening.join(" · ") })]
+					}) : null,
+					/* @__PURE__ */ jsxs("div", {
+						className: "ew-kv",
+						children: [/* @__PURE__ */ jsx("span", {
+							className: "ew-k",
+							children: t("review.endings")
+						}), /* @__PURE__ */ jsx("span", { children: t("review.endingsN", { n: p.endings }) })]
+					})
+				]
+			}) : null,
+			draft.dropped.length ? /* @__PURE__ */ jsxs("div", {
+				className: "ew-review-warn",
+				children: [/* @__PURE__ */ jsx("div", {
+					className: "ew-review-warn-h",
+					children: t("review.dropped")
+				}), /* @__PURE__ */ jsx("ul", {
+					className: "ew-list",
+					children: draft.dropped.map((d, i) => /* @__PURE__ */ jsx("li", { children: d }, i))
+				})]
+			}) : null,
+			draft.warnings.length ? /* @__PURE__ */ jsxs("div", {
+				className: "ew-review-warn",
+				children: [/* @__PURE__ */ jsx("div", {
+					className: "ew-review-warn-h",
+					children: t("review.warnings")
+				}), /* @__PURE__ */ jsx("ul", {
+					className: "ew-list",
+					children: draft.warnings.map((wn, i) => /* @__PURE__ */ jsx("li", { children: wn }, i))
+				})]
+			}) : null,
+			/* @__PURE__ */ jsx("button", {
+				className: "ew-draft-jump",
+				type: "button",
+				onClick: jumpToChat,
+				children: t("review.jump")
+			}),
+			chatHint ? /* @__PURE__ */ jsx("div", {
+				className: "ew-create-hint",
+				children: t("review.jumpHint")
+			}) : null,
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-bar",
+				children: [/* @__PURE__ */ jsx("button", {
+					className: "ew-btn ew-btn-quiet",
+					type: "button",
+					onClick: () => void discard(),
+					disabled: !!busy,
+					children: t("review.discard")
+				}), /* @__PURE__ */ jsx("button", {
+					className: "ew-btn ew-btn-go ew-review-accept",
+					type: "button",
+					onClick: () => void install(),
+					disabled: !!busy,
+					children: busy === "installing" ? t("review.installing") : t("review.accept")
+				})]
+			})
+		]
+	});
+}
+//#endregion
 //#region src/library.tsx
 var TURN_UNITS = {
 	month: "unit.month",
@@ -1279,50 +1934,41 @@ function WorldCard({ world, onOpen, plays = 0 }) {
 		className: "ew-card ew-world-card",
 		type: "button",
 		onClick: () => onOpen(world.worldId),
-		children: [
-			/* @__PURE__ */ jsxs("div", {
-				className: "ew-titlerow",
-				children: [
-					/* @__PURE__ */ jsx("span", {
-						className: "ew-title",
-						children: world.title
-					}),
-					world.lineage ? /* @__PURE__ */ jsx(Chip, {
-						accent: true,
-						children: t("world.lineage")
-					}) : null,
-					world.stale ? /* @__PURE__ */ jsx(Chip, { children: t("world.stale") }) : null
-				]
-			}),
-			/* @__PURE__ */ jsx("div", {
-				className: "ew-world-promise",
-				children: promise
-			}),
-			possibilities.length ? /* @__PURE__ */ jsxs("div", {
-				className: "ew-world-possibilities",
-				children: [/* @__PURE__ */ jsx("div", {
-					className: "ew-world-possibilities-label",
-					children: t("world.cardPossibilities")
-				}), possibilities.map((possibility) => /* @__PURE__ */ jsx("div", {
-					className: "ew-world-possibility",
-					children: possibility
-				}, possibility))]
-			}) : null,
-			world.stalenessNote ? /* @__PURE__ */ jsx("div", {
-				className: "ew-meta",
-				children: world.stalenessNote
-			}) : null,
-			/* @__PURE__ */ jsxs("div", {
-				className: "ew-world-card-footer",
-				children: [/* @__PURE__ */ jsx("span", {
-					className: "ew-meta",
-					children: plays > 0 ? t("world.plays", { n: plays }) : t("world.cardUntold")
-				}), /* @__PURE__ */ jsxs("span", {
-					className: "ew-world-enter",
-					children: [t("world.cardEnter"), " →"]
-				})]
-			})
-		]
+		children: [/* @__PURE__ */ jsxs("div", {
+			className: "ew-world-band",
+			children: [/* @__PURE__ */ jsx("span", {
+				className: "ew-world-band-title",
+				children: world.title
+			}), world.lineage ? /* @__PURE__ */ jsx(Chip, {
+				accent: true,
+				children: t("world.lineage")
+			}) : null]
+		}), /* @__PURE__ */ jsxs("div", {
+			className: "ew-world-body",
+			children: [
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-world-promise",
+					children: promise
+				}),
+				possibilities.length ? /* @__PURE__ */ jsx("div", {
+					className: "ew-world-possibilities",
+					children: possibilities.map((possibility) => /* @__PURE__ */ jsx("span", {
+						className: "ew-world-possibility",
+						children: possibility
+					}, possibility))
+				}) : null,
+				/* @__PURE__ */ jsxs("div", {
+					className: "ew-world-card-footer",
+					children: [/* @__PURE__ */ jsx("span", {
+						className: "ew-meta",
+						children: plays > 0 ? t("world.plays", { n: plays }) : t("world.cardUntold")
+					}), /* @__PURE__ */ jsxs("span", {
+						className: "ew-world-enter",
+						children: [t("world.cardEnter"), " →"]
+					})]
+				})
+			]
+		})]
 	});
 }
 /**
@@ -1403,74 +2049,164 @@ function LifeRow({ run, onOpen, onDelete, onArchive, onRename }) {
 	});
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-card ew-card-row",
-		children: [/* @__PURE__ */ jsxs("button", {
-			className: "ew-card-open",
-			type: "button",
-			disabled: !!run.unreadable,
-			onClick: () => onOpen(run.runId),
-			children: [
-				/* @__PURE__ */ jsxs("div", {
-					className: "ew-titlerow",
-					children: [/* @__PURE__ */ jsx("span", {
-						className: "ew-title",
-						children: name
-					}), run.awaitingOpening ? /* @__PURE__ */ jsx(Chip, {
-						accent: true,
-						children: t("life.waiting")
-					}) : null]
-				}),
-				name !== run.title ? /* @__PURE__ */ jsx("div", {
-					className: "ew-sub",
-					children: run.title
-				}) : null,
-				/* @__PURE__ */ jsx("div", {
-					className: "ew-meta",
-					children: where
-				})
-			]
-		}), actions.length ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("div", {
-			className: "ew-life-actions",
-			children: actions.map((a) => /* @__PURE__ */ jsx("button", {
-				className: "ew-btn ew-btn-quiet ew-card-drop",
+		children: [
+			run.backdrop ? /* @__PURE__ */ jsx("img", {
+				className: "ew-card-bg",
+				src: `${API}/runs/${encodeURIComponent(run.runId)}/backdrop?v=${run.backdrop.version}`,
+				alt: "",
+				"aria-hidden": "true",
+				draggable: false
+			}) : null,
+			run.backdrop ? /* @__PURE__ */ jsx("div", {
+				className: "ew-card-bg-scrim",
+				"aria-hidden": "true"
+			}) : null,
+			/* @__PURE__ */ jsxs("button", {
+				className: "ew-card-open",
 				type: "button",
-				"aria-label": a.aria,
-				onClick: a.onClick,
-				children: a.label
-			}, a.key))
-		}), /* @__PURE__ */ jsxs("div", {
-			className: "ew-life-menu",
-			ref: menuRef,
-			children: [/* @__PURE__ */ jsx("button", {
-				className: "ew-kebab",
-				type: "button",
-				"aria-haspopup": "menu",
-				"aria-expanded": menuOpen,
-				"aria-label": t("life.actions", { name }),
-				onClick: () => setMenuOpen((o) => !o),
-				children: /* @__PURE__ */ jsx(MenuGlyph, {})
-			}), menuOpen ? /* @__PURE__ */ jsx("div", {
-				className: "ew-menu",
-				role: "menu",
+				disabled: !!run.unreadable,
+				onClick: () => onOpen(run.runId),
+				children: [
+					/* @__PURE__ */ jsxs("div", {
+						className: "ew-titlerow",
+						children: [/* @__PURE__ */ jsx("span", {
+							className: "ew-title",
+							children: name
+						}), run.awaitingOpening ? /* @__PURE__ */ jsx(Chip, {
+							accent: true,
+							children: t("life.waiting")
+						}) : null]
+					}),
+					name !== run.title ? /* @__PURE__ */ jsx("div", {
+						className: "ew-sub",
+						children: run.title
+					}) : null,
+					/* @__PURE__ */ jsx("div", {
+						className: "ew-meta",
+						children: where
+					})
+				]
+			}),
+			actions.length ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("div", {
+				className: "ew-life-actions",
 				children: actions.map((a) => /* @__PURE__ */ jsx("button", {
-					className: "ew-menu-item",
-					role: "menuitem",
+					className: "ew-btn ew-btn-quiet ew-card-drop",
 					type: "button",
 					"aria-label": a.aria,
-					onClick: () => {
-						setMenuOpen(false);
-						a.onClick();
-					},
+					onClick: a.onClick,
 					children: a.label
 				}, a.key))
-			}) : null]
-		})] }) : null]
+			}), /* @__PURE__ */ jsxs("div", {
+				className: "ew-life-menu",
+				ref: menuRef,
+				children: [/* @__PURE__ */ jsx("button", {
+					className: "ew-kebab",
+					type: "button",
+					"aria-haspopup": "menu",
+					"aria-expanded": menuOpen,
+					"aria-label": t("life.actions", { name }),
+					onClick: () => setMenuOpen((o) => !o),
+					children: /* @__PURE__ */ jsx(MenuGlyph, {})
+				}), menuOpen ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("div", {
+					className: "ew-menu-backdrop",
+					"aria-hidden": "true",
+					onClick: () => setMenuOpen(false)
+				}), /* @__PURE__ */ jsx("div", {
+					className: "ew-menu",
+					role: "menu",
+					children: actions.map((a) => /* @__PURE__ */ jsx("button", {
+						className: "ew-menu-item",
+						role: "menuitem",
+						type: "button",
+						"aria-label": a.aria,
+						onClick: (e) => {
+							e.stopPropagation();
+							setMenuOpen(false);
+							a.onClick();
+						},
+						onTouchEnd: (e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							setMenuOpen(false);
+							a.onClick();
+						},
+						children: a.label
+					}, a.key))
+				})] }) : null]
+			})] }) : null
+		]
+	});
+}
+/** The world's setting as a browsable, grouped structure — the reader-facing face
+*  of the world's `lore`. Grouped by category; each entry expands to its body, and
+*  its relations to other entries are shown as a small edge list. */
+function WorldSetting({ lore }) {
+	const [open, setOpen] = useState({});
+	const names = new Map(lore.map((e) => [e.id, e.name]));
+	const order = [];
+	const groups = /* @__PURE__ */ new Map();
+	for (const e of lore) {
+		const cat = e.category || t("world.settingOther");
+		if (!groups.has(cat)) {
+			groups.set(cat, []);
+			order.push(cat);
+		}
+		groups.get(cat).push(e);
+	}
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ew-setting",
+		style: { marginTop: "18px" },
+		children: [/* @__PURE__ */ jsx("div", {
+			className: "ew-section",
+			children: t("world.setting")
+		}), order.map((cat) => /* @__PURE__ */ jsxs("div", {
+			className: "ew-setting-group",
+			children: [/* @__PURE__ */ jsx("div", {
+				className: "ew-glabel",
+				children: cat
+			}), (groups.get(cat) ?? []).map((e) => /* @__PURE__ */ jsxs("div", {
+				className: "ew-setting-entry",
+				children: [/* @__PURE__ */ jsxs("button", {
+					className: "ew-setting-head",
+					type: "button",
+					"aria-expanded": !!open[e.id],
+					onClick: () => setOpen((o) => ({
+						...o,
+						[e.id]: !o[e.id]
+					})),
+					children: [
+						/* @__PURE__ */ jsx("span", {
+							className: "ew-setting-name",
+							children: e.name
+						}),
+						e.summary ? /* @__PURE__ */ jsx("span", {
+							className: "ew-setting-sum",
+							children: e.summary
+						}) : null,
+						/* @__PURE__ */ jsx("span", {
+							className: "ew-setting-caret",
+							"aria-hidden": "true"
+						})
+					]
+				}), open[e.id] ? /* @__PURE__ */ jsxs("div", {
+					className: "ew-setting-body",
+					children: [/* @__PURE__ */ jsx(Prose, { text: e.text }), e.relations.length ? /* @__PURE__ */ jsx("div", {
+						className: "ew-setting-rel",
+						children: e.relations.map((r, i) => /* @__PURE__ */ jsxs("span", {
+							className: "ew-chip",
+							children: [r.label ? `${r.label} · ` : "", names.get(r.to) ?? r.to]
+						}, `${r.to}-${i}`))
+					}) : null]
+				}) : null]
+			}, e.id))]
+		}, cat))]
 	});
 }
 function WorldDetailView({ worldId, onBack, onPlay, onDelete, onLanguage, initialLanguage }) {
 	const [world, setWorld] = useState(null);
 	const [error, setError] = useState(null);
 	const [nonce, setNonce] = useState(0);
-	const [lore, setLore] = useState(false);
+	const [laws, setLaws] = useState(false);
 	const [language, setLanguage] = useState(initialLanguage);
 	useEffect(() => {
 		let alive = true;
@@ -1615,17 +2351,50 @@ function WorldDetailView({ worldId, onBack, onPlay, onDelete, onLanguage, initia
 				save: (world.save ?? []).length
 			})
 		}),
-		world.prose ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("button", {
-			className: "ew-section ew-section-toggle",
-			type: "button",
+		world.lore?.length ? /* @__PURE__ */ jsx(WorldSetting, { lore: world.lore }) : null,
+		world.roles?.length ? /* @__PURE__ */ jsxs("div", {
+			className: "ew-roles",
 			style: { marginTop: "18px" },
-			"aria-expanded": lore,
-			onClick: () => setLore((v) => !v),
-			children: lore ? t("world.loreHide") : t("world.loreShow")
-		}), lore ? /* @__PURE__ */ jsx("div", {
-			className: "ew-block",
-			children: /* @__PURE__ */ jsx(Prose, { text: world.prose })
-		}) : null] }) : null,
+			children: [/* @__PURE__ */ jsx("div", {
+				className: "ew-section",
+				children: t("world.roles")
+			}), /* @__PURE__ */ jsx("div", {
+				className: "ew-block",
+				children: (world.roles ?? []).map((r) => /* @__PURE__ */ jsxs("div", {
+					className: "ew-role",
+					children: [/* @__PURE__ */ jsx("span", {
+						className: "ew-role-name",
+						children: r.name
+					}), r.summary ? /* @__PURE__ */ jsx("span", {
+						className: "ew-role-sum",
+						children: r.summary
+					}) : null]
+				}, r.id))
+			})]
+		}) : null,
+		world.prose ? /* @__PURE__ */ jsx("div", {
+			className: "ew-setting",
+			style: { marginTop: "18px" },
+			children: /* @__PURE__ */ jsxs("div", {
+				className: "ew-setting-entry",
+				children: [/* @__PURE__ */ jsxs("button", {
+					className: "ew-setting-head",
+					type: "button",
+					"aria-expanded": laws,
+					onClick: () => setLaws((v) => !v),
+					children: [/* @__PURE__ */ jsx("span", {
+						className: "ew-setting-name",
+						children: t("world.laws")
+					}), /* @__PURE__ */ jsx("span", {
+						className: "ew-setting-caret",
+						"aria-hidden": "true"
+					})]
+				}), laws ? /* @__PURE__ */ jsx("div", {
+					className: "ew-setting-body",
+					children: /* @__PURE__ */ jsx(Prose, { text: world.prose })
+				}) : null]
+			})
+		}) : null,
 		/* @__PURE__ */ jsxs("div", {
 			className: "ew-bar",
 			children: [/* @__PURE__ */ jsx("button", {
@@ -1735,6 +2504,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 	const [answers, setAnswers] = useState(draft.answers ?? {});
 	const [customs, setCustoms] = useState(draft.customs ?? {});
 	const [style, setStyle] = useState(draft.style ?? (styleRows.find((s) => s.default) ?? styleRows[0])?.id ?? "");
+	const [role, setRole] = useState(draft.role ?? "");
 	const [page, setPage] = useState(draft.page ?? 0);
 	const [busy, setBusy] = useState("");
 	const [failed, setFailed] = useState(null);
@@ -1746,6 +2516,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 				answers,
 				customs,
 				style,
+				role,
 				page,
 				run,
 				savedAt: Date.now()
@@ -1756,6 +2527,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 		answers,
 		customs,
 		style,
+		role,
 		page,
 		run
 	]);
@@ -1770,6 +2542,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 		setAnswers({});
 		setCustoms({});
 		setStyle(defaultStyle);
+		setRole("");
 		setPage(0);
 		setRestored(false);
 	};
@@ -1836,7 +2609,8 @@ function OpeningScreen({ world, onBack, onLive }) {
 				worldId: world.worldId,
 				style,
 				answers: payload(),
-				language: world.language
+				language: world.language,
+				role: role || void 0
 			});
 			api.openRun(created.runId);
 			clearDraft();
@@ -1904,6 +2678,34 @@ function OpeningScreen({ world, onBack, onLive }) {
 				onClick: () => setRestored(false),
 				children: t("note.dismiss")
 			})]
+		}) : null,
+		page === 0 && (world.roles?.length ?? 0) > 0 ? /* @__PURE__ */ jsxs("div", {
+			className: "ew-group",
+			children: [
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-glabel",
+					children: t("opening.roleLabel")
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-ghint",
+					children: t("opening.roleHint")
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-chips",
+					children: (world.roles ?? []).map((r) => /* @__PURE__ */ jsx("button", {
+						type: "button",
+						className: `ew-opt${role === r.id ? " ew-opt-on" : ""}`,
+						"aria-pressed": role === r.id,
+						onClick: () => setRole(role === r.id ? "" : r.id),
+						children: r.name
+					}, r.id))
+				}),
+				role ? /* @__PURE__ */ jsx("div", {
+					className: "ew-role-sum",
+					style: { marginTop: "8px" },
+					children: (world.roles ?? []).find((r) => r.id === role)?.summary
+				}) : null
+			]
 		}) : null,
 		slice.map((g) => /* @__PURE__ */ jsx(Group, {
 			group: g,
@@ -2156,6 +2958,16 @@ function History({ runId }) {
 			rows.map((p) => /* @__PURE__ */ jsxs("div", {
 				className: "ew-past",
 				children: [
+					p.backdrop && !eventsOnly ? /* @__PURE__ */ jsx("img", {
+						className: "ew-past-bg",
+						src: `${API}/runs/${encodeURIComponent(runId)}/backdrop?turn=${p.turn}&v=${p.backdrop.version}`,
+						alt: "",
+						"aria-hidden": "true",
+						draggable: false,
+						onError: (e) => {
+							e.currentTarget.style.display = "none";
+						}
+					}) : null,
 					/* @__PURE__ */ jsxs("div", {
 						className: "ew-past-head",
 						children: [/* @__PURE__ */ jsx("span", {
@@ -2612,6 +3424,57 @@ var CSS_TEXT$2 = `
 }
 .ews-btn:disabled { opacity: 0.5; cursor: default; }
 `;
+//#endregion
+//#region src/backdrop.tsx
+/**
+* The story's background layer: the narrator-authored SVG, shown as an inert
+* `<img>` behind the story.
+*
+* Accepting the narrator's drawing (the app otherwise never accepts markup) is
+* safe because it is rendered as an IMAGE, not a live document:
+*
+*  - an SVG in an `<img>` runs in a non-scripted context — `<script>` and `on*=`
+*    handlers never execute and external loads are disabled — so the markup cannot
+*    run code or exfiltrate, with or without a sandbox (the backend also strips
+*    those as defense in depth);
+*  - it sits BEHIND the prose with `pointer-events: none` (see `.ew-backdrop` in
+*    styles.css), so a background that draws a fake control cannot be clicked or
+*    cover the real one.
+*
+* This replaced a sandboxed `<iframe srcdoc>` that iOS Safari blank-rendered
+* (showing a flat grey background on iPhone). An image renders and sizes reliably
+* everywhere, and the image context is a stronger boundary than the sandbox was.
+*
+* `version` is the cache-buster: a replaced background loads the new image.
+*/
+function Backdrop({ runId, version, turn }) {
+	const q = turn != null ? `?turn=${turn}&v=${version}` : `?v=${version}`;
+	const src = `${API}/runs/${encodeURIComponent(runId)}/backdrop${q}`;
+	const [shownSrc, setShownSrc] = useState(null);
+	useEffect(() => {
+		if (src === shownSrc) return;
+		let alive = true;
+		const img = new Image();
+		img.onload = () => {
+			if (alive) setShownSrc(src);
+		};
+		img.src = src;
+		return () => {
+			alive = false;
+		};
+	}, [src, shownSrc]);
+	if (shownSrc == null) return null;
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ew-backdrop",
+		"aria-hidden": "true",
+		children: [/* @__PURE__ */ jsx("img", {
+			className: "ew-backdrop-frame",
+			src: shownSrc,
+			alt: "",
+			draggable: false
+		}), /* @__PURE__ */ jsx("div", { className: "ew-backdrop-scrim" })]
+	});
+}
 //#endregion
 //#region src/memory-layouts/timeline.tsx
 function TimelineLens({ payload, lang, focus, setFocus, filters }) {
@@ -3413,7 +4276,7 @@ var FILTER_KEYS = [
 	"objects",
 	"threads"
 ];
-function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus }) {
+function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 	const [payload, setPayload] = useState(null);
 	const [lens, setLens] = useState(null);
 	const [focus, setFocus] = useState(initialFocus ?? "");
@@ -3437,15 +4300,22 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus }) {
 		className: "ews-overlay",
 		role: "dialog",
 		"aria-modal": "true",
-		children: [/* @__PURE__ */ jsx(StarStyles, {}), /* @__PURE__ */ jsx("div", {
-			className: "ews-head",
-			children: /* @__PURE__ */ jsx("button", {
-				className: "ews-btn",
-				type: "button",
-				onClick: onClose,
-				children: mt(lang, "star.close")
+		children: [
+			/* @__PURE__ */ jsx(StarStyles, {}),
+			backdrop ? /* @__PURE__ */ jsx(Backdrop, {
+				runId,
+				version: backdrop.version
+			}) : null,
+			/* @__PURE__ */ jsx("div", {
+				className: "ews-head",
+				children: /* @__PURE__ */ jsx("button", {
+					className: "ews-btn",
+					type: "button",
+					onClick: onClose,
+					children: mt(lang, "star.close")
+				})
 			})
-		})]
+		]
 	});
 	const focused = focus ? nodeById(payload, focus) : void 0;
 	const isKept = focused ? kept.includes(focused.id) || payload.keepsakes.some((kp) => kp.cites.includes(focused.id)) : false;
@@ -3466,6 +4336,10 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus }) {
 		"aria-label": mt(lang, "star.title"),
 		children: [
 			/* @__PURE__ */ jsx(StarStyles, {}),
+			backdrop ? /* @__PURE__ */ jsx(Backdrop, {
+				runId,
+				version: backdrop.version
+			}) : null,
 			/* @__PURE__ */ jsxs("div", {
 				className: "ews-head",
 				children: [
@@ -3611,9 +4485,14 @@ function StarStyles() {
 }
 var CSS_TEXT = `
 .ews-overlay {
-  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  position: absolute; inset: 0; min-height: 100%; z-index: 60;
+  display: flex; flex-direction: column;
   background: var(--bg, #14151f); color: var(--fg, #e5e7eb); overflow: hidden;
 }
+/* When a life backdrop is mounted it sits at z-index 0 inside the overlay (same
+ * as .ew-backdrop at the root); lift every other child above it so the map reads
+ * over the backdrop instead of under it. */
+.ews-overlay > *:not(.ew-backdrop) { position: relative; z-index: 1; }
 .ews-head {
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;
   border-bottom: 1px solid var(--border, #2d2f3d);
@@ -3640,6 +4519,10 @@ var CSS_TEXT = `
   padding: 8px 16px; border-bottom: 1px solid var(--border, #2d2f3d); font-size: 13px;
 }
 .ews-filter { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+/* Native checkboxes render the browser's blue check; paint them with the app's
+ * accent (the same colour the lens tabs and chips use) so they match the rest of
+ * the crew UI instead of clashing with a stray blue. */
+.ews-filter input[type="checkbox"] { accent-color: var(--accent, #7c3aed); }
 .ews-mode { margin-inline-start: auto; }
 .ews-body { flex: 1; display: flex; min-height: 0; }
 .ews-lens-pane { flex: 1; overflow: auto; padding: 16px; }
@@ -3747,6 +4630,285 @@ var CSS_TEXT = `
   .ews-head { flex-wrap: wrap; }
 }
 `;
+//#endregion
+//#region src/tabbar.tsx
+/** Canonical system regions, in the order they take on the bar. Anything a world
+*  tags with its own word follows these, and untagged scenes fall into one bucket. */
+var REGION_ORDER = [
+	"status",
+	"world",
+	"pack",
+	"tasks"
+];
+var SYSTEM = "system";
+/** iOS-style ceiling: six tabs fit a phone bar; past this the tail folds into 更多. */
+var MAX_VISIBLE = 6;
+function regionLabel(region, labels) {
+	if (region === SYSTEM) return t("tab.system");
+	if (REGION_ORDER.includes(region)) return t(`tab.${region}`);
+	return labels.find((l) => l.trim())?.trim() || region;
+}
+/** The full ordered tab list for a life: 书页, then the world's system regions
+*  (canonical first, then custom, then the untagged bucket), then 星图. A region
+*  is any region tagged on a PANEL (app-rendered from state) or a mounted SCENE;
+*  both feed the same tab. */
+function buildTabs(scenes, panels = []) {
+	const byRegion = /* @__PURE__ */ new Map();
+	const bucket = (key) => {
+		const b = byRegion.get(key) ?? {
+			scenes: [],
+			labels: []
+		};
+		byRegion.set(key, b);
+		return b;
+	};
+	for (const s of scenes) {
+		const b = bucket((s.region ?? "").trim() || SYSTEM);
+		b.scenes.push(s);
+		if ((s.label ?? "").trim()) b.labels.push((s.label ?? "").trim());
+	}
+	for (const p of panels) {
+		const region = (p.region ?? "").trim();
+		if (!region) continue;
+		bucket(region).labels.push(p.label ?? "");
+	}
+	const present = [...byRegion.keys()];
+	const regionTabs = [
+		...REGION_ORDER.filter((r) => present.includes(r)),
+		...present.filter((r) => !REGION_ORDER.includes(r) && r !== SYSTEM),
+		...present.includes(SYSTEM) ? [SYSTEM] : []
+	].map((r) => ({
+		id: r,
+		kind: "region",
+		label: regionLabel(r, byRegion.get(r)?.labels ?? []),
+		sceneIds: (byRegion.get(r)?.scenes ?? []).map((s) => s.sceneId)
+	}));
+	return [
+		{
+			id: "reading",
+			kind: "reading",
+			label: t("tab.reading"),
+			sceneIds: []
+		},
+		...regionTabs,
+		{
+			id: "starmap",
+			kind: "starmap",
+			label: t("tab.starmap"),
+			sceneIds: []
+		}
+	];
+}
+/** Hide on scroll-down, show on scroll-up. Listens in the capture phase so it
+*  catches whichever element actually scrolls — the window in a standalone web
+*  view, or the dashboard's panel div when embedded. */
+function useScrollHide(enabled) {
+	const [hidden, setHidden] = useState(false);
+	useEffect(() => {
+		if (!enabled) {
+			setHidden(false);
+			return;
+		}
+		let last = -1;
+		const onScroll = (e) => {
+			const tgt = e.target;
+			const el = tgt && tgt instanceof HTMLElement ? tgt : document.scrollingElement;
+			const y = el ? el.scrollTop : window.scrollY || 0;
+			if (last < 0) {
+				last = y;
+				return;
+			}
+			const dy = y - last;
+			if (Math.abs(dy) < 8) return;
+			if (y < 40) setHidden(false);
+			else if (dy > 0) setHidden(true);
+			else setHidden(false);
+			last = y;
+		};
+		window.addEventListener("scroll", onScroll, true);
+		return () => window.removeEventListener("scroll", onScroll, true);
+	}, [enabled]);
+	return hidden;
+}
+function icon(tab) {
+	return tabIcon(tab.kind === "region" ? tab.id : tab.kind);
+}
+/** The glyph for a tab/region id — shared by the phone bottom bar and the desktop
+*  right-aside tab strip so both surfaces read the same. */
+function tabIcon(id) {
+	switch (id) {
+		case "reading": return /* @__PURE__ */ jsxs("svg", {
+			viewBox: "0 0 24 24",
+			children: [/* @__PURE__ */ jsx("path", { d: "M12 6.5C10.5 5 8 4.5 4 4.7v13c4-.2 6.5.3 8 1.8 1.5-1.5 4-2 8-1.8v-13c-4-.2-6.5.3-8 1.8Z" }), /* @__PURE__ */ jsx("path", { d: "M12 6.5V19" })]
+		});
+		case "starmap": return /* @__PURE__ */ jsx("svg", {
+			viewBox: "0 0 24 24",
+			children: /* @__PURE__ */ jsx("path", { d: "M12 3.2l1.9 4.4 4.8.4-3.6 3.1 1.1 4.7L12 13.8 7.8 15.8l1.1-4.7L5.3 8l4.8-.4Z" })
+		});
+		case "status": return /* @__PURE__ */ jsxs("svg", {
+			viewBox: "0 0 24 24",
+			children: [/* @__PURE__ */ jsx("circle", {
+				cx: "12",
+				cy: "8",
+				r: "3.4"
+			}), /* @__PURE__ */ jsx("path", { d: "M5.5 20c.6-3.6 3.2-5.5 6.5-5.5S18.4 16.4 19 20" })]
+		});
+		case "world": return /* @__PURE__ */ jsxs("svg", {
+			viewBox: "0 0 24 24",
+			children: [/* @__PURE__ */ jsx("circle", {
+				cx: "12",
+				cy: "12",
+				r: "8.2"
+			}), /* @__PURE__ */ jsx("path", { d: "M3.8 12h16.4M12 3.8c2.4 2.4 2.4 13.9 0 16.4M12 3.8c-2.4 2.4-2.4 13.9 0 16.4" })]
+		});
+		case "pack": return /* @__PURE__ */ jsxs("svg", {
+			viewBox: "0 0 24 24",
+			children: [
+				/* @__PURE__ */ jsx("path", { d: "M7 9V7.5A5 5 0 0 1 17 7.5V9" }),
+				/* @__PURE__ */ jsx("rect", {
+					x: "4.5",
+					y: "9",
+					width: "15",
+					height: "11",
+					rx: "2.5"
+				}),
+				/* @__PURE__ */ jsx("path", { d: "M9.5 13h5" })
+			]
+		});
+		case "tasks": return /* @__PURE__ */ jsxs("svg", {
+			viewBox: "0 0 24 24",
+			children: [/* @__PURE__ */ jsx("rect", {
+				x: "4.5",
+				y: "4.5",
+				width: "15",
+				height: "15",
+				rx: "3"
+			}), /* @__PURE__ */ jsx("path", { d: "M8.5 12.2l2.4 2.4 4.6-5" })]
+		});
+		default: return /* @__PURE__ */ jsxs("svg", {
+			viewBox: "0 0 24 24",
+			children: [
+				/* @__PURE__ */ jsx("rect", {
+					x: "4",
+					y: "4",
+					width: "7",
+					height: "7",
+					rx: "1.5"
+				}),
+				/* @__PURE__ */ jsx("rect", {
+					x: "13",
+					y: "4",
+					width: "7",
+					height: "7",
+					rx: "1.5"
+				}),
+				/* @__PURE__ */ jsx("rect", {
+					x: "4",
+					y: "13",
+					width: "7",
+					height: "7",
+					rx: "1.5"
+				}),
+				/* @__PURE__ */ jsx("rect", {
+					x: "13",
+					y: "13",
+					width: "7",
+					height: "7",
+					rx: "1.5"
+				})
+			]
+		});
+	}
+}
+function moreIcon() {
+	return /* @__PURE__ */ jsxs("svg", {
+		viewBox: "0 0 24 24",
+		children: [
+			/* @__PURE__ */ jsx("circle", {
+				cx: "6",
+				cy: "12",
+				r: "1.6"
+			}),
+			/* @__PURE__ */ jsx("circle", {
+				cx: "12",
+				cy: "12",
+				r: "1.6"
+			}),
+			/* @__PURE__ */ jsx("circle", {
+				cx: "18",
+				cy: "12",
+				r: "1.6"
+			})
+		]
+	});
+}
+function WorldTabBar({ tabs, active, dots, hidden, onSelect }) {
+	const [moreOpen, setMoreOpen] = useState(false);
+	let visible = tabs;
+	let overflow = [];
+	if (tabs.length > MAX_VISIBLE) {
+		visible = tabs.slice(0, 5);
+		overflow = tabs.slice(5);
+	}
+	const overflowActive = overflow.some((o) => o.id === active);
+	const overflowDot = overflow.some((o) => dots[o.id]);
+	return createPortal(/* @__PURE__ */ jsxs(Fragment, { children: [moreOpen && overflow.length ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("button", {
+		className: "ew-tabmore-scrim",
+		type: "button",
+		"aria-label": t("play.back"),
+		onClick: () => setMoreOpen(false)
+	}), /* @__PURE__ */ jsx("div", {
+		className: "ew-tabmore",
+		role: "menu",
+		children: overflow.map((o) => /* @__PURE__ */ jsxs("button", {
+			className: "ew-tabmore-item" + (o.id === active ? " on" : ""),
+			type: "button",
+			role: "menuitem",
+			onClick: () => {
+				onSelect(o.id);
+				setMoreOpen(false);
+			},
+			children: [
+				icon(o),
+				/* @__PURE__ */ jsx("span", { children: o.label }),
+				dots[o.id] ? /* @__PURE__ */ jsx("i", { className: "ew-tabdot-inline" }) : null
+			]
+		}, o.id))
+	})] }) : null, /* @__PURE__ */ jsxs("nav", {
+		className: "ew-tabbar" + (hidden && !moreOpen ? " ew-tabbar-hidden" : ""),
+		"aria-label": t("tab.label"),
+		children: [visible.map((tb) => /* @__PURE__ */ jsxs("button", {
+			className: "ew-tab" + (tb.id === active ? " on" : ""),
+			type: "button",
+			"aria-pressed": tb.id === active,
+			onClick: () => {
+				setMoreOpen(false);
+				onSelect(tb.id);
+			},
+			children: [
+				dots[tb.id] ? /* @__PURE__ */ jsx("span", { className: "ew-tabdot" }) : null,
+				icon(tb),
+				/* @__PURE__ */ jsx("span", {
+					className: "ew-tablabel",
+					children: tb.label
+				})
+			]
+		}, tb.id)), overflow.length ? /* @__PURE__ */ jsxs("button", {
+			className: "ew-tab" + (overflowActive ? " on" : ""),
+			type: "button",
+			"aria-expanded": moreOpen,
+			onClick: () => setMoreOpen((o) => !o),
+			children: [
+				overflowDot ? /* @__PURE__ */ jsx("span", { className: "ew-tabdot" }) : null,
+				moreIcon(),
+				/* @__PURE__ */ jsx("span", {
+					className: "ew-tablabel",
+					children: t("tab.more")
+				})
+			]
+		}) : null]
+	})] }), document.body);
+}
 //#endregion
 //#region src/play.tsx
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
@@ -3885,7 +5047,7 @@ function EchoMark({ e, lang, runId, onJump }) {
 		}) : null]
 	});
 }
-function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife, refresh }) {
+function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh, openStar, onStarClose, onLiveTurn, narrow, onPanels }) {
 	const [v, setV] = useState(null);
 	const [error, setError] = useState(null);
 	const [action, setAction] = useState("");
@@ -3897,6 +5059,10 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 	const [retry, setRetry] = useState(null);
 	const [drawer, setDrawer] = useState(false);
 	const [starOpen, setStarOpen] = useState(false);
+	const [asideTab, setAsideTab] = useState("");
+	/** Per-region content signature last seen on the aside, so a region tab dots on
+	*  an unseen change — the same notification affordance the phone bottom bar has. */
+	const asideSeenRef = useRef({});
 	const [legacyOpen, setLegacyOpen] = useState(false);
 	const [back, setBack] = useState(false);
 	const loadedRun = useRef(null);
@@ -3923,10 +5089,11 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 		try {
 			const next = await api.run(runId);
 			setV(next);
+			setError(null);
 			if (loadedRun.current !== runId) {
 				loadedRun.current = runId;
 				const recap = next.recap;
-				setRecapOpen(next.turn > 1 && !!(recap.lastAction || recap.events.length || recap.choices.length));
+				setRecapOpen(next.turn > 1 && !!(recap.lastAction || recap.events.length));
 			}
 		} catch (e) {
 			setError(e.message);
@@ -3979,6 +5146,36 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 	useEffect(() => {
 		onScenes(v?.scenes ?? []);
 	}, [v, onScenes]);
+	useEffect(() => {
+		if (openStar !== void 0) setStarOpen(openStar);
+	}, [openStar]);
+	useEffect(() => {
+		if (v && v.turn) onLiveTurn?.(v.turn);
+	}, [v?.turn, onLiveTurn]);
+	useEffect(() => {
+		onPanels?.(v?.panels ?? []);
+	}, [v?.panels, onPanels]);
+	useEffect(() => {
+		if (!v) {
+			onBackdrop(null);
+			return;
+		}
+		const latest = v.turn;
+		const shown = viewTurn ?? latest;
+		if (shown >= latest) onBackdrop(v.backdrop ?? null);
+		else {
+			const past = chron.find((c) => c.turn === shown)?.backdrop;
+			onBackdrop(past ? {
+				version: past.version,
+				turn: shown
+			} : v.backdrop ?? null);
+		}
+	}, [
+		v,
+		viewTurn,
+		chron,
+		onBackdrop
+	]);
 	const take = async (payload, what) => {
 		setTapped(what);
 		setPhrase(pick("play.waiting"));
@@ -4238,16 +5435,6 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 				}), /* @__PURE__ */ jsx("ul", {
 					className: "ew-recap-list",
 					children: recap.events.map((event) => /* @__PURE__ */ jsx("li", { children: event }, event))
-				})] }) : null,
-				recap.choices.length ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("div", {
-					className: "ew-recap-label",
-					children: t("play.recapNow")
-				}), /* @__PURE__ */ jsx("div", {
-					className: "ew-recap-choices",
-					children: recap.choices.map((choice) => /* @__PURE__ */ jsx("span", {
-						className: "ew-recap-choice",
-						children: choice
-					}, choice))
 				})] }) : null
 			]
 		}) : null,
@@ -4290,6 +5477,15 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 				})]
 			}, `${h}-${i}`))
 		}) : null,
+		(v.milestonesReached ?? []).length ? /* @__PURE__ */ jsx("div", {
+			className: "ew-milestone",
+			role: "status",
+			"aria-live": "polite",
+			children: (v.milestonesReached ?? []).map((m, i) => /* @__PURE__ */ jsx("div", {
+				className: "ew-milestone-row",
+				children: t("play.milestone", { label: m })
+			}, `${m}-${i}`))
+		}) : null,
 		(v.digest ?? []).length ? /* @__PURE__ */ jsx("div", {
 			className: "ew-digest",
 			children: (v.digest ?? []).map((dg, i) => /* @__PURE__ */ jsxs("div", {
@@ -4320,7 +5516,16 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 				onJump: (turn) => setViewTurn(turn >= latest ? null : turn)
 			}, `${e.sourceId}-${i}`))
 		}) : null,
-		stalled ? /* @__PURE__ */ jsxs("div", {
+		generating ? /* @__PURE__ */ jsx("div", {
+			className: "ew-note ew-note-live",
+			role: "status",
+			"aria-live": "polite",
+			children: /* @__PURE__ */ jsx(TurnProgress, {
+				g: v.generating,
+				label: phrase || t("play.generating")
+			})
+		}) : null,
+		stalled && !generating ? /* @__PURE__ */ jsxs("div", {
 			className: "ew-note",
 			role: "status",
 			"aria-live": "polite",
@@ -4342,16 +5547,38 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 				return /* @__PURE__ */ jsxs("div", {
 					className: "ew-choicewrap",
 					children: [/* @__PURE__ */ jsxs("button", {
-						className: "ew-choice" + (armed ? " ew-choice-armed" : "") + (sending ? " ew-choice-waiting" : ""),
+						className: "ew-choice" + (c.fateful || c.art ? " ew-choice-fateful" : "") + (c.art ? " ew-choice-arted" : "") + (armed ? " ew-choice-armed" : "") + (sending ? " ew-choice-waiting" : ""),
 						type: "button",
 						disabled: busy,
 						"aria-pressed": armed,
 						"aria-busy": sending,
 						onClick: () => setArm(armed ? "" : target),
-						children: [/* @__PURE__ */ jsx("span", {
-							className: "ew-choice-label",
-							children: c.label
-						}), sending ? /* @__PURE__ */ jsx(Waiting, { label: phrase }) : null]
+						children: [
+							c.art ? /* @__PURE__ */ jsx("img", {
+								className: "ew-choice-art",
+								src: `data:image/svg+xml;utf8,${encodeURIComponent(c.art)}`,
+								alt: "",
+								"aria-hidden": "true",
+								draggable: false,
+								onError: (e) => {
+									e.currentTarget.style.display = "none";
+								}
+							}) : v.backdrop?.buttons ? /* @__PURE__ */ jsx("img", {
+								className: "ew-choice-art ew-choice-art-common",
+								src: `${API}/runs/${encodeURIComponent(runId)}/backdrop?part=buttons&v=${v.backdrop.version}`,
+								alt: "",
+								"aria-hidden": "true",
+								draggable: false,
+								onError: (e) => {
+									e.currentTarget.style.display = "none";
+								}
+							}) : null,
+							/* @__PURE__ */ jsx("span", {
+								className: "ew-choice-label",
+								children: c.label
+							}),
+							sending ? /* @__PURE__ */ jsx(Waiting, { label: phrase }) : null
+						]
 					}), armed && !busy ? /* @__PURE__ */ jsxs("div", {
 						className: "ew-confirm",
 						children: [
@@ -4450,33 +5677,20 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 				className: "ew-confirm ew-confirm-act",
 				children: /* @__PURE__ */ jsx(Waiting, { label: phrase })
 			}) : null,
-			generating ? /* @__PURE__ */ jsx("div", {
-				className: "ew-note ew-note-live",
-				children: /* @__PURE__ */ jsx(TurnProgress, {
-					g: v.generating,
-					label: phrase || t("play.generating")
-				})
-			}) : null,
 			action.length > 400 ? /* @__PURE__ */ jsx("div", {
 				className: "ew-count",
 				children: `${action.length} / 500`
 			}) : null
 		] }) : null,
-		/* @__PURE__ */ jsx("button", {
+		!narrow ? /* @__PURE__ */ jsx("button", {
 			className: "ew-drawer",
 			type: "button",
 			"aria-expanded": drawer,
 			"aria-controls": "ew-panels-drawer",
 			onClick: () => setDrawer((d) => !d),
 			children: drawer ? t("play.drawerClose") : t("play.drawerOpen")
-		}),
-		v.turn >= 1 ? /* @__PURE__ */ jsx("button", {
-			className: "ew-drawer",
-			type: "button",
-			onClick: () => setStarOpen(true),
-			children: mt(v.language, "star.title")
 		}) : null,
-		drawer ? /* @__PURE__ */ jsx("div", {
+		drawer && !narrow ? /* @__PURE__ */ jsx("div", {
 			id: "ew-panels-drawer",
 			style: { marginTop: "10px" },
 			children: (v.panels ?? []).length ? panels : /* @__PURE__ */ jsx("div", {
@@ -4485,46 +5699,126 @@ function PlayPage({ runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife
 			})
 		}) : null
 	] });
-	return /* @__PURE__ */ jsxs("div", { children: [
-		starOpen ? /* @__PURE__ */ jsx(StarMap, {
-			runId,
-			lang: v.language,
-			onClose: () => setStarOpen(false),
-			onJumpTurn: (turn) => {
-				setStarOpen(false);
-				setViewTurn(turn >= latest ? null : turn);
-			}
-		}) : null,
-		/* @__PURE__ */ jsxs("div", {
-			className: "ew-topbar",
-			children: [/* @__PURE__ */ jsx("button", {
-				className: "ew-back",
-				type: "button",
-				onClick: onBack,
-				children: t("play.back")
-			}), pager]
-		}),
-		/* @__PURE__ */ jsxs("div", {
-			className: "ew-titleline",
-			children: [/* @__PURE__ */ jsx("h3", {
-				className: "ew-detail-title",
-				children: v.title
-			}), v.clock ? /* @__PURE__ */ jsx("span", {
-				className: "ew-clock",
-				children: v.clock
-			}) : null]
-		}),
-		/* @__PURE__ */ jsxs("div", {
-			className: "ew-play",
-			children: [main, /* @__PURE__ */ jsx("div", {
-				className: "ew-aside",
-				children: panels
-			})]
-		})
-	] });
+	const asideRegionTabs = buildTabs(v.scenes ?? [], v.panels ?? []).filter((tb) => tb.kind === "region");
+	const asideUntagged = (v.panels ?? []).filter((p) => !(p.region ?? "").trim());
+	const asideStripTabs = [...asideRegionTabs, ...asideUntagged.length ? [{
+		id: "__untagged",
+		kind: "region",
+		label: t("tab.system"),
+		sceneIds: []
+	}] : []];
+	const activeAside = asideStripTabs.some((tb) => tb.id === asideTab) ? asideTab : asideStripTabs[0]?.id ?? "";
+	const asidePanels = activeAside === "__untagged" ? asideUntagged : (v.panels ?? []).filter((p) => (p.region ?? "").trim() === activeAside);
+	const asideSig = (regionId) => {
+		const group = regionId === "__untagged" ? asideUntagged : (v.panels ?? []).filter((p) => (p.region ?? "").trim() === regionId);
+		return JSON.stringify(group.map((p) => [p.id, JSON.stringify(p.fields)]));
+	};
+	const asideDots = {};
+	for (const tb of asideStripTabs) {
+		const sig = asideSig(tb.id);
+		if (tb.id === activeAside) {
+			asideSeenRef.current[tb.id] = sig;
+			asideDots[tb.id] = false;
+			continue;
+		}
+		if (asideSeenRef.current[tb.id] === void 0) asideSeenRef.current[tb.id] = sig;
+		asideDots[tb.id] = asideSeenRef.current[tb.id] !== sig;
+	}
+	return /* @__PURE__ */ jsxs("div", {
+		className: "ew-play-root",
+		children: [
+			starOpen ? /* @__PURE__ */ jsx(StarMap, {
+				runId,
+				lang: v.language,
+				backdrop: v.backdrop ?? null,
+				onClose: () => {
+					setStarOpen(false);
+					onStarClose?.();
+				},
+				onJumpTurn: (turn) => {
+					setStarOpen(false);
+					setViewTurn(turn >= latest ? null : turn);
+				}
+			}) : null,
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-topbar",
+				children: [/* @__PURE__ */ jsx("button", {
+					className: "ew-back",
+					type: "button",
+					onClick: onBack,
+					children: t("play.back")
+				}), pager]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-titleline",
+				children: [/* @__PURE__ */ jsx("h3", {
+					className: "ew-detail-title",
+					children: v.title
+				}), v.clock ? /* @__PURE__ */ jsx("span", {
+					className: "ew-clock",
+					children: v.clock
+				}) : null]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-play",
+				children: [main, !narrow ? /* @__PURE__ */ jsxs("div", {
+					className: "ew-aside",
+					children: [/* @__PURE__ */ jsxs("div", {
+						className: "ew-aside-tabs",
+						children: [asideStripTabs.map((tb) => /* @__PURE__ */ jsxs("button", {
+							type: "button",
+							className: "ew-aside-tab" + (tb.id === activeAside ? " on" : ""),
+							"aria-pressed": tb.id === activeAside,
+							onClick: () => setAsideTab(tb.id),
+							children: [
+								tabIcon(tb.id === "__untagged" ? "system" : tb.id),
+								/* @__PURE__ */ jsx("span", { children: tb.label }),
+								asideDots[tb.id] ? /* @__PURE__ */ jsx("i", { className: "ew-aside-dot" }) : null
+							]
+						}, tb.id)), /* @__PURE__ */ jsxs("button", {
+							type: "button",
+							className: "ew-aside-tab",
+							onClick: () => setStarOpen(true),
+							children: [tabIcon("starmap"), /* @__PURE__ */ jsx("span", { children: mt(v.language, "star.title") })]
+						})]
+					}), asidePanels.length ? /* @__PURE__ */ jsx(Fragment, { children: asidePanels.map((p) => /* @__PURE__ */ jsx(PanelBox, { panel: p }, p.id)) }) : /* @__PURE__ */ jsx("div", {
+						className: "ew-note",
+						children: t("play.nothingToShow")
+					})]
+				}) : null]
+			})
+		]
+	});
 }
 //#endregion
 //#region src/rail.tsx
+/** The desktop navigator: worlds and lives, one click away.
+*
+* Why a rail and not a wider column. The shelf, a world's detail, the opening
+* screen and the live turn were all one centred column, which is right on a phone
+* and wasteful on a desktop — not because 900px is too narrow to read (it is about
+* right for prose), but because *navigation* was sharing the reading axis. Opening
+* a world replaced the shelf, so switching between two lives meant going back to
+* a list, and the list itself was the same width as the story.
+*
+* Why it is now a drawer rather than a permanent column. A permanent 248px of names
+* beside a story is navigation charging rent on every page: it is read once when you
+* switch lives and ignored for the hours in between. So it opens from the same
+* top-left slot the phone puts "back to the shelf" in, closes on the first thing you
+* pick, and the reading column keeps the whole width the rest of the time.
+*
+* It opens IN FLOW, pushing the story right, and is never a viewport-fixed overlay.
+* That is not a style preference: this app is mounted inside the dashboard's own
+* content region, which is itself offset right by the dashboard's sidebar, so a
+* panel positioned at `left: 0` of the VIEWPORT lands outside the area the app can
+* be seen in — drawn, but somewhere the reader cannot look.
+*
+* It never shows prose and never grows.
+*
+* Below the desktop breakpoint this component renders NOTHING and the shelf works
+* exactly as it did: a phone has no room for a rail of any kind, and the existing
+* narrow layout was not a compromise to be undone but the baseline to build on.
+*/
 /** The same fact as the shelf's row, in the same words.
 *
 * Reusing `life.*` rather than adding `rail.*` twins is deliberate: the rail and
@@ -4537,7 +5831,18 @@ function lifeWhere(run) {
 	if (run.awaitingOpening) return t("life.unborn");
 	return t("life.turn", { turn: run.turn });
 }
-function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome, atShelf }) {
+function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome, atShelf, open, onClose, width, onWidth }) {
+	useEffect(() => {
+		if (!open) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => {
+			window.removeEventListener("keydown", onKey);
+		};
+	}, [open, onClose]);
+	if (!open) return null;
 	const playable = (worlds ?? []).filter((w) => w.usable);
 	const broken = (worlds ?? []).length - playable.length;
 	const shown = runs.filter((r) => !r.archived);
@@ -4545,11 +5850,19 @@ function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, 
 		className: "ew-rail",
 		"aria-label": t("rail.label"),
 		children: [
-			atShelf ? null : /* @__PURE__ */ jsx("button", {
-				className: "ew-rail-home",
-				type: "button",
-				onClick: onHome,
-				children: t("rail.shelf")
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-rail-top",
+				children: [atShelf ? /* @__PURE__ */ jsx("span", {}) : /* @__PURE__ */ jsx("button", {
+					className: "ew-rail-home",
+					type: "button",
+					onClick: onHome,
+					children: t("rail.shelf")
+				}), /* @__PURE__ */ jsx("button", {
+					className: "ew-rail-x",
+					type: "button",
+					onClick: onClose,
+					children: t("rail.close")
+				})]
 			}),
 			shown.length ? /* @__PURE__ */ jsxs("div", {
 				className: "ew-rail-group",
@@ -4596,6 +5909,25 @@ function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, 
 						children: t("rail.broken", { n: broken })
 					}) : null
 				]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-rail-group",
+				children: [/* @__PURE__ */ jsx("div", {
+					className: "ew-rail-head",
+					children: t("rail.width")
+				}), /* @__PURE__ */ jsxs("select", {
+					className: "ew-uilang ew-rail-width",
+					"aria-label": t("rail.width"),
+					value: width,
+					onChange: (e) => onWidth(e.target.value === "fixed" ? "fixed" : "fluid"),
+					children: [/* @__PURE__ */ jsx("option", {
+						value: "fluid",
+						children: t("rail.width.fluid")
+					}), /* @__PURE__ */ jsx("option", {
+						value: "fixed",
+						children: t("rail.width.fixed")
+					})]
+				})]
 			})
 		]
 	});
@@ -4615,11 +5947,16 @@ function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, 
 * the dashboard's own document for every player, including the majority who never
 * see a scene at all.
 */
-function SceneSlot({ runId, sceneId, onChoice }) {
+function SceneSlot({ runId, sceneId, asks, visible = true, onChoice }) {
 	const [everNeeded, setEverNeeded] = useState(false);
 	const [html, setHtml] = useState("");
 	const [full, setFull] = useState(false);
 	const [failed, setFailed] = useState(false);
+	/** Set the instant the player acts, cleared when the scene changes — so a scene
+	*  tap has immediate feedback instead of looking dead for the seconds a turn
+	*  takes. (M0.4) */
+	const [sending, setSending] = useState(false);
+	const wrapRef = useRef(null);
 	useEffect(() => {
 		if (sceneId) setEverNeeded(true);
 	}, [sceneId]);
@@ -4648,7 +5985,18 @@ function SceneSlot({ runId, sceneId, onChoice }) {
 	const answered = useRef(false);
 	useEffect(() => {
 		answered.current = false;
+		setSending(false);
 	}, [sceneId, html]);
+	useEffect(() => {
+		if (html && sceneId && asks) wrapRef.current?.scrollIntoView({
+			block: "nearest",
+			behavior: "smooth"
+		});
+	}, [
+		html,
+		sceneId,
+		asks
+	]);
 	useEffect(() => {
 		if (!everNeeded) return void 0;
 		const onMessage = (e) => {
@@ -4660,6 +6008,7 @@ function SceneSlot({ runId, sceneId, onChoice }) {
 			if (typeof d.choice !== "string" || !d.choice) return;
 			if (answered.current) return;
 			answered.current = true;
+			setSending(true);
 			onChoice(sceneId, d.choice, d.nonce);
 		};
 		window.addEventListener("message", onMessage);
@@ -4680,8 +6029,9 @@ function SceneSlot({ runId, sceneId, onChoice }) {
 	const on = !!(html && sceneId);
 	const loading = !!sceneId && !html && !failed;
 	return /* @__PURE__ */ jsxs("div", {
-		className: "ew-slot-wrap",
-		style: on ? void 0 : { margin: 0 },
+		className: `ew-slot-wrap${full ? " ew-slot-wrap-full" : ""}`,
+		ref: wrapRef,
+		style: !visible ? { display: "none" } : on ? void 0 : { margin: 0 },
 		children: [
 			failed && sceneId ? /* @__PURE__ */ jsx("div", {
 				className: "ew-note",
@@ -4692,6 +6042,12 @@ function SceneSlot({ runId, sceneId, onChoice }) {
 				role: "status",
 				"aria-live": "polite",
 				children: t("play.sceneLoading")
+			}) : null,
+			sending ? /* @__PURE__ */ jsx("div", {
+				className: "ew-note",
+				role: "status",
+				"aria-live": "polite",
+				children: t("play.sceneSending")
 			}) : null,
 			everNeeded ? /* @__PURE__ */ jsx("iframe", {
 				title: t("play.sceneTitle"),
@@ -4715,6 +6071,13 @@ function SceneSlot({ runId, sceneId, onChoice }) {
 }
 //#endregion
 //#region src/settings.tsx
+/** The host App SDK, reached through the window module map (an older host may not
+*  expose it). `useAppApi()` is the AUTHORIZED path to a CORE route like
+*  `/api/models`: it injects an app token and gates on the manifest's declared
+*  `permissions.api`, where the app's path-scoped session cookie cannot reach
+*  outside `/api/apps/endless-worlds/*`. Without it the model picker falls back
+*  to the bare-fetch `api.models()`, which a core route rejects — hence auto-only. */
+var appSdk = window.__kirocrew_modules?.["@kirocrew/app-sdk"];
 /**
 * Narrator settings, opened from the home page: which model writes the story and
 * at what reasoning effort. Both apply to every life's narrator at its next turn.
@@ -4730,21 +6093,22 @@ function SettingsPanel({ onClose }) {
 	const [models, setModels] = useState([]);
 	const [saved, setSaved] = useState(false);
 	const [busy, setBusy] = useState(false);
+	const appApi = appSdk?.useAppApi?.() ?? null;
 	useEffect(() => {
 		let alive = true;
 		api.settings().then((s) => {
 			if (!alive) return;
-			setModel(s.model || "");
+			setModel(s.model && s.model !== "auto" ? s.model : "");
 			setEffort(s.reasoningEffort || "");
 			if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts);
 		}).catch(() => {});
-		api.models().then((m) => {
+		(appApi ? appApi.get("/api/models").then(normalizeModels).catch(() => api.models()) : api.models()).then((m) => {
 			if (alive) setModels(m);
 		}).catch(() => {});
 		return () => {
 			alive = false;
 		};
-	}, []);
+	}, [appApi]);
 	const save = async () => {
 		setBusy(true);
 		try {
@@ -4759,8 +6123,8 @@ function SettingsPanel({ onClose }) {
 			setBusy(false);
 		}
 	};
-	const modelIds = models.map((m) => m.id);
-	const extra = model && !modelIds.includes(model) ? [model] : [];
+	const modelIds = models.map((m) => m.id).filter((id) => id && id !== "auto");
+	const extra = model && model !== "auto" && !modelIds.includes(model) ? [model] : [];
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-settings ew-block",
 		children: [
@@ -4837,7 +6201,7 @@ function SettingsPanel({ onClose }) {
 }
 //#endregion
 //#region src/styles.css?raw
-var styles_default = "/* This app mounts into the DASHBOARD's own document, not an iframe, so every rule\n   here is global. Hence the ew- prefix on every class and zero bare element\n   selectors — an unprefixed .card would repaint the whole dashboard.\n\n   Narrow-first: bare rules are the phone baseline, min-width adds the desktop. */\n\n.ew-root {\n  --ew-gutter: 16px;\n  color: var(--text, #e2e8f0);\n  padding: var(--ew-gutter);\n  /* Scopes any future overlay to this panel instead of the whole dashboard. */\n  position: relative;\n}\n@media (min-width: 768px) {\n  .ew-root { max-width: 900px; margin: 0 auto; --ew-gutter: 24px; }\n}\n\n/* ── the desktop rail ──────────────────────────────────────────────────────\n   Above this width the page splits into a navigation axis and a reading axis.\n   Below it the rail is not rendered at all and the shelf behaves exactly as it\n   always has — the narrow layout is the baseline, not a compromise being undone.\n\n   1100px, not 768: a rail plus a readable measure needs ~1060px, and squeezing\n   both into a tablet gives a cramped rail AND cramped prose. Between 768 and\n   1100 the centred column is still the best use of the space. */\n.ew-rail { display: none; }\n\n@media (min-width: 1100px) {\n  /* The cap moves off .ew-root and onto the reading column, so the rail can sit\n     outside the measure instead of eating into it. */\n  .ew-root { max-width: 1320px; }\n\n  /* One way back, not two. The rail's own \"back to the shelf\" is permanent and\n     always in the same place, so the view's inline back button is a second control\n     doing the same thing. Scoped to `.ew-root .ew-back` (0,2,0) on purpose: the\n     base `.ew-back` rule is declared LATER in this file, so an equal-specificity\n     `.ew-back { display: none }` here would lose the cascade and the button would\n     stay visible — which is exactly the \"two back buttons\" bug this had. The\n     inline one is the mobile affordance and stays the only one below this width. */\n  .ew-root .ew-back { display: none; }\n\n  /* The shelf, once. The rail already lists every life and every world, so the\n     same list in the reading column was the same information twice, side by side.\n     Hidden here rather than removed from the component, because whether the rail\n     exists is a width question and so is this. */\n  .ew-shelflist { display: none; }\n\n  .ew-shell {\n    display: grid;\n    grid-template-columns: 248px minmax(0, 1fr);\n    gap: 32px;\n    align-items: start;\n  }\n\n  .ew-rail {\n    display: block;\n    position: sticky;\n    /* Sticks under the app's own header rather than the viewport top, so the\n       title does not scroll away from the rail it labels. */\n    top: var(--ew-gutter);\n    /* Its own scroll: a shelf with thirty lives must not push the story down. */\n    max-height: calc(100vh - 120px);\n    overflow-y: auto;\n    padding-right: 4px;\n  }\n\n  /* The measure. Prose is the reason this number exists — a life is read, not\n     scanned — so it is set in ch and does not grow with the window. */\n  .ew-main { max-width: 74ch; }\n}\n\n.ew-rail-home {\n  display: block; width: 100%; text-align: left;\n  min-height: 36px; margin-bottom: 14px; padding: 0;\n  background: transparent; border: none; cursor: pointer;\n  color: var(--accent, #7c3aed); font: inherit; font-size: 13px;\n}\n\n.ew-rail-group { margin-bottom: 18px; }\n.ew-rail-head {\n  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;\n  text-transform: uppercase;\n  color: var(--muted, #6b7280);\n  margin-bottom: 6px;\n}\n\n.ew-rail-row {\n  display: block; width: 100%; text-align: left; cursor: pointer;\n  background: transparent;\n  border: none; border-left: 2px solid transparent;\n  border-radius: 0 6px 6px 0;\n  padding: 7px 8px; margin-bottom: 1px;\n  color: inherit; font: inherit;\n}\n.ew-rail-row:hover { background: var(--card, #1f2030); }\n.ew-rail-row:disabled { cursor: default; opacity: 0.45; }\n.ew-rail-row-on {\n  border-left-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 10%, transparent);\n}\n\n.ew-rail-name {\n  display: block; font-size: 13px; line-height: 1.35;\n  /* A world title is user content: one long unbroken run must not widen the\n     grid column, which would push the reading measure sideways. */\n  overflow-wrap: anywhere;\n}\n.ew-rail-sub {\n  display: block; font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px;\n}\n/* Only where the rail is: below it, the shelf list IS the page and this landing\n   would be a second copy of what the list already says. */\n.ew-onlywide { display: none; }\n@media (min-width: 1100px) { .ew-onlywide { display: block; } }\n\n/* ── reading back ── */\n.ew-history { margin-top: 14px; }\n.ew-past { padding-bottom: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--border, #2d2f3d); }\n.ew-past-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }\n.ew-past-turn { font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; }\n.ew-past-action { font-size: 12px; color: var(--accent, #7c3aed); overflow-wrap: anywhere; }\n\n.ew-rail-note {\n  font-size: 11px; color: var(--muted, #6b7280); padding: 6px 8px; line-height: 1.6;\n}\n\n.ew-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }\n.ew-head h2 { margin: 0; font-size: 17px; font-weight: 600; }\n@media (min-width: 768px) { .ew-head h2 { font-size: 19px; } }\n/* Interface-language dropdown: pushed to the far right of the title bar. */\n.ew-uilang {\n  margin-left: 0; min-height: 30px; padding: 0 8px; font-size: 13px;\n  color: var(--text, #e2e8f0); background: transparent;\n  border: 1px solid var(--border, #334155); border-radius: 8px; cursor: pointer;\n}\n/* The header's right-hand controls (language, settings), grouped and pushed right. */\n.ew-headtools { margin-left: auto; display: flex; gap: 8px; align-items: center; }\n/* Narrator settings panel on the home page. */\n.ew-settings {\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  background: var(--card, #1f2030); padding: 14px; margin-bottom: 16px;\n}\n.ew-settings-head { display: flex; align-items: center; justify-content: space-between; }\n.ew-settings-row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }\n.ew-settings-label { flex: 0 0 8em; color: var(--muted, #6b7280); font-size: 13px; }\n.ew-settings-select { flex: 1; min-width: 0; }\n.ew-settings-foot { display: flex; align-items: center; gap: 12px; margin-top: 6px; }\n.ew-settings-saved { font-size: 12px; color: var(--accent, #7c3aed); }\n\n/* A world name is user content and can be one long unbroken run; without this a\n   phone gets a horizontal scrollbar on the whole page. */\n.ew-title, .ew-detail-title { overflow-wrap: anywhere; }\n\n.ew-card {\n  display: block; width: 100%; text-align: left; cursor: pointer;\n  background: var(--card, #1f2030);\n  border: 1px solid var(--border, #2d2f3d);\n  border-radius: 10px;\n  padding: 12px; margin-bottom: 10px;\n  color: inherit; font: inherit;\n  -webkit-tap-highlight-color: transparent;\n}\n@media (min-width: 768px) { .ew-card { padding: 14px; } }\n.ew-card:active { border-color: var(--accent, #7c3aed); }\n.ew-card-broken { cursor: default; border-left: 3px solid var(--danger, #b91c1c); }\n\n.ew-title { font-size: 15px; font-weight: 600; line-height: 1.35; }\n@media (min-width: 768px) { .ew-title { font-size: 16px; } }\n\n.ew-titlerow {\n  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;\n}\n.ew-chips { display: flex; gap: 6px; flex-wrap: wrap; }\n\n.ew-chip {\n  border-radius: 9999px; padding: 2px 9px; font-size: 11px;\n  border: 1px solid var(--border, #2d2f3d);\n  color: var(--muted, #6b7280);\n  white-space: nowrap;\n}\n.ew-chip-accent {\n  border-color: transparent;\n  background: color-mix(in oklab, var(--accent, #7c3aed) 16%, transparent);\n  color: var(--accent, #7c3aed);\n}\n\n.ew-meta { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7; }\n\n/* A world card is an invitation to imagine a life, not a package manifest. The\n   promise leads; concrete possibilities make it credible; implementation counts\n   stay one tap away on the detail page. */\n.ew-world-card { overflow: hidden; }\n.ew-world-promise {\n  margin: 2px 0 12px;\n  font-size: 14px; line-height: 1.65;\n  color: var(--text, #e2e8f0);\n}\n.ew-world-possibilities {\n  margin: 0 0 14px; padding: 10px 12px;\n  border-left: 2px solid color-mix(in oklab, var(--accent, #7c3aed) 48%, transparent);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 7%, transparent);\n}\n.ew-world-possibilities-label {\n  margin-bottom: 5px; font-size: 11px; font-weight: 600;\n  letter-spacing: .04em; color: var(--accent, #7c3aed);\n}\n.ew-world-possibility {\n  position: relative; padding-left: 12px;\n  font-size: 12px; line-height: 1.65;\n  color: var(--muted, #94a3b8);\n}\n.ew-world-possibility::before { content: '·'; position: absolute; left: 1px; }\n.ew-world-card-footer {\n  display: flex; align-items: baseline; justify-content: space-between;\n  gap: 12px; margin-top: 12px; padding-top: 10px;\n  border-top: 1px solid var(--border, #2d2f3d);\n}\n.ew-world-enter {\n  flex: none; font-size: 12px; font-weight: 600;\n  color: var(--accent, #7c3aed);\n}\n\n/* 44px is the smallest reliably tappable target; a 13px text link with 4px of\n   padding is about 21px, which is a miss on a phone even when it looks fine on a\n   desktop mock. */\n.ew-back {\n  display: inline-flex; align-items: center;\n  min-height: 44px; padding: 0 12px 0 0;\n  background: transparent; border: none; cursor: pointer;\n  color: var(--accent, #7c3aed); font: inherit; font-size: 14px;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.ew-detail-title { margin: 0 0 4px; font-size: 19px; line-height: 1.3; }\n@media (min-width: 768px) { .ew-detail-title { font-size: 22px; } }\n\n.ew-section { font-size: 13px; font-weight: 600; margin: 0 0 7px; }\n.ew-block { margin-bottom: 18px; }\n/* A small explanatory caption under a block, e.g. what the accented chips mean. */\n.ew-hint { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.6; margin-top: -10px; }\n\n.ew-panel {\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px; margin-bottom: 8px;\n}\n@media (min-width: 768px) { .ew-panel { padding: 10px 12px; } }\n.ew-panel-head {\n  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 7px;\n}\n.ew-panel-name { font-size: 13px; font-weight: 600; }\n\n.ew-note {\n  font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px 12px; margin-top: 10px;\n}\n/* A note that carries an action. The button keeps its own size, so a long sentence\n   wraps instead of squeezing the thing the player is meant to press. */\n.ew-note-row {\n  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;\n  justify-content: space-between;\n}\n\n/* ── the second ask ──\n   Absolute inside the app's own box, NOT fixed — the same rule the scene slot\n   follows and for a sharper reason here: a fixed overlay would cover the\n   dashboard's own navigation, so a modal that failed to close would trap the\n   player in this app. Scoped to .ew-root, the worst case is an app they can\n   still navigate away from. */\n.ew-modal-wrap {\n  position: absolute; inset: 0; z-index: 40;\n  display: flex; align-items: flex-start; justify-content: center;\n  padding: 24px var(--ew-gutter, 8px);\n  background: color-mix(in oklab, var(--bg, #1a1b26) 72%, transparent);\n  /* The app's box can be taller than the viewport; keeping the panel near the top\n     of it means a scrolled page still shows the panel rather than empty scrim. */\n  overflow-y: auto;\n}\n.ew-modal {\n  width: 100%; max-width: 460px; box-sizing: border-box;\n  background: var(--bg-elevated, #21222e); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 12px;\n  padding: 18px; margin-top: 4vh;\n}\n.ew-modal:focus { outline: none; }\n.ew-modal-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; }\n.ew-modal-body { font-size: 14px; line-height: 1.75; margin-bottom: 12px; }\n.ew-modal-note { margin-bottom: 14px; }\n.ew-modal-gate { display: block; margin-bottom: 14px; }\n.ew-modal-gate .ew-meta { display: block; margin-bottom: 6px; }\n.ew-modal-problem {\n  font-size: 13px; line-height: 1.7; margin-bottom: 12px;\n  color: var(--danger, #f87171);\n}\n.ew-modal-bar { margin-top: 0; }\n\n/* What is about to be lost, named. A count alone does not tell the player which\n   life they are ending. */\n.ew-doomed {\n  list-style: none; margin: 0 0 14px; padding: 0;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  max-height: 34vh; overflow-y: auto;\n}\n.ew-doomed li {\n  display: flex; justify-content: space-between; gap: 10px;\n  padding: 8px 12px; font-size: 13px;\n  border-bottom: 1px solid var(--border, #2d2f3d);\n}\n.ew-doomed li:last-child { border-bottom: none; }\n.ew-doomed-name { min-width: 0; overflow-wrap: anywhere; }\n.ew-doomed-where { color: var(--muted, #6b7280); flex: 0 0 auto; font-size: 12px; }\n\n/* ── opening screen ── */\n\n.ew-group { margin-bottom: 20px; }\n.ew-glabel {\n  font-size: 14px; font-weight: 600; margin-bottom: 2px;\n  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;\n}\n.ew-ghint { font-size: 12px; color: var(--muted, #6b7280); margin-bottom: 8px; }\n\n/* Options are buttons, not a select: on a phone a native select opens a modal\n   wheel for six words, and the words are the whole point of this screen. */\n.ew-opt {\n  border-radius: 9999px; padding: 7px 13px; font-size: 13px;\n  border: 1px solid var(--border, #2d2f3d); background: transparent;\n  color: var(--text, #e2e8f0); cursor: pointer; font: inherit;\n  min-height: 36px; -webkit-tap-highlight-color: transparent;\n}\n.ew-opt-on {\n  border-color: transparent; color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 18%, transparent);\n}\n\n.ew-input {\n  width: 100%; box-sizing: border-box;\n  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px 12px; font: inherit; font-size: 15px;\n  min-height: 44px;\n}\n.ew-input:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n\n/* A visible keyboard focus ring on every custom control, so tabbing through the\n   app can be followed. :focus-visible keeps it off pointer clicks. */\n.ew-btn:focus-visible, .ew-opt:focus-visible, .ew-choice:focus-visible,\n.ew-drawer:focus-visible, .ew-card-open:focus-visible, .ew-slot-btn:focus-visible,\n.ew-rail-row:focus-visible, .ew-rail-home:focus-visible, .ew-back:focus-visible,\n.ew-section-toggle:focus-visible {\n  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;\n}\n\n/* Inline rename inside a life row: flexes to fill the row beside its save/cancel\n   buttons rather than forcing them onto a second line. */\n.ew-rename-input {\n  flex: 1 1 auto; min-width: 0; box-sizing: border-box;\n  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 8px 10px; font: inherit; min-height: 40px;\n}\n.ew-rename-input:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n\n/* The archived group's heading is a toggle: it keeps the section typography but\n   reads as pressable. */\n.ew-section-toggle {\n  background: none; border: none; padding: 0; cursor: pointer;\n  color: inherit; text-align: start; -webkit-tap-highlight-color: transparent;\n}\n\n/* History toolbar: the events-only toggle and the jump-to-turn control. */\n.ew-history-bar {\n  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;\n}\n.ew-jump {\n  width: 7em; min-width: 0; box-sizing: border-box; font: inherit; min-height: 36px;\n  padding: 6px 10px; border-radius: 8px;\n  color: var(--text, #e2e8f0); background: var(--bg, #1a1b26);\n  border: 1px solid var(--border, #2d2f3d);\n}\n.ew-jump:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n.ew-search { width: 12em; }\n\n/* The \"world is being arranged\" state on the play page while a life is born. */\n.ew-arrange {\n  display: flex; flex-direction: column; gap: 12px; align-items: flex-start;\n  padding: 20px 0;\n}\n.ew-arrange-title {\n  font-size: 18px; font-weight: 600; color: var(--text, #e2e8f0);\n}\n\n/* A quiet marker when the world opens a new chapter of this life. */\n.ew-unlocked { margin: 0 0 14px; display: flex; flex-direction: column; gap: 7px; }\n\n/* \"An old thing came back\" — the echo marker (design §8.1). A single folded line\n   in the unlocked-marker voice; expanding it is the player's act, never a popup. */\n.ew-echoes { margin: 12px 0 14px; display: flex; flex-direction: column; gap: 7px; }\n.ew-echo {\n  padding-inline-start: 10px;\n  border-inline-start: 2px solid color-mix(in oklab, var(--accent, #7c3aed) 55%, transparent);\n}\n.ew-echo-line {\n  appearance: none; background: none; border: 0; padding: 2px 0; cursor: pointer;\n  font: inherit; font-size: 13px; font-style: italic; text-align: start;\n  color: var(--accent, #7c3aed);\n}\n.ew-echo-line:hover { text-decoration: underline; }\n.ew-echo-body {\n  margin-top: 6px; display: flex; flex-direction: column; gap: 6px;\n  font-size: 13px; line-height: 1.6; color: var(--fg, #e5e7eb);\n}\n.ew-echo-row { display: flex; gap: 8px; align-items: baseline; }\n.ew-echo-label {\n  flex: 0 0 auto; font-size: 12px; color: var(--muted, #6b7280);\n}\n.ew-echo-actions { display: flex; gap: 8px; margin-top: 2px; }\n\n.ew-unlocked-row {\n  font-size: 13px; color: var(--accent, #7c3aed);\n  padding-inline-start: 10px;\n  border-inline-start: 2px solid var(--accent, #7c3aed);\n}\n.ew-unlocked-heading { font-style: italic; font-weight: 600; }\n.ew-unlocked-meaning {\n  margin-top: 2px; font-size: 12px; line-height: 1.6;\n  color: var(--muted, #6b7280);\n}\n\n/* Small ceremonies around the prose: one reveals what the world settled at birth;\n   the other restores a returning player's place without generating a new summary. */\n.ew-story-moment {\n  margin: 0 0 16px; padding: 12px 14px; border-radius: 10px;\n  border: 1px solid color-mix(in oklab, var(--accent, #7c3aed) 32%, var(--border, #2d2f3d));\n  background: color-mix(in oklab, var(--accent, #7c3aed) 7%, var(--card, #1f2030));\n}\n.ew-story-moment-head {\n  display: flex; align-items: baseline; justify-content: space-between;\n  gap: 12px; margin-bottom: 7px;\n}\n.ew-story-moment-title { font-size: 13px; font-weight: 600; color: var(--accent, #7c3aed); }\n.ew-story-moment-close {\n  flex: none; border: none; padding: 3px 0; background: transparent;\n  color: var(--muted, #6b7280); font: inherit; font-size: 11px; cursor: pointer;\n}\n.ew-story-moment-close:focus-visible {\n  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;\n}\n.ew-reveal-row {\n  display: flex; justify-content: space-between; gap: 12px;\n  padding: 4px 0; font-size: 13px; line-height: 1.5;\n}\n.ew-reveal-label, .ew-recap-label { color: var(--muted, #6b7280); }\n.ew-reveal-value { text-align: end; font-weight: 600; }\n.ew-story-moment-hint { margin-top: 6px; font-size: 11px; color: var(--muted, #6b7280); }\n.ew-recap-line { margin: 5px 0; font-size: 12px; line-height: 1.65; }\n.ew-recap-list { margin: 4px 0 8px; padding-inline-start: 18px; font-size: 12px; line-height: 1.65; }\n.ew-recap-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }\n.ew-recap-choice {\n  border-radius: 9999px; padding: 3px 9px; font-size: 11px;\n  border: 1px solid var(--border, #2d2f3d); color: var(--muted, #94a3b8);\n}\n\n/* A turn's marked events and gains — the material the events-only timeline shows. */\n.ew-marks { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }\n.ew-mark {\n  font-size: 13px; line-height: 1.6; padding-inline-start: 12px; position: relative;\n}\n.ew-mark::before {\n  content: \"·\"; position: absolute; inset-inline-start: 2px; color: var(--muted, #6b7280);\n}\n.ew-mark-gain { color: var(--muted, #6b7280); }\n\n/* A scalar field the narrator handed a structured value: its text, one line each. */\n.ew-lines { display: flex; flex-direction: column; gap: 3px; }\n\n/* The pre-birth summary: every opening choice on one line, with world-decided\n   items plainly marked so a look-before-you-leap is honest about what was chosen. */\n.ew-summary {\n  margin: 18px 0 6px; padding: 12px 14px; border-radius: 10px;\n  border: 1px solid var(--border, #2d2f3d); background: var(--card, #1f2030);\n}\n.ew-summary-row {\n  display: flex; gap: 12px; justify-content: space-between; align-items: baseline;\n  padding: 4px 0; font-size: 14px; line-height: 1.6;\n}\n.ew-summary-label { color: var(--muted, #6b7280); flex: 0 0 auto; }\n.ew-summary-value { text-align: end; }\n.ew-summary-world { text-align: end; color: var(--muted, #6b7280); font-style: italic; }\n\n.ew-sealed {\n  border: 1px dashed var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px 12px; font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7;\n}\n\n.ew-bar {\n  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;\n  margin-top: 20px; padding-top: 16px;\n  border-top: 1px solid var(--border, #2d2f3d);\n}\n.ew-btn {\n  border-radius: 8px; padding: 0 16px; min-height: 44px;\n  border: 1px solid var(--border, #2d2f3d); background: transparent;\n  color: var(--text, #e2e8f0); font: inherit; font-size: 14px; cursor: pointer;\n  -webkit-tap-highlight-color: transparent;\n}\n.ew-btn-go {\n  border-color: transparent; background: var(--accent, #7c3aed); color: #fff;\n  font-weight: 600; flex: 1; min-width: 140px;\n}\n.ew-btn:disabled, .ew-btn-go:disabled { opacity: .5; cursor: default; }\n\n/* Destructive, and it must read that way BEFORE it is pressed. Colour is not the\n   safeguard (the dialog is), but a delete that looks like every other button is a\n   delete the player presses while reading something else. */\n.ew-btn-danger {\n  border-color: var(--danger, #f87171);\n  color: var(--danger, #f87171);\n  background: color-mix(in oklab, var(--danger, #f87171) 12%, transparent);\n  flex: 0 0 auto;\n}\n/* The way OUT of a destructive path, and the way INTO one from a page whose\n   subject is something else. Quiet on purpose. */\n.ew-btn-quiet {\n  color: var(--muted, #6b7280); border-color: transparent;\n  flex: 0 0 auto; min-height: 36px; padding: 0 12px; font-size: 13px;\n}\n.ew-btn-quiet:hover { color: var(--text, #e2e8f0); }\n.ew-spacer { flex: 1; }\n/* Language chooser on the world card: a small toggle set, the chosen one filled. */\n.ew-lang {\n  border: 1px solid var(--border, #334155); border-radius: 999px;\n  background: transparent; color: var(--muted, #6b7280);\n  min-height: 32px; padding: 0 14px; font-size: 13px; cursor: pointer;\n}\n.ew-lang:hover { color: var(--text, #e2e8f0); }\n.ew-lang[aria-pressed=\"true\"] {\n  background: var(--accent, #6366f1); color: #fff; border-color: transparent;\n}\n@media (min-width: 768px) { .ew-btn-go { flex: 0 0 auto; } }\n\n/* ── prose ── */\n\n/* Reading typography, not UI typography — this is the only place the player reads\n   for minutes at a time. */\n.ew-prose {\n  font-size: 16px; line-height: 1.85; max-width: 66ch; margin: 12px 0 0;\n}\n/* Only the fallback path needs pre-wrap. With the host's markdown renderer,\n   paragraphs are real elements and pre-wrap would double every blank line. */\n.ew-prose-plain { white-space: pre-wrap; }\n.ew-prose p { margin: 0 0 1.1em; }\n.ew-prose p:last-child { margin-bottom: 0; }\n.ew-prose em { font-style: italic; }\n.ew-prose h1, .ew-prose h2, .ew-prose h3 {\n  font-size: 1.05em; font-weight: 600; margin: 1.4em 0 .5em;\n}\n.ew-prose blockquote {\n  margin: 1em 0; padding-left: 12px;\n  border-left: 2px solid var(--border, #2d2f3d); color: var(--muted, #6b7280);\n}\n.ew-prose ul, .ew-prose ol { margin: .8em 0; padding-left: 1.4em; }\n.ew-prose li { margin: .25em 0; }\n\n/* ── play page ── */\n\n/* Narrow-first single column; panels move to a sidebar from 900px. Below that the\n   sidebar is absent entirely and the drawer is how panels stay reachable —\n   rendering both would put every panel on screen twice. */\n.ew-play { display: block; }\n.ew-aside { display: none; }\n@media (min-width: 900px) {\n  .ew-play {\n    display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 28px; align-items: start;\n  }\n  .ew-aside { display: block; position: sticky; top: 12px; }\n}\n\n/* Title with the in-world date beside it (shown only when the world has one). */\n.ew-titleline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }\n.ew-titleline .ew-clock { margin-bottom: 0; }\n.ew-clock {\n  font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; margin-bottom: 4px;\n}\n\n/* Back button and turn pager share one row, the pager pushed to the far right. */\n.ew-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }\n/* Turn pager: ‹ current turn › */\n.ew-pager {\n  display: flex; align-items: center; justify-content: center; gap: 14px;\n  margin: 0;\n}\n.ew-pager-turn {\n  font-size: 13px; color: var(--muted, #6b7280); letter-spacing: .04em;\n  min-width: 6em; text-align: center;\n}\n.ew-pager-arw {\n  display: inline-flex; align-items: center; justify-content: center;\n  width: 36px; height: 36px; border-radius: 8px; cursor: pointer;\n  background: transparent; border: 1px solid var(--border, #2d2f3d);\n  color: var(--text, #e2e8f0);\n}\n.ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); }\n.ew-pager-arw:disabled { opacity: .35; cursor: default; }\n\n.ew-digest { margin: 0 0 20px; }\n/* Page-turn: the story slides+fades in — from the right going forward, from the\n   left going back. Keyed remount per turn runs it once; motion-reduce opts out. */\n@keyframes ew-page-fwd { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }\n@keyframes ew-page-back { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }\n.ew-turnpage-fwd { animation: ew-page-fwd .3s ease-out both; }\n.ew-turnpage-back { animation: ew-page-back .3s ease-out both; }\n@media (prefers-reduced-motion: reduce) {\n  .ew-turnpage-fwd, .ew-turnpage-back { animation: none; }\n}\n.ew-drow {\n  display: flex; gap: 8px; padding: 6px 0; font-size: 13px; line-height: 1.7;\n  border-bottom: 1px solid var(--border, #2d2f3d);\n}\n.ew-drow-rumour { color: var(--muted, #6b7280); font-style: italic; }\n.ew-dcat { color: var(--muted, #6b7280); flex: 0 0 auto; min-width: 4.5em; }\n\n/* Panels keep UI type while the prose gets reading type — a stat block read at\n   16/1.85 is harder to scan, not easier. */\n.ew-panel-box {\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  padding: 12px; margin-bottom: 10px; font-size: 13px;\n}\n.ew-panel-box-name {\n  margin-bottom: 5px; font-size: 13px; font-weight: 600;\n  color: var(--text, #e2e8f0);\n}\n.ew-panel-quiet { opacity: .55; }\n.ew-prow { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; line-height: 1.6; }\n.ew-plabel { color: var(--muted, #6b7280); flex: 0 0 5.5em; }\n.ew-pval { flex: 1; min-width: 0; overflow-wrap: anywhere; }\n/* A rank/tier value renders as an accent chip, but the narrator can write a whole\n   clause into it (measured on the flagship). Chips are nowrap by default so tag\n   rows stay tidy — but a value chip must wrap instead of overflowing the panel. */\n.ew-pval .ew-chip { white-space: normal; overflow-wrap: anywhere; }\n.ew-gap { color: var(--border, #2d2f3d); }\n\n/* A label that is really a sentence. Measured on the live flagship: the narrator\n   wrote a whole clause into a label slot, and the fixed 5.5em column wrapped it to\n   ten lines beside a single dot. Stacking costs one line of height and makes the row\n   readable; keeping the column costs ten and does not. */\n.ew-prow-stack { display: block; }\n.ew-prow-stack .ew-plabel { flex: none; margin-bottom: 2px; line-height: 1.55; }\n.ew-prow-stack .ew-pval { margin-left: 0; }\n\n.ew-bar-track {\n  height: 4px; border-radius: 2px; margin-top: 5px;\n  background: var(--border, #2d2f3d); overflow: hidden;\n}\n.ew-bar-fill { height: 100%; background: var(--accent, #7c3aed); }\n\n.ew-list { margin: 0; padding: 0; list-style: none; }\n.ew-list li { padding: 2px 0; }\n.ew-sub { color: var(--muted, #6b7280); }\n/* The world's name, demoted to a second line now that the life's own identity holds\n   the first. Small: it is the same string on every row, so it is context, not news. */\n.ew-card .ew-sub { display: block; font-size: 12px; margin-bottom: 2px; }\n\n.ew-choices { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; }\n.ew-choice {\n  text-align: left; width: 100%; box-sizing: border-box;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  background: var(--card, #1f2030); color: var(--text, #e2e8f0);\n  padding: 12px 14px; font: inherit; font-size: 14px; line-height: 1.5;\n  min-height: 48px; cursor: pointer; -webkit-tap-highlight-color: transparent;\n}\n.ew-choice:active { border-color: var(--accent, #7c3aed); }\n.ew-choice:disabled { opacity: .5; cursor: default; }\n\n/* The one that was chosen. Kept at full opacity while its siblings dim, because\n   the point of the waiting state is to confirm WHICH choice was taken — a row where\n   every option is equally grey has answered a different question. */\n.ew-choicewrap { margin-bottom: 8px; }\n.ew-choice { position: relative; overflow: hidden; }\n.ew-choice-label { position: relative; z-index: 1; }\n\n/* Armed: chosen, not yet done. Reads as a held breath — brighter and slightly\n   raised, but explicitly NOT the accent fill the committing state uses, so the two\n   are never confused at a glance. */\n.ew-choice-armed {\n  border-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 8%, var(--card, #1f2030));\n  transform: translateY(-1px);\n  transition: transform .14s ease, background .14s ease, border-color .14s ease;\n}\n\n.ew-choice-waiting {\n  opacity: 1 !important;\n  border-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030));\n}\n/* A light sweeping across the chosen line, once every couple of seconds. Chosen\n   over a spinner because it belongs to the SENTENCE the player picked rather than\n   to the page: what is being waited on is that line becoming a month. */\n.ew-choice-waiting::after {\n  content: ''; position: absolute; inset: 0; z-index: 0;\n  background: linear-gradient(\n    100deg,\n    transparent 20%,\n    color-mix(in oklab, var(--accent, #7c3aed) 22%, transparent) 50%,\n    transparent 80%\n  );\n  transform: translateX(-100%);\n  animation: ew-sweep 2.1s ease-in-out infinite;\n}\n\n/* ── the second step ──────────────────────────────────────────────────────\n   A turn is a month of a life and cannot be undone, so committing one is its own\n   deliberate act. The row appears under the armed choice rather than in a modal:\n   a dialog would take the sentence being decided off the screen. */\n.ew-confirm {\n  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;\n  padding: 8px 4px 2px 14px;\n  animation: ew-rise .16s ease-out;\n}\n.ew-confirm-act { padding-left: 0; }\n.ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); margin-right: 2px; }\n.ew-btn-sm { min-height: 36px; padding: 0 14px; font-size: 13px; flex: 0 0 auto; }\n.ew-note-live { display: flex; align-items: center; margin-top: 10px; min-width: 0; }\n/* Turn progress: a staged bar the narrator's tool calls drive — a fill that jumps\n   to ~90% once it has read the life, plus a moving shimmer so the long writing\n   phase never looks stalled. */\n.ew-progress { width: 100%; min-width: 0; }\n.ew-progress-track {\n  position: relative; height: 6px; border-radius: 999px; overflow: hidden;\n  background: var(--border, #2d2f3d);\n}\n.ew-progress-fill {\n  position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 999px;\n  background: var(--accent, #7c3aed); transition: width .4s ease;\n}\n.ew-progress-track::after {\n  content: ''; position: absolute; inset: 0; z-index: 1;\n  background: linear-gradient(\n    100deg, transparent 20%,\n    color-mix(in oklab, #fff 28%, transparent) 50%, transparent 80%\n  );\n  transform: translateX(-100%); animation: ew-sweep 1.6s ease-in-out infinite;\n}\n.ew-progress-steps {\n  display: flex; justify-content: space-between; gap: 8px; margin-top: 6px;\n}\n.ew-progress-label { font-size: 12px; color: var(--muted, #6b7280); }\n.ew-progress-count { font-size: 11px; color: var(--muted, #6b7280); flex: 0 0 auto; }\n@media (prefers-reduced-motion: reduce) {\n  .ew-progress-track::after { animation: none; opacity: 0; }\n}\n\n/* ── waiting ──────────────────────────────────────────────────────────────\n   The app's only animation, introduced with its reduced-motion answer in the same\n   edit rather than after: idle motion like this reads as pleasant to most people\n   and as a symptom to someone with a vestibular disorder, and retrofitting the\n   media query means shipping the version without it. */\n\n.ew-wait {\n  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;\n  vertical-align: middle; margin-left: 8px; position: relative; z-index: 1;\n  min-width: 0; max-width: 100%;\n}\n.ew-wait-dots { display: inline-flex; gap: 4px; flex: 0 0 auto; }\n.ew-wait-label { font-size: 12px; color: var(--muted, #6b7280); min-width: 0; overflow-wrap: anywhere; }\n\n.ew-dot {\n  width: 5px; height: 5px; border-radius: 50%;\n  background: currentColor; opacity: .35;\n  animation: ew-pulse 1.1s ease-in-out infinite;\n}\n/* Staggered, so the group reads as one moving thing rather than three blinking\n   ones. */\n.ew-dot:nth-child(2) { animation-delay: .18s; }\n.ew-dot:nth-child(3) { animation-delay: .36s; }\n\n@keyframes ew-pulse {\n  0%, 80%, 100% { opacity: .25; transform: scale(.8); }\n  40%           { opacity: 1;   transform: scale(1); }\n}\n@keyframes ew-sweep {\n  0%        { transform: translateX(-100%); }\n  60%, 100% { transform: translateX(100%); }\n}\n@keyframes ew-rise {\n  from { opacity: 0; transform: translateY(-3px); }\n  to   { opacity: 1; transform: none; }\n}\n\n@media (prefers-reduced-motion: reduce) {\n  /* Not \"animation: none\" alone — that would leave three barely-visible dots and\n     no signal at all. Every indicator stays; they simply stop moving. */\n  .ew-dot { animation: none; opacity: .75; }\n  .ew-choice-waiting::after { animation: none; transform: none; opacity: .35; }\n  .ew-confirm { animation: none; }\n  .ew-choice-armed { transition: none; transform: none; }\n}\n\n.ew-act { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }\n.ew-act textarea {\n  flex: 1; min-width: 0; box-sizing: border-box; resize: vertical;\n  min-height: 44px; max-height: 40vh;\n  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  padding: 11px 12px; font: inherit; font-size: 15px; line-height: 1.5;\n}\n.ew-act textarea:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n\n.ew-count { font-size: 11px; color: var(--muted, #6b7280); margin-top: 4px; }\n\n/* The drawer is how panels stay reachable on a phone without pushing the prose\n   off the first screen. */\n.ew-drawer {\n  width: 100%; margin: 20px 0 0;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  background: transparent; color: var(--text, #e2e8f0);\n  font: inherit; font-size: 13px; min-height: 44px; cursor: pointer;\n}\n@media (min-width: 900px) { .ew-drawer { display: none; } }\n\n/* ── the scene slot ── */\n\n/* ONE element, created on first need and never moved. Moving an iframe in the DOM\n   reloads it, so re-parenting a mounted scene would throw away whatever the player\n   was looking at — and a React portal does not help, because the browser's rule is\n   about the element's position in the document, not about who rendered it. */\n.ew-slot {\n  display: none;\n  width: 100%;\n  border: 1px solid var(--border, #2d2f3d);\n  border-radius: 10px;\n  background: var(--card, #1f2030);\n  /* A scene is a picture, not a page: it never becomes the scrolling thing. */\n  overflow: hidden;\n}\n.ew-slot-on { display: block; height: 320px; }\n\n/* Fullscreen is the SAME element with different geometry. Absolute inside the\n   app's own box rather than fixed: position fixed escapes the panel entirely and\n   would put a scene over the dashboard's own chrome. */\n.ew-slot-full {\n  display: block;\n  position: absolute; inset: 0;\n  height: auto; z-index: 20;\n  border-radius: 0;\n}\n\n.ew-slot-wrap { position: relative; margin: 16px 0 0; }\n.ew-slot-bar {\n  display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 6px;\n}\n.ew-slot-bar-full { position: absolute; top: 8px; right: 8px; z-index: 21; margin: 0; }\n.ew-slot-btn {\n  min-height: 36px; padding: 0 12px; font: inherit; font-size: 12px;\n  color: var(--text, #e2e8f0); background: var(--card, #1f2030);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px; cursor: pointer;\n  -webkit-tap-highlight-color: transparent;\n}\n\n/* A shelf row that carries its own destructive control. The row is a div and the\n   open action is a button INSIDE it, because a button cannot contain a button --\n   and the delete has to be a sibling, not a nested child. */\n.ew-card-row { display: flex; align-items: stretch; gap: 0; padding: 0; overflow: visible; }\n.ew-card-open {\n  flex: 1 1 auto; min-width: 0; text-align: left; font: inherit;\n  background: transparent; border: none; color: inherit; cursor: pointer;\n  /* 12px, matching .ew-card, so a life row is inset exactly like a world card. */\n  padding: 12px; -webkit-tap-highlight-color: transparent;\n}\n.ew-card-open:disabled { opacity: .55; cursor: default; }\n/* Aligned to the top of the row rather than centred: a row is two or three lines\n   tall, and a vertically centred control drifts as the row's text grows. */\n.ew-card-drop {\n  align-self: flex-start; margin: 10px 10px 0 0; border-radius: 8px;\n}\n/* Row actions: inline on desktop, collapsed into a kebab menu on a phone where\n   three stacked buttons wrapped badly. */\n.ew-life-actions { display: flex; align-items: flex-start; }\n.ew-life-menu { display: none; position: relative; align-self: flex-start; margin: 10px 10px 0 0; }\n@media (max-width: 767px) {\n  .ew-life-actions { display: none; }\n  .ew-life-menu { display: block; }\n  /* iOS Safari zooms the page when a focused control's font-size is under 16px.\n     Floor every control at 16px on a phone so focusing an input never zooms in. */\n  .ew-root input, .ew-root textarea, .ew-root select { font-size: 16px; }\n}\n.ew-kebab {\n  display: inline-flex; align-items: center; justify-content: center;\n  width: 40px; height: 40px; border-radius: 8px; cursor: pointer;\n  background: transparent; border: 1px solid var(--border, #2d2f3d);\n  color: var(--muted, #6b7280); -webkit-tap-highlight-color: transparent;\n}\n.ew-kebab:hover { color: var(--text, #e2e8f0); }\n.ew-menu {\n  position: absolute; right: 0; top: 44px; z-index: 30; min-width: 160px;\n  display: flex; flex-direction: column; gap: 2px; padding: 6px;\n  background: var(--card, #1f2030); border: 1px solid var(--border, #2d2f3d);\n  border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .45);\n}\n.ew-menu-item {\n  text-align: left; font: inherit; cursor: pointer; min-height: 42px;\n  padding: 10px 12px; border: none; border-radius: 6px;\n  background: transparent; color: var(--text, #e2e8f0);\n}\n.ew-menu-item:hover { background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030)); }\n";
+var styles_default = "/* This app mounts into the DASHBOARD's own document, not an iframe, so every rule\n   here is global. Hence the ew- prefix on every class and zero bare element\n   selectors — an unprefixed .card would repaint the whole dashboard.\n\n   Narrow-first: bare rules are the phone baseline, min-width adds the desktop. */\n\n.ew-root {\n  --ew-gutter: 16px;\n  color: var(--text, #e2e8f0);\n  padding: var(--ew-gutter);\n  /* Scopes any future overlay to this panel instead of the whole dashboard. */\n  position: relative;\n}\n@media (min-width: 768px) {\n  .ew-root { max-width: 900px; margin: 0 auto; --ew-gutter: 24px; }\n}\n\n/* ── the desktop shelf drawer ──────────────────────────────────────────────\n   Above this width the shelf is reachable from every page without occupying one.\n   Below it neither the drawer nor its opener is rendered and the shelf behaves\n   exactly as it always has — the narrow layout is the baseline, not a compromise\n   being undone.\n\n   1100px, not 768: below it the centred column is already the best use of the\n   space, and a drawer that leaves a readable measure needs the room.\n\n   It opens IN FLOW and pushes the story right. NOT `position: fixed`: this app is\n   mounted inside the dashboard's own content region, which is offset right by the\n   dashboard's sidebar, so a panel pinned to `left: 0` of the VIEWPORT is painted\n   outside the area the app is visible in — it renders and the reader cannot see it.\n   A grid column has no such problem because it is positioned by the app's own box. */\n.ew-rail { display: none; }\n.ew-rail-top {\n  display: flex; align-items: center; justify-content: space-between; gap: 10px;\n  margin-bottom: 10px;\n}\n.ew-rail-x {\n  background: transparent; border: none; cursor: pointer;\n  color: var(--muted, #6b7280); font: inherit; font-size: 13px;\n  min-height: 36px; padding: 0 2px;\n}\n.ew-rail-width { width: 100%; }\n/* The opener. Hidden at phone widths, where the inline \"back to the shelf\" is the\n   corner's one control; sized like that button so the corner does not shift as the\n   window crosses the breakpoint. */\n.ew-shelfbtn {\n  display: none;\n  align-items: center; min-height: 44px; padding: 0 12px 0 0;\n  background: transparent; border: none; cursor: pointer;\n  color: var(--accent, #7c3aed); font: inherit; font-size: 14px;\n}\n\n@media (min-width: 1100px) {\n  /* Fill the whole available space for immersion: the app spans the dashboard's\n     content region edge to edge, so the backdrop reaches the edges instead of\n     leaving black gutters beside a centred 1320px column. The reading measure is\n     NOT lifted here — it lives on `.ew-main` (74ch) below, so prose stays readable\n     while the background fills the room around it. This is the same full-width the\n     `.ew-w-fluid` reader preference already uses. */\n  .ew-root { max-width: none; }\n\n  /* One way back, not two. The drawer's own \"back to the shelf\" is the desktop's\n     route home, so the view's inline back button is a second control doing the same\n     thing. Scoped to `.ew-root .ew-back` (0,2,0) on purpose: the base `.ew-back`\n     rule is declared LATER in this file, so an equal-specificity\n     `.ew-back { display: none }` here would lose the cascade and the button would\n     stay visible — which is exactly the \"two back buttons\" bug this had. The inline\n     one is the mobile affordance and stays the only one below this width. */\n  .ew-root .ew-back { display: none; }\n\n  /* The lives, once. The rail lists every life by name, so repeating the life\n     rows in the reading column is the same information twice — hide them when the\n     rail is open. The WORLD covers stay: a name in the rail is not the cover tile,\n     and the landing's job is to invite you into a world, not just link to it. */\n  .ew-shell-open .ew-shelf-lives { display: none; }\n\n  /* Closed: one column, the story owns the width. Open: two, the story moves right\n     by exactly the drawer's own width and nothing is covered. */\n  .ew-shell-open {\n    display: grid;\n    grid-template-columns: 248px minmax(0, 1fr);\n    gap: 32px;\n    align-items: start;\n  }\n  .ew-shell-open .ew-rail {\n    display: block;\n    position: sticky;\n    /* Sticks under the app's own header rather than the viewport top, so the title\n       does not scroll away from the shelf it labels. */\n    top: var(--ew-gutter);\n    /* Its own scroll: a shelf with thirty lives must not push the story down. */\n    max-height: calc(100vh - 120px);\n    overflow-y: auto;\n    padding-right: 4px;\n  }\n  /* The opener is only for OPENING: when the shelf is already open the rail's own\n     close is the single closer, so hiding the opener removes the \"two buttons that\n     both close\" confusion. */\n  .ew-shelfbtn { display: inline-flex; }\n  .ew-shell-open .ew-shelfbtn { display: none; }\n\n  /* The measure. Prose is the reason this number exists — a life is read, not\n     scanned — so it is set in ch and does not grow with the window. It is the\n     DEFAULT, not the law: `.ew-w-fluid` below is the reader's own explicit\n     override and the only thing that lifts it. */\n  .ew-main { max-width: 74ch; }\n  /* Closed shell has no rail column, so the reading measure would otherwise pin to\n     the LEFT of the full-width app and look cramped with empty backdrop filling the\n     right. Centre it so the closed reading view is balanced. The open shell is a\n     grid that positions the column itself, so this is scoped to the closed state. */\n  .ew-shell:not(.ew-shell-open) .ew-main { margin-inline: auto; }\n}\n\n/* ── the reading measure, as the reader set it ─────────────────────────────\n   `fixed` is the cap above. `fluid` gives the story the window, and is a stored\n   preference rather than a width the layout guessed at: the guard is against the\n   measure growing on its own, not against being told to. On the play page the\n   status aside keeps its 300px either way, so fluid widens the prose, not the\n   panels. Declared after the desktop block and one class more specific, so it wins\n   on specificity rather than on source order. */\n.ew-root.ew-w-fluid { max-width: none; }\n@media (min-width: 1100px) {\n  .ew-root.ew-w-fluid .ew-main { max-width: none; }\n}\n\n.ew-rail-home {\n  display: block; width: 100%; text-align: left;\n  min-height: 36px; margin-bottom: 14px; padding: 0;\n  background: transparent; border: none; cursor: pointer;\n  color: var(--accent, #7c3aed); font: inherit; font-size: 13px;\n}\n/* In the drawer's top row it shares the line with the close control, so it gives up\n   the full-width block box it needs when it is the only thing there. */\n.ew-rail-top .ew-rail-home { width: auto; margin-bottom: 0; }\n\n.ew-rail-group { margin-bottom: 18px; }\n.ew-rail-head {\n  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;\n  text-transform: uppercase;\n  color: var(--muted, #6b7280);\n  margin-bottom: 6px;\n}\n\n.ew-rail-row {\n  display: block; width: 100%; text-align: left; cursor: pointer;\n  background: transparent;\n  border: none; border-left: 2px solid transparent;\n  border-radius: 0 6px 6px 0;\n  padding: 7px 8px; margin-bottom: 1px;\n  color: inherit; font: inherit;\n}\n@media (hover: hover) { .ew-rail-row:hover { background: var(--card, #1f2030); } }\n.ew-rail-row:disabled { cursor: default; opacity: 0.45; }\n.ew-rail-row-on {\n  border-left-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 10%, transparent);\n}\n\n.ew-rail-name {\n  display: block; font-size: 13px; line-height: 1.35;\n  /* A world title is user content: one long unbroken run must not widen the\n     grid column, which would push the reading measure sideways. */\n  overflow-wrap: anywhere;\n}\n.ew-rail-sub {\n  display: block; font-size: 11px; color: var(--muted, #6b7280); margin-top: 2px;\n}\n/* Only where the rail is: below it, the shelf list IS the page and this landing\n   would be a second copy of what the list already says. */\n.ew-onlywide { display: none; }\n@media (min-width: 1100px) { .ew-onlywide { display: block; } }\n\n/* ── reading back ── */\n.ew-history { margin-top: 14px; }\n.ew-past { position: relative; overflow: hidden; padding: 6px 10px; margin-bottom: 18px; border-bottom: 1px solid var(--border, #2d2f3d); border-radius: 8px; }\n/* Each re-read page keeps the scene it had: its backdrop sits faint behind the\n   prose, and the content is lifted above it so it stays readable. */\n.ew-past-bg {\n  position: absolute; inset: 0; width: 100%; height: 100%;\n  object-fit: cover; opacity: .16; pointer-events: none; z-index: 0;\n}\n.ew-past-head, .ew-past .ew-prose, .ew-past .ew-marks { position: relative; z-index: 1; }\n.ew-past-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }\n.ew-past-turn { font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; }\n.ew-past-action { font-size: 12px; color: var(--accent, #7c3aed); overflow-wrap: anywhere; }\n\n.ew-rail-note {\n  font-size: 11px; color: var(--muted, #6b7280); padding: 6px 8px; line-height: 1.6;\n}\n\n.ew-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }\n.ew-head h2 { margin: 0; font-size: 17px; font-weight: 600; }\n@media (min-width: 768px) { .ew-head h2 { font-size: 19px; } }\n/* Interface-language dropdown: pushed to the far right of the title bar. */\n.ew-uilang {\n  margin-left: 0; min-height: 30px; padding: 0 8px; font-size: 13px;\n  color: var(--text, #e2e8f0); background: transparent;\n  border: 1px solid var(--border, #334155); border-radius: 8px; cursor: pointer;\n}\n/* The header's right-hand controls (language, settings), grouped and pushed right. */\n.ew-headtools { margin-left: auto; display: flex; gap: 8px; align-items: center; }\n/* Narrator settings panel on the home page. */\n.ew-settings {\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  background: var(--card, #1f2030); padding: 14px; margin-bottom: 16px;\n}\n.ew-settings-head { display: flex; align-items: center; justify-content: space-between; }\n.ew-settings-row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }\n.ew-settings-label { flex: 0 0 8em; color: var(--muted, #6b7280); font-size: 13px; }\n.ew-settings-select { flex: 1; min-width: 0; }\n.ew-settings-foot { display: flex; align-items: center; gap: 12px; margin-top: 6px; }\n.ew-settings-saved { font-size: 12px; color: var(--accent, #7c3aed); }\n/* The shared .ew-hint carries a negative top margin tuned for its other call\n * sites; inside the settings panel it directly follows the 44px Save button row,\n * where that negative margin pulls the note up ONTO the button. Reset it here. */\n.ew-settings .ew-hint { margin-top: 8px; }\n\n/* A world name is user content and can be one long unbroken run; without this a\n   phone gets a horizontal scrollbar on the whole page. */\n.ew-title, .ew-detail-title { overflow-wrap: anywhere; }\n\n.ew-card {\n  display: block; width: 100%; text-align: left; cursor: pointer;\n  background: var(--card, #1f2030);\n  border: 1px solid var(--border, #2d2f3d);\n  border-radius: 10px;\n  padding: 12px; margin-bottom: 10px;\n  color: inherit; font: inherit;\n  -webkit-tap-highlight-color: transparent;\n  /* Scope the life backdrop to the card and clip it to the rounded corners. */\n  position: relative; overflow: hidden;\n}\n/* The life's narrator backdrop behind the card, framed to the card (unlike the\n * full-page .ew-backdrop). A scrim over it keeps the title/meta readable; inert\n * image so it runs no script and needs no sandbox. */\n.ew-card-bg {\n  position: absolute; inset: 0; z-index: 0;\n  width: 100%; height: 100%; object-fit: cover;\n  opacity: .5; pointer-events: none;\n}\n.ew-card-bg-scrim {\n  position: absolute; inset: 0; z-index: 0; pointer-events: none;\n  background: linear-gradient(\n    180deg,\n    color-mix(in srgb, var(--card, #1f2030) 45%, transparent),\n    color-mix(in srgb, var(--card, #1f2030) 72%, transparent)\n  );\n}\n/* Lift the card's real content above the backdrop + scrim. */\n.ew-card > .ew-card-bg ~ *:not(.ew-card-bg-scrim) { position: relative; z-index: 1; }\n@media (min-width: 768px) { .ew-card { padding: 14px; } }\n.ew-card:active { border-color: var(--accent, #7c3aed); }\n.ew-card-broken { cursor: default; border-left: 3px solid var(--danger, #b91c1c); }\n\n.ew-title { font-size: 15px; font-weight: 600; line-height: 1.35; }\n@media (min-width: 768px) { .ew-title { font-size: 16px; } }\n\n.ew-titlerow {\n  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;\n}\n.ew-chips { display: flex; gap: 6px; flex-wrap: wrap; }\n\n.ew-chip {\n  border-radius: 9999px; padding: 2px 9px; font-size: 11px;\n  border: 1px solid var(--border, #2d2f3d);\n  color: var(--muted, #6b7280);\n  /* A chip's text can come from the world or the narrator, so it is not safe to\n     assume it is short. Wrap/break a long one instead of letting `nowrap` force a\n     page-wide horizontal scroll on a phone. */\n  white-space: normal; overflow-wrap: anywhere; max-width: 100%;\n}\n.ew-chip-accent {\n  border-color: transparent;\n  background: color-mix(in oklab, var(--accent, #7c3aed) 16%, transparent);\n  color: var(--accent, #7c3aed);\n}\n\n.ew-meta { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7; }\n\n/* A world card is an invitation to imagine a life, not a package manifest. The\n   promise leads; concrete possibilities make it credible; implementation counts\n   stay one tap away on the detail page. */\n.ew-world-card { overflow: hidden; }\n.ew-world-promise {\n  margin: 2px 0 12px;\n  font-size: 14px; line-height: 1.65;\n  color: var(--text, #e2e8f0);\n}\n.ew-world-possibilities {\n  margin: 0 0 14px; padding: 10px 12px;\n  border-left: 2px solid color-mix(in oklab, var(--accent, #7c3aed) 48%, transparent);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 7%, transparent);\n}\n.ew-world-possibilities-label {\n  margin-bottom: 5px; font-size: 11px; font-weight: 600;\n  letter-spacing: .04em; color: var(--accent, #7c3aed);\n}\n.ew-world-possibility {\n  position: relative; padding-left: 12px;\n  font-size: 12px; line-height: 1.65;\n  color: var(--muted, #94a3b8);\n}\n.ew-world-possibility::before { content: '·'; position: absolute; left: 1px; }\n.ew-world-card-footer {\n  display: flex; align-items: baseline; justify-content: space-between;\n  gap: 12px; margin-top: 12px; padding-top: 10px;\n  border-top: 1px solid var(--border, #2d2f3d);\n}\n.ew-world-enter {\n  flex: none; font-size: 12px; font-weight: 600;\n  color: var(--accent, #7c3aed);\n}\n\n/* ── the landing: a living bookshelf ─────────────────────────────────────\n   The play page became rich (full backdrop, translucent cards); the shelf was a\n   flat list by comparison. These give the landing its own ambient night sky, a\n   tagline, a prominent \"continue\" hero, life rows with a gilt spine, and worlds\n   as book covers — so the shelf reads as part of the same world. */\n/* The ambient fills the whole screen, not the content box. It was painted on\n   `.ew-root`, which is width-capped and only as tall as its content, so on desktop\n   the night sky covered a centred column and left the rest black. A fixed\n   full-viewport layer behind the content (z-index 0; content is z-index 1) fills\n   the screen at any column width or content height. */\n.ew-home::before {\n  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;\n  background:\n    radial-gradient(circle at 8px 8px, rgba(230, 217, 168, .16) 1px, transparent 1.7px) 0 0 / 48px 48px,\n    radial-gradient(55% 40% at 50% 4%, color-mix(in srgb, var(--accent, #d9b45a) 12%, transparent), transparent 62%),\n    radial-gradient(130% 95% at 50% 0%, #1b1832 0%, #131120 48%, #0a0912 100%);\n}\n.ew-tagline {\n  color: var(--muted, #9c96a8); font-size: 13px; line-height: 1.6; margin: 4px 2px 18px;\n}\n\n/* Continue: the most recent life, made a gold hero rather than one row among many.\n   Styles the LifeRow card inside the wrapper, so LifeRow itself stays generic. */\n.ew-cont-wrap .ew-card {\n  border-color: color-mix(in oklab, var(--accent, #d9b45a) 36%, var(--border, #2d2f3d));\n  background:\n    linear-gradient(180deg,\n      color-mix(in srgb, var(--accent, #d9b45a) 16%, transparent),\n      color-mix(in srgb, var(--accent, #d9b45a) 4%, transparent)),\n    var(--card, #1f2030);\n  box-shadow: 0 6px 22px rgba(0, 0, 0, .28);\n}\n\n/* Life rows read as books on a shelf: a thin gilt spine down the left edge. */\n.ew-card-row {\n  box-shadow: inset 3px 0 0 color-mix(in oklab, var(--accent, #d9b45a) 55%, transparent);\n}\n\n/* World card = a book cover: a decorative band carries the title; the body holds\n   the promise, style chips, and the play-count + enter. */\n.ew-world-card { padding: 0; }\n.ew-world-band {\n  display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px;\n  min-height: 96px; padding: 14px 16px;\n  background:\n    repeating-linear-gradient(135deg,\n      color-mix(in srgb, var(--accent, #d9b45a) 9%, transparent) 0 2px, transparent 2px 12px),\n    radial-gradient(120% 160% at 18% 0%, #3a2d63, #1a1430);\n  border-bottom: 1px solid var(--border, #2d2f3d);\n}\n.ew-world-band-title {\n  font-size: 19px; font-weight: 700; color: #f1ecdf; text-shadow: 0 2px 8px rgba(0, 0, 0, .5);\n}\n.ew-world-body { padding: 14px 16px; }\n/* The possibilities become style chips (was an accent-bordered bullet list). */\n.ew-world-possibilities {\n  display: flex; flex-wrap: wrap; gap: 6px;\n  margin: 12px 0 0; padding: 0; border: 0; background: none;\n}\n.ew-world-possibility {\n  position: static; padding: 3px 9px; font-size: 11px; color: var(--muted, #9c96a8);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 999px;\n  background: color-mix(in srgb, var(--card, #1f2030) 50%, transparent);\n}\n.ew-world-possibility::before { content: none; }\n\n/* ── creating a world from pasted text ─────────────────────────────────────\n   The entry sits atop the worlds shelf; a draft being compiled reads as a book\n   being written (the same gilt spine as a life); the paste and review screens are\n   transient forms, like the opening. */\n.ew-card-create {\n  display: flex; align-items: center; gap: 12px;\n  border: 1px dashed color-mix(in srgb, var(--accent, #d9b45a) 45%, var(--border, #2d2f3d));\n  background: linear-gradient(\n    180deg, color-mix(in srgb, var(--accent, #d9b45a) 6%, transparent), transparent\n  );\n  text-align: left; -webkit-tap-highlight-color: transparent;\n}\n.ew-create-plus {\n  width: 38px; height: 38px; flex: none; border-radius: 9px;\n  display: inline-flex; align-items: center; justify-content: center;\n  font-size: 22px; line-height: 1; color: var(--accent, #d9b45a);\n  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 55%, var(--border, #2d2f3d));\n}\n.ew-create-text { display: flex; flex-direction: column; gap: 2px; }\n.ew-create-title { font-size: 15px; font-weight: 600; color: var(--text, #e2e8f0); }\n.ew-create-sub { font-size: 12.5px; color: var(--muted, #9c96a8); }\n\n.ew-card-draft {\n  box-shadow: inset 3px 0 0 color-mix(in oklab, var(--accent, #d9b45a) 55%, transparent);\n}\n.ew-card-draft-ready { box-shadow: inset 3px 0 0 var(--accent, #d9b45a); }\n.ew-card-draft-failed { box-shadow: inset 3px 0 0 color-mix(in oklab, #d9534f 60%, transparent); }\n\n.ew-progress { margin-top: 10px; }\n.ew-progress-track {\n  height: 5px; border-radius: 3px; overflow: hidden;\n  background: color-mix(in srgb, var(--border, #2d2f3d) 80%, transparent);\n}\n.ew-progress-fill {\n  height: 100%; border-radius: 3px; transition: width .4s ease;\n  background: linear-gradient(\n    90deg, var(--accent, #d9b45a), color-mix(in srgb, var(--accent, #d9b45a) 55%, #000)\n  );\n}\n\n.ew-create { max-width: 720px; }\n.ew-create-ta {\n  width: 100%; min-height: 320px; resize: vertical; box-sizing: border-box;\n  background: color-mix(in srgb, var(--card, #1f2030) 85%, #000);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  color: var(--text, #e2e8f0); font: inherit; font-size: 14px; line-height: 1.7;\n  padding: 14px; -webkit-tap-highlight-color: transparent;\n}\n.ew-create-hint {\n  font-size: 12.5px; color: var(--muted, #9c96a8); line-height: 1.6; margin: 8px 2px 0;\n}\n.ew-create-count { margin-left: auto; align-self: center; font-size: 12px; color: var(--muted, #9c96a8); }\n.ew-create-titlelabel { display: block; font-size: 12px; color: var(--muted, #9c96a8); margin: 2px 0 6px; }\n.ew-title-edit {\n  width: 100%; box-sizing: border-box;\n  background: color-mix(in srgb, var(--card, #1f2030) 85%, #000);\n  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 40%, var(--border, #2d2f3d));\n  border-radius: 8px; color: #f1ecdf; font-size: 17px; font-weight: 700; padding: 9px 11px;\n}\n.ew-review { margin-top: 14px; }\n.ew-kv {\n  display: flex; gap: 10px; font-size: 13.5px; padding: 8px 0; line-height: 1.6;\n  border-bottom: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 60%, transparent);\n}\n.ew-kv:last-child { border-bottom: 0; }\n.ew-kv .ew-k { color: var(--muted, #9c96a8); width: 56px; flex: none; }\n.ew-review-warn {\n  margin-top: 14px; padding: 10px 12px; border-radius: 8px;\n  background: color-mix(in srgb, var(--accent, #d9b45a) 8%, transparent);\n  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 28%, var(--border, #2d2f3d));\n}\n.ew-review-warn-h {\n  font-size: 12px; font-weight: 600; margin-bottom: 6px;\n  color: color-mix(in srgb, var(--accent, #d9b45a) 80%, var(--text, #e2e8f0));\n}\n.ew-draft-jump {\n  display: block; width: 100%; margin-top: 14px; padding: 11px;\n  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 40%, var(--border, #2d2f3d));\n  border-radius: 9px; background: color-mix(in srgb, var(--accent, #d9b45a) 5%, transparent);\n  color: var(--accent, #d9b45a); font: inherit; font-size: 13.5px; font-weight: 600;\n  cursor: pointer; -webkit-tap-highlight-color: transparent;\n}\n.ew-review-accept { flex: 1; }\n\n/* 44px is the smallest reliably tappable target; a 13px text link with 4px of\n   padding is about 21px, which is a miss on a phone even when it looks fine on a\n   desktop mock. */\n.ew-back {\n  display: inline-flex; align-items: center;\n  min-height: 44px; padding: 0 12px 0 0;\n  background: transparent; border: none; cursor: pointer;\n  color: var(--accent, #7c3aed); font: inherit; font-size: 14px;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.ew-detail-title { margin: 0 0 4px; font-size: 19px; line-height: 1.3; }\n@media (min-width: 768px) { .ew-detail-title { font-size: 22px; } }\n\n.ew-section { font-size: 13px; font-weight: 600; margin: 0 0 7px; }\n.ew-block { margin-bottom: 18px; }\n/* A small explanatory caption under a block, e.g. what the accented chips mean. */\n.ew-hint { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.6; margin-top: -10px; }\n\n.ew-panel {\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px; margin-bottom: 8px;\n}\n@media (min-width: 768px) { .ew-panel { padding: 10px 12px; } }\n.ew-panel-head {\n  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 7px;\n}\n.ew-panel-name { font-size: 13px; font-weight: 600; }\n\n.ew-note {\n  font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px 12px; margin-top: 10px;\n}\n/* A note that carries an action. The button keeps its own size, so a long sentence\n   wraps instead of squeezing the thing the player is meant to press. */\n.ew-note-row {\n  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;\n  justify-content: space-between;\n}\n\n/* ── the second ask ──\n   Absolute inside the app's own box, NOT fixed — the same rule the scene slot\n   follows and for a sharper reason here: a fixed overlay would cover the\n   dashboard's own navigation, so a modal that failed to close would trap the\n   player in this app. Scoped to .ew-root, the worst case is an app they can\n   still navigate away from. */\n.ew-modal-wrap {\n  position: fixed; inset: 0; z-index: 40;\n  display: flex; align-items: flex-start; justify-content: center;\n  padding: 24px var(--ew-gutter, 8px);\n  background: color-mix(in oklab, var(--bg, #1a1b26) 72%, transparent);\n  /* Fixed to the viewport, not sized to the app box: on a scrolled phone an\n     absolute wrap put the panel at the top of a tall page — off-screen and unseen\n     while its scrim still dimmed the view. Fixed keeps the panel in view and its\n     scrim catches every click regardless of scroll. */\n  overflow-y: auto;\n}\n.ew-modal {\n  width: 100%; max-width: 460px; box-sizing: border-box;\n  background: var(--bg-elevated, #21222e); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 12px;\n  padding: 18px; margin-top: 4vh;\n}\n.ew-modal:focus { outline: none; }\n.ew-modal-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; }\n.ew-modal-body { font-size: 14px; line-height: 1.75; margin-bottom: 12px; }\n.ew-modal-note { margin-bottom: 14px; }\n.ew-modal-gate { display: block; margin-bottom: 14px; }\n.ew-modal-gate .ew-meta { display: block; margin-bottom: 6px; }\n.ew-modal-problem {\n  font-size: 13px; line-height: 1.7; margin-bottom: 12px;\n  color: var(--danger, #f87171);\n}\n.ew-modal-bar { margin-top: 0; }\n\n/* What is about to be lost, named. A count alone does not tell the player which\n   life they are ending. */\n.ew-doomed {\n  list-style: none; margin: 0 0 14px; padding: 0;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  max-height: 34vh; overflow-y: auto;\n}\n.ew-doomed li {\n  display: flex; justify-content: space-between; gap: 10px;\n  padding: 8px 12px; font-size: 13px;\n  border-bottom: 1px solid var(--border, #2d2f3d);\n}\n.ew-doomed li:last-child { border-bottom: none; }\n.ew-doomed-name { min-width: 0; overflow-wrap: anywhere; }\n.ew-doomed-where { color: var(--muted, #6b7280); flex: 0 0 auto; font-size: 12px; }\n\n/* ── opening screen ── */\n\n.ew-group { margin-bottom: 20px; }\n.ew-glabel {\n  font-size: 14px; font-weight: 600; margin-bottom: 2px;\n  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;\n}\n.ew-ghint { font-size: 12px; color: var(--muted, #6b7280); margin-bottom: 8px; }\n\n/* Options are buttons, not a select: on a phone a native select opens a modal\n   wheel for six words, and the words are the whole point of this screen. */\n.ew-opt {\n  border-radius: 9999px; padding: 7px 13px; font-size: 13px;\n  border: 1px solid var(--border, #2d2f3d); background: transparent;\n  color: var(--text, #e2e8f0); cursor: pointer; font: inherit;\n  min-height: 36px; -webkit-tap-highlight-color: transparent;\n}\n.ew-opt-on {\n  border-color: transparent; color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 18%, transparent);\n}\n\n.ew-input {\n  width: 100%; box-sizing: border-box;\n  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px 12px; font: inherit; font-size: 15px;\n  min-height: 44px;\n}\n.ew-input:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n\n/* A visible keyboard focus ring on every custom control, so tabbing through the\n   app can be followed. :focus-visible keeps it off pointer clicks. */\n.ew-btn:focus-visible, .ew-opt:focus-visible, .ew-choice:focus-visible,\n.ew-drawer:focus-visible, .ew-card-open:focus-visible, .ew-slot-btn:focus-visible,\n.ew-starbtn:focus-visible,\n.ew-rail-row:focus-visible, .ew-rail-home:focus-visible, .ew-back:focus-visible,\n.ew-shelfbtn:focus-visible, .ew-rail-x:focus-visible,\n.ew-section-toggle:focus-visible {\n  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;\n}\n\n/* Inline rename inside a life row: flexes to fill the row beside its save/cancel\n   buttons rather than forcing them onto a second line. */\n.ew-rename-input {\n  flex: 1 1 auto; min-width: 0; box-sizing: border-box;\n  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px;\n  padding: 8px 10px; font: inherit; min-height: 40px;\n}\n.ew-rename-input:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n\n/* The archived group's heading is a toggle: it keeps the section typography but\n   reads as pressable. */\n.ew-section-toggle {\n  background: none; border: none; padding: 0; cursor: pointer;\n  color: inherit; text-align: start; -webkit-tap-highlight-color: transparent;\n}\n\n/* History toolbar: the events-only toggle and the jump-to-turn control. */\n.ew-history-bar {\n  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;\n}\n.ew-jump {\n  width: 7em; min-width: 0; box-sizing: border-box; font: inherit; min-height: 36px;\n  padding: 6px 10px; border-radius: 8px;\n  color: var(--text, #e2e8f0); background: var(--bg, #1a1b26);\n  border: 1px solid var(--border, #2d2f3d);\n}\n.ew-jump:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n.ew-search { width: 12em; }\n\n/* The \"world is being arranged\" state on the play page while a life is born. */\n.ew-arrange {\n  display: flex; flex-direction: column; gap: 12px; align-items: flex-start;\n  padding: 20px 0;\n}\n.ew-arrange-title {\n  font-size: 18px; font-weight: 600; color: var(--text, #e2e8f0);\n}\n\n/* A quiet marker when the world opens a new chapter of this life. */\n.ew-unlocked { margin: 0 0 14px; display: flex; flex-direction: column; gap: 7px; }\n\n/* \"An old thing came back\" — the echo marker (design §8.1). A single folded line\n   in the unlocked-marker voice; expanding it is the player's act, never a popup. */\n.ew-echoes { margin: 12px 0 14px; display: flex; flex-direction: column; gap: 7px; }\n.ew-echo {\n  padding-inline-start: 10px;\n  border-inline-start: 2px solid color-mix(in oklab, var(--accent, #7c3aed) 55%, transparent);\n}\n.ew-echo-line {\n  appearance: none; background: none; border: 0; padding: 2px 0; cursor: pointer;\n  font: inherit; font-size: 13px; font-style: italic; text-align: start;\n  color: var(--accent, #7c3aed);\n}\n@media (hover: hover) { .ew-echo-line:hover { text-decoration: underline; } }\n.ew-echo-body {\n  margin-top: 6px; display: flex; flex-direction: column; gap: 6px;\n  font-size: 13px; line-height: 1.6; color: var(--fg, #e5e7eb);\n}\n.ew-echo-row { display: flex; gap: 8px; align-items: baseline; }\n.ew-echo-label {\n  flex: 0 0 auto; font-size: 12px; color: var(--muted, #6b7280);\n}\n.ew-echo-actions { display: flex; gap: 8px; margin-top: 2px; }\n\n.ew-unlocked-row {\n  font-size: 13px; color: var(--accent, #7c3aed);\n  padding-inline-start: 10px;\n  border-inline-start: 2px solid var(--accent, #7c3aed);\n}\n.ew-unlocked-heading { font-style: italic; font-weight: 600; }\n.ew-unlocked-meaning {\n  margin-top: 2px; font-size: 12px; line-height: 1.6;\n  color: var(--muted, #6b7280);\n}\n/* A milestone reached this month — a small gilt banner, warmer than the chapter\n   marker so an achievement reads as a reward, not just a progress note. */\n.ew-milestone { margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; }\n.ew-milestone-row {\n  font-size: 13px; font-weight: 600;\n  color: color-mix(in oklab, var(--accent, #d9b45a) 82%, var(--text, #e2e8f0));\n  padding: 8px 12px; border-radius: 8px;\n  background: color-mix(in srgb, var(--accent, #d9b45a) 12%, transparent);\n  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 34%, var(--border, #2d2f3d));\n}\n\n/* Small ceremonies around the prose: one reveals what the world settled at birth;\n   the other restores a returning player's place without generating a new summary. */\n.ew-story-moment {\n  margin: 16px 0; padding: 12px 14px; border-radius: 10px;\n  border: 1px solid color-mix(in oklab, var(--accent, #7c3aed) 32%, var(--border, #2d2f3d));\n  /* Translucent so the story's backdrop shows through, rather than an opaque card\n     sitting on top of it. A faint accent tint over transparency keeps it reading as\n     a card; the accent border still defines its edge. */\n  background: linear-gradient(\n    180deg,\n    color-mix(in srgb, var(--accent, #7c3aed) 15%, transparent),\n    color-mix(in srgb, var(--accent, #7c3aed) 5%, transparent)\n  );\n}\n.ew-story-moment-head {\n  display: flex; align-items: baseline; justify-content: space-between;\n  gap: 12px; margin-bottom: 7px;\n}\n.ew-story-moment-title { font-size: 13px; font-weight: 600; color: var(--accent, #7c3aed); }\n.ew-story-moment-close {\n  flex: none; border: none; padding: 3px 0; background: transparent;\n  color: var(--muted, #6b7280); font: inherit; font-size: 11px; cursor: pointer;\n}\n.ew-story-moment-close:focus-visible {\n  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;\n}\n.ew-reveal-row {\n  display: flex; justify-content: space-between; gap: 12px;\n  padding: 4px 0; font-size: 13px; line-height: 1.5;\n}\n.ew-reveal-label, .ew-recap-label { color: var(--muted, #6b7280); }\n.ew-reveal-value { text-align: end; font-weight: 600; }\n.ew-story-moment-hint { margin-top: 6px; font-size: 11px; color: var(--muted, #6b7280); }\n/* On the now-translucent story-moment cards, the cold --muted grey is hard to read\n   over the backdrop. Warm it toward the accent and lighten it — the mock's scheme —\n   scoped to these cards so ordinary muted text elsewhere is untouched. */\n.ew-story-moment .ew-reveal-label,\n.ew-story-moment .ew-recap-label,\n.ew-story-moment .ew-story-moment-hint {\n  color: color-mix(in srgb, var(--text, #e2e8f0) 70%, var(--accent, #7c3aed));\n}\n.ew-recap-line { margin: 5px 0; font-size: 12px; line-height: 1.65; }\n.ew-recap-list { margin: 4px 0 8px; padding-inline-start: 18px; font-size: 12px; line-height: 1.65; }\n\n/* A turn's marked events and gains — the material the events-only timeline shows. */\n.ew-marks { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }\n.ew-mark {\n  font-size: 13px; line-height: 1.6; padding-inline-start: 12px; position: relative;\n}\n.ew-mark::before {\n  content: \"·\"; position: absolute; inset-inline-start: 2px; color: var(--muted, #6b7280);\n}\n.ew-mark-gain { color: var(--muted, #6b7280); }\n\n/* A scalar field the narrator handed a structured value: its text, one line each. */\n.ew-lines { display: flex; flex-direction: column; gap: 3px; }\n\n/* The pre-birth summary: every opening choice on one line, with world-decided\n   items plainly marked so a look-before-you-leap is honest about what was chosen. */\n.ew-summary {\n  margin: 18px 0 6px; padding: 12px 14px; border-radius: 10px;\n  border: 1px solid var(--border, #2d2f3d); background: var(--card, #1f2030);\n}\n.ew-summary-row {\n  display: flex; gap: 12px; justify-content: space-between; align-items: baseline;\n  padding: 4px 0; font-size: 14px; line-height: 1.6;\n}\n.ew-summary-label { color: var(--muted, #6b7280); flex: 0 0 auto; }\n.ew-summary-value { text-align: end; }\n.ew-summary-world { text-align: end; color: var(--muted, #6b7280); font-style: italic; }\n\n.ew-sealed {\n  border: 1px dashed var(--border, #2d2f3d); border-radius: 8px;\n  padding: 10px 12px; font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7;\n}\n\n.ew-bar {\n  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;\n  margin-top: 20px; padding-top: 16px;\n  border-top: 1px solid var(--border, #2d2f3d);\n}\n.ew-btn {\n  border-radius: 8px; padding: 0 16px; min-height: 44px;\n  border: 1px solid var(--border, #2d2f3d); background: transparent;\n  color: var(--text, #e2e8f0); font: inherit; font-size: 14px; cursor: pointer;\n  -webkit-tap-highlight-color: transparent;\n}\n.ew-btn-go {\n  border-color: transparent; background: var(--accent, #7c3aed); color: #fff;\n  font-weight: 600; flex: 1; min-width: 140px;\n}\n.ew-btn:disabled, .ew-btn-go:disabled { opacity: .5; cursor: default; }\n\n/* Destructive, and it must read that way BEFORE it is pressed. Colour is not the\n   safeguard (the dialog is), but a delete that looks like every other button is a\n   delete the player presses while reading something else. */\n.ew-btn-danger {\n  border-color: var(--danger, #f87171);\n  color: var(--danger, #f87171);\n  background: color-mix(in oklab, var(--danger, #f87171) 12%, transparent);\n  flex: 0 0 auto;\n}\n/* The way OUT of a destructive path, and the way INTO one from a page whose\n   subject is something else. Quiet on purpose. */\n.ew-btn-quiet {\n  color: var(--muted, #6b7280); border-color: transparent;\n  flex: 0 0 auto; min-height: 36px; padding: 0 12px; font-size: 13px;\n}\n@media (hover: hover) { .ew-btn-quiet:hover { color: var(--text, #e2e8f0); } }\n.ew-spacer { flex: 1; }\n/* Language chooser on the world card: a small toggle set, the chosen one filled. */\n.ew-lang {\n  border: 1px solid var(--border, #334155); border-radius: 999px;\n  background: transparent; color: var(--muted, #6b7280);\n  min-height: 32px; padding: 0 14px; font-size: 13px; cursor: pointer;\n}\n@media (hover: hover) { .ew-lang:hover { color: var(--text, #e2e8f0); } }\n.ew-lang[aria-pressed=\"true\"] {\n  background: var(--accent, #6366f1); color: #fff; border-color: transparent;\n}\n@media (min-width: 768px) { .ew-btn-go { flex: 0 0 auto; } }\n\n/* ── prose ── */\n\n/* Reading typography, not UI typography — this is the only place the player reads\n   for minutes at a time. */\n.ew-prose {\n  font-size: 16px; line-height: 1.85; max-width: 66ch; margin: 12px 0 0;\n  /* CJK and ordinary prose wrap fine on their own; this only catches a long\n     unbreakable token (a URL, an id) so it breaks instead of overflowing the page\n     on a narrow screen. Not `break-all`, which would break ordinary words too. */\n  overflow-wrap: anywhere;\n}\n.ew-prose pre { overflow-x: auto; }\n/* Only the fallback path needs pre-wrap. With the host's markdown renderer,\n   paragraphs are real elements and pre-wrap would double every blank line. */\n.ew-prose-plain { white-space: pre-wrap; }\n.ew-prose p { margin: 0 0 1.1em; }\n.ew-prose p:last-child { margin-bottom: 0; }\n.ew-prose em { font-style: italic; }\n.ew-prose h1, .ew-prose h2, .ew-prose h3 {\n  font-size: 1.05em; font-weight: 600; margin: 1.4em 0 .5em;\n}\n.ew-prose blockquote {\n  margin: 1em 0; padding-left: 12px;\n  border-left: 2px solid var(--border, #2d2f3d); color: var(--muted, #6b7280);\n}\n.ew-prose ul, .ew-prose ol { margin: .8em 0; padding-left: 1.4em; }\n.ew-prose li { margin: .25em 0; }\n\n/* ── play page ── */\n\n/* Narrow-first single column; panels move to a sidebar from 900px. Below that the\n   sidebar is absent entirely and the drawer is how panels stay reachable —\n   rendering both would put every panel on screen twice. */\n/* The story's background layer, spanning the WHOLE app on the live view. The app\n   root is the positioning context (.ew-root is position:relative); the backdrop is\n   placed behind everything (z-index 0) and cannot be interacted with. Every real\n   child of the root is lifted above it, so the background never covers or\n   intercepts a control — the anti-phishing guarantee for a scriptless frame. */\n.ew-root > *:not(.ew-backdrop) { position: relative; z-index: 1; }\n.ew-backdrop {\n  position: fixed; inset: 0; z-index: 0;\n  pointer-events: none; overflow: hidden;\n  /* Pinned to the viewport, NOT sized to content. Expanding the drawer or the\n     panels used to grow this layer (it was `absolute; inset:0` inside .ew-root,\n     so its height tracked the content), and `object-fit: cover` then re-cropped\n     the SVG — the art behind a translucent button visibly shifted colour on open.\n     Fixed fills the viewport regardless of content height, so it never re-crops,\n     and a short screen (opening / \"arranging\") is still fully covered. */\n}\n.ew-backdrop-frame {\n  position: absolute; inset: 0;\n  width: 100%; height: 100%;\n  border: 0; pointer-events: none;\n  object-fit: cover; display: block;\n  background: transparent;\n}\n/* A contrast floor between the background and the prose, kept light so a PATTERN\n   reads through instead of being flattened into grey. The narrator supplies real\n   imagery; a heavy scrim would waste it. Legibility past this is the reading\n   surfaces' own semi-opaque backing, not more dimming here. */\n.ew-backdrop-scrim {\n  position: absolute; inset: 0;\n  pointer-events: none;\n  background: linear-gradient(\n    to bottom,\n    color-mix(in srgb, var(--ew-bg, #0b0c10) 22%, transparent),\n    color-mix(in srgb, var(--ew-bg, #0b0c10) 40%, transparent)\n  );\n}\n\n.ew-play { display: block; }.ew-aside { display: none; }\n@media (min-width: 900px) {\n  .ew-play {\n    display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 28px; align-items: start;\n  }\n  .ew-aside { display: block; position: sticky; top: 12px; }\n}\n\n/* Title with the in-world date beside it (shown only when the world has one). */\n.ew-titleline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }\n.ew-titleline .ew-clock { margin-bottom: 0; }\n.ew-clock {\n  font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; margin-bottom: 4px;\n}\n\n/* Back button and turn pager share one row, the pager pushed to the far right. */\n.ew-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }\n/* Turn pager: ‹ current turn › */\n.ew-pager {\n  display: flex; align-items: center; justify-content: center; gap: 14px;\n  margin: 0;\n}\n.ew-pager-turn {\n  font-size: 13px; color: var(--muted, #6b7280); letter-spacing: .04em;\n  min-width: 6em; text-align: center;\n}\n.ew-pager-arw {\n  display: inline-flex; align-items: center; justify-content: center;\n  width: 36px; height: 36px; border-radius: 8px; cursor: pointer;\n  background: transparent; border: 1px solid var(--border, #2d2f3d);\n  color: var(--text, #e2e8f0);\n}\n@media (hover: hover) { .ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); } }\n.ew-pager-arw:disabled { opacity: .35; cursor: default; }\n\n.ew-digest { margin: 0 0 20px; }\n/* Page-turn: the story slides+fades in — from the right going forward, from the\n   left going back. Keyed remount per turn runs it once; motion-reduce opts out. */\n@keyframes ew-page-fwd { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }\n@keyframes ew-page-back { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }\n.ew-turnpage-fwd { animation: ew-page-fwd .3s ease-out both; }\n.ew-turnpage-back { animation: ew-page-back .3s ease-out both; }\n@media (prefers-reduced-motion: reduce) {\n  .ew-turnpage-fwd, .ew-turnpage-back { animation: none; }\n}\n.ew-drow {\n  display: flex; gap: 8px; padding: 6px 0; font-size: 13px; line-height: 1.7;\n  border-bottom: 1px solid var(--border, #2d2f3d);\n}\n.ew-drow-rumour { color: var(--muted, #6b7280); font-style: italic; }\n.ew-dcat { color: var(--muted, #6b7280); flex: 0 0 auto; min-width: 4.5em; }\n\n/* Panels keep UI type while the prose gets reading type — a stat block read at\n   16/1.85 is harder to scan, not easier. */\n.ew-panel-box {\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  padding: 12px; margin-bottom: 10px; font-size: 13px;\n}\n.ew-panel-box-name {\n  margin-bottom: 5px; font-size: 13px; font-weight: 600;\n  color: var(--text, #e2e8f0);\n}\n.ew-panel-quiet { opacity: .55; }\n.ew-prow { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; line-height: 1.6; }\n.ew-plabel { color: var(--muted, #6b7280); flex: 0 0 5.5em; }\n.ew-pval { flex: 1; min-width: 0; overflow-wrap: anywhere; }\n/* A rank/tier value renders as an accent chip, but the narrator can write a whole\n   clause into it (measured on the flagship). Chips are nowrap by default so tag\n   rows stay tidy — but a value chip must wrap instead of overflowing the panel. */\n.ew-pval .ew-chip { white-space: normal; overflow-wrap: anywhere; }\n.ew-gap { color: var(--border, #2d2f3d); }\n\n/* A label that is really a sentence. Measured on the live flagship: the narrator\n   wrote a whole clause into a label slot, and the fixed 5.5em column wrapped it to\n   ten lines beside a single dot. Stacking costs one line of height and makes the row\n   readable; keeping the column costs ten and does not. */\n.ew-prow-stack { display: block; }\n.ew-prow-stack .ew-plabel { flex: none; margin-bottom: 2px; line-height: 1.55; }\n.ew-prow-stack .ew-pval { margin-left: 0; }\n\n.ew-bar-track {\n  height: 4px; border-radius: 2px; margin-top: 5px;\n  background: var(--border, #2d2f3d); overflow: hidden;\n}\n.ew-bar-fill { height: 100%; background: var(--accent, #7c3aed); }\n\n.ew-list { margin: 0; padding: 0; list-style: none; }\n.ew-list li { padding: 2px 0; }\n.ew-sub { color: var(--muted, #6b7280); }\n/* The world's name, demoted to a second line now that the life's own identity holds\n   the first. Small: it is the same string on every row, so it is context, not news. */\n.ew-card .ew-sub { display: block; font-size: 12px; margin-bottom: 2px; }\n\n.ew-choices { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; }\n.ew-choice {\n  text-align: left; width: 100%; box-sizing: border-box;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  /* Translucent so the scene's backdrop shows through every choice — the shared,\n     theme-matching texture for the whole row, at no narrator cost. */\n  background: color-mix(in srgb, var(--card, #1f2030) 66%, transparent);\n  color: var(--text, #e2e8f0);\n  padding: 12px 14px; font: inherit; font-size: 14px; line-height: 1.5;\n  min-height: 48px; cursor: pointer; -webkit-tap-highlight-color: transparent;\n  transition: border-color .14s ease, background .14s ease, transform .14s ease;\n}\n/* Match the armed look on press so the touch highlight flows straight into the\n * armed state. Without this, `:active` only moved the border, so on release the\n * button dropped to its dim base style for a frame before React applied `armed`\n * — reading as a grey dip between two highlights on a single tap. */\n.ew-choice:active {\n  border-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 8%, var(--card, #1f2030));\n}\n.ew-choice:disabled { opacity: .5; cursor: default; }\n\n/* The one that was chosen. Kept at full opacity while its siblings dim, because\n   the point of the waiting state is to confirm WHICH choice was taken — a row where\n   every option is equally grey has answered a different question. */\n.ew-choicewrap { margin-bottom: 8px; }\n.ew-choice { position: relative; overflow: hidden; }\n.ew-choice-label { position: relative; z-index: 1; }\n\n/* A fateful choice — one the narrator marked as able to lead to a major event or\n   turning point. A distinctive, ornate look so it reads as weightier than the\n   rest: an accent border, a faint diagonal gilt hatch, and a glow blooming from\n   the top corner. Theme-aware (all tints derive from --accent), and still\n   translucent so the backdrop shows through like its siblings. Kept as background\n   layers, not a pseudo-element, so it never collides with the waiting sweep. */\n.ew-choice-fateful {\n  border-color: color-mix(in oklab, var(--accent, #7c3aed) 55%, var(--border, #2d2f3d));\n  background:\n    repeating-linear-gradient(\n      135deg,\n      color-mix(in srgb, var(--accent, #7c3aed) 10%, transparent) 0 2px,\n      transparent 2px 11px\n    ),\n    radial-gradient(\n      130% 170% at 100% 0%,\n      color-mix(in srgb, var(--accent, #7c3aed) 26%, transparent),\n      transparent 55%\n    ),\n    color-mix(in srgb, var(--card, #1f2030) 64%, transparent);\n  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 20%, transparent);\n  /* A slow accent glow that breathes, so a fateful choice quietly signals weight\n     before it is even touched. On the border only (the narrator's art sits inside),\n     slow enough to read as ambience not alarm; disabled under reduced-motion. */\n  animation: ew-fateful-glow 4.5s ease-in-out infinite;\n}\n\n/* The narrator's own SVG for a fateful choice, as an inert image behind the label.\n   Kept low-opacity so the label stays readable; the accent border still frames it. */\n.ew-choice-art {\n  position: absolute; inset: 0; z-index: 0;\n  width: 100%; height: 100%;\n  /* A fateful choice's own art is ONE centred emblem, so contain it — the button\n     is far wider than the art's viewBox, and `cover` would crop the symbol to a\n     horizontal band (its top and bottom sliced off). The shared tiled motif below\n     overrides back to `cover`, because a texture is meant to fill edge to edge. */\n  object-fit: contain;\n  pointer-events: none; opacity: .55;\n}\n/* The shared scene motif on ordinary buttons sits fainter than a fateful choice's\n   own art, so a fateful choice still stands out from the row. It is a full-bleed\n   texture, so it fills the button (cover) rather than being contained. */\n.ew-choice-art-common { opacity: .4; object-fit: cover; }\n/* When the narrator supplied art, it IS the pattern — drop the app's fallback\n   hatch/glow so the two do not fight, but keep the accent border/frame. Declared\n   after .ew-choice-fateful so it wins the cascade. */\n.ew-choice-arted {\n  background: color-mix(in srgb, var(--card, #1f2030) 60%, transparent);\n}\n\n/* Armed: chosen, not yet done. Reads as a held breath — brighter and slightly\n   raised, but explicitly NOT the accent fill the committing state uses, so the two\n   are never confused at a glance. */\n.ew-choice-armed {\n  border-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 8%, var(--card, #1f2030));\n  transform: translateY(-1px);\n  transition: transform .14s ease, background .14s ease, border-color .14s ease;\n}\n\n.ew-choice-waiting {\n  opacity: 1 !important;\n  border-color: var(--accent, #7c3aed);\n  background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030));\n}\n/* A light sweeping across the chosen line, once every couple of seconds. Chosen\n   over a spinner because it belongs to the SENTENCE the player picked rather than\n   to the page: what is being waited on is that line becoming a month. */\n.ew-choice-waiting::after {\n  content: ''; position: absolute; inset: 0; z-index: 0;\n  background: linear-gradient(\n    100deg,\n    transparent 20%,\n    color-mix(in oklab, var(--accent, #7c3aed) 22%, transparent) 50%,\n    transparent 80%\n  );\n  transform: translateX(-100%);\n  animation: ew-sweep 2.1s ease-in-out infinite;\n}\n\n/* ── the second step ──────────────────────────────────────────────────────\n   A turn is a month of a life and cannot be undone, so committing one is its own\n   deliberate act. The row appears under the armed choice rather than in a modal:\n   a dialog would take the sentence being decided off the screen. */\n.ew-confirm {\n  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;\n  padding: 8px 4px 2px 14px;\n  animation: ew-rise .16s ease-out;\n}\n.ew-confirm-act { padding-left: 0; }\n.ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); margin-right: 2px; }\n.ew-btn-sm { min-height: 36px; padding: 0 14px; font-size: 13px; flex: 0 0 auto; }\n.ew-note-live { display: flex; align-items: center; margin-top: 10px; min-width: 0; }\n/* Turn progress: a staged bar the narrator's tool calls drive — a fill that jumps\n   to ~90% once it has read the life, plus a moving shimmer so the long writing\n   phase never looks stalled. */\n.ew-progress { width: 100%; min-width: 0; }\n.ew-progress-track {\n  position: relative; height: 6px; border-radius: 999px; overflow: hidden;\n  background: var(--border, #2d2f3d);\n}\n.ew-progress-fill {\n  position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 999px;\n  background: var(--accent, #7c3aed); transition: width .4s ease;\n}\n.ew-progress-track::after {\n  content: ''; position: absolute; inset: 0; z-index: 1;\n  background: linear-gradient(\n    100deg, transparent 20%,\n    color-mix(in oklab, #fff 28%, transparent) 50%, transparent 80%\n  );\n  transform: translateX(-100%); animation: ew-sweep 1.6s ease-in-out infinite;\n}\n.ew-progress-steps {\n  display: flex; justify-content: space-between; gap: 8px; margin-top: 6px;\n}\n.ew-progress-label { font-size: 12px; color: var(--muted, #6b7280); }\n.ew-progress-count { font-size: 11px; color: var(--muted, #6b7280); flex: 0 0 auto; }\n@media (prefers-reduced-motion: reduce) {\n  .ew-progress-track::after { animation: none; opacity: 0; }\n}\n\n/* ── waiting ──────────────────────────────────────────────────────────────\n   The app's only animation, introduced with its reduced-motion answer in the same\n   edit rather than after: idle motion like this reads as pleasant to most people\n   and as a symptom to someone with a vestibular disorder, and retrofitting the\n   media query means shipping the version without it. */\n\n.ew-wait {\n  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;\n  vertical-align: middle; margin-left: 8px; position: relative; z-index: 1;\n  min-width: 0; max-width: 100%;\n}\n.ew-wait-dots { display: inline-flex; gap: 4px; flex: 0 0 auto; }\n.ew-wait-label { font-size: 12px; color: var(--muted, #6b7280); min-width: 0; overflow-wrap: anywhere; }\n\n.ew-dot {\n  width: 5px; height: 5px; border-radius: 50%;\n  background: currentColor; opacity: .35;\n  animation: ew-pulse 1.1s ease-in-out infinite;\n}\n/* Staggered, so the group reads as one moving thing rather than three blinking\n   ones. */\n.ew-dot:nth-child(2) { animation-delay: .18s; }\n.ew-dot:nth-child(3) { animation-delay: .36s; }\n\n@keyframes ew-pulse {\n  0%, 80%, 100% { opacity: .25; transform: scale(.8); }\n  40%           { opacity: 1;   transform: scale(1); }\n}\n@keyframes ew-sweep {\n  0%        { transform: translateX(-100%); }\n  60%, 100% { transform: translateX(100%); }\n}\n@keyframes ew-rise {\n  from { opacity: 0; transform: translateY(-3px); }\n  to   { opacity: 1; transform: none; }\n}\n\n@media (prefers-reduced-motion: reduce) {\n  /* Not \"animation: none\" alone — that would leave three barely-visible dots and\n     no signal at all. Every indicator stays; they simply stop moving. */\n  .ew-dot { animation: none; opacity: .75; }\n  .ew-choice-waiting::after { animation: none; transform: none; opacity: .35; }\n  .ew-confirm { animation: none; }\n  .ew-choice-armed { transition: none; transform: none; }\n  .ew-choice { transition: none; }\n  .ew-choice-fateful { animation: none; }\n}\n\n.ew-act { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }\n.ew-act textarea {\n  flex: 1; min-width: 0; box-sizing: border-box; resize: vertical;\n  min-height: 44px; max-height: 40vh;\n  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  padding: 11px 12px; font: inherit; font-size: 15px; line-height: 1.5;\n}\n.ew-act textarea:focus { outline: 2px solid var(--accent, #7c3aed); outline-offset: 1px; }\n\n.ew-count { font-size: 11px; color: var(--muted, #6b7280); margin-top: 4px; }\n\n/* The drawer is how panels stay reachable on a phone without pushing the prose\n   off the first screen. */\n.ew-drawer {\n  width: 100%; margin: 20px 0 0;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  background: transparent; color: var(--text, #e2e8f0);\n  font: inherit; font-size: 13px; min-height: 44px; cursor: pointer;\n}\n@media (min-width: 900px) { .ew-drawer { display: none; } }\n\n/* The way into the life star map. It looks like the panels drawer because it sits\n   in the same place and is the same kind of move, but it is NOT that class: the\n   drawer disappears above 900px (its panels move into the aside) and the star map\n   has no aside twin, so sharing the class hid the only entrance on a desktop. */\n.ew-starbtn {\n  display: block; width: 100%; margin: 20px 0 0;\n  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;\n  background: transparent; color: var(--text, #e2e8f0);\n  font: inherit; font-size: 13px; min-height: 44px; cursor: pointer;\n}\n\n/* ── the scene slot ── */\n\n/* ONE element, created on first need and never moved. Moving an iframe in the DOM\n   reloads it, so re-parenting a mounted scene would throw away whatever the player\n   was looking at — and a React portal does not help, because the browser's rule is\n   about the element's position in the document, not about who rendered it. */\n.ew-slot {\n  display: none;\n  width: 100%;\n  border: 1px solid var(--border, #2d2f3d);\n  border-radius: 10px;\n  background: var(--card, #1f2030);\n  /* A scene is a picture, not a page: it never becomes the scrolling thing. */\n  overflow: hidden;\n}\n.ew-slot-on { display: block; height: 320px; }\n\n/* Fullscreen is the SAME element with different geometry. Absolute inside the\n   app's own box rather than fixed: position fixed escapes the panel entirely and\n   would put a scene over the dashboard's own chrome. */\n.ew-slot-full {\n  display: block;\n  /* Absolute inside .ew-slot-wrap, NOT fixed: fixed would escape the panel and\n     cover the dashboard's own chrome. The wrapper carries the height in fullscreen\n     (.ew-slot-wrap-full) so this inset:0 iframe resolves to a real box instead of\n     the 0-height one the collapsed wrapper used to give it (M0.1). */\n  position: absolute; inset: 0; z-index: 20;\n  border-radius: 0; background: var(--ew-bg, #0b0c10);\n}\n\n.ew-slot-wrap { position: relative; margin: 16px 0 0; }\n/* In fullscreen the iframe and its bar both go absolute, so without a height here\n   the relative wrapper collapses to 0 and the iframe had nothing to fill (M0.1).\n   Give the wrapper the height; the scene fills the panel and stays inside it. */\n.ew-slot-wrap-full { min-height: 85dvh; }\n.ew-slot-bar {\n  display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 6px;\n}\n.ew-slot-bar-full { position: absolute; top: 8px; right: 8px; z-index: 21; margin: 0; }\n.ew-slot-btn {\n  min-height: 36px; padding: 0 12px; font: inherit; font-size: 12px;\n  color: var(--text, #e2e8f0); background: var(--card, #1f2030);\n  border: 1px solid var(--border, #2d2f3d); border-radius: 8px; cursor: pointer;\n  -webkit-tap-highlight-color: transparent;\n}\n\n/* A shelf row that carries its own destructive control. The row is a div and the\n   open action is a button INSIDE it, because a button cannot contain a button --\n   and the delete has to be a sibling, not a nested child. */\n.ew-card-row { display: flex; align-items: stretch; gap: 0; padding: 0; overflow: visible; }\n.ew-card-open {\n  flex: 1 1 auto; min-width: 0; text-align: left; font: inherit;\n  background: transparent; border: none; color: inherit; cursor: pointer;\n  /* 12px, matching .ew-card, so a life row is inset exactly like a world card. */\n  padding: 12px; -webkit-tap-highlight-color: transparent;\n}\n.ew-card-open:disabled { opacity: .55; cursor: default; }\n/* Aligned to the top of the row rather than centred: a row is two or three lines\n   tall, and a vertically centred control drifts as the row's text grows. */\n.ew-card-drop {\n  align-self: flex-start; margin: 10px 10px 0 0; border-radius: 8px;\n}\n/* Row actions: inline on desktop, collapsed into a kebab menu on a phone where\n   three stacked buttons wrapped badly. */\n.ew-life-actions { display: flex; align-items: flex-start; }\n.ew-life-menu { display: none; position: relative; align-self: flex-start; margin: 10px 10px 0 0; }\n@media (max-width: 767px) {\n  .ew-life-actions { display: none; }\n  .ew-life-menu { display: block; }\n  /* iOS Safari zooms the page when a focused control's font-size is under 16px.\n     Floor every control at 16px on a phone so focusing an input never zooms in. */\n  .ew-root input, .ew-root textarea, .ew-root select { font-size: 16px; }\n}\n.ew-kebab {\n  display: inline-flex; align-items: center; justify-content: center;\n  width: 40px; height: 40px; border-radius: 8px; cursor: pointer;\n  background: transparent; border: 1px solid var(--border, #2d2f3d);\n  color: var(--muted, #6b7280); -webkit-tap-highlight-color: transparent;\n}\n@media (hover: hover) { .ew-kebab:hover { color: var(--text, #e2e8f0); } }\n/* Sits above every life row (rows are z-index auto) and just below the menu, so\n   a tap anywhere but the menu is absorbed here and closes it — never reaching the\n   row beneath. Transparent, but it MUST catch clicks, so no pointer-events:none. */\n.ew-menu-backdrop { position: fixed; inset: 0; z-index: 29; background: transparent; }\n.ew-menu {\n  position: absolute; right: 0; top: 44px; z-index: 30; min-width: 160px;\n  display: flex; flex-direction: column; gap: 2px; padding: 6px;\n  background: var(--card, #1f2030); border: 1px solid var(--border, #2d2f3d);\n  border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .45);\n}\n.ew-menu-item {\n  text-align: left; font: inherit; cursor: pointer; min-height: 42px;\n  padding: 10px 12px; border: none; border-radius: 6px;\n  background: transparent; color: var(--text, #e2e8f0);\n}\n@media (hover: hover) { .ew-menu-item:hover { background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030)); } }\n\n/* ── phone bottom tab bar ──────────────────────────────────────────────────\n   Sticky at the foot of the app's own scroll container (never position:fixed,\n   which in the dashboard DOM escapes the panel). Colour IS the background: a soft\n   dark fade lifts it off the story text scrolling under it, with no panel block.\n   Hides on scroll-down, returns on scroll-up. */\n.ew-tabbar {\n  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;\n  max-width: 900px; margin-inline: auto;  /* match the centred .ew-root column */\n  display: flex; height: 60px;\n  padding-bottom: env(safe-area-inset-bottom, 0);  /* clear the iOS home indicator */\n  background: linear-gradient(180deg,\n    rgba(6, 7, 14, 0) 0%, rgba(6, 7, 14, .82) 46%, rgba(6, 7, 14, .96) 100%);\n  transition: transform .28s ease;\n  pointer-events: auto;\n}\n.ew-tabbar-hidden { transform: translateY(96px); }\n.ew-tab {\n  flex: 1; display: flex; flex-direction: column; align-items: center;\n  justify-content: flex-end; gap: 3px; padding: 0 0 9px;\n  background: transparent; border: 0; cursor: pointer;\n  color: var(--muted, #8b8ea6); font: inherit; font-size: 10px; position: relative;\n}\n.ew-tab svg {\n  width: 21px; height: 21px; stroke: currentColor; fill: none;\n  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;\n}\n.ew-tab.on { color: var(--gold, #e5c07b); }\n.ew-tab.on::before {\n  content: \"\"; position: absolute; top: 8px; width: 26px; height: 2.5px;\n  border-radius: 2px; background: var(--gold, #e5c07b);\n}\n.ew-tablabel { line-height: 1; }\n.ew-tabdot {\n  position: absolute; top: 6px; right: calc(50% - 15px);\n  width: 7px; height: 7px; border-radius: 50%;\n  background: var(--gold, #e5c07b); box-shadow: 0 0 6px var(--gold, #e5c07b);\n}\n/* Overflow sheet for the 更多 tab. The bar is portalled to document.body, so the\n   scrim is fixed to the viewport (it must not extend the page or cover chrome\n   beyond the tap-to-close area). */\n.ew-tabmore-scrim {\n  position: fixed; inset: 0; z-index: 31; background: transparent; border: 0;\n}\n.ew-tabmore {\n  position: fixed; bottom: 66px; left: 0; right: 0; z-index: 32;\n  max-width: 900px; margin: 0 auto; width: calc(100% - 16px); padding: 6px;\n  background: var(--panel, #12142a); border: 1px solid var(--border, #262a3e);\n  border-radius: 14px; box-shadow: 0 14px 34px rgba(0, 0, 0, .55);\n  display: flex; flex-direction: column;\n}\n.ew-tabmore-item {\n  display: flex; align-items: center; gap: 10px; padding: 10px 12px;\n  background: transparent; border: 0; color: var(--text, #e9e6df);\n  font: inherit; font-size: 13.5px; border-radius: 10px; cursor: pointer;\n  text-align: start;\n}\n.ew-tabmore-item svg {\n  width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7;\n  stroke-linecap: round; stroke-linejoin: round;\n}\n.ew-tabmore-item.on { color: var(--gold, #e5c07b); }\n.ew-tabdot-inline {\n  width: 7px; height: 7px; border-radius: 50%; margin-inline-start: auto;\n  background: var(--gold, #e5c07b);\n}\n.ew-region-pane { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }\n/* World setting view (structured lore browser) on the world detail page. */\n.ew-setting-group { margin: 8px 0 2px; }\n.ew-setting-entry { border-bottom: 1px solid var(--border, #2d2f3d); }\n.ew-setting-head {\n  display: flex; gap: 8px; align-items: center; width: 100%; text-align: start;\n  background: transparent; border: 0; padding: 11px 8px; cursor: pointer;\n  color: var(--text, #e2e8f0); font: inherit; border-radius: 8px;\n  transition: background 0.12s ease; -webkit-tap-highlight-color: transparent;\n}\n/* hover only on real pointers — on touch, :hover is emulated on tap-down and would\n   light the row up before the finger lifts. */\n@media (hover: hover) {\n  .ew-setting-head:hover { background: var(--surface-2, rgba(255, 255, 255, 0.05)); }\n  .ew-setting-head:hover .ew-setting-name { color: var(--accent, #7c3aed); }\n}\n.ew-setting-head:focus-visible { outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px; }\n.ew-setting-name { font-weight: 600; flex: 0 0 auto; }\n.ew-setting-sum {\n  color: var(--muted, #8b8ea6); font-size: 12.5px;\n  flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\n}\n/* A chevron the reader can see is clickable: points right when closed, down when\n   open. Drawn from borders so it needs no icon font or emoji. */\n.ew-setting-caret {\n  margin-left: auto; flex: 0 0 auto; width: 7px; height: 7px; margin-inline-end: 2px;\n  border-right: 2px solid var(--muted, #8b8ea6); border-bottom: 2px solid var(--muted, #8b8ea6);\n  transform: rotate(-45deg); transition: transform 0.15s ease, border-color 0.12s ease;\n}\n.ew-setting-head[aria-expanded=\"true\"] .ew-setting-caret { transform: rotate(45deg); }\n@media (hover: hover) {\n  .ew-setting-head:hover .ew-setting-caret { border-color: var(--accent, #7c3aed); }\n}\n.ew-setting-body { padding: 0 8px 12px; }\n.ew-setting-rel { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }\n/* Starting-archetype (role) list on the world detail page. */\n.ew-role { display: flex; gap: 8px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border, #2d2f3d); }\n.ew-role-name { font-weight: 600; flex: 0 0 auto; }\n.ew-role-sum { color: var(--muted, #8b8ea6); font-size: 12.5px; overflow-wrap: anywhere; }\n/* Desktop right-aside tab strip: switch which system region's panels show. */\n.ew-aside-tabs {\n  display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px;\n  border-bottom: 1px solid var(--border, #262a3e); padding-bottom: 8px;\n}\n.ew-aside-tab {\n  display: inline-flex; align-items: center; gap: 6px; position: relative;\n  background: transparent; border: 0; color: var(--muted, #8b8ea6);\n  font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; cursor: pointer;\n}\n.ew-aside-tab svg {\n  width: 15px; height: 15px; stroke: currentColor; fill: none;\n  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;\n}\n.ew-aside-tab.on {\n  color: var(--gold, #e5c07b);\n  background: color-mix(in oklab, var(--gold, #e5c07b) 14%, transparent);\n}\n.ew-aside-dot {\n  width: 6px; height: 6px; border-radius: 50%;\n  background: var(--gold, #e5c07b); box-shadow: 0 0 6px var(--gold, #e5c07b);\n}\n\n/* Kept at the end of the file: a @keyframes block's nested braces confuse the\n   naive CSS parser in the frontend contract tests, shifting the rule pairing for\n   everything after it. At EOF there is nothing after it to shift. */\n@keyframes ew-fateful-glow {\n  0%, 100% {\n    box-shadow:\n      inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 20%, transparent),\n      0 0 0 0 transparent;\n  }\n  50% {\n    box-shadow:\n      inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 34%, transparent),\n      0 0 12px 1px color-mix(in srgb, var(--accent, #7c3aed) 18%, transparent);\n  }\n}\n";
 //#endregion
 //#region src/main.tsx
 /** Where the player was, so leaving the page does not throw them back to the
@@ -4847,6 +6211,10 @@ var WHERE = "endless-worlds:where";
 /** The player's standing UI-language pick from the header dropdown. Prefixed and
 *  shared with the dashboard document like every other key this app keeps. */
 var LANG_KEY = "endless-worlds:lang";
+/** The reader's standing choice of reading measure. A preference, not a per-world
+*  fact, so it is kept here rather than asked of the backend. */
+var WIDTH_KEY = "endless-worlds:width";
+var RAIL_KEY = "endless-worlds:rail";
 var remember = (where) => {
 	try {
 		localStorage.setItem(WHERE, JSON.stringify(where));
@@ -4869,8 +6237,39 @@ function EndlessWorlds() {
 	const [seeds, setSeeds] = useState(null);
 	const [runs, setRuns] = useState([]);
 	const [error, setError] = useState(null);
+	/** World drafts being built from pasted text — shown as cards in the worlds
+	*  section, polled to completion, then reviewed and installed. */
+	const [drafts, setDrafts] = useState([]);
+	/** The draft open in the review screen (view === 'draft'). */
+	const [reviewDraft, setReviewDraft] = useState(null);
 	const [view, setView] = useState("library");
 	const [showSettings, setShowSettings] = useState(false);
+	/** The shelf. Remembered across loads and OPEN by default so the landing shows
+	*  the lives in it; the reader can close it for more reading room (the story
+	*  then owns the full width) and reopen it, and the choice sticks. */
+	const [railOpen, setRailOpen] = useState(() => {
+		try {
+			return localStorage.getItem(RAIL_KEY) !== "closed";
+		} catch {
+			return true;
+		}
+	});
+	const toggleRail = useCallback(() => {
+		setRailOpen((o) => {
+			const next = !o;
+			try {
+				localStorage.setItem(RAIL_KEY, next ? "open" : "closed");
+			} catch {}
+			return next;
+		});
+	}, []);
+	const [readWidth, setReadWidth] = useState(() => localStorage.getItem(WIDTH_KEY) === "fixed" ? "fixed" : "fluid");
+	const chooseWidth = useCallback((next) => {
+		try {
+			localStorage.setItem(WIDTH_KEY, next);
+		} catch {}
+		setReadWidth(next);
+	}, []);
 	const rootRef = useRef(null);
 	useEffect(() => {
 		rootRef.current?.scrollIntoView({ block: "start" });
@@ -4879,6 +6278,14 @@ function EndlessWorlds() {
 	const [world, setWorld] = useState(null);
 	const [live, setLive] = useState(null);
 	const [scenes, setScenes] = useState([]);
+	const [panels, setPanels] = useState([]);
+	const [backdrop, setBackdrop] = useState(null);
+	const [isNarrow, setIsNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(max-width: 1100px)").matches : false);
+	const [tab, setTab] = useState("reading");
+	const [liveTurn, setLiveTurn] = useState(0);
+	/** tabId → the content signature last seen, so a tab dots only on an UNSEEN
+	*  change. A ref (not state) because it is bookkeeping, not render input. */
+	const seenRef = useRef({});
 	const [refresh, setRefresh] = useState(0);
 	/** Which world's deletion is being confirmed, or null. Held here rather than in
 	*  the detail view because the reload that follows a deletion unmounts that
@@ -4916,10 +6323,22 @@ function EndlessWorlds() {
 		} catch {
 			setRuns([]);
 		}
+		try {
+			setDrafts((await api.worldDrafts()).drafts);
+		} catch {
+			setDrafts([]);
+		}
 	}, [lang]);
 	useEffect(() => {
 		load();
 	}, [load]);
+	useEffect(() => {
+		if (!drafts.some((d) => d.status === "generating" || d.status === "new")) return;
+		const timer = window.setInterval(() => {
+			load();
+		}, DRAFT_POLL_MS);
+		return () => window.clearInterval(timer);
+	}, [drafts, load]);
 	useEffect(() => {
 		if (!worlds) return;
 		const live = new Set(worlds.map((w) => w.worldId));
@@ -4955,14 +6374,46 @@ function EndlessWorlds() {
 			});
 			return;
 		}
-		if (where.view === "opening" && where.worldId) api.world(where.worldId).then((w) => {
-			applyLanguage(w.language);
-			setWorld(w);
-			setView("opening");
-		}).catch(() => {
-			forget();
-		});
+		if (where.view === "opening" && where.worldId) {
+			api.world(where.worldId).then((w) => {
+				applyLanguage(w.language);
+				setWorld(w);
+				setView("opening");
+			}).catch(() => {
+				forget();
+			});
+			return;
+		}
+		if (where.view === "create") {
+			setView("create");
+			return;
+		}
+		if (where.view === "draft" && where.draftId) {
+			const did = where.draftId;
+			api.worldDraft(did).then(() => {
+				setReviewDraft(did);
+				setView("draft");
+			}).catch(() => {
+				forget();
+			});
+		}
 	}, [applyLanguage]);
+	const prevViewRef = useRef("library");
+	const homeRef = useRef(() => {});
+	useEffect(() => {
+		const prev = prevViewRef.current;
+		prevViewRef.current = view;
+		if (prev === "library" && view !== "library") try {
+			window.history.pushState({ ew: "subview" }, "");
+		} catch {}
+	}, [view]);
+	useEffect(() => {
+		const onPop = () => {
+			homeRef.current();
+		};
+		window.addEventListener("popstate", onPop);
+		return () => window.removeEventListener("popstate", onPop);
+	}, []);
 	const home = () => {
 		forget();
 		setView("library");
@@ -4970,7 +6421,40 @@ function EndlessWorlds() {
 		setWorld(null);
 		setLive(null);
 		setScenes([]);
+		setReviewDraft(null);
 		load();
+	};
+	homeRef.current = home;
+	const startCreate = () => {
+		remember({ view: "create" });
+		setView("create");
+	};
+	const openDraft = (draftId) => {
+		remember({
+			view: "draft",
+			draftId
+		});
+		setReviewDraft(draftId);
+		setView("draft");
+	};
+	/** After submitting the paste, go straight to the review screen — it shows the
+	*  worldsmith's progress and then the result; leaving it drops back to the shelf
+	*  where the draft card keeps polling. */
+	const draftCreated = (draftId) => {
+		load();
+		openDraft(draftId);
+	};
+	const backToShelf = () => {
+		remember({ view: "library" });
+		setView("library");
+		setReviewDraft(null);
+		load();
+	};
+	const draftInstalled = () => {
+		home();
+	};
+	const discardDraftInline = (draftId) => {
+		api.discardWorldDraft(draftId).then(() => void load()).catch(() => void load());
 	};
 	const enterLife = (runId) => {
 		remember({
@@ -5075,20 +6559,91 @@ function EndlessWorlds() {
 		changeLifeMeta(runId, { archived });
 	}, [changeLifeMeta]);
 	const [showArchived, setShowArchived] = useState(false);
+	useEffect(() => {
+		if (typeof window === "undefined" || !window.matchMedia) return void 0;
+		const mq = window.matchMedia("(max-width: 1100px)");
+		const on = () => setIsNarrow(mq.matches);
+		on();
+		mq.addEventListener?.("change", on);
+		return () => mq.removeEventListener?.("change", on);
+	}, []);
+	useEffect(() => {
+		setTab("reading");
+	}, [live]);
+	const tabs = useMemo(() => buildTabs(scenes, panels), [scenes, panels]);
+	const narrowLive = isNarrow && view === "live" && !!live;
+	const barHidden = useScrollHide(narrowLive);
+	useEffect(() => {
+		if (narrowLive && !tabs.some((tb) => tb.id === tab)) setTab("reading");
+	}, [
+		tabs,
+		tab,
+		narrowLive
+	]);
+	const sigOf = useCallback((id, sceneIds) => {
+		if (id === "reading") return `r${liveTurn}`;
+		if (id === "starmap") return "s";
+		const sc = sceneIds.map((sid) => {
+			const s = scenes.find((x) => x.sceneId === sid);
+			return [
+				sid,
+				s?.asks ?? false,
+				s?.answered ?? false
+			];
+		});
+		const pn = panels.filter((p) => (p.region ?? "") === id).map((p) => [p.id, JSON.stringify(p.fields)]);
+		return JSON.stringify([sc, pn]);
+	}, [
+		scenes,
+		panels,
+		liveTurn
+	]);
+	const dots = {};
+	for (const tb of tabs) {
+		const sig = sigOf(tb.id, tb.sceneIds);
+		if (seenRef.current[tb.id] === void 0) seenRef.current[tb.id] = sig;
+		dots[tb.id] = tb.id !== tab && tb.id !== "starmap" && seenRef.current[tb.id] !== sig;
+	}
+	useEffect(() => {
+		const tb = tabs.find((x) => x.id === tab);
+		if (tb) seenRef.current[tab] = sigOf(tab, tb.sceneIds);
+	}, [
+		tab,
+		tabs,
+		sigOf
+	]);
+	const activeSceneIds = tabs.find((tb) => tb.id === tab)?.sceneIds ?? [];
+	const hideBody = narrowLive && tab !== "reading" && tab !== "starmap";
 	let body;
 	if (view === "live" && live) body = /* @__PURE__ */ jsx(PlayPage, {
 		runId: live,
 		onBack: home,
 		onScenes: setScenes,
+		onBackdrop: setBackdrop,
 		onReplay: openWorld,
 		onReplaySame: restartSameOpening,
 		onEnterLife: enterLife,
-		refresh
+		refresh,
+		openStar: narrowLive ? tab === "starmap" : void 0,
+		onStarClose: () => setTab("reading"),
+		onLiveTurn: setLiveTurn,
+		narrow: narrowLive,
+		onPanels: setPanels
 	});
 	else if (view === "opening" && world) body = /* @__PURE__ */ jsx(OpeningScreen, {
 		world,
 		onBack: home,
 		onLive: enterLife
+	});
+	else if (view === "create") body = /* @__PURE__ */ jsx(CreateWorldScreen, {
+		onCancel: backToShelf,
+		onCreated: draftCreated
+	});
+	else if (view === "draft" && reviewDraft) body = /* @__PURE__ */ jsx(WorldDraftReview, {
+		draftId: reviewDraft,
+		onInstalled: draftInstalled,
+		onDiscarded: backToShelf,
+		onBack: backToShelf
 	});
 	else if (selected) body = /* @__PURE__ */ jsx(WorldDetailView, {
 		worldId: selected,
@@ -5145,7 +6700,7 @@ function EndlessWorlds() {
 		};
 		body = /* @__PURE__ */ jsxs(Fragment, { children: [
 			newest ? /* @__PURE__ */ jsxs("div", {
-				className: "ew-onlywide",
+				className: "ew-onlywide ew-cont-wrap",
 				children: [/* @__PURE__ */ jsx("div", {
 					className: "ew-section",
 					children: t("shelf.continue")
@@ -5158,7 +6713,7 @@ function EndlessWorlds() {
 				children: t("shelf.pick")
 			}),
 			/* @__PURE__ */ jsxs("div", {
-				className: "ew-shelflist",
+				className: "ew-shelflist ew-shelf-lives",
 				children: [
 					active.length ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("div", {
 						className: "ew-section",
@@ -5185,12 +6740,22 @@ function EndlessWorlds() {
 					}), showArchived ? archivedRuns.map((r) => /* @__PURE__ */ jsx(LifeRow, {
 						run: r,
 						...rowProps
-					}, r.runId)) : null] }) : null,
+					}, r.runId)) : null] }) : null
+				]
+			}),
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-shelflist ew-shelf-worlds",
+				children: [
 					runs.length ? /* @__PURE__ */ jsx("div", {
 						className: "ew-section",
-						style: { marginTop: "22px" },
 						children: t("library.otherWorlds")
 					}) : null,
+					/* @__PURE__ */ jsx(CreateWorldCard, { onClick: startCreate }),
+					drafts.map((d) => /* @__PURE__ */ jsx(WorldDraftCard, {
+						draft: d,
+						onOpen: openDraft,
+						onDiscard: discardDraftInline
+					}, d.draftId)),
 					worlds.length === 0 ? /* @__PURE__ */ jsx("div", {
 						className: "ew-meta",
 						children: t("library.empty")
@@ -5223,11 +6788,16 @@ function EndlessWorlds() {
 	return /* @__PURE__ */ jsx(LanguageContext.Provider, {
 		value: applyLanguage,
 		children: /* @__PURE__ */ jsxs("div", {
-			className: "ew-root",
+			className: "ew-root ew-w-" + readWidth + (view === "library" ? " ew-home" : ""),
 			lang,
 			ref: rootRef,
 			children: [
 				/* @__PURE__ */ jsx("style", { children: styles_default }),
+				view === "live" && live && backdrop ? /* @__PURE__ */ jsx(Backdrop, {
+					runId: live,
+					version: backdrop.version,
+					turn: backdrop.turn
+				}) : null,
 				/* @__PURE__ */ jsxs("div", {
 					className: "ew-head",
 					children: [
@@ -5257,6 +6827,10 @@ function EndlessWorlds() {
 						}) : null
 					]
 				}),
+				view === "library" ? /* @__PURE__ */ jsx("div", {
+					className: "ew-tagline",
+					children: t("app.tagline")
+				}) : null,
 				view === "library" && showSettings ? /* @__PURE__ */ jsx(SettingsPanel, { onClose: () => setShowSettings(false) }) : null,
 				note ? /* @__PURE__ */ jsxs("div", {
 					className: "ew-note ew-note-row",
@@ -5268,7 +6842,7 @@ function EndlessWorlds() {
 					})]
 				}) : null,
 				/* @__PURE__ */ jsxs("div", {
-					className: "ew-shell",
+					className: "ew-shell" + (railOpen ? " ew-shell-open" : ""),
 					children: [/* @__PURE__ */ jsx(WorldRail, {
 						worlds,
 						runs,
@@ -5277,15 +6851,42 @@ function EndlessWorlds() {
 						onWorld: openWorld,
 						onLife: enterLife,
 						onHome: home,
-						atShelf: view === "library"
-					}), /* @__PURE__ */ jsx("div", {
+						atShelf: view === "library",
+						open: railOpen,
+						onClose: toggleRail,
+						width: readWidth,
+						onWidth: chooseWidth
+					}), /* @__PURE__ */ jsxs("div", {
 						className: "ew-main",
-						children: body
+						children: [
+							/* @__PURE__ */ jsx("button", {
+								className: "ew-shelfbtn",
+								type: "button",
+								"aria-expanded": railOpen,
+								onClick: toggleRail,
+								children: t("rail.open")
+							}),
+							/* @__PURE__ */ jsx("div", {
+								className: "ew-bodywrap",
+								style: {
+									display: hideBody ? "none" : void 0,
+									paddingBottom: narrowLive ? "72px" : void 0
+								},
+								children: body
+							}),
+							hideBody ? /* @__PURE__ */ jsx("div", {
+								className: "ew-region-pane",
+								style: { paddingBottom: "72px" },
+								children: panels.filter((p) => (p.region ?? "") === tab).map((p) => /* @__PURE__ */ jsx(PanelBox, { panel: p }, p.id))
+							}) : null
+						]
 					})]
 				}),
 				live ? scenes.map((s) => /* @__PURE__ */ jsx(SceneSlot, {
 					runId: live,
 					sceneId: s.sceneId,
+					asks: s.asks,
+					visible: !narrowLive || activeSceneIds.includes(s.sceneId),
 					onChoice: onSceneChoice
 				}, s.sceneId)) : null,
 				doomed ? /* @__PURE__ */ jsx(DeleteWorldDialog, {
@@ -5297,6 +6898,13 @@ function EndlessWorlds() {
 					runId: doomedLife,
 					onCancel: () => setDoomedLife(null),
 					onDeleted: afterLifeDelete
+				}) : null,
+				narrowLive ? /* @__PURE__ */ jsx(WorldTabBar, {
+					tabs,
+					active: tab,
+					dots,
+					hidden: barHidden,
+					onSelect: setTab
 				}) : null
 			]
 		})

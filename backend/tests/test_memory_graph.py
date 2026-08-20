@@ -308,24 +308,56 @@ def committed_run(store):
 
 def take_turn(run, turn, memory=None, **extra):
     args = {"runId": run, "turn": turn, "prose": f"turn {turn}",
+            "choices": [{"id": "go", "label": "go on"}],
             "state": {"alive": True}, **extra}
     if memory is not None:
         args["memory"] = memory
     return call("endless_advance_turn", **args)
 
 
-def test_malformed_memory_commits_nothing(app):
-    """§12.1: malformed memory 不产生部分写入 — not the state, not the prose."""
+def test_malformed_memory_commits_the_turn_but_drops_the_block(app):
+    """Memory is enrichment, not the story: a malformed block is DROPPED and warned,
+    but the turn still commits (prose + choices + state). No memory is recorded for
+    that turn, and nothing is ever back-filled from prose."""
     store = srv._store()
     run = committed_run(store)
     bad = {"events": [{"key": "k", "title": "t", "summary": "s",
                        "participants": ["nobody"], "disclosure": "known"}]}
     out = take_turn(run, 1, memory=bad)
-    assert out["ok"] is True and out["committed"] is False
-    assert out["reason"] == "memory-rejected"
-    assert out["field"] == "memory.events[0].participants[0]"
-    assert int(store.read_state(run).get("turn") or 0) == 0
-    assert store.read_chronicle(run) == []
+    assert out["committed"] is True, "the turn lands; memory never holds it hostage"
+    warned = out.get("warnings") or []
+    mem = next((w for w in warned if w.get("panel") == "memory"), None)
+    assert mem is not None and mem["field"] == "memory.events[0].participants[0]"
+    assert int(store.read_state(run)["turn"]) == 1, "the turn committed"
+    (entry,) = store.read_chronicle(run)
+    assert "memory" not in entry, "the invalid block was dropped, not recorded"
+
+
+def test_memory_sent_as_a_json_string_is_recovered(app):
+    """A narrator that double-encodes the block sends `memory` as a JSON STRING; the
+    call recovers it to an object instead of failing the turn on a type mismatch."""
+    import json as _json
+    store = srv._store()
+    run = committed_run(store)
+    out = call("endless_advance_turn", runId=run, turn=1, prose="turn 1",
+               choices=[{"id": "go", "label": "go on"}], state={"alive": True},
+               memory=_json.dumps(bridge_memory(), ensure_ascii=False))
+    assert out["committed"] is True
+    (entry,) = store.read_chronicle(run)
+    assert entry["memory"]["events"][0]["key"] == "saved-elin"
+
+
+def test_memory_sent_as_a_non_json_string_is_dropped_not_fatal(app):
+    """An unrecoverable string `memory` is dropped and the turn still commits — memory
+    never blocks a turn, at the schema layer or the semantic one."""
+    store = srv._store()
+    run = committed_run(store)
+    out = call("endless_advance_turn", runId=run, turn=1, prose="turn 1",
+               choices=[{"id": "go", "label": "go on"}], state={"alive": True},
+               memory="not json at all")
+    assert out["committed"] is True
+    (entry,) = store.read_chronicle(run)
+    assert "memory" not in entry
 
 
 def test_a_valid_memory_rides_the_same_chronicle_record(app):

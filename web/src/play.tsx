@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
-import { api } from './api'
+import { api, API } from './api'
 
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
  *  this is about the page converging on its own rather than about latency. */
@@ -25,6 +25,7 @@ import { LegacyPicker } from './legacy'
 import { StarMap } from './memory'
 import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
+import { buildTabs, tabIcon } from './tabbar'
 
 function Chevron({ dir }: { dir: 'l' | 'r' }) {
   const d = dir === 'l' ? 'M11 4 L6 9 L11 14' : 'M7 4 L12 9 L7 14'
@@ -145,16 +146,34 @@ function EchoMark({
 }
 
 export function PlayPage({
-  runId, onBack, onScenes, onReplay, onReplaySame, onEnterLife, refresh,
+  runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh,
+  openStar, onStarClose, onLiveTurn, narrow, onPanels,
 }: {
   runId: string
   onBack: () => void
   onScenes: (scenes: SceneRow[]) => void
+  /** The world image behind the whole app, reported upward because it is rendered
+   *  at the ROOT rather than in this column — on a desktop it spans the page, not
+   *  just the story. */
+  onBackdrop: (backdrop: { version: number; turn?: number } | null) => void
   onReplay: (worldId: string) => void
   onReplaySame: (fromRunId: string) => void
   /** Enter another life by id — how a legacy heir is stepped into (§9). */
   onEnterLife: (runId: string) => void
   refresh: number
+  /** The 星图 tab (narrow viewport) drives the star map overlay from outside; when
+   *  undefined the play page's own control owns it (desktop). */
+  openStar?: boolean
+  onStarClose?: () => void
+  /** Report the live turn upward so the bottom bar can dot 书页 on a new month
+   *  while the player is reading a system tab. */
+  onLiveTurn?: (turn: number) => void
+  /** Narrow viewport: the phone bottom bar owns the system panels (grouped into
+   *  region tabs), so the in-column drawer and star button are suppressed here. */
+  narrow?: boolean
+  /** Report the world's panels upward so the bottom bar can build region tabs from
+   *  the ones that carry a region. */
+  onPanels?: (panels: PlayView['panels']) => void
 }) {
   const [v, setV] = useState<PlayView | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -175,6 +194,11 @@ export function PlayPage({
   // The life star map overlay (§8.3): opened from the secondary action area,
   // never from the per-turn controls — it reads the life, it does not play it.
   const [starOpen, setStarOpen] = useState(false)
+  // Desktop right-aside: which system region's panels are shown (a region id).
+  const [asideTab, setAsideTab] = useState('')
+  /** Per-region content signature last seen on the aside, so a region tab dots on
+   *  an unseen change — the same notification affordance the phone bottom bar has. */
+  const asideSeenRef = useRef<Record<string, string>>({})
   // The legacy bridge picker (§9): offered on the ending page of a lineage world.
   const [legacyOpen, setLegacyOpen] = useState(false)
   const [back, setBack] = useState(false)
@@ -210,6 +234,10 @@ export function PlayPage({
     try {
       const next = await api.run(runId)
       setV(next)
+      // A later successful poll must clear an earlier transient failure — otherwise
+      // one dropped request during generation leaves the error page up for good,
+      // since the render checks `error` first. (M0.5)
+      setError(null)
       if (loadedRun.current !== runId) {
         loadedRun.current = runId
         const recap = next.recap
@@ -283,6 +311,39 @@ export function PlayPage({
   useEffect(() => {
     onScenes(v?.scenes ?? [])
   }, [v, onScenes])
+
+  // Drive the star map from the 星图 tab on a phone; the desktop control still owns
+  // it when no external tab is wired (openStar undefined).
+  useEffect(() => {
+    if (openStar !== undefined) setStarOpen(openStar)
+  }, [openStar])
+
+  // Let the bottom bar mark 书页 when a new month lands while reading elsewhere.
+  useEffect(() => {
+    if (v && v.turn) onLiveTurn?.(v.turn)
+  }, [v?.turn, onLiveTurn])
+
+  // Report panels upward so the phone bar can build region tabs from them.
+  useEffect(() => {
+    onPanels?.(v?.panels ?? [])
+  }, [v?.panels, onPanels])
+
+  // Same reason as the scenes above: the backdrop is mounted by the root, so this
+  // page reports which version the view is asking for rather than rendering it. It
+  // follows the SHOWN page: the live turn's backdrop on the newest page, or the
+  // backdrop that was effective on a past page (by `turn`) when the pager steps
+  // back — so re-reading an old page restores its scene, not the latest one.
+  useEffect(() => {
+    if (!v) { onBackdrop(null); return }
+    const latest = v.turn
+    const shown = viewTurn ?? latest
+    if (shown >= latest) {
+      onBackdrop(v.backdrop ?? null)
+    } else {
+      const past = chron.find((c) => c.turn === shown)?.backdrop
+      onBackdrop(past ? { version: past.version, turn: shown } : (v.backdrop ?? null))
+    }
+  }, [v, viewTurn, chron, onBackdrop])
 
   const take = async (payload: { turn?: number; action?: string }, what: string) => {
     setTapped(what)
@@ -548,6 +609,16 @@ export function PlayPage({
         </div>
       ) : null}
 
+      {(v.milestonesReached ?? []).length ? (
+        <div className="ew-milestone" role="status" aria-live="polite">
+          {(v.milestonesReached ?? []).map((m, i) => (
+            <div className="ew-milestone-row" key={`${m}-${i}`}>
+              {t('play.milestone', { label: m })}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {(v.digest ?? []).length ? (
         <div className="ew-digest">
           {(v.digest ?? []).map((dg, i) => (
@@ -597,7 +668,20 @@ export function PlayPage({
         </div>
       ) : null}
 
-      {stalled ? (
+      {/* Still being written: the pending record is fresh, so the narrator is
+          working — show the normal waiting indicator, never the retry. `takeTurn`
+          returns advanced:false the moment its wait deadline passes, but that is the
+          app's deadline, NOT proof the narrator stopped. */}
+      {generating ? (
+        <div className="ew-note ew-note-live" role="status" aria-live="polite">
+          <TurnProgress g={v.generating} label={phrase || t('play.generating')} />
+        </div>
+      ) : null}
+
+      {/* The retry is shown ONLY when the narrator has truly stopped — no fresh
+          pending record (`generating` is null). While it is still writing, the block
+          above shows instead, so a slow month never reads as a failed one. */}
+      {stalled && !generating ? (
         <div className="ew-note" role="status" aria-live="polite">
           {t('play.stalled')}
           {retry ? (
@@ -625,6 +709,8 @@ export function PlayPage({
                 <button
                   className={
                     'ew-choice'
+                    + (c.fateful || c.art ? ' ew-choice-fateful' : '')
+                    + (c.art ? ' ew-choice-arted' : '')
                     + (armed ? ' ew-choice-armed' : '')
                     + (sending ? ' ew-choice-waiting' : '')
                   }
@@ -636,6 +722,31 @@ export function PlayPage({
                   aria-busy={sending}
                   onClick={() => setArm(armed ? '' : target)}
                 >
+                  {/* The narrator's own pattern behind the label, as an INERT
+                      image (an SVG in an <img> runs no script and fetches nothing,
+                      so it needs no sandbox). A fateful choice uses its OWN `art`;
+                      an ordinary one falls back to the scene's shared `buttons`
+                      motif, versioned with the backdrop so it swaps when the
+                      backdrop does. Validated server-side. */}
+                  {c.art ? (
+                    <img
+                      className="ew-choice-art"
+                      src={`data:image/svg+xml;utf8,${encodeURIComponent(c.art)}`}
+                      alt=""
+                      aria-hidden="true"
+                      draggable={false}
+                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                    />
+                  ) : v.backdrop?.buttons ? (
+                    <img
+                      className="ew-choice-art ew-choice-art-common"
+                      src={`${API}/runs/${encodeURIComponent(runId)}/backdrop?part=buttons&v=${v.backdrop.version}`}
+                      alt=""
+                      aria-hidden="true"
+                      draggable={false}
+                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                    />
+                  ) : null}
                   <span className="ew-choice-label">{c.label}</span>
                   {sending ? <Waiting label={phrase} /> : null}
                 </button>
@@ -735,16 +846,6 @@ export function PlayPage({
           </div>
         ) : null}
 
-        {/* Coming back to a page whose narrator is still working: nothing local
-            remembers which option was taken, so the reassurance is turn-level.
-            The staged progress shows for the whole in-flight turn, including
-            while a tapped choice sweeps, so the wait always reads as progress. */}
-        {generating ? (
-          <div className="ew-note ew-note-live">
-            <TurnProgress g={v.generating} label={phrase || t('play.generating')} />
-          </div>
-        ) : null}
-
         {action.length > 400 ? (
           <div className="ew-count">{`${action.length} / 500`}</div>
         ) : null}
@@ -755,34 +856,18 @@ export function PlayPage({
           story covers re-reading this life. Kept in the ended view, which has no
           pager. */}
 
-      <button
-        className="ew-drawer"
-        type="button"
-        aria-expanded={drawer}
-        aria-controls="ew-panels-drawer"
-        onClick={() => setDrawer((d) => !d)}
-      >
-        {drawer ? t('play.drawerClose') : t('play.drawerOpen')}
-      </button>
-      {/* Its own class, not `.ew-drawer`: that class is hidden above 900px because
-          the PANELS move into the aside there, and the star map has no such desktop
-          twin — sharing the class left the desktop with no way into it at all. */}
-      {v.turn >= 1 ? (
+      {!narrow ? (
         <button
-          className="ew-starbtn"
+          className="ew-drawer"
           type="button"
-          onClick={() => {
-            // The overlay is absolute-anchored to the app box (not the viewport),
-            // so its head sits at the box top. The star button is at the bottom,
-            // so scroll the app to the top first or the modal opens off-screen.
-            document.querySelector('.ew-root')?.scrollIntoView({ block: 'start' })
-            setStarOpen(true)
-          }}
+          aria-expanded={drawer}
+          aria-controls="ew-panels-drawer"
+          onClick={() => setDrawer((d) => !d)}
         >
-          {mt(v.language, 'star.title')}
+          {drawer ? t('play.drawerClose') : t('play.drawerOpen')}
         </button>
       ) : null}
-      {drawer ? (
+      {drawer && !narrow ? (
         <div id="ew-panels-drawer" style={{ marginTop: '10px' }}>
           {(v.panels ?? []).length ? panels : (
             <div className="ew-note">{t('play.nothingToShow')}</div>
@@ -792,13 +877,53 @@ export function PlayPage({
     </div>
   )
 
+  // Desktop right-aside tabs: the world's system regions (panels grouped by
+  // region), plus an untagged bucket, plus a 星图 entry. On a phone the bottom bar
+  // owns all of this instead (this aside is not rendered when `narrow`).
+  const asideRegionTabs = buildTabs(v.scenes ?? [], v.panels ?? []).filter(
+    (tb) => tb.kind === 'region',
+  )
+  const asideUntagged = (v.panels ?? []).filter((p) => !(p.region ?? '').trim())
+  const asideStripTabs = [
+    ...asideRegionTabs,
+    ...(asideUntagged.length
+      ? [{ id: '__untagged', kind: 'region' as const, label: t('tab.system'), sceneIds: [] }]
+      : []),
+  ]
+  const activeAside = asideStripTabs.some((tb) => tb.id === asideTab)
+    ? asideTab
+    : (asideStripTabs[0]?.id ?? '')
+  const asidePanels = activeAside === '__untagged'
+    ? asideUntagged
+    : (v.panels ?? []).filter((p) => (p.region ?? '').trim() === activeAside)
+
+  // Dot a region tab whose panels changed while the reader was on another tab.
+  const asideSig = (regionId: string): string => {
+    const group = regionId === '__untagged'
+      ? asideUntagged
+      : (v.panels ?? []).filter((p) => (p.region ?? '').trim() === regionId)
+    return JSON.stringify(group.map((p) => [p.id, JSON.stringify(p.fields)]))
+  }
+  const asideDots: Record<string, boolean> = {}
+  for (const tb of asideStripTabs) {
+    const sig = asideSig(tb.id)
+    if (tb.id === activeAside) {
+      asideSeenRef.current[tb.id] = sig  // the open tab is always current
+      asideDots[tb.id] = false
+      continue
+    }
+    if (asideSeenRef.current[tb.id] === undefined) asideSeenRef.current[tb.id] = sig
+    asideDots[tb.id] = asideSeenRef.current[tb.id] !== sig
+  }
+
   return (
-    <div>
+    <div className="ew-play-root">
       {starOpen ? (
         <StarMap
           runId={runId}
           lang={v.language}
-          onClose={() => setStarOpen(false)}
+          backdrop={v.backdrop ?? null}
+          onClose={() => { setStarOpen(false); onStarClose?.() }}
           onJumpTurn={(turn) => {
             setStarOpen(false)
             setViewTurn(turn >= latest ? null : turn)
@@ -815,7 +940,38 @@ export function PlayPage({
       </div>
       <div className="ew-play">
         {main}
-        <div className="ew-aside">{panels}</div>
+        {!narrow ? (
+          <div className="ew-aside">
+            <div className="ew-aside-tabs">
+              {asideStripTabs.map((tb) => (
+                <button
+                  key={tb.id}
+                  type="button"
+                  className={'ew-aside-tab' + (tb.id === activeAside ? ' on' : '')}
+                  aria-pressed={tb.id === activeAside}
+                  onClick={() => setAsideTab(tb.id)}
+                >
+                  {tabIcon(tb.id === '__untagged' ? 'system' : tb.id)}
+                  <span>{tb.label}</span>
+                  {asideDots[tb.id] ? <i className="ew-aside-dot" /> : null}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="ew-aside-tab"
+                onClick={() => setStarOpen(true)}
+              >
+                {tabIcon('starmap')}
+                <span>{mt(v.language, 'star.title')}</span>
+              </button>
+            </div>
+            {asidePanels.length ? (
+              <>{asidePanels.map((p) => <PanelBox key={p.id} panel={p} />)}</>
+            ) : (
+              <div className="ew-note">{t('play.nothingToShow')}</div>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   )

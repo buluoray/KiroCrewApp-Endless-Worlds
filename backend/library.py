@@ -32,6 +32,7 @@ from world import (
     WorldPack,
     install_seed,
     read_world,
+    serialize_world,
     summarize,
 )
 
@@ -41,7 +42,7 @@ _WORLD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 #: A language tag, e.g. ``en``, ``zh``, ``pt-br``. A world id can never contain a
 #: dot, so a dotted file stem is unambiguously a language VARIANT of a base world:
-#: ``jianhuo-jiyuan.en.md`` is the English rendering of ``jianhuo-jiyuan``. Each
+#: ``age-of-sword-and-flame.en.md`` is the English rendering of ``age-of-sword-and-flame``. Each
 #: variant is a complete, ordinary pack (its own header + prose) whose ``id``
 #: equals the base id and whose ``language`` equals the tag — so the whole render
 #: and narrate pipeline is untouched; only which FILE a run reads changes.
@@ -49,7 +50,7 @@ _LANG_RE = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$")
 
 
 def _split_variant(stem: str) -> tuple[str, str] | None:
-    """``("jianhuo-jiyuan", "en")`` for a variant stem, ``None`` for a base world.
+    """``("age-of-sword-and-flame", "en")`` for a variant stem, ``None`` for a base world.
 
     The base id is everything before the last dot; the language tag is the part
     after it. Returns ``None`` unless BOTH halves validate, so a base world (no
@@ -142,6 +143,33 @@ class WorldLibrary:
 
     def seed_path_for(self, world_id: str) -> Path:
         return self._seeds / f"{self._check_id(world_id)}.md"
+
+    def install(self, world_text: str) -> str:
+        """Install a compiled world file onto the shelf, returning its id.
+
+        Used by the world-draft flow: the text is a full world file that already
+        passed ``accept_compiled_header``'s gate. It is re-validated here so the
+        shelf can never hold a file it cannot read, and refused on an id collision
+        so a paste can never silently overwrite an existing world. A matching
+        gravestone is cleared — installing a world whose id the player once deleted
+        is a deliberate un-delete.
+        """
+        try:
+            pack = read_world(world_text)
+        except (TemplateError, WorldError, ContractTooNew) as exc:
+            raise LibraryError(f"this world could not be read: {exc}") from exc
+        world_id = self._check_id(pack.template.id)
+        target = self.path_for(world_id)
+        if target.exists():
+            raise LibraryError(f"a world named {world_id!r} already exists")
+        self._worlds.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".md.tmp")
+        tmp.write_text(serialize_world(pack), encoding="utf-8")
+        os.replace(tmp, target)
+        gone = self.removed()
+        if world_id in gone:
+            self._write_removed(gone - {world_id})
+        return world_id
 
     # -- gravestones ------------------------------------------------------
 

@@ -1,17 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { LifeRowData, SceneRow, SeedReport, WorldDetail, WorldRow } from './api'
+import type {
+  LifeRowData, PanelView, SceneRow, SeedReport, WorldDetail, WorldRow, WorldDraftRow,
+} from './api'
 import { api } from './api'
 import { DeleteLifeDialog, DeleteWorldDialog } from './confirm'
+import {
+  CreateWorldCard, CreateWorldScreen, DRAFT_POLL_MS, WorldDraftCard, WorldDraftReview,
+} from './create-world'
 import { LifeRow, WorldCard, WorldDetailView } from './library'
 import { DRAFT_PREFIX, OpeningScreen } from './opening'
 import { PlayPage } from './play'
-import { WorldRail } from './rail'
+import { WorldRail, type ReadWidth } from './rail'
+import { Backdrop } from './backdrop'
 import { SceneSlot } from './scene'
 import { SettingsPanel } from './settings'
+import { WorldTabBar, buildTabs, useScrollHide } from './tabbar'
 import styles from './styles.css?raw'
 import { asLang, LanguageContext, setCurrentLanguage, t, type Lang } from './strings'
-import { Glyph } from './ui'
+import { Glyph, PanelBox } from './ui'
 
 /** Where the player was, so leaving the page does not throw them back to the
  *  shelf. Prefixed because this app mounts inside the dashboard's own document
@@ -22,12 +29,19 @@ const WHERE = 'endless-worlds:where'
  *  shared with the dashboard document like every other key this app keeps. */
 const LANG_KEY = 'endless-worlds:lang'
 
-type View = 'library' | 'detail' | 'opening' | 'live'
+/** The reader's standing choice of reading measure. A preference, not a per-world
+ *  fact, so it is kept here rather than asked of the backend. */
+const WIDTH_KEY = 'endless-worlds:width'
+const RAIL_KEY = 'endless-worlds:rail'
+
+type View = 'library' | 'detail' | 'opening' | 'live' | 'create' | 'draft'
 
 interface Where {
   view: View
   runId?: string
   worldId?: string
+  /** The world-draft being reviewed (view === 'draft'). */
+  draftId?: string
 }
 
 const remember = (where: Where) => {
@@ -58,8 +72,46 @@ export default function EndlessWorlds() {
   const [runs, setRuns] = useState<LifeRowData[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  /** World drafts being built from pasted text — shown as cards in the worlds
+   *  section, polled to completion, then reviewed and installed. */
+  const [drafts, setDrafts] = useState<WorldDraftRow[]>([])
+  /** The draft open in the review screen (view === 'draft'). */
+  const [reviewDraft, setReviewDraft] = useState<string | null>(null)
+
   const [view, setView] = useState<View>('library')
   const [showSettings, setShowSettings] = useState(false)
+  /** The shelf. Remembered across loads and OPEN by default so the landing shows
+   *  the lives in it; the reader can close it for more reading room (the story
+   *  then owns the full width) and reopen it, and the choice sticks. */
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) !== 'closed'
+    } catch {
+      return true
+    }
+  })
+  const toggleRail = useCallback(() => {
+    setRailOpen((o) => {
+      const next = !o
+      try {
+        localStorage.setItem(RAIL_KEY, next ? 'open' : 'closed')
+      } catch {
+        /* private mode: the choice still holds for this session */
+      }
+      return next
+    })
+  }, [])
+  const [readWidth, setReadWidth] = useState<ReadWidth>(
+    () => (localStorage.getItem(WIDTH_KEY) === 'fixed' ? 'fixed' : 'fluid'),
+  )
+  const chooseWidth = useCallback((next: ReadWidth) => {
+    try {
+      localStorage.setItem(WIDTH_KEY, next)
+    } catch {
+      /* private mode: the choice still holds for this session */
+    }
+    setReadWidth(next)
+  }, [])
   // The app mounts inside the dashboard's own scroll container, which keeps its
   // offset across our view swaps — so moving from the shelf into a tall opening
   // form would land the player at its BOTTOM. Bring our root back into view at the
@@ -72,6 +124,21 @@ export default function EndlessWorlds() {
   const [world, setWorld] = useState<WorldDetail | null>(null)
   const [live, setLive] = useState<string | null>(null)
   const [scenes, setScenes] = useState<SceneRow[]>([])
+  const [panels, setPanels] = useState<PanelView[]>([])
+  const [backdrop, setBackdrop] = useState<{ version: number; turn?: number } | null>(null)
+  // ── phone bottom tab bar ──────────────────────────────────────────────
+  // Narrow-viewport only; the desktop keeps the WorldRail. `tab` is the active
+  // surface within a life: 'reading', 'starmap', or a scene region id.
+  const [isNarrow, setIsNarrow] = useState(
+    () => (typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(max-width: 1100px)').matches
+      : false),
+  )
+  const [tab, setTab] = useState('reading')
+  const [liveTurn, setLiveTurn] = useState(0)
+  /** tabId → the content signature last seen, so a tab dots only on an UNSEEN
+   *  change. A ref (not state) because it is bookkeeping, not render input. */
+  const seenRef = useRef<Record<string, string>>({})
   const [refresh, setRefresh] = useState(0)
   /** Which world's deletion is being confirmed, or null. Held here rather than in
    *  the detail view because the reload that follows a deletion unmounts that
@@ -131,9 +198,26 @@ export default function EndlessWorlds() {
     } catch {
       setRuns([])
     }
+    // A failed draft list must not blank the shelf either.
+    try {
+      setDrafts((await api.worldDrafts()).drafts)
+    } catch {
+      setDrafts([])
+    }
   }, [lang])
 
   useEffect(() => { void load() }, [load])
+
+  // A world draft being compiled converges on the server; poll the shelf while any
+  // is in flight so a returning player watches it finish (main.tsx has no other
+  // interval — mirrors play.tsx's generating poll).
+  useEffect(() => {
+    if (!drafts.some((d) => d.status === 'generating' || d.status === 'new')) {
+      return undefined
+    }
+    const timer = window.setInterval(() => { void load() }, DRAFT_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [drafts, load])
 
   // Drafts outlive nothing they should: an opening left half-answered for a world
   // that has since been deleted is dead weight in shared localStorage, so it is
@@ -180,8 +264,43 @@ export default function EndlessWorlds() {
       api.world(where.worldId)
         .then((w) => { applyLanguage(w.language); setWorld(w); setView('opening') })
         .catch(() => { forget() })
+      return
+    }
+    // The paste screen has nothing to re-fetch — its text lives in its own draft.
+    if (where.view === 'create') {
+      setView('create')
+      return
+    }
+    // A draft under review is re-read; a draft since discarded clears the location.
+    if (where.view === 'draft' && where.draftId) {
+      const did = where.draftId
+      api.worldDraft(did)
+        .then(() => { setReviewDraft(did); setView('draft') })
+        .catch(() => { forget() })
     }
   }, [applyLanguage])
+
+  // ── browser history: system Back returns to the shelf, not out of the app ──
+  // main.tsx navigates by React state, so without this an Android Back / iOS edge
+  // swipe exits the dashboard page instead of stepping back a layer (M0.3).
+  const prevViewRef = useRef<View>('library')
+  const homeRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    const prev = prevViewRef.current
+    prevViewRef.current = view
+    // Entering a sub-view from the shelf pushes ONE entry, so Back pops to the
+    // shelf. Deeper hops (detail→opening→live) don't stack more — Back from any
+    // depth returns home, which is the predictable phone behaviour and avoids a
+    // fragile per-hop stack the in-app buttons would fall out of sync with.
+    if (prev === 'library' && view !== 'library') {
+      try { window.history.pushState({ ew: 'subview' }, '') } catch { /* no-op */ }
+    }
+  }, [view])
+  useEffect(() => {
+    const onPop = () => { homeRef.current() }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   const home = () => {
     forget()
@@ -190,11 +309,44 @@ export default function EndlessWorlds() {
     setWorld(null)
     setLive(null)
     setScenes([])
+    setReviewDraft(null)
     void load()
+  }
+  // Keep the popstate listener calling the LATEST home closure without re-binding.
+  homeRef.current = home
+
+  // ── creating a world from pasted text ──────────────────────────────────
+  const startCreate = () => {
+    remember({ view: 'create' })
+    setView('create')
+  }
+  const openDraft = (draftId: string) => {
+    remember({ view: 'draft', draftId })
+    setReviewDraft(draftId)
+    setView('draft')
+  }
+  /** After submitting the paste, go straight to the review screen — it shows the
+   *  worldsmith's progress and then the result; leaving it drops back to the shelf
+   *  where the draft card keeps polling. */
+  const draftCreated = (draftId: string) => {
+    void load()
+    openDraft(draftId)
+  }
+  const backToShelf = () => {
+    remember({ view: 'library' })
+    setView('library')
+    setReviewDraft(null)
+    void load()
+  }
+  const draftInstalled = () => { home() }
+  const discardDraftInline = (draftId: string) => {
+    void api.discardWorldDraft(draftId).then(() => void load()).catch(() => void load())
   }
 
   const enterLife = (runId: string) => {
     remember({ view: 'live', runId })
+    // Picking is the drawer's whole job: it closes on the choice rather than
+    // waiting to be dismissed off the page it just navigated away from.
     setLive(runId)
     setView('live')
   }
@@ -319,11 +471,75 @@ export default function EndlessWorlds() {
   )
   const [showArchived, setShowArchived] = useState(false)
 
+  // ── bottom tab bar: track viewport, reset per life, build tabs & dots ──
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const mq = window.matchMedia('(max-width: 1100px)')
+    const on = () => setIsNarrow(mq.matches)
+    on()
+    mq.addEventListener?.('change', on)
+    return () => mq.removeEventListener?.('change', on)
+  }, [])
+  // A new life always opens on its story, never on a stale system tab.
+  useEffect(() => { setTab('reading') }, [live])
+
+  const tabs = useMemo(() => buildTabs(scenes, panels), [scenes, panels])
+  const narrowLive = isNarrow && view === 'live' && !!live
+  const barHidden = useScrollHide(narrowLive)
+
+  // A dismissed region must not leave the bar pointing at a tab that is gone.
+  useEffect(() => {
+    if (narrowLive && !tabs.some((tb) => tb.id === tab)) setTab('reading')
+  }, [tabs, tab, narrowLive])
+
+  const sigOf = useCallback((id: string, sceneIds: string[]): string => {
+    if (id === 'reading') return `r${liveTurn}`
+    if (id === 'starmap') return 's'  // the star map never dots
+    const sc = sceneIds.map((sid) => {
+      const s = scenes.find((x) => x.sceneId === sid)
+      return [sid, s?.asks ?? false, s?.answered ?? false]
+    })
+    const pn = panels
+      .filter((p) => (p.region ?? '') === id)
+      .map((p) => [p.id, JSON.stringify(p.fields)])
+    return JSON.stringify([sc, pn])
+  }, [scenes, panels, liveTurn])
+
+  // Compute dots each render; first sight of a tab records its signature so it
+  // does not dot on load, only on a later unseen change.
+  const dots: Record<string, boolean> = {}
+  for (const tb of tabs) {
+    const sig = sigOf(tb.id, tb.sceneIds)
+    if (seenRef.current[tb.id] === undefined) seenRef.current[tb.id] = sig
+    dots[tb.id] = tb.id !== tab && tb.id !== 'starmap' && seenRef.current[tb.id] !== sig
+  }
+  // Visiting a tab (or its content changing while it is open) clears its dot.
+  useEffect(() => {
+    const tb = tabs.find((x) => x.id === tab)
+    if (tb) seenRef.current[tab] = sigOf(tab, tb.sceneIds)
+  }, [tab, tabs, sigOf])
+
+  const activeSceneIds = tabs.find((tb) => tb.id === tab)?.sceneIds ?? []
+  // On a phone a system region hides the story column and shows its frames; the
+  // desktop shows everything and never hides the body.
+  const hideBody = narrowLive && tab !== 'reading' && tab !== 'starmap'
+
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} />
+    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onBackdrop={setBackdrop} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} openStar={narrowLive ? tab === 'starmap' : undefined} onStarClose={() => setTab('reading')} onLiveTurn={setLiveTurn} narrow={narrowLive} onPanels={setPanels} />
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
+  } else if (view === 'create') {
+    body = <CreateWorldScreen onCancel={backToShelf} onCreated={draftCreated} />
+  } else if (view === 'draft' && reviewDraft) {
+    body = (
+      <WorldDraftReview
+        draftId={reviewDraft}
+        onInstalled={draftInstalled}
+        onDiscarded={backToShelf}
+        onBack={backToShelf}
+      />
+    )
   } else if (selected) {
     body = (
       <WorldDetailView
@@ -379,7 +595,7 @@ export default function EndlessWorlds() {
     body = (
       <>
         {newest ? (
-          <div className="ew-onlywide">
+          <div className="ew-onlywide ew-cont-wrap">
             <div className="ew-section">{t('shelf.continue')}</div>
             <LifeRow run={newest} onOpen={enterLife} />
           </div>
@@ -387,7 +603,7 @@ export default function EndlessWorlds() {
           <div className="ew-onlywide ew-meta">{t('shelf.pick')}</div>
         )}
 
-        <div className="ew-shelflist">
+        <div className="ew-shelflist ew-shelf-lives">
           {active.length ? (
             <>
               <div className="ew-section">{t('library.lives')}</div>
@@ -420,12 +636,25 @@ export default function EndlessWorlds() {
                 : null}
             </>
           ) : null}
+        </div>
 
+        <div className="ew-shelflist ew-shelf-worlds">
           {runs.length ? (
-            <div className="ew-section" style={{ marginTop: '22px' }}>
+            <div className="ew-section">
               {t('library.otherWorlds')}
             </div>
           ) : null}
+
+          {/* The way in to a player-made world — always present, above the shelf. */}
+          <CreateWorldCard onClick={startCreate} />
+          {drafts.map((d) => (
+            <WorldDraftCard
+              key={d.draftId}
+              draft={d}
+              onOpen={openDraft}
+              onDiscard={discardDraftInline}
+            />
+          ))}
 
           {worlds.length === 0 ? (
             <div className="ew-meta">{t('library.empty')}</div>
@@ -466,11 +695,22 @@ export default function EndlessWorlds() {
 
   return (
     <LanguageContext.Provider value={applyLanguage}>
-    <div className="ew-root" lang={lang} ref={rootRef}>
+    <div
+      className={'ew-root ew-w-' + readWidth + (view === 'library' ? ' ew-home' : '')}
+      lang={lang}
+      ref={rootRef}
+    >
       {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
           instead of outliving it in the page's stylesheet list. */}
       <style>{styles}</style>
+
+      {/* Full-app backdrop: rendered at the root (not inside the play column) so on
+          desktop it spans the rail AND the play area for immersion, and on a phone
+          it fills the screen. Only on a live view — the shelf stays plain. */}
+      {view === 'live' && live && backdrop ? (
+        <Backdrop runId={live} version={backdrop.version} turn={backdrop.turn} />
+      ) : null}
 
       <div className="ew-head">
         <Glyph />
@@ -498,6 +738,10 @@ export default function EndlessWorlds() {
         ) : null}
       </div>
 
+      {view === 'library' ? (
+        <div className="ew-tagline">{t('app.tagline')}</div>
+      ) : null}
+
       {view === 'library' && showSettings ? (
         <SettingsPanel onClose={() => setShowSettings(false)} />
       ) : null}
@@ -511,10 +755,11 @@ export default function EndlessWorlds() {
         </div>
       ) : null}
 
-      {/* Two axes, not one. The rail renders nothing below 1100px, so a phone gets
-          exactly the layout it had; a desktop gets navigation that does not have to
-          replace what is being read. */}
-      <div className="ew-shell">
+      {/* One axis, plus a drawer that pushes rather than covers. The rail renders
+          nothing below 1100px and nothing at all while closed, so a phone gets
+          exactly the layout it had and a desktop gets the whole width for the story
+          until it asks for the shelf. */}
+      <div className={'ew-shell' + (railOpen ? ' ew-shell-open' : '')}>
         <WorldRail
           worlds={worlds}
           runs={runs}
@@ -524,8 +769,43 @@ export default function EndlessWorlds() {
           onLife={enterLife}
           onHome={home}
           atShelf={view === 'library'}
+          open={railOpen}
+          onClose={toggleRail}
+          width={readWidth}
+          onWidth={chooseWidth}
         />
-        <div className="ew-main">{body}</div>
+        <div className="ew-main">
+          {/* The desktop's shelf opener, in the same top-left slot the phone puts
+              its "back to the shelf" in — that button is hidden at this width, so
+              the corner carries one control at every size, not two. */}
+          <button
+            className="ew-shelfbtn"
+            type="button"
+            aria-expanded={railOpen}
+            onClick={toggleRail}
+          >
+            {t('rail.open')}
+          </button>
+          <div
+            className="ew-bodywrap"
+            style={{
+              display: hideBody ? 'none' : undefined,
+              paddingBottom: narrowLive ? '72px' : undefined,
+            }}
+          >
+            {body}
+          </div>
+          {/* A system region tab (phone): the story column is hidden and this
+              region's panels stand alone. Its mounted scenes render below, outside
+              the shell, filtered to the same region. */}
+          {hideBody ? (
+            <div className="ew-region-pane" style={{ paddingBottom: '72px' }}>
+              {panels.filter((p) => (p.region ?? '') === tab).map((p) => (
+                <PanelBox key={p.id} panel={p} />
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* Outside `body` on purpose, and one frame per mounted scene: each is
@@ -533,7 +813,14 @@ export default function EndlessWorlds() {
           iframe reloads it. The order is the mount order and never re-sorted, so an
           asking scene becoming answered does not shuffle a frame and reload it. */}
       {live ? scenes.map((s) => (
-        <SceneSlot key={s.sceneId} runId={live} sceneId={s.sceneId} onChoice={onSceneChoice} />
+        <SceneSlot
+          key={s.sceneId}
+          runId={live}
+          sceneId={s.sceneId}
+          asks={s.asks}
+          visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
+          onChoice={onSceneChoice}
+        />
       )) : null}
       {doomed ? (
         <DeleteWorldDialog
@@ -548,6 +835,19 @@ export default function EndlessWorlds() {
           runId={doomedLife}
           onCancel={() => setDoomedLife(null)}
           onDeleted={afterLifeDelete}
+        />
+      ) : null}
+
+      {/* The phone's bottom navigator — sticky at the foot of the app's own scroll
+          container (never fixed, which would escape the panel in the dashboard).
+          Desktop keeps the WorldRail and never shows this. */}
+      {narrowLive ? (
+        <WorldTabBar
+          tabs={tabs}
+          active={tab}
+          dots={dots}
+          hidden={barHidden}
+          onSelect={setTab}
         />
       ) : null}
     </div>

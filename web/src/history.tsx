@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { PastTurn } from './api'
-import { api } from './api'
+import { api, API } from './api'
 import { t } from './strings'
 import { Prose } from './ui'
 
@@ -134,6 +134,16 @@ export function History({ runId }: { runId: string }) {
 
       {rows.map((p) => (
         <div className="ew-past" key={p.turn}>
+          {p.backdrop && !eventsOnly ? (
+            <img
+              className="ew-past-bg"
+              src={`${API}/runs/${encodeURIComponent(runId)}/backdrop?turn=${p.turn}&v=${p.backdrop.version}`}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              onError={(e) => { e.currentTarget.style.display = 'none' }}
+            />
+          ) : null}
           <div className="ew-past-head">
             <span className="ew-past-turn">{t('play.turn', { turn: p.turn })}</span>
             {/* The fork, not only the outcome. A month re-read without the choice

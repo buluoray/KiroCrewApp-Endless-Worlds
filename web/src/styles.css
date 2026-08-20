@@ -15,58 +15,112 @@
   .ew-root { max-width: 900px; margin: 0 auto; --ew-gutter: 24px; }
 }
 
-/* ── the desktop rail ──────────────────────────────────────────────────────
-   Above this width the page splits into a navigation axis and a reading axis.
-   Below it the rail is not rendered at all and the shelf behaves exactly as it
-   always has — the narrow layout is the baseline, not a compromise being undone.
+/* ── the desktop shelf drawer ──────────────────────────────────────────────
+   Above this width the shelf is reachable from every page without occupying one.
+   Below it neither the drawer nor its opener is rendered and the shelf behaves
+   exactly as it always has — the narrow layout is the baseline, not a compromise
+   being undone.
 
-   1100px, not 768: a rail plus a readable measure needs ~1060px, and squeezing
-   both into a tablet gives a cramped rail AND cramped prose. Between 768 and
-   1100 the centred column is still the best use of the space. */
+   1100px, not 768: below it the centred column is already the best use of the
+   space, and a drawer that leaves a readable measure needs the room.
+
+   It opens IN FLOW and pushes the story right. NOT `position: fixed`: this app is
+   mounted inside the dashboard's own content region, which is offset right by the
+   dashboard's sidebar, so a panel pinned to `left: 0` of the VIEWPORT is painted
+   outside the area the app is visible in — it renders and the reader cannot see it.
+   A grid column has no such problem because it is positioned by the app's own box. */
 .ew-rail { display: none; }
+.ew-rail-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+}
+.ew-rail-x {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--muted, #6b7280); font: inherit; font-size: 13px;
+  min-height: 36px; padding: 0 2px;
+}
+.ew-rail-width { width: 100%; }
+/* The opener. Hidden at phone widths, where the inline "back to the shelf" is the
+   corner's one control; sized like that button so the corner does not shift as the
+   window crosses the breakpoint. */
+.ew-shelfbtn {
+  display: none;
+  align-items: center; min-height: 44px; padding: 0 12px 0 0;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--accent, #7c3aed); font: inherit; font-size: 14px;
+}
 
 @media (min-width: 1100px) {
-  /* The cap moves off .ew-root and onto the reading column, so the rail can sit
-     outside the measure instead of eating into it. */
-  .ew-root { max-width: 1320px; }
+  /* Fill the whole available space for immersion: the app spans the dashboard's
+     content region edge to edge, so the backdrop reaches the edges instead of
+     leaving black gutters beside a centred 1320px column. The reading measure is
+     NOT lifted here — it lives on `.ew-main` (74ch) below, so prose stays readable
+     while the background fills the room around it. This is the same full-width the
+     `.ew-w-fluid` reader preference already uses. */
+  .ew-root { max-width: none; }
 
-  /* One way back, not two. The rail's own "back to the shelf" is permanent and
-     always in the same place, so the view's inline back button is a second control
-     doing the same thing. Scoped to `.ew-root .ew-back` (0,2,0) on purpose: the
-     base `.ew-back` rule is declared LATER in this file, so an equal-specificity
+  /* One way back, not two. The drawer's own "back to the shelf" is the desktop's
+     route home, so the view's inline back button is a second control doing the same
+     thing. Scoped to `.ew-root .ew-back` (0,2,0) on purpose: the base `.ew-back`
+     rule is declared LATER in this file, so an equal-specificity
      `.ew-back { display: none }` here would lose the cascade and the button would
-     stay visible — which is exactly the "two back buttons" bug this had. The
-     inline one is the mobile affordance and stays the only one below this width. */
+     stay visible — which is exactly the "two back buttons" bug this had. The inline
+     one is the mobile affordance and stays the only one below this width. */
   .ew-root .ew-back { display: none; }
 
-  /* The shelf, once. The rail already lists every life and every world, so the
-     same list in the reading column was the same information twice, side by side.
-     Hidden here rather than removed from the component, because whether the rail
-     exists is a width question and so is this. */
-  .ew-shelflist { display: none; }
+  /* The lives, once. The rail lists every life by name, so repeating the life
+     rows in the reading column is the same information twice — hide them when the
+     rail is open. The WORLD covers stay: a name in the rail is not the cover tile,
+     and the landing's job is to invite you into a world, not just link to it. */
+  .ew-shell-open .ew-shelf-lives { display: none; }
 
-  .ew-shell {
+  /* Closed: one column, the story owns the width. Open: two, the story moves right
+     by exactly the drawer's own width and nothing is covered. */
+  .ew-shell-open {
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr);
     gap: 32px;
     align-items: start;
   }
-
-  .ew-rail {
+  .ew-shell-open .ew-rail {
     display: block;
     position: sticky;
-    /* Sticks under the app's own header rather than the viewport top, so the
-       title does not scroll away from the rail it labels. */
+    /* Sticks under the app's own header rather than the viewport top, so the title
+       does not scroll away from the shelf it labels. */
     top: var(--ew-gutter);
     /* Its own scroll: a shelf with thirty lives must not push the story down. */
     max-height: calc(100vh - 120px);
     overflow-y: auto;
     padding-right: 4px;
   }
+  /* The opener is only for OPENING: when the shelf is already open the rail's own
+     close is the single closer, so hiding the opener removes the "two buttons that
+     both close" confusion. */
+  .ew-shelfbtn { display: inline-flex; }
+  .ew-shell-open .ew-shelfbtn { display: none; }
 
   /* The measure. Prose is the reason this number exists — a life is read, not
-     scanned — so it is set in ch and does not grow with the window. */
+     scanned — so it is set in ch and does not grow with the window. It is the
+     DEFAULT, not the law: `.ew-w-fluid` below is the reader's own explicit
+     override and the only thing that lifts it. */
   .ew-main { max-width: 74ch; }
+  /* Closed shell has no rail column, so the reading measure would otherwise pin to
+     the LEFT of the full-width app and look cramped with empty backdrop filling the
+     right. Centre it so the closed reading view is balanced. The open shell is a
+     grid that positions the column itself, so this is scoped to the closed state. */
+  .ew-shell:not(.ew-shell-open) .ew-main { margin-inline: auto; }
+}
+
+/* ── the reading measure, as the reader set it ─────────────────────────────
+   `fixed` is the cap above. `fluid` gives the story the window, and is a stored
+   preference rather than a width the layout guessed at: the guard is against the
+   measure growing on its own, not against being told to. On the play page the
+   status aside keeps its 300px either way, so fluid widens the prose, not the
+   panels. Declared after the desktop block and one class more specific, so it wins
+   on specificity rather than on source order. */
+.ew-root.ew-w-fluid { max-width: none; }
+@media (min-width: 1100px) {
+  .ew-root.ew-w-fluid .ew-main { max-width: none; }
 }
 
 .ew-rail-home {
@@ -75,6 +129,9 @@
   background: transparent; border: none; cursor: pointer;
   color: var(--accent, #7c3aed); font: inherit; font-size: 13px;
 }
+/* In the drawer's top row it shares the line with the close control, so it gives up
+   the full-width block box it needs when it is the only thing there. */
+.ew-rail-top .ew-rail-home { width: auto; margin-bottom: 0; }
 
 .ew-rail-group { margin-bottom: 18px; }
 .ew-rail-head {
@@ -92,7 +149,7 @@
   padding: 7px 8px; margin-bottom: 1px;
   color: inherit; font: inherit;
 }
-.ew-rail-row:hover { background: var(--card, #1f2030); }
+@media (hover: hover) { .ew-rail-row:hover { background: var(--card, #1f2030); } }
 .ew-rail-row:disabled { cursor: default; opacity: 0.45; }
 .ew-rail-row-on {
   border-left-color: var(--accent, #7c3aed);
@@ -115,7 +172,14 @@
 
 /* ── reading back ── */
 .ew-history { margin-top: 14px; }
-.ew-past { padding-bottom: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--border, #2d2f3d); }
+.ew-past { position: relative; overflow: hidden; padding: 6px 10px; margin-bottom: 18px; border-bottom: 1px solid var(--border, #2d2f3d); border-radius: 8px; }
+/* Each re-read page keeps the scene it had: its backdrop sits faint behind the
+   prose, and the content is lifted above it so it stays readable. */
+.ew-past-bg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; opacity: .16; pointer-events: none; z-index: 0;
+}
+.ew-past-head, .ew-past .ew-prose, .ew-past .ew-marks { position: relative; z-index: 1; }
 .ew-past-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .ew-past-turn { font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; }
 .ew-past-action { font-size: 12px; color: var(--accent, #7c3aed); overflow-wrap: anywhere; }
@@ -163,7 +227,27 @@
   padding: 12px; margin-bottom: 10px;
   color: inherit; font: inherit;
   -webkit-tap-highlight-color: transparent;
+  /* Scope the life backdrop to the card and clip it to the rounded corners. */
+  position: relative; overflow: hidden;
 }
+/* The life's narrator backdrop behind the card, framed to the card (unlike the
+ * full-page .ew-backdrop). A scrim over it keeps the title/meta readable; inert
+ * image so it runs no script and needs no sandbox. */
+.ew-card-bg {
+  position: absolute; inset: 0; z-index: 0;
+  width: 100%; height: 100%; object-fit: cover;
+  opacity: .5; pointer-events: none;
+}
+.ew-card-bg-scrim {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card, #1f2030) 45%, transparent),
+    color-mix(in srgb, var(--card, #1f2030) 72%, transparent)
+  );
+}
+/* Lift the card's real content above the backdrop + scrim. */
+.ew-card > .ew-card-bg ~ *:not(.ew-card-bg-scrim) { position: relative; z-index: 1; }
 @media (min-width: 768px) { .ew-card { padding: 14px; } }
 .ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-card-broken { cursor: default; border-left: 3px solid var(--danger, #b91c1c); }
@@ -180,7 +264,10 @@
   border-radius: 9999px; padding: 2px 9px; font-size: 11px;
   border: 1px solid var(--border, #2d2f3d);
   color: var(--muted, #6b7280);
-  white-space: nowrap;
+  /* A chip's text can come from the world or the narrator, so it is not safe to
+     assume it is short. Wrap/break a long one instead of letting `nowrap` force a
+     page-wide horizontal scroll on a phone. */
+  white-space: normal; overflow-wrap: anywhere; max-width: 100%;
 }
 .ew-chip-accent {
   border-color: transparent;
@@ -223,6 +310,156 @@
   flex: none; font-size: 12px; font-weight: 600;
   color: var(--accent, #7c3aed);
 }
+
+/* ── the landing: a living bookshelf ─────────────────────────────────────
+   The play page became rich (full backdrop, translucent cards); the shelf was a
+   flat list by comparison. These give the landing its own ambient night sky, a
+   tagline, a prominent "continue" hero, life rows with a gilt spine, and worlds
+   as book covers — so the shelf reads as part of the same world. */
+/* The ambient fills the whole screen, not the content box. It was painted on
+   `.ew-root`, which is width-capped and only as tall as its content, so on desktop
+   the night sky covered a centred column and left the rest black. A fixed
+   full-viewport layer behind the content (z-index 0; content is z-index 1) fills
+   the screen at any column width or content height. */
+.ew-home::before {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(circle at 8px 8px, rgba(230, 217, 168, .16) 1px, transparent 1.7px) 0 0 / 48px 48px,
+    radial-gradient(55% 40% at 50% 4%, color-mix(in srgb, var(--accent, #d9b45a) 12%, transparent), transparent 62%),
+    radial-gradient(130% 95% at 50% 0%, #1b1832 0%, #131120 48%, #0a0912 100%);
+}
+.ew-tagline {
+  color: var(--muted, #9c96a8); font-size: 13px; line-height: 1.6; margin: 4px 2px 18px;
+}
+
+/* Continue: the most recent life, made a gold hero rather than one row among many.
+   Styles the LifeRow card inside the wrapper, so LifeRow itself stays generic. */
+.ew-cont-wrap .ew-card {
+  border-color: color-mix(in oklab, var(--accent, #d9b45a) 36%, var(--border, #2d2f3d));
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--accent, #d9b45a) 16%, transparent),
+      color-mix(in srgb, var(--accent, #d9b45a) 4%, transparent)),
+    var(--card, #1f2030);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .28);
+}
+
+/* Life rows read as books on a shelf: a thin gilt spine down the left edge. */
+.ew-card-row {
+  box-shadow: inset 3px 0 0 color-mix(in oklab, var(--accent, #d9b45a) 55%, transparent);
+}
+
+/* World card = a book cover: a decorative band carries the title; the body holds
+   the promise, style chips, and the play-count + enter. */
+.ew-world-card { padding: 0; }
+.ew-world-band {
+  display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px;
+  min-height: 96px; padding: 14px 16px;
+  background:
+    repeating-linear-gradient(135deg,
+      color-mix(in srgb, var(--accent, #d9b45a) 9%, transparent) 0 2px, transparent 2px 12px),
+    radial-gradient(120% 160% at 18% 0%, #3a2d63, #1a1430);
+  border-bottom: 1px solid var(--border, #2d2f3d);
+}
+.ew-world-band-title {
+  font-size: 19px; font-weight: 700; color: #f1ecdf; text-shadow: 0 2px 8px rgba(0, 0, 0, .5);
+}
+.ew-world-body { padding: 14px 16px; }
+/* The possibilities become style chips (was an accent-bordered bullet list). */
+.ew-world-possibilities {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: 12px 0 0; padding: 0; border: 0; background: none;
+}
+.ew-world-possibility {
+  position: static; padding: 3px 9px; font-size: 11px; color: var(--muted, #9c96a8);
+  border: 1px solid var(--border, #2d2f3d); border-radius: 999px;
+  background: color-mix(in srgb, var(--card, #1f2030) 50%, transparent);
+}
+.ew-world-possibility::before { content: none; }
+
+/* ── creating a world from pasted text ─────────────────────────────────────
+   The entry sits atop the worlds shelf; a draft being compiled reads as a book
+   being written (the same gilt spine as a life); the paste and review screens are
+   transient forms, like the opening. */
+.ew-card-create {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent, #d9b45a) 45%, var(--border, #2d2f3d));
+  background: linear-gradient(
+    180deg, color-mix(in srgb, var(--accent, #d9b45a) 6%, transparent), transparent
+  );
+  text-align: left; -webkit-tap-highlight-color: transparent;
+}
+.ew-create-plus {
+  width: 38px; height: 38px; flex: none; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1; color: var(--accent, #d9b45a);
+  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 55%, var(--border, #2d2f3d));
+}
+.ew-create-text { display: flex; flex-direction: column; gap: 2px; }
+.ew-create-title { font-size: 15px; font-weight: 600; color: var(--text, #e2e8f0); }
+.ew-create-sub { font-size: 12.5px; color: var(--muted, #9c96a8); }
+
+.ew-card-draft {
+  box-shadow: inset 3px 0 0 color-mix(in oklab, var(--accent, #d9b45a) 55%, transparent);
+}
+.ew-card-draft-ready { box-shadow: inset 3px 0 0 var(--accent, #d9b45a); }
+.ew-card-draft-failed { box-shadow: inset 3px 0 0 color-mix(in oklab, #d9534f 60%, transparent); }
+
+.ew-progress { margin-top: 10px; }
+.ew-progress-track {
+  height: 5px; border-radius: 3px; overflow: hidden;
+  background: color-mix(in srgb, var(--border, #2d2f3d) 80%, transparent);
+}
+.ew-progress-fill {
+  height: 100%; border-radius: 3px; transition: width .4s ease;
+  background: linear-gradient(
+    90deg, var(--accent, #d9b45a), color-mix(in srgb, var(--accent, #d9b45a) 55%, #000)
+  );
+}
+
+.ew-create { max-width: 720px; }
+.ew-create-ta {
+  width: 100%; min-height: 320px; resize: vertical; box-sizing: border-box;
+  background: color-mix(in srgb, var(--card, #1f2030) 85%, #000);
+  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;
+  color: var(--text, #e2e8f0); font: inherit; font-size: 14px; line-height: 1.7;
+  padding: 14px; -webkit-tap-highlight-color: transparent;
+}
+.ew-create-hint {
+  font-size: 12.5px; color: var(--muted, #9c96a8); line-height: 1.6; margin: 8px 2px 0;
+}
+.ew-create-count { margin-left: auto; align-self: center; font-size: 12px; color: var(--muted, #9c96a8); }
+.ew-create-titlelabel { display: block; font-size: 12px; color: var(--muted, #9c96a8); margin: 2px 0 6px; }
+.ew-title-edit {
+  width: 100%; box-sizing: border-box;
+  background: color-mix(in srgb, var(--card, #1f2030) 85%, #000);
+  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 40%, var(--border, #2d2f3d));
+  border-radius: 8px; color: #f1ecdf; font-size: 17px; font-weight: 700; padding: 9px 11px;
+}
+.ew-review { margin-top: 14px; }
+.ew-kv {
+  display: flex; gap: 10px; font-size: 13.5px; padding: 8px 0; line-height: 1.6;
+  border-bottom: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 60%, transparent);
+}
+.ew-kv:last-child { border-bottom: 0; }
+.ew-kv .ew-k { color: var(--muted, #9c96a8); width: 56px; flex: none; }
+.ew-review-warn {
+  margin-top: 14px; padding: 10px 12px; border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #d9b45a) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 28%, var(--border, #2d2f3d));
+}
+.ew-review-warn-h {
+  font-size: 12px; font-weight: 600; margin-bottom: 6px;
+  color: color-mix(in srgb, var(--accent, #d9b45a) 80%, var(--text, #e2e8f0));
+}
+.ew-draft-jump {
+  display: block; width: 100%; margin-top: 14px; padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 40%, var(--border, #2d2f3d));
+  border-radius: 9px; background: color-mix(in srgb, var(--accent, #d9b45a) 5%, transparent);
+  color: var(--accent, #d9b45a); font: inherit; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.ew-review-accept { flex: 1; }
 
 /* 44px is the smallest reliably tappable target; a 13px text link with 4px of
    padding is about 21px, which is a miss on a phone even when it looks fine on a
@@ -272,12 +509,14 @@
    player in this app. Scoped to .ew-root, the worst case is an app they can
    still navigate away from. */
 .ew-modal-wrap {
-  position: absolute; inset: 0; z-index: 40;
+  position: fixed; inset: 0; z-index: 40;
   display: flex; align-items: flex-start; justify-content: center;
   padding: 24px var(--ew-gutter, 8px);
   background: color-mix(in oklab, var(--bg, #1a1b26) 72%, transparent);
-  /* The app's box can be taller than the viewport; keeping the panel near the top
-     of it means a scrolled page still shows the panel rather than empty scrim. */
+  /* Fixed to the viewport, not sized to the app box: on a scrolled phone an
+     absolute wrap put the panel at the top of a tall page — off-screen and unseen
+     while its scrim still dimmed the view. Fixed keeps the panel in view and its
+     scrim catches every click regardless of scroll. */
   overflow-y: auto;
 }
 .ew-modal {
@@ -349,7 +588,9 @@
    app can be followed. :focus-visible keeps it off pointer clicks. */
 .ew-btn:focus-visible, .ew-opt:focus-visible, .ew-choice:focus-visible,
 .ew-drawer:focus-visible, .ew-card-open:focus-visible, .ew-slot-btn:focus-visible,
+.ew-starbtn:focus-visible,
 .ew-rail-row:focus-visible, .ew-rail-home:focus-visible, .ew-back:focus-visible,
+.ew-shelfbtn:focus-visible, .ew-rail-x:focus-visible,
 .ew-section-toggle:focus-visible {
   outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px;
 }
@@ -408,7 +649,7 @@
   font: inherit; font-size: 13px; font-style: italic; text-align: start;
   color: var(--accent, #7c3aed);
 }
-.ew-echo-line:hover { text-decoration: underline; }
+@media (hover: hover) { .ew-echo-line:hover { text-decoration: underline; } }
 .ew-echo-body {
   margin-top: 6px; display: flex; flex-direction: column; gap: 6px;
   font-size: 13px; line-height: 1.6; color: var(--fg, #e5e7eb);
@@ -429,13 +670,30 @@
   margin-top: 2px; font-size: 12px; line-height: 1.6;
   color: var(--muted, #6b7280);
 }
+/* A milestone reached this month — a small gilt banner, warmer than the chapter
+   marker so an achievement reads as a reward, not just a progress note. */
+.ew-milestone { margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; }
+.ew-milestone-row {
+  font-size: 13px; font-weight: 600;
+  color: color-mix(in oklab, var(--accent, #d9b45a) 82%, var(--text, #e2e8f0));
+  padding: 8px 12px; border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #d9b45a) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 34%, var(--border, #2d2f3d));
+}
 
 /* Small ceremonies around the prose: one reveals what the world settled at birth;
    the other restores a returning player's place without generating a new summary. */
 .ew-story-moment {
-  margin: 0 0 16px; padding: 12px 14px; border-radius: 10px;
+  margin: 16px 0; padding: 12px 14px; border-radius: 10px;
   border: 1px solid color-mix(in oklab, var(--accent, #7c3aed) 32%, var(--border, #2d2f3d));
-  background: color-mix(in oklab, var(--accent, #7c3aed) 7%, var(--card, #1f2030));
+  /* Translucent so the story's backdrop shows through, rather than an opaque card
+     sitting on top of it. A faint accent tint over transparency keeps it reading as
+     a card; the accent border still defines its edge. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent, #7c3aed) 15%, transparent),
+    color-mix(in srgb, var(--accent, #7c3aed) 5%, transparent)
+  );
 }
 .ew-story-moment-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -456,13 +714,16 @@
 .ew-reveal-label, .ew-recap-label { color: var(--muted, #6b7280); }
 .ew-reveal-value { text-align: end; font-weight: 600; }
 .ew-story-moment-hint { margin-top: 6px; font-size: 11px; color: var(--muted, #6b7280); }
+/* On the now-translucent story-moment cards, the cold --muted grey is hard to read
+   over the backdrop. Warm it toward the accent and lighten it — the mock's scheme —
+   scoped to these cards so ordinary muted text elsewhere is untouched. */
+.ew-story-moment .ew-reveal-label,
+.ew-story-moment .ew-recap-label,
+.ew-story-moment .ew-story-moment-hint {
+  color: color-mix(in srgb, var(--text, #e2e8f0) 70%, var(--accent, #7c3aed));
+}
 .ew-recap-line { margin: 5px 0; font-size: 12px; line-height: 1.65; }
 .ew-recap-list { margin: 4px 0 8px; padding-inline-start: 18px; font-size: 12px; line-height: 1.65; }
-.ew-recap-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.ew-recap-choice {
-  border-radius: 9999px; padding: 3px 9px; font-size: 11px;
-  border: 1px solid var(--border, #2d2f3d); color: var(--muted, #94a3b8);
-}
 
 /* A turn's marked events and gains — the material the events-only timeline shows. */
 .ew-marks { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
@@ -528,7 +789,7 @@
   color: var(--muted, #6b7280); border-color: transparent;
   flex: 0 0 auto; min-height: 36px; padding: 0 12px; font-size: 13px;
 }
-.ew-btn-quiet:hover { color: var(--text, #e2e8f0); }
+@media (hover: hover) { .ew-btn-quiet:hover { color: var(--text, #e2e8f0); } }
 .ew-spacer { flex: 1; }
 /* Language chooser on the world card: a small toggle set, the chosen one filled. */
 .ew-lang {
@@ -536,7 +797,7 @@
   background: transparent; color: var(--muted, #6b7280);
   min-height: 32px; padding: 0 14px; font-size: 13px; cursor: pointer;
 }
-.ew-lang:hover { color: var(--text, #e2e8f0); }
+@media (hover: hover) { .ew-lang:hover { color: var(--text, #e2e8f0); } }
 .ew-lang[aria-pressed="true"] {
   background: var(--accent, #6366f1); color: #fff; border-color: transparent;
 }
@@ -548,7 +809,12 @@
    for minutes at a time. */
 .ew-prose {
   font-size: 16px; line-height: 1.85; max-width: 66ch; margin: 12px 0 0;
+  /* CJK and ordinary prose wrap fine on their own; this only catches a long
+     unbreakable token (a URL, an id) so it breaks instead of overflowing the page
+     on a narrow screen. Not `break-all`, which would break ordinary words too. */
+  overflow-wrap: anywhere;
 }
+.ew-prose pre { overflow-x: auto; }
 /* Only the fallback path needs pre-wrap. With the host's markdown renderer,
    paragraphs are real elements and pre-wrap would double every blank line. */
 .ew-prose-plain { white-space: pre-wrap; }
@@ -570,8 +836,44 @@
 /* Narrow-first single column; panels move to a sidebar from 900px. Below that the
    sidebar is absent entirely and the drawer is how panels stay reachable —
    rendering both would put every panel on screen twice. */
-.ew-play { display: block; }
-.ew-aside { display: none; }
+/* The story's background layer, spanning the WHOLE app on the live view. The app
+   root is the positioning context (.ew-root is position:relative); the backdrop is
+   placed behind everything (z-index 0) and cannot be interacted with. Every real
+   child of the root is lifted above it, so the background never covers or
+   intercepts a control — the anti-phishing guarantee for a scriptless frame. */
+.ew-root > *:not(.ew-backdrop) { position: relative; z-index: 1; }
+.ew-backdrop {
+  position: fixed; inset: 0; z-index: 0;
+  pointer-events: none; overflow: hidden;
+  /* Pinned to the viewport, NOT sized to content. Expanding the drawer or the
+     panels used to grow this layer (it was `absolute; inset:0` inside .ew-root,
+     so its height tracked the content), and `object-fit: cover` then re-cropped
+     the SVG — the art behind a translucent button visibly shifted colour on open.
+     Fixed fills the viewport regardless of content height, so it never re-crops,
+     and a short screen (opening / "arranging") is still fully covered. */
+}
+.ew-backdrop-frame {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  border: 0; pointer-events: none;
+  object-fit: cover; display: block;
+  background: transparent;
+}
+/* A contrast floor between the background and the prose, kept light so a PATTERN
+   reads through instead of being flattened into grey. The narrator supplies real
+   imagery; a heavy scrim would waste it. Legibility past this is the reading
+   surfaces' own semi-opaque backing, not more dimming here. */
+.ew-backdrop-scrim {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ew-bg, #0b0c10) 22%, transparent),
+    color-mix(in srgb, var(--ew-bg, #0b0c10) 40%, transparent)
+  );
+}
+
+.ew-play { display: block; }.ew-aside { display: none; }
 @media (min-width: 900px) {
   .ew-play {
     display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 28px; align-items: start;
@@ -603,7 +905,7 @@
   background: transparent; border: 1px solid var(--border, #2d2f3d);
   color: var(--text, #e2e8f0);
 }
-.ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); }
+@media (hover: hover) { .ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); } }
 .ew-pager-arw:disabled { opacity: .35; cursor: default; }
 
 .ew-digest { margin: 0 0 20px; }
@@ -668,11 +970,22 @@
 .ew-choice {
   text-align: left; width: 100%; box-sizing: border-box;
   border: 1px solid var(--border, #2d2f3d); border-radius: 10px;
-  background: var(--card, #1f2030); color: var(--text, #e2e8f0);
+  /* Translucent so the scene's backdrop shows through every choice — the shared,
+     theme-matching texture for the whole row, at no narrator cost. */
+  background: color-mix(in srgb, var(--card, #1f2030) 66%, transparent);
+  color: var(--text, #e2e8f0);
   padding: 12px 14px; font: inherit; font-size: 14px; line-height: 1.5;
   min-height: 48px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: border-color .14s ease, background .14s ease, transform .14s ease;
 }
-.ew-choice:active { border-color: var(--accent, #7c3aed); }
+/* Match the armed look on press so the touch highlight flows straight into the
+ * armed state. Without this, `:active` only moved the border, so on release the
+ * button dropped to its dim base style for a frame before React applied `armed`
+ * — reading as a grey dip between two highlights on a single tap. */
+.ew-choice:active {
+  border-color: var(--accent, #7c3aed);
+  background: color-mix(in oklab, var(--accent, #7c3aed) 8%, var(--card, #1f2030));
+}
 .ew-choice:disabled { opacity: .5; cursor: default; }
 
 /* The one that was chosen. Kept at full opacity while its siblings dim, because
@@ -681,6 +994,56 @@
 .ew-choicewrap { margin-bottom: 8px; }
 .ew-choice { position: relative; overflow: hidden; }
 .ew-choice-label { position: relative; z-index: 1; }
+
+/* A fateful choice — one the narrator marked as able to lead to a major event or
+   turning point. A distinctive, ornate look so it reads as weightier than the
+   rest: an accent border, a faint diagonal gilt hatch, and a glow blooming from
+   the top corner. Theme-aware (all tints derive from --accent), and still
+   translucent so the backdrop shows through like its siblings. Kept as background
+   layers, not a pseudo-element, so it never collides with the waiting sweep. */
+.ew-choice-fateful {
+  border-color: color-mix(in oklab, var(--accent, #7c3aed) 55%, var(--border, #2d2f3d));
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent, #7c3aed) 10%, transparent) 0 2px,
+      transparent 2px 11px
+    ),
+    radial-gradient(
+      130% 170% at 100% 0%,
+      color-mix(in srgb, var(--accent, #7c3aed) 26%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--card, #1f2030) 64%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 20%, transparent);
+  /* A slow accent glow that breathes, so a fateful choice quietly signals weight
+     before it is even touched. On the border only (the narrator's art sits inside),
+     slow enough to read as ambience not alarm; disabled under reduced-motion. */
+  animation: ew-fateful-glow 4.5s ease-in-out infinite;
+}
+
+/* The narrator's own SVG for a fateful choice, as an inert image behind the label.
+   Kept low-opacity so the label stays readable; the accent border still frames it. */
+.ew-choice-art {
+  position: absolute; inset: 0; z-index: 0;
+  width: 100%; height: 100%;
+  /* A fateful choice's own art is ONE centred emblem, so contain it — the button
+     is far wider than the art's viewBox, and `cover` would crop the symbol to a
+     horizontal band (its top and bottom sliced off). The shared tiled motif below
+     overrides back to `cover`, because a texture is meant to fill edge to edge. */
+  object-fit: contain;
+  pointer-events: none; opacity: .55;
+}
+/* The shared scene motif on ordinary buttons sits fainter than a fateful choice's
+   own art, so a fateful choice still stands out from the row. It is a full-bleed
+   texture, so it fills the button (cover) rather than being contained. */
+.ew-choice-art-common { opacity: .4; object-fit: cover; }
+/* When the narrator supplied art, it IS the pattern — drop the app's fallback
+   hatch/glow so the two do not fight, but keep the accent border/frame. Declared
+   after .ew-choice-fateful so it wins the cascade. */
+.ew-choice-arted {
+  background: color-mix(in srgb, var(--card, #1f2030) 60%, transparent);
+}
 
 /* Armed: chosen, not yet done. Reads as a held breath — brighter and slightly
    raised, but explicitly NOT the accent fill the committing state uses, so the two
@@ -798,6 +1161,8 @@
   .ew-choice-waiting::after { animation: none; transform: none; opacity: .35; }
   .ew-confirm { animation: none; }
   .ew-choice-armed { transition: none; transform: none; }
+  .ew-choice { transition: none; }
+  .ew-choice-fateful { animation: none; }
 }
 
 .ew-act { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }
@@ -822,6 +1187,17 @@
 }
 @media (min-width: 900px) { .ew-drawer { display: none; } }
 
+/* The way into the life star map. It looks like the panels drawer because it sits
+   in the same place and is the same kind of move, but it is NOT that class: the
+   drawer disappears above 900px (its panels move into the aside) and the star map
+   has no aside twin, so sharing the class hid the only entrance on a desktop. */
+.ew-starbtn {
+  display: block; width: 100%; margin: 20px 0 0;
+  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;
+  background: transparent; color: var(--text, #e2e8f0);
+  font: inherit; font-size: 13px; min-height: 44px; cursor: pointer;
+}
+
 /* ── the scene slot ── */
 
 /* ONE element, created on first need and never moved. Moving an iframe in the DOM
@@ -844,12 +1220,19 @@
    would put a scene over the dashboard's own chrome. */
 .ew-slot-full {
   display: block;
-  position: absolute; inset: 0;
-  height: auto; z-index: 20;
-  border-radius: 0;
+  /* Absolute inside .ew-slot-wrap, NOT fixed: fixed would escape the panel and
+     cover the dashboard's own chrome. The wrapper carries the height in fullscreen
+     (.ew-slot-wrap-full) so this inset:0 iframe resolves to a real box instead of
+     the 0-height one the collapsed wrapper used to give it (M0.1). */
+  position: absolute; inset: 0; z-index: 20;
+  border-radius: 0; background: var(--ew-bg, #0b0c10);
 }
 
 .ew-slot-wrap { position: relative; margin: 16px 0 0; }
+/* In fullscreen the iframe and its bar both go absolute, so without a height here
+   the relative wrapper collapses to 0 and the iframe had nothing to fill (M0.1).
+   Give the wrapper the height; the scene fills the panel and stays inside it. */
+.ew-slot-wrap-full { min-height: 85dvh; }
 .ew-slot-bar {
   display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 6px;
 }
@@ -894,7 +1277,11 @@
   background: transparent; border: 1px solid var(--border, #2d2f3d);
   color: var(--muted, #6b7280); -webkit-tap-highlight-color: transparent;
 }
-.ew-kebab:hover { color: var(--text, #e2e8f0); }
+@media (hover: hover) { .ew-kebab:hover { color: var(--text, #e2e8f0); } }
+/* Sits above every life row (rows are z-index auto) and just below the menu, so
+   a tap anywhere but the menu is absorbed here and closes it — never reaching the
+   row beneath. Transparent, but it MUST catch clicks, so no pointer-events:none. */
+.ew-menu-backdrop { position: fixed; inset: 0; z-index: 29; background: transparent; }
 .ew-menu {
   position: absolute; right: 0; top: 44px; z-index: 30; min-width: 160px;
   display: flex; flex-direction: column; gap: 2px; padding: 6px;
@@ -906,4 +1293,147 @@
   padding: 10px 12px; border: none; border-radius: 6px;
   background: transparent; color: var(--text, #e2e8f0);
 }
-.ew-menu-item:hover { background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030)); }
+@media (hover: hover) { .ew-menu-item:hover { background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030)); } }
+
+/* ── phone bottom tab bar ──────────────────────────────────────────────────
+   Sticky at the foot of the app's own scroll container (never position:fixed,
+   which in the dashboard DOM escapes the panel). Colour IS the background: a soft
+   dark fade lifts it off the story text scrolling under it, with no panel block.
+   Hides on scroll-down, returns on scroll-up. */
+.ew-tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  max-width: 900px; margin-inline: auto;  /* match the centred .ew-root column */
+  display: flex; height: 60px;
+  padding-bottom: env(safe-area-inset-bottom, 0);  /* clear the iOS home indicator */
+  background: linear-gradient(180deg,
+    rgba(6, 7, 14, 0) 0%, rgba(6, 7, 14, .82) 46%, rgba(6, 7, 14, .96) 100%);
+  transition: transform .28s ease;
+  pointer-events: auto;
+}
+.ew-tabbar-hidden { transform: translateY(96px); }
+.ew-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-end; gap: 3px; padding: 0 0 9px;
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--muted, #8b8ea6); font: inherit; font-size: 10px; position: relative;
+}
+.ew-tab svg {
+  width: 21px; height: 21px; stroke: currentColor; fill: none;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.ew-tab.on { color: var(--gold, #e5c07b); }
+.ew-tab.on::before {
+  content: ""; position: absolute; top: 8px; width: 26px; height: 2.5px;
+  border-radius: 2px; background: var(--gold, #e5c07b);
+}
+.ew-tablabel { line-height: 1; }
+.ew-tabdot {
+  position: absolute; top: 6px; right: calc(50% - 15px);
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--gold, #e5c07b); box-shadow: 0 0 6px var(--gold, #e5c07b);
+}
+/* Overflow sheet for the 更多 tab. The bar is portalled to document.body, so the
+   scrim is fixed to the viewport (it must not extend the page or cover chrome
+   beyond the tap-to-close area). */
+.ew-tabmore-scrim {
+  position: fixed; inset: 0; z-index: 31; background: transparent; border: 0;
+}
+.ew-tabmore {
+  position: fixed; bottom: 66px; left: 0; right: 0; z-index: 32;
+  max-width: 900px; margin: 0 auto; width: calc(100% - 16px); padding: 6px;
+  background: var(--panel, #12142a); border: 1px solid var(--border, #262a3e);
+  border-radius: 14px; box-shadow: 0 14px 34px rgba(0, 0, 0, .55);
+  display: flex; flex-direction: column;
+}
+.ew-tabmore-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: transparent; border: 0; color: var(--text, #e9e6df);
+  font: inherit; font-size: 13.5px; border-radius: 10px; cursor: pointer;
+  text-align: start;
+}
+.ew-tabmore-item svg {
+  width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ew-tabmore-item.on { color: var(--gold, #e5c07b); }
+.ew-tabdot-inline {
+  width: 7px; height: 7px; border-radius: 50%; margin-inline-start: auto;
+  background: var(--gold, #e5c07b);
+}
+.ew-region-pane { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+/* World setting view (structured lore browser) on the world detail page. */
+.ew-setting-group { margin: 8px 0 2px; }
+.ew-setting-entry { border-bottom: 1px solid var(--border, #2d2f3d); }
+.ew-setting-head {
+  display: flex; gap: 8px; align-items: center; width: 100%; text-align: start;
+  background: transparent; border: 0; padding: 11px 8px; cursor: pointer;
+  color: var(--text, #e2e8f0); font: inherit; border-radius: 8px;
+  transition: background 0.12s ease; -webkit-tap-highlight-color: transparent;
+}
+/* hover only on real pointers — on touch, :hover is emulated on tap-down and would
+   light the row up before the finger lifts. */
+@media (hover: hover) {
+  .ew-setting-head:hover { background: var(--surface-2, rgba(255, 255, 255, 0.05)); }
+  .ew-setting-head:hover .ew-setting-name { color: var(--accent, #7c3aed); }
+}
+.ew-setting-head:focus-visible { outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px; }
+.ew-setting-name { font-weight: 600; flex: 0 0 auto; }
+.ew-setting-sum {
+  color: var(--muted, #8b8ea6); font-size: 12.5px;
+  flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* A chevron the reader can see is clickable: points right when closed, down when
+   open. Drawn from borders so it needs no icon font or emoji. */
+.ew-setting-caret {
+  margin-left: auto; flex: 0 0 auto; width: 7px; height: 7px; margin-inline-end: 2px;
+  border-right: 2px solid var(--muted, #8b8ea6); border-bottom: 2px solid var(--muted, #8b8ea6);
+  transform: rotate(-45deg); transition: transform 0.15s ease, border-color 0.12s ease;
+}
+.ew-setting-head[aria-expanded="true"] .ew-setting-caret { transform: rotate(45deg); }
+@media (hover: hover) {
+  .ew-setting-head:hover .ew-setting-caret { border-color: var(--accent, #7c3aed); }
+}
+.ew-setting-body { padding: 0 8px 12px; }
+.ew-setting-rel { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* Starting-archetype (role) list on the world detail page. */
+.ew-role { display: flex; gap: 8px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border, #2d2f3d); }
+.ew-role-name { font-weight: 600; flex: 0 0 auto; }
+.ew-role-sum { color: var(--muted, #8b8ea6); font-size: 12.5px; overflow-wrap: anywhere; }
+/* Desktop right-aside tab strip: switch which system region's panels show. */
+.ew-aside-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px;
+  border-bottom: 1px solid var(--border, #262a3e); padding-bottom: 8px;
+}
+.ew-aside-tab {
+  display: inline-flex; align-items: center; gap: 6px; position: relative;
+  background: transparent; border: 0; color: var(--muted, #8b8ea6);
+  font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; cursor: pointer;
+}
+.ew-aside-tab svg {
+  width: 15px; height: 15px; stroke: currentColor; fill: none;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.ew-aside-tab.on {
+  color: var(--gold, #e5c07b);
+  background: color-mix(in oklab, var(--gold, #e5c07b) 14%, transparent);
+}
+.ew-aside-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold, #e5c07b); box-shadow: 0 0 6px var(--gold, #e5c07b);
+}
+
+/* Kept at the end of the file: a @keyframes block's nested braces confuse the
+   naive CSS parser in the frontend contract tests, shifting the rule pairing for
+   everything after it. At EOF there is nothing after it to shift. */
+@keyframes ew-fateful-glow {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 20%, transparent),
+      0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 34%, transparent),
+      0 0 12px 1px color-mix(in srgb, var(--accent, #7c3aed) 18%, transparent);
+  }
+}

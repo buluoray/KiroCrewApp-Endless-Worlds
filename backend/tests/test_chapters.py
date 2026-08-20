@@ -36,7 +36,7 @@ from srcguard import code_only  # noqa: E402
 from template import Chapter, TemplateError, parse_template  # noqa: E402
 from world import read_world  # noqa: E402
 
-FLAGSHIP = _BACKEND.parent / "seeds" / "jianhuo-jiyuan.md"
+FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
 
 
 @pytest.fixture(scope="module")
@@ -276,7 +276,7 @@ def test_the_worlds_own_law_is_never_something_to_ask_for(pack):
     revolve around the player. A narrator that has to request them is a narrator that
     can forget to."""
     always = {c.id for c in pack.template.chapters if c.always}
-    for essential in ("principles", "protections", "restraint"):
+    for essential in ("principles", "protections", "identity"):
         assert essential in always, (
             f"{essential} is not in the opening brief — the narrator would have to "
             "know to ask for the rules that restrain it"
