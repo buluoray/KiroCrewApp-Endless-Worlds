@@ -105,6 +105,22 @@ sees is produced locally from a closed, code-owned vocabulary.
   (`test_same_origin_is_never_granted`) and the HTML is handed over as `srcDoc`, never
   navigated to (`test_the_scene_is_handed_over_as_srcdoc_not_navigated_to`).
 
+- **One turn in flight, across every surface.** A scene answer dispatches from
+  `main.tsx` (`onSceneChoice`), not from the play page, so the page's own `busy`
+  cannot see it — a hoisted `turnPending` lock (ref-gated against same-frame
+  double taps) covers the window before the next poll reports `generating`. It is
+  fed to every `SceneSlot` as `locked` (two mounted asking scenes cannot fire two
+  concurrent turns) and to `PlayPage` where it folds into `busy` (choice buttons
+  and the act box).
+
+- **A slot's "sending…" state always has a way back.** `SceneSlot`'s internal
+  reset watches `[sceneId, html, resetSignal]`: a refused answer or a dropped
+  request leaves the html unchanged, so `onSceneChoice` bumps a `sceneEpoch`
+  (passed as `resetSignal`) in its `finally` — without it the tapped slot shows
+  "sending…" forever with no way to act again. A stale re-tap after a completed
+  turn is refused server-side (its nonce is spent), so the reset is safe on the
+  success path too.
+
 ### The answer channel (`SceneLedger`)
 
 - **A rejected answer writes no state.** Every rejection path in `record_answer` is

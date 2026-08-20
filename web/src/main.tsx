@@ -140,6 +140,16 @@ export default function EndlessWorlds() {
    *  change. A ref (not state) because it is bookkeeping, not render input. */
   const seenRef = useRef<Record<string, string>>({})
   const [refresh, setRefresh] = useState(0)
+  /** ONE turn in flight at a time, across every surface that can start one — a
+   *  scene answer, a choice tap, the act box. Scene answers dispatch from here
+   *  (not PlayPage), so without a hoisted lock the play page's own `busy` never
+   *  learns a scene already fired and a player can start two concurrent turns. */
+  const [turnPending, setTurnPending] = useState(false)
+  const turnPendingRef = useRef(false)
+  /** Bumped whenever a scene answer resolves without changing scene html, so
+   *  every SceneSlot clears its local answered/sending state (a refused answer
+   *  otherwise locks its slot on "sending…" forever). */
+  const [sceneEpoch, setSceneEpoch] = useState(0)
   /** Which world's deletion is being confirmed, or null. Held here rather than in
    *  the detail view because the reload that follows a deletion unmounts that
    *  view — a dialog owned by it would vanish mid-request. */
@@ -432,18 +442,29 @@ export default function EndlessWorlds() {
   const onSceneChoice = useCallback(
     async (sceneId: string, choice: string, nonce: string) => {
       if (!live) return
+      // One turn at a time across every surface: the ref (not state) is the gate
+      // so two taps in the same frame cannot both pass before a re-render.
+      if (turnPendingRef.current) return
+      turnPendingRef.current = true
+      setTurnPending(true)
       try {
         const out = await api.answerScene(live, sceneId, { choice, nonce })
-        if (!out.accepted) {
-          setRefresh((n) => n + 1)
-          return
+        if (out.accepted) {
+          await api.takeTurn(live, { action: out.action })
         }
-        await api.takeTurn(live, { action: out.action })
       } catch {
         // A dropped request must not strand the player: reloading shows whether the
         // answer landed.
+      } finally {
+        turnPendingRef.current = false
+        setTurnPending(false)
+        // Clear every slot's local answered/sending state: a refusal or a dropped
+        // request leaves the scene html unchanged, so without this bump the tapped
+        // slot would show "sending…" forever. A stale re-tap after a completed
+        // turn is harmless — its nonce is spent and the server refuses it.
+        setSceneEpoch((n) => n + 1)
+        setRefresh((n) => n + 1)
       }
-      setRefresh((n) => n + 1)
     },
     [live],
   )
@@ -526,7 +547,7 @@ export default function EndlessWorlds() {
 
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onBackdrop={setBackdrop} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} openStar={narrowLive ? tab === 'starmap' : undefined} onStarClose={() => setTab('reading')} onLiveTurn={setLiveTurn} narrow={narrowLive} onPanels={setPanels} />
+    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onBackdrop={setBackdrop} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} openStar={narrowLive ? tab === 'starmap' : undefined} onStarClose={() => setTab('reading')} onLiveTurn={setLiveTurn} narrow={narrowLive} onPanels={setPanels} turnPending={turnPending} />
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
   } else if (view === 'create') {
@@ -820,6 +841,8 @@ export default function EndlessWorlds() {
           asks={s.asks}
           visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
           onChoice={onSceneChoice}
+          resetSignal={sceneEpoch}
+          locked={turnPending}
         />
       )) : null}
       {doomed ? (

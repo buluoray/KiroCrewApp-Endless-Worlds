@@ -147,7 +147,7 @@ function EchoMark({
 
 export function PlayPage({
   runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh,
-  openStar, onStarClose, onLiveTurn, narrow, onPanels,
+  openStar, onStarClose, onLiveTurn, narrow, onPanels, turnPending = false,
 }: {
   runId: string
   onBack: () => void
@@ -174,6 +174,11 @@ export function PlayPage({
   /** Report the world's panels upward so the bottom bar can build region tabs from
    *  the ones that carry a region. */
   onPanels?: (panels: PlayView['panels']) => void
+  /** True while a SCENE answer's turn is in flight (dispatched from main, not
+   *  from this page) — folded into `busy` so the choice buttons and act box
+   *  cannot start a second concurrent turn in the window before the next poll
+   *  reports `generating`. */
+  turnPending?: boolean
 }) {
   const [v, setV] = useState<PlayView | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -277,7 +282,7 @@ export function PlayPage({
 
   // Either reason the player cannot act: their own tap, or a narrator already at
   // work — including one asked for by a page they have since closed.
-  const busy = !!tapped || generating
+  const busy = !!tapped || generating || turnPending
 
   // Cycle the arranging flavour while a life is being born.
   useEffect(() => {

@@ -5047,7 +5047,7 @@ function EchoMark({ e, lang, runId, onJump }) {
 		}) : null]
 	});
 }
-function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh, openStar, onStarClose, onLiveTurn, narrow, onPanels }) {
+function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh, openStar, onStarClose, onLiveTurn, narrow, onPanels, turnPending = false }) {
 	const [v, setV] = useState(null);
 	const [error, setError] = useState(null);
 	const [action, setAction] = useState("");
@@ -5126,7 +5126,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 		awaiting,
 		load
 	]);
-	const busy = !!tapped || generating;
+	const busy = !!tapped || generating || turnPending;
 	useEffect(() => {
 		if (!(v?.awaitingOpening && generating)) return void 0;
 		setArrange(pick("opening.waiting"));
@@ -5947,7 +5947,7 @@ function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, 
 * the dashboard's own document for every player, including the majority who never
 * see a scene at all.
 */
-function SceneSlot({ runId, sceneId, asks, visible = true, onChoice }) {
+function SceneSlot({ runId, sceneId, asks, visible = true, onChoice, resetSignal = 0, locked = false }) {
 	const [everNeeded, setEverNeeded] = useState(false);
 	const [html, setHtml] = useState("");
 	const [full, setFull] = useState(false);
@@ -5986,7 +5986,13 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice }) {
 	useEffect(() => {
 		answered.current = false;
 		setSending(false);
-	}, [sceneId, html]);
+	}, [
+		sceneId,
+		html,
+		resetSignal
+	]);
+	const lockedRef = useRef(locked);
+	lockedRef.current = locked;
 	useEffect(() => {
 		if (html && sceneId && asks) wrapRef.current?.scrollIntoView({
 			block: "nearest",
@@ -6007,6 +6013,7 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice }) {
 			if (typeof d.nonce !== "string" || !d.nonce) return;
 			if (typeof d.choice !== "string" || !d.choice) return;
 			if (answered.current) return;
+			if (lockedRef.current) return;
 			answered.current = true;
 			setSending(true);
 			onChoice(sceneId, d.choice, d.nonce);
@@ -6287,6 +6294,16 @@ function EndlessWorlds() {
 	*  change. A ref (not state) because it is bookkeeping, not render input. */
 	const seenRef = useRef({});
 	const [refresh, setRefresh] = useState(0);
+	/** ONE turn in flight at a time, across every surface that can start one — a
+	*  scene answer, a choice tap, the act box. Scene answers dispatch from here
+	*  (not PlayPage), so without a hoisted lock the play page's own `busy` never
+	*  learns a scene already fired and a player can start two concurrent turns. */
+	const [turnPending, setTurnPending] = useState(false);
+	const turnPendingRef = useRef(false);
+	/** Bumped whenever a scene answer resolves without changing scene html, so
+	*  every SceneSlot clears its local answered/sending state (a refused answer
+	*  otherwise locks its slot on "sending…" forever). */
+	const [sceneEpoch, setSceneEpoch] = useState(0);
 	/** Which world's deletion is being confirmed, or null. Held here rather than in
 	*  the detail view because the reload that follows a deletion unmounts that
 	*  view — a dialog owned by it would vanish mid-request. */
@@ -6533,18 +6550,21 @@ function EndlessWorlds() {
 	*/
 	const onSceneChoice = useCallback(async (sceneId, choice, nonce) => {
 		if (!live) return;
+		if (turnPendingRef.current) return;
+		turnPendingRef.current = true;
+		setTurnPending(true);
 		try {
 			const out = await api.answerScene(live, sceneId, {
 				choice,
 				nonce
 			});
-			if (!out.accepted) {
-				setRefresh((n) => n + 1);
-				return;
-			}
-			await api.takeTurn(live, { action: out.action });
-		} catch {}
-		setRefresh((n) => n + 1);
+			if (out.accepted) await api.takeTurn(live, { action: out.action });
+		} catch {} finally {
+			turnPendingRef.current = false;
+			setTurnPending(false);
+			setSceneEpoch((n) => n + 1);
+			setRefresh((n) => n + 1);
+		}
 	}, [live]);
 	const changeLifeMeta = useCallback(async (runId, changes) => {
 		try {
@@ -6628,7 +6648,8 @@ function EndlessWorlds() {
 		onStarClose: () => setTab("reading"),
 		onLiveTurn: setLiveTurn,
 		narrow: narrowLive,
-		onPanels: setPanels
+		onPanels: setPanels,
+		turnPending
 	});
 	else if (view === "opening" && world) body = /* @__PURE__ */ jsx(OpeningScreen, {
 		world,
@@ -6887,7 +6908,9 @@ function EndlessWorlds() {
 					sceneId: s.sceneId,
 					asks: s.asks,
 					visible: !narrowLive || activeSceneIds.includes(s.sceneId),
-					onChoice: onSceneChoice
+					onChoice: onSceneChoice,
+					resetSignal: sceneEpoch,
+					locked: turnPending
 				}, s.sceneId)) : null,
 				doomed ? /* @__PURE__ */ jsx(DeleteWorldDialog, {
 					worldId: doomed,

@@ -25,7 +25,7 @@ interface SceneMessage {
  * see a scene at all.
  */
 export function SceneSlot({
-  runId, sceneId, asks, visible = true, onChoice,
+  runId, sceneId, asks, visible = true, onChoice, resetSignal = 0, locked = false,
 }: {
   runId: string | null
   sceneId: string
@@ -37,6 +37,15 @@ export function SceneSlot({
    *  desktop, which shows every scene inline, unchanged. */
   visible?: boolean
   onChoice: (sceneId: string, choice: string, nonce: string) => void
+  /** Bumped by the parent when a scene answer resolved WITHOUT changing this
+   *  scene's html (server refusal, dropped request, or a completed turn that left
+   *  the scene as-is). Without it a refused answer locks the slot on "sending…"
+   *  forever, because the internal reset only watches [sceneId, html]. */
+  resetSignal?: number
+  /** True while ANY turn is in flight anywhere (a sibling scene's answer, the
+   *  choice buttons, the act box) — taps are ignored so two mounted asking scenes
+   *  cannot fire two concurrent turns. */
+  locked?: boolean
 }) {
   const [everNeeded, setEverNeeded] = useState(false)
   const [html, setHtml] = useState('')
@@ -85,7 +94,12 @@ export function SceneSlot({
   useEffect(() => {
     answered.current = false
     setSending(false)  // a fresh scene (or an updated one) clears the sending state
-  }, [sceneId, html])
+  }, [sceneId, html, resetSignal])
+
+  // The lock must be readable inside the message handler without re-subscribing
+  // the listener on every turn-state flip.
+  const lockedRef = useRef(locked)
+  lockedRef.current = locked
 
   // An asking scene that arrives at the foot of a long page is easy to miss, and
   // there was no feedback that a turn was even in progress. Bring it into view when
@@ -109,6 +123,7 @@ export function SceneSlot({
       if (typeof d.nonce !== 'string' || !d.nonce) return
       if (typeof d.choice !== 'string' || !d.choice) return
       if (answered.current) return
+      if (lockedRef.current) return  // a turn is already in flight somewhere
       answered.current = true
       setSending(true)
       onChoice(sceneId, d.choice, d.nonce)
