@@ -1,5 +1,5 @@
 ---
-# 《剑火纪元·西方幻想人生模拟器》V1.0 — machine-readable header.
+# 《剑火纪元》V1.0 — machine-readable header.
 #
 # Every declaration below is traceable to a chapter of the prose that follows.
 # The prose itself is never parsed: it is the narrator's instruction set and is
@@ -13,7 +13,7 @@
 # capability packs.
 
 id: age-of-sword-and-flame
-title: 剑火纪元·西方幻想人生模拟器
+title: 剑火纪元
 version: "1.0"
 language: zh
 
@@ -608,8 +608,6 @@ chapters:
   heading: 第十二章 · 世界模拟者身份与终极原则
   always: true
 ---
-《剑火纪元·西方幻想人生模拟器》
-V1.0 · 超高自由度西方魔幻世界沙盘终极版
 ——魔法不是外挂。
 ——它只是这个世界的自然规律之一。
 ⸻

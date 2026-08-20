@@ -1,5 +1,5 @@
 ---
-# 《Age of Sword and Flame · Western Fantasy Life Simulator》V1.0 — machine-readable header.
+# 《Age of Sword and Flame》V1.0 — machine-readable header.
 #
 # Every declaration below is traceable to a chapter of the prose that follows.
 # The prose itself is never parsed: it is the narrator's instruction set and is
@@ -7,7 +7,7 @@
 # render and what to enforce.
 
 id: age-of-sword-and-flame
-title: Age of Sword and Flame · Western Fantasy Life Simulator
+title: Age of Sword and Flame
 version: "1.0"
 language: en
 
@@ -608,8 +608,6 @@ chapters:
   heading: Chapter 12 · The World Simulator's Identity and Ultimate Principles
   always: true
 ---
-《Age of Sword and Flame · Western Fantasy Life Simulator》
-V1.0 · The ultimate high-freedom Western-fantasy world sandbox
 ——Magic is not a cheat.
 ——It is merely one of this world's natural laws.
 ⸻

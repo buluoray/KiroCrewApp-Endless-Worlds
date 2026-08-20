@@ -208,7 +208,7 @@ def test_the_shipped_flagship_seed_installs_and_lists(tmp_path: Path) -> None:
 
     row = next(r for r in lib.list_worlds() if r["worldId"] == "age-of-sword-and-flame")
     assert row["usable"] is True
-    assert row["title"] == "剑火纪元·西方幻想人生模拟器"
+    assert row["title"] == "剑火纪元"
     assert row["panelCount"] == 6
     assert row["openingGroups"] == 13
     assert row["lineage"] is True
