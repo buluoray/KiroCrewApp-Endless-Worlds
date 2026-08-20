@@ -117,7 +117,10 @@ _TOOLS: list[dict[str, Any]] = [
             "turn MUST include `choices`; omit them only on a terminal turn, marked "
             "`ending: true` or via state that fires a world ending. Declare "
             "state in full — a field you leave out reads to the player as a fact "
-            "that vanished. Idempotent per (runId, turn): re-sending a turn you "
+            "that vanished; the exceptions are `digest` and `relations`, which merge "
+            "forward, so there you declare only what changed this turn (a null value "
+            "retires one entry) instead of re-sending the whole block. Idempotent "
+            "per (runId, turn): re-sending a turn you "
             "already committed changes nothing. The optional `memory` block is how "
             "this world REMEMBERS: declare the people/places/things this turn "
             "introduced, the events that happened, and any relation changes. When "
@@ -704,6 +707,32 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
 #: moment its first turn landed: the play view could no longer find its world.
 RESERVED_STATE_KEYS = ("worldId", "style", "language", "opening", "status", "role", "granted", "milestones")
 
+#: State keys that MERGE forward at the sub-key level instead of replacing wholesale.
+#: `digest` (world news by category) and `relations` (per-figure standing) are
+#: cumulative dicts the narrator would otherwise re-declare in full every turn — most
+#: of it unchanged boilerplate. Merging lets it declare only the categories/figures
+#: that moved this span; an omitted sub-entry PERSISTS, and a sub-value of null or ""
+#: RETIRES that entry (the clear sentinel). Omitting the whole key carries the prior
+#: forward unchanged. Everything NOT listed here still replaces wholesale — a plain
+#: fact the narrator stops declaring is a fact that stopped being true.
+MERGE_STATE_KEYS = ("digest", "relations")
+
+
+def _merge_forward(prior: Any, incoming: dict[str, Any]) -> dict[str, Any]:
+    """A partial declaration merged onto the prior value at the sub-key level.
+
+    A key present in ``incoming`` replaces that one entry; a key whose value is
+    ``None`` or ``""`` retires it; every other entry in ``prior`` is kept. Used for
+    ``MERGE_STATE_KEYS`` so the narrator can send only what changed this turn.
+    """
+    merged = dict(prior) if isinstance(prior, dict) else {}
+    for key, value in incoming.items():
+        if value is None or value == "":
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    return merged
+
 
 def _apply_milestones(run_id: str, state: dict[str, Any], prev: dict[str, Any]) -> None:
     """Record any milestones newly reached this turn into a reserved state key.
@@ -875,6 +904,17 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     for key in RESERVED_STATE_KEYS:
         if key in current and key not in state:
             state[key] = current[key]
+    # The cumulative panels (digest, relations) merge forward instead of replacing,
+    # so the narrator declares only what moved this span rather than re-sending the
+    # whole block every turn. Omitted entirely → carry the prior forward; declared
+    # partially → merge onto the prior; a null/"" sub-value retires that entry.
+    for key in MERGE_STATE_KEYS:
+        prior = current.get(key)
+        if key not in state:
+            if isinstance(prior, dict) and prior:
+                state[key] = prior
+        elif isinstance(state[key], dict) and isinstance(prior, dict):
+            state[key] = _merge_forward(prior, state[key])
     state["turn"] = turn
     # Record milestones reached this turn (permanent, app-owned) before committing.
     try:

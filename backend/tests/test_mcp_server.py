@@ -527,6 +527,54 @@ def test_a_field_the_narrator_stops_declaring_is_gone(app):
     assert after["worldId"] == "w"
 
 
+def test_digest_and_relations_merge_forward_only_what_changed(app):
+    """The cumulative panels are the exception to whole-state replace: the narrator
+    declares only the categories/figures that moved this span, and the unmentioned
+    ones persist rather than vanishing — so it stops re-sending the whole block."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    call("endless_advance_turn", runId=run, turn=1, prose="p",
+         choices=[{"id": "go", "label": "go"}],
+         state={"digest": {"war": "帝国宣战", "trade": "商路如常"},
+                "relations": {"mother": "alive", "mentor": "trusted"}})
+    # Turn 2 touches only one entry in each; the rest must survive.
+    call("endless_advance_turn", runId=run, turn=2, prose="p",
+         choices=[{"id": "go", "label": "go"}],
+         state={"digest": {"war": "战事平息"}, "relations": {"mentor": "exiled"}})
+    after = store.read_state(run)
+    assert after["digest"] == {"war": "战事平息", "trade": "商路如常"}
+    assert after["relations"] == {"mother": "alive", "mentor": "exiled"}
+
+
+def test_a_null_sub_value_retires_a_merged_entry(app):
+    """The clear sentinel: null (or "") on a digest category / relation figure
+    retires just that entry, leaving the rest of the cumulative block intact."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    call("endless_advance_turn", runId=run, turn=1, prose="p",
+         choices=[{"id": "go", "label": "go"}],
+         state={"digest": {"war": "帝国宣战", "trade": "商路如常"}})
+    call("endless_advance_turn", runId=run, turn=2, prose="p",
+         choices=[{"id": "go", "label": "go"}],
+         state={"digest": {"war": None}})
+    assert store.read_state(run)["digest"] == {"trade": "商路如常"}
+
+
+def test_omitting_a_merge_key_carries_the_whole_block_forward(app):
+    """Unlike a plain field, a cumulative panel the narrator does not mention this
+    turn is kept whole, not cleared."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    call("endless_advance_turn", runId=run, turn=1, prose="p",
+         choices=[{"id": "go", "label": "go"}],
+         state={"digest": {"war": "帝国宣战"}, "年龄": "0岁"})
+    call("endless_advance_turn", runId=run, turn=2, prose="p",
+         choices=[{"id": "go", "label": "go"}], state={"年龄": "1岁"})
+    after = store.read_state(run)
+    assert after["digest"] == {"war": "帝国宣战"}, "the cumulative block persisted"
+    assert after["年龄"] == "1岁"
+
+
 def test_milestones_are_reached_once_and_then_permanent(app):
     """An achievement is recorded the turn its condition first holds, and stays
     recorded afterwards even if the condition later goes false (app-owned)."""

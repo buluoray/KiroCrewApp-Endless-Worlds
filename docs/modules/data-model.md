@@ -45,14 +45,25 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
 
 ## Load-bearing contracts
 
-- **Reserved keys carry forward; everything else the narrator omits is gone.**
-  A field the narrator stops declaring reads as a fact that stopped being true —
-  that is the intended narrative semantics. The six reserved keys are not the
-  narrator's to declare, so dropping one (notably `worldId`) would leave a life
-  that `get_run` cannot resolve panels for. Load-bearing because the carry-forward
-  set is the only thing standing between a terse turn and an unopenable life.
-  Enforced by `mcp_server._advance_turn`; the pending record's exclusion from
-  the set is pinned by `test_pending.test_the_record_lives_outside_the_state`.
+- **Reserved keys carry forward; the two cumulative panels merge forward; every
+  other field the narrator omits is gone.** A plain field the narrator stops
+  declaring reads as a fact that stopped being true — that is the intended
+  narrative semantics. The reserved keys are not the narrator's to declare, so
+  dropping one (notably `worldId`) would leave a life that `get_run` cannot resolve
+  panels for. `MERGE_STATE_KEYS = (digest, relations)` are a third case: cumulative
+  dicts the narrator would otherwise re-declare in full every turn, so
+  `_advance_turn` MERGES a partial declaration onto the prior at the sub-key level
+  (`_merge_forward`) — an omitted category/figure persists, a null/`""` sub-value
+  retires it, and omitting the whole key carries the prior block forward. This is
+  backward-compatible: a narrator that still sends the whole block declares every
+  entry, so the merge equals a replace. Load-bearing because the carry-forward set
+  is the only thing standing between a terse turn and an unopenable life. Enforced
+  by `mcp_server._advance_turn`; the pending record's exclusion from the reserved
+  set is pinned by `test_pending.test_the_record_lives_outside_the_state`, and the
+  merge/clear/omit behaviour by
+  `test_mcp_server.test_digest_and_relations_merge_forward_only_what_changed`,
+  `test_a_null_sub_value_retires_a_merged_entry`, and
+  `test_omitting_a_merge_key_carries_the_whole_block_forward`.
 
 - **Systems compute derived state at commit, and read their base from the PRIOR
   committed state — so the number is the app's, not the narrator's.** After the
