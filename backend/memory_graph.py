@@ -65,19 +65,6 @@ MAX_CANDIDATES = 6
 DORMANT_AFTER_TURNS = 8
 
 
-class MemoryRejected(ValueError):
-    """A ``memory`` block that must not be committed, naming the exact field.
-
-    Carries a precise path (``memory.events[0].echoes[1]``) so the narrator can
-    fix the one thing that was wrong and retry, per design §5.3.
-    """
-
-    def __init__(self, field: str, expected: str) -> None:
-        super().__init__(f"{field}: {expected}")
-        self.field = field
-        self.expected = expected
-
-
 def event_id(turn: int, key: str) -> str:
     """The canonical, run-scoped name of an event: ``event:12:saved-elin``.
 
@@ -256,50 +243,68 @@ def _id_ok(value: str) -> bool:
     return bool(value) and ":" not in value and not any(c.isspace() for c in value)
 
 
-def validate_memory(memory: dict[str, Any], index: dict[str, Any], *, turn: int) -> None:
-    """Refuse a ``memory`` block that must not become facts, or return quietly.
+def sanitize_memory(
+    memory: dict[str, Any], index: dict[str, Any], *, turn: int
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Salvage a ``memory`` block instead of rejecting it whole (design §5.3).
 
-    Validates the WHOLE block before anything is committed: a memory that fails
-    here fails the entire tool call, so there is never a half-written turn
-    (design §5.3 "先通过校验，再提交任何内容"). Every refusal names the exact
-    field path so the narrator can correct one thing and retry.
+    The block is enrichment, not the story, so a single bad reference must never
+    cost the real memory around it. Returns a CLEAN block carrying only the parts
+    that pass, plus ``dropped`` — one entry per thing removed, each naming the
+    exact field path and a narrator-facing ``detail`` — so the caller commits
+    what survived and warns about the rest. Granularity, in check order:
 
-    Semantic rules, in the order they are checked:
-    * an entity id must be well-formed and not redeclare a known id with a
-      different kind (no evidence-free type changes);
-    * every reference (participants, place, thread ids, relation endpoints)
-      must resolve to the implicit ``player``, a previously known entity, or an
-      entity declared in this very block — unknown references are refused, not
-      auto-created;
-    * event keys are unique within the turn and must not collide with an
-      already-recorded event of this turn;
-    * an echo target must be the canonical id of an event that exists in THIS
-      life — which is also what makes a cross-life reference impossible, since
-      another run's ids simply do not resolve here;
-    * a correction target must exist, like an echo;
-    * a relation's ``reasonEvent`` is either a key declared in this block or a
-      canonical id of an existing event.
+    * an entity with a malformed id, an unknown kind, a duplicate in-block id, or
+      a kind that conflicts with a known one is dropped; the rest are kept and
+      become resolvable references;
+    * a structurally broken event (malformed/duplicate/replayed key, missing
+      title or summary, unknown disclosure) is dropped whole — nothing anchors
+      it — while an otherwise-good event is KEPT and loses only the individual
+      references that do not resolve (an unknown participant, a non-place
+      ``place``, an unknown importance, a dangling echo/corrects);
+    * a THREAD is its own namespace, not an entity: ``opened`` DECLARES the
+      thread (opening one is what creates it, so it never needs a prior entity),
+      and only ``advanced``/``resolved`` on a thread never opened is dropped;
+    * a relation is a single edge, so a bad endpoint/type/change/reasonEvent
+      drops that one relation and never the events.
+
+    Nothing is auto-invented (an unknown participant is dropped, not created) and
+    nothing is back-filled from prose; a block whose parts all fail returns an
+    empty clean block, which the caller records as no memory.
     """
-    declared: dict[str, str] = {}  # id -> kind, from this block
-    entities = memory.get("entities") or []
-    for i, ent in enumerate(entities):
+    dropped: list[dict[str, str]] = []
+
+    def drop(field: str, expected: str, detail: str) -> None:
+        dropped.append({"field": field, "expected": expected, "detail": detail})
+
+    # -- entities: keep the well-formed, non-conflicting ones -----------------
+    declared: dict[str, str] = {}  # id -> kind, from the KEPT entities of this block
+    kept_entities: list[dict[str, Any]] = []
+    for i, ent in enumerate(memory.get("entities") or []):
         path = f"memory.entities[{i}]"
         eid = str(ent.get("id") or "")
-        if not _id_ok(eid):
-            raise MemoryRejected(f"{path}.id", "a non-empty id without ':' or spaces")
         kind = str(ent.get("kind") or "")
+        if not _id_ok(eid):
+            drop(f"{path}.id", "a non-empty id without ':' or spaces",
+                 f"Dropped a malformed entity id at {path}.")
+            continue
         if kind not in KINDS:
-            raise MemoryRejected(f"{path}.kind", f"one of {', '.join(KINDS)}")
+            drop(f"{path}.kind", f"one of {', '.join(KINDS)}",
+                 f"Dropped entity {eid!r}: {kind!r} is not a known kind.")
+            continue
         if eid in declared:
-            raise MemoryRejected(f"{path}.id", f"declared twice this turn: {eid}")
+            drop(f"{path}.id", f"declared twice this turn: {eid}",
+                 f"Dropped the duplicate declaration of {eid!r}; the first was kept.")
+            continue
         known = index["entities"].get(eid)
         if known is not None and known["kind"] != kind:
-            raise MemoryRejected(
-                f"{path}.kind",
-                f"{eid} is already a {known['kind']}; a kind never changes "
-                "without an explicit merge",
-            )
+            drop(f"{path}.kind",
+                 f"{eid} is already a {known['kind']}; a kind never changes without a merge",
+                 f"Dropped entity {eid!r}: it is already a {known['kind']}, and a kind never "
+                 "changes without an explicit merge.")
+            continue
         declared[eid] = kind
+        kept_entities.append(ent)
 
     def resolve(ref: str) -> str:
         """The kind of a resolvable entity reference, or '' if unknown."""
@@ -310,107 +315,163 @@ def validate_memory(memory: dict[str, Any], index: dict[str, Any], *, turn: int)
         known = index["entities"].get(ref)
         return known["kind"] if known is not None else ""
 
-    keys_this_turn: set[str] = set()
-    events = memory.get("events") or []
-    for i, ev in enumerate(events):
+    known_threads = index.get("threads") or {}
+    opened_threads: set[str] = set()  # threads opened earlier in THIS block
+
+    # -- events: drop the unusable whole; salvage every event that can stand ---
+    kept_keys: set[str] = set()
+    kept_events: list[dict[str, Any]] = []
+    for i, ev in enumerate(memory.get("events") or []):
         path = f"memory.events[{i}]"
         key = str(ev.get("key") or "")
         if not _id_ok(key):
-            raise MemoryRejected(f"{path}.key", "a non-empty key without ':' or spaces")
-        if key in keys_this_turn:
-            raise MemoryRejected(f"{path}.key", f"used twice this turn: {key}")
-        keys_this_turn.add(key)
+            drop(f"{path}.key", "a non-empty key without ':' or spaces",
+                 f"Dropped the event at {path}: its key is malformed, so nothing can anchor it.")
+            continue
+        if key in kept_keys:
+            drop(f"{path}.key", f"used twice this turn: {key}",
+                 f"Dropped the event at {path}: key {key!r} was already used this turn.")
+            continue
         if event_id(turn, key) in index["events"]:
             # A replayed key for a turn that already recorded it — events are
-            # append-only, and this is the one collision idempotence does not
-            # already absorb upstream.
-            raise MemoryRejected(f"{path}.key", f"already recorded for turn {turn}")
+            # append-only, the one collision idempotence does not absorb upstream.
+            drop(f"{path}.key", f"already recorded for turn {turn}",
+                 f"Dropped the event at {path}: {key!r} is already recorded for this turn.")
+            continue
         if not str(ev.get("title") or "").strip():
-            raise MemoryRejected(f"{path}.title", "a short title")
+            drop(f"{path}.title", "a short title",
+                 f"Dropped the event at {path}: an event needs a title.")
+            continue
         if not str(ev.get("summary") or "").strip():
-            raise MemoryRejected(f"{path}.summary", "a one-line summary")
-        disclosure = str(ev.get("disclosure") or "")
-        if disclosure not in DISCLOSURES:
-            raise MemoryRejected(
-                f"{path}.disclosure", f"one of {', '.join(DISCLOSURES)}"
-            )
+            drop(f"{path}.summary", "a one-line summary",
+                 f"Dropped the event at {path}: an event needs a one-line summary.")
+            continue
+        if str(ev.get("disclosure") or "") not in DISCLOSURES:
+            drop(f"{path}.disclosure", f"one of {', '.join(DISCLOSURES)}",
+                 f"Dropped the event at {path}: "
+                 f"{ev.get('disclosure')!r} is not a known disclosure.")
+            continue
+
+        clean_ev = dict(ev)
+
         importance = ev.get("importance")
         if importance is not None and importance not in IMPORTANCE:
-            raise MemoryRejected(
-                f"{path}.importance", f"one of {', '.join(IMPORTANCE)}"
-            )
+            clean_ev.pop("importance", None)
+            drop(f"{path}.importance", f"one of {', '.join(IMPORTANCE)}",
+                 f"Kept the event at {path} but dropped its unknown importance {importance!r}.")
+
+        good_parts: list[Any] = []
         for j, part in enumerate(ev.get("participants") or []):
-            if not resolve(str(part)):
-                raise MemoryRejected(
-                    f"{path}.participants[{j}]",
-                    f"a known entity or one declared this turn, got {part!r}",
-                )
+            if resolve(str(part)):
+                good_parts.append(part)
+            else:
+                drop(f"{path}.participants[{j}]",
+                     f"a known entity or one declared this turn, got {part!r}",
+                     f"Kept the event at {path} but dropped its unknown participant "
+                     f"{str(part)!r}; re-declare that entity to record it.")
+        if "participants" in clean_ev:
+            clean_ev["participants"] = good_parts
+
         place = str(ev.get("place") or "")
         if place:
-            kind = resolve(place)
-            if not kind:
-                raise MemoryRejected(
-                    f"{path}.place",
-                    f"a known entity or one declared this turn, got {place!r}",
-                )
-            if kind != "place":
-                raise MemoryRejected(f"{path}.place", f"{place} is a {kind}, not a place")
+            pkind = resolve(place)
+            if pkind != "place":
+                clean_ev.pop("place", None)
+                reason = (f"{place} is a {pkind}, not a place" if pkind
+                          else f"a known place, got {place!r}")
+                drop(f"{path}.place", reason,
+                     f"Kept the event at {path} but dropped its place ({reason}).")
+
+        good_threads: list[Any] = []
         for j, th in enumerate(ev.get("threads") or []):
             tid = str(th.get("id") or "")
-            kind = resolve(tid)
-            if not kind:
-                raise MemoryRejected(
-                    f"{path}.threads[{j}].id",
-                    f"a known entity or one declared this turn, got {tid!r}",
-                )
-            if kind != "thread":
-                raise MemoryRejected(
-                    f"{path}.threads[{j}].id", f"{tid} is a {kind}, not a thread"
-                )
-            if str(th.get("effect") or "") not in THREAD_EFFECTS:
-                raise MemoryRejected(
-                    f"{path}.threads[{j}].effect",
-                    f"one of {', '.join(THREAD_EFFECTS)}",
-                )
+            effect = str(th.get("effect") or "")
+            tpath = f"{path}.threads[{j}]"
+            if not _id_ok(tid):
+                drop(f"{tpath}.id", "a non-empty id without ':' or spaces",
+                     f"Kept the event at {path} but dropped a malformed thread id.")
+                continue
+            if effect not in THREAD_EFFECTS:
+                drop(f"{tpath}.effect", f"one of {', '.join(THREAD_EFFECTS)}",
+                     f"Kept the event at {path} but dropped thread {tid!r}: unknown effect "
+                     f"{effect!r}.")
+                continue
+            if effect == "opened":
+                # Opening a thread is what creates it; it needs no prior existence.
+                opened_threads.add(tid)
+                good_threads.append(th)
+            elif tid in known_threads or tid in opened_threads:
+                good_threads.append(th)
+            else:
+                drop(f"{tpath}.id", f"a thread opened before or this turn, got {tid!r}",
+                     f"Kept the event at {path} but dropped thread {tid!r}: it was never "
+                     "opened. Open it with effect 'opened' before advancing or resolving it.")
+        if "threads" in clean_ev:
+            clean_ev["threads"] = good_threads
+
+        good_echoes: list[Any] = []
         for j, target in enumerate(ev.get("echoes") or []):
-            if str(target) not in index["events"]:
-                raise MemoryRejected(
-                    f"{path}.echoes[{j}]",
-                    "the canonical id of an event that exists in this life "
-                    f"(like event:3:some-key), got {target!r}",
-                )
+            if str(target) in index["events"]:
+                good_echoes.append(target)
+            else:
+                drop(f"{path}.echoes[{j}]",
+                     "the canonical id of an event that exists in this life "
+                     f"(like event:3:some-key), got {target!r}",
+                     f"Kept the event at {path} but dropped an echo to {str(target)!r}, which "
+                     "names no event in this life.")
+        if "echoes" in clean_ev:
+            clean_ev["echoes"] = good_echoes
+
         corrects = str(ev.get("corrects") or "")
         if corrects and corrects not in index["events"]:
-            raise MemoryRejected(
-                f"{path}.corrects",
-                f"the canonical id of an event that exists in this life, got {corrects!r}",
-            )
+            clean_ev.pop("corrects", None)
+            drop(f"{path}.corrects",
+                 f"the canonical id of an event that exists in this life, got {corrects!r}",
+                 f"Kept the event at {path} but dropped a correction of {corrects!r}, which "
+                 "names no event in this life.")
 
+        kept_keys.add(key)
+        kept_events.append(clean_ev)
+
+    # -- relations: a single bad edge drops only itself -----------------------
+    kept_relations: list[dict[str, Any]] = []
     for i, rel in enumerate(memory.get("relations") or []):
         path = f"memory.relations[{i}]"
-        for end in ("from", "to"):
-            ref = str(rel.get(end) or "")
-            if not resolve(ref):
-                raise MemoryRejected(
-                    f"{path}.{end}",
-                    f"a known entity or one declared this turn, got {ref!r}",
-                )
+        bad_end = next(
+            (end for end in ("from", "to") if not resolve(str(rel.get(end) or ""))), None
+        )
+        if bad_end is not None:
+            ref = str(rel.get(bad_end) or "")
+            drop(f"{path}.{bad_end}",
+                 f"a known entity or one declared this turn, got {ref!r}",
+                 f"Dropped the relation at {path}: its {bad_end} {ref!r} does not resolve.")
+            continue
         if not str(rel.get("type") or "").strip():
-            raise MemoryRejected(f"{path}.type", "the relation's name, in the world's own word")
+            drop(f"{path}.type", "the relation's name, in the world's own word",
+                 f"Dropped the relation at {path}: it has no type.")
+            continue
         if str(rel.get("change") or "") not in RELATION_CHANGES:
-            raise MemoryRejected(
-                f"{path}.change", f"one of {', '.join(RELATION_CHANGES)}"
-            )
+            drop(f"{path}.change", f"one of {', '.join(RELATION_CHANGES)}",
+                 f"Dropped the relation at {path}: {rel.get('change')!r} is not a known change.")
+            continue
         reason = str(rel.get("reasonEvent") or "")
-        if reason:
-            in_block = reason in keys_this_turn
-            in_history = reason in index["events"]
-            if not in_block and not in_history:
-                raise MemoryRejected(
-                    f"{path}.reasonEvent",
-                    "an event key declared this turn, or the canonical id of an "
-                    f"existing event, got {reason!r}",
-                )
+        if reason and reason not in kept_keys and reason not in index["events"]:
+            drop(f"{path}.reasonEvent",
+                 "an event key declared this turn, or the canonical id of an existing event, "
+                 f"got {reason!r}",
+                 f"Dropped the relation at {path}: its reasonEvent {reason!r} names no event "
+                 "kept this turn or in this life.")
+            continue
+        kept_relations.append(rel)
+
+    clean: dict[str, Any] = {}
+    if kept_entities:
+        clean["entities"] = kept_entities
+    if kept_events:
+        clean["events"] = kept_events
+    if kept_relations:
+        clean["relations"] = kept_relations
+    return clean, dropped
 
 
 # ── recall (design §7) ──────────────────────────────────────────────────

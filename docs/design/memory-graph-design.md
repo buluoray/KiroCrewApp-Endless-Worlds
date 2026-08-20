@@ -198,9 +198,9 @@ The event `key` need only be unique within the current turn. Subsequent recall c
 ### 5.3 Write Rules
 
 - `memory` is optional, for compatibility with old worlds and turns that produce no graph facts.
-- Once provided, the entire `memory` must pass structural and semantic validation before anything is committed.
-- Unknown entity references, duplicate IDs, illegal echo targets, or cross-life references reject the tool call.
-- Rejection returns the exact field path, so the Narrator can correct and retry.
+- Once provided, `memory` is SALVAGED, not rejected whole: `sanitize_memory` records every part that passes and drops only the pieces that do not, so one bad reference never costs the real memory around it.
+- A structurally broken event (bad/duplicate/replayed key, missing title or summary, unknown disclosure) is dropped whole; an otherwise-good event keeps its title/summary and loses only its unresolved references (unknown participant, non-place `place`, dangling echo/corrects); a relation is a single edge dropped on any bad field. A thread is its own namespace — effect `opened` declares it, and only `advanced`/`resolved` on a never-opened thread is dropped.
+- Every drop returns the exact field path and a narrator-facing detail, surfaced as a non-blocking warning so the Narrator can re-declare it later. Nothing is auto-created, nothing is back-filled from prose, and cross-life ids simply do not resolve.
 - The Narrator may drop the problematic `memory` and commit the prose, but the system should record "no structured memory this turn" and must not back-fill from prose.
 - Once appended, an event cannot be rewritten; corrections are expressed through a new `correction` event.
 - An entity may gain aliases or a summary, but its type must not change without evidence.

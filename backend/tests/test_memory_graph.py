@@ -87,64 +87,111 @@ def bridge_memory():
 # ── §12.1 validation: refusals name the exact field ──────────────────────
 
 
-def test_unknown_participant_is_refused_by_path():
+def test_unknown_participant_is_dropped_but_the_event_survives():
     memory = {"events": [{"key": "k", "title": "t", "summary": "s",
                           "participants": ["nobody"], "disclosure": "known"}]}
-    with pytest.raises(mg.MemoryRejected) as err:
-        mg.validate_memory(memory, mg.build_index([]), turn=1)
-    assert err.value.field == "memory.events[0].participants[0]"
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
+    assert [d["field"] for d in dropped] == ["memory.events[0].participants[0]"]
+    (ev,) = clean["events"]
+    assert ev["participants"] == [], "the unknown participant is gone"
+    assert ev["title"] == "t", "but the event itself is salvaged"
 
 
-def test_duplicate_event_key_in_one_turn_is_refused():
+def test_duplicate_event_key_drops_the_second_keeps_the_first():
     memory = {"events": [
         {"key": "k", "title": "t", "summary": "s", "disclosure": "known"},
         {"key": "k", "title": "t2", "summary": "s2", "disclosure": "known"},
     ]}
-    with pytest.raises(mg.MemoryRejected) as err:
-        mg.validate_memory(memory, mg.build_index([]), turn=1)
-    assert err.value.field == "memory.events[1].key"
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
+    assert [d["field"] for d in dropped] == ["memory.events[1].key"]
+    (ev,) = clean["events"]
+    assert ev["title"] == "t", "the first event with the key is kept"
 
 
-def test_echo_target_must_be_a_real_event_of_this_life():
-    """§12.2: 回响必须引用真实旧事件 — and a cross-life id simply does not
-    resolve here, which is what makes cross-life references impossible."""
+def test_a_dangling_echo_is_dropped_but_the_event_survives():
+    """§12.2: 回响必须引用真实旧事件 — but a bad echo only loses the echo, not the
+    event; a cross-life id simply does not resolve here."""
     memory = {"events": [{"key": "k", "title": "t", "summary": "s",
                           "echoes": ["event:3:never-happened"],
                           "disclosure": "known"}]}
-    with pytest.raises(mg.MemoryRejected) as err:
-        mg.validate_memory(memory, mg.build_index([]), turn=5)
-    assert err.value.field == "memory.events[0].echoes[0]"
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=5)
+    assert [d["field"] for d in dropped] == ["memory.events[0].echoes[0]"]
+    (ev,) = clean["events"]
+    assert ev["echoes"] == [] and ev["title"] == "t"
 
 
-def test_an_entity_kind_never_changes_without_a_merge():
+def test_an_entity_kind_conflict_drops_only_that_entity():
     index = mg.build_index([turn_entry(1, bridge_memory())])
     memory = {"entities": [{"id": "elin", "kind": "object", "name": "艾琳"}]}
-    with pytest.raises(mg.MemoryRejected) as err:
-        mg.validate_memory(memory, index, turn=2)
-    assert err.value.field == "memory.entities[0].kind"
+    clean, dropped = mg.sanitize_memory(memory, index, turn=2)
+    assert [d["field"] for d in dropped] == ["memory.entities[0].kind"]
+    assert "entities" not in clean, "the conflicting entity is not recorded"
 
 
-def test_disclosure_is_required_and_closed():
+def test_an_unknown_disclosure_drops_the_whole_event():
+    """A structurally broken event has nothing to anchor it, so it is dropped whole
+    (not salvaged like a bad reference)."""
     memory = {"events": [{"key": "k", "title": "t", "summary": "s",
                           "disclosure": "public"}]}
-    with pytest.raises(mg.MemoryRejected) as err:
-        mg.validate_memory(memory, mg.build_index([]), turn=1)
-    assert err.value.field == "memory.events[0].disclosure"
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
+    assert [d["field"] for d in dropped] == ["memory.events[0].disclosure"]
+    assert "events" not in clean
 
 
-def test_a_place_reference_must_actually_be_a_place():
+def test_a_non_place_place_is_dropped_but_the_event_survives():
     memory = {
         "entities": [{"id": "elin", "kind": "character", "name": "Elin"}],
         "events": [{"key": "k", "title": "t", "summary": "s",
                     "place": "elin", "disclosure": "known"}],
     }
-    with pytest.raises(mg.MemoryRejected) as err:
-        mg.validate_memory(memory, mg.build_index([]), turn=1)
-    assert err.value.field == "memory.events[0].place"
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
+    assert [d["field"] for d in dropped] == ["memory.events[0].place"]
+    (ev,) = clean["events"]
+    assert "place" not in ev and ev["title"] == "t"
 
 
-def test_the_design_example_validates_whole():
-    mg.validate_memory(bridge_memory(), mg.build_index([]), turn=1)
+def test_opening_a_thread_needs_no_prior_entity():
+    """The screenshot bug: opening a NEW thread is what creates it, so it must not
+    require a kind:thread entity declared first — the whole memory used to be dropped
+    over exactly this."""
+    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
+                          "threads": [{"id": "orwins-shadow", "effect": "opened"}],
+                          "disclosure": "known"}]}
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=14)
+    assert dropped == [], "opening a thread is not an error"
+    (ev,) = clean["events"]
+    assert ev["threads"] == [{"id": "orwins-shadow", "effect": "opened"}]
+
+
+def test_advancing_a_never_opened_thread_is_dropped_but_the_event_survives():
+    """Advancing or resolving a thread that was never opened is a real inconsistency,
+    so the thread tag is dropped — but only the tag, never the event."""
+    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
+                          "threads": [{"id": "ghost", "effect": "advanced"}],
+                          "disclosure": "known"}]}
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=3)
+    assert [d["field"] for d in dropped] == ["memory.events[0].threads[0].id"]
+    (ev,) = clean["events"]
+    assert ev["threads"] == [] and ev["title"] == "t"
+
+
+def test_resolving_a_previously_opened_thread_is_kept():
+    chronicle = [turn_entry(1, bridge_memory())]  # opens elin-debt
+    memory = {"events": [{"key": "repaid", "title": "t", "summary": "s",
+                          "threads": [{"id": "elin-debt", "effect": "resolved"}],
+                          "disclosure": "known"}]}
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index(chronicle), turn=3)
+    assert dropped == []
+    (ev,) = clean["events"]
+    assert ev["threads"] == [{"id": "elin-debt", "effect": "resolved"}]
+
+
+def test_the_design_example_survives_whole():
+    clean, dropped = mg.sanitize_memory(bridge_memory(), mg.build_index([]), turn=1)
+    assert dropped == []
+    assert len(clean["entities"]) == 3
+    assert len(clean["events"]) == 1
+    assert len(clean["relations"]) == 1
 
 
 def test_same_name_different_id_is_never_merged():
@@ -315,10 +362,10 @@ def take_turn(run, turn, memory=None, **extra):
     return call("endless_advance_turn", **args)
 
 
-def test_malformed_memory_commits_the_turn_but_drops_the_block(app):
-    """Memory is enrichment, not the story: a malformed block is DROPPED and warned,
-    but the turn still commits (prose + choices + state). No memory is recorded for
-    that turn, and nothing is ever back-filled from prose."""
+def test_a_bad_reference_is_salvaged_and_the_turn_keeps_the_event(app):
+    """Memory is salvaged, not rejected whole: an unknown participant is dropped, the
+    event around it is still recorded, the turn commits (prose + choices + state), and
+    the drop is surfaced as a non-blocking warning. Nothing is back-filled from prose."""
     store = srv._store()
     run = committed_run(store)
     bad = {"events": [{"key": "k", "title": "t", "summary": "s",
@@ -330,7 +377,29 @@ def test_malformed_memory_commits_the_turn_but_drops_the_block(app):
     assert mem is not None and mem["field"] == "memory.events[0].participants[0]"
     assert int(store.read_state(run)["turn"]) == 1, "the turn committed"
     (entry,) = store.read_chronicle(run)
-    assert "memory" not in entry, "the invalid block was dropped, not recorded"
+    assert entry["memory"]["events"][0]["key"] == "k", "the event was salvaged"
+    assert entry["memory"]["events"][0]["participants"] == [], "only the bad ref was dropped"
+
+
+def test_a_block_whose_parts_all_fail_records_no_memory(app):
+    """When nothing survives sanitizing, the turn still commits but stores no memory —
+    the block is not written empty."""
+    store = srv._store()
+    run = committed_run(store)
+    # An event dropped whole (unknown disclosure is structural, caught pre-schema here
+    # via a reference-only failure): use an event that loses its only anchor.
+    bad = {"events": [{"key": "k", "title": "t", "summary": "s",
+                       "threads": [{"id": "ghost", "effect": "resolved"}],
+                       "participants": ["nobody"], "disclosure": "known"}]}
+    out = take_turn(run, 1, memory=bad)
+    assert out["committed"] is True
+    (entry,) = store.read_chronicle(run)
+    # The event still survives (title/summary stand); the bad thread + participant are
+    # the only casualties, and both are warned.
+    assert entry["memory"]["events"][0]["key"] == "k"
+    fields = {w["field"] for w in out.get("warnings") or [] if w.get("panel") == "memory"}
+    assert "memory.events[0].participants[0]" in fields
+    assert "memory.events[0].threads[0].id" in fields
 
 
 def test_memory_sent_as_a_json_string_is_recovered(app):

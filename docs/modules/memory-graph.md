@@ -15,7 +15,7 @@ meaning half (keepsakes, story cards, star lenses) is in
 
 | Path | What it is |
 |---|---|
-| `backend/memory_graph.py` | the fact graph itself — `build_index`, `event_id`, `validate_memory`, `project_relations`, `recall_candidates`, `echo_markers`, `event_neighbourhood`, `star_payload`, and `MemoryRejected` |
+| `backend/memory_graph.py` | the fact graph itself — `build_index`, `event_id`, `sanitize_memory`, `project_relations`, `recall_candidates`, `echo_markers`, `event_neighbourhood`, and `star_payload` |
 | `backend/memory_routes.py` | the HTTP surface that commits/serves the graph and gates disclosure per life (star payload, echo markers, legacy bridge) |
 | `backend/tests/test_memory_graph.py` | the pinning tests for index rebuild, validation, relations, recall, echoes, and the tool surface (no partial write, `(runId,turn)` idempotency, per-life candidate isolation, bounded neighbourhood) |
 | `backend/tests/test_full_chain.py` | the one birth-to-inheritance life test that exercises the whole memory-graph chain end to end |
@@ -42,26 +42,36 @@ meaning half (keepsakes, story cards, star lenses) is in
   uniqueness the caller must guarantee (`test_duplicate_event_key_in_one_turn_is_refused`),
   and ids from another run cannot be forged.
 
-- **Whole-block validation, but a failure never blocks the turn.**
-  `validate_memory(memory, index, *, turn)` validates the *entire* `memory` block
-  and any failure raises `MemoryRejected(field, expected)` with an exact path (e.g.
-  `memory.events[0].echoes[1]`). The block is all-or-nothing as a UNIT — a partially
-  valid block is never half-recorded — but the caller (`mcp_server._advance_turn`)
-  treats memory as enrichment: on `MemoryRejected` it DROPS the block, commits the
-  turn's prose/choices/state anyway, and surfaces a non-blocking `panel: "memory"`
-  warning so the narrator re-declares the facts later. So "atomic" means the memory
-  record is whole-or-absent, not that a bad block aborts the turn. Unknown references
-  are refused rather than auto-created
-  (`test_unknown_participant_is_refused_by_path`); an entity kind never changes
-  without an explicit merge (`test_an_entity_kind_never_changes_without_a_merge`),
-  and same-name-different-id is never auto-merged
-  (`test_same_name_different_id_is_never_merged`); `disclosure` is required and
-  closed (`test_disclosure_is_required_and_closed`); a `place` reference must
-  resolve to a `place` (`test_a_place_reference_must_actually_be_a_place`). At the
-  tool surface a malformed block is dropped, not recorded, while the turn commits:
-  `test_malformed_memory_commits_the_turn_but_drops_the_block` (turn lands, chronicle
-  entry carries no `memory`), and a `memory` sent as a JSON string is recovered or
-  else dropped (`test_memory_sent_as_a_json_string_is_recovered`,
+- **Granular salvage — a bad piece is dropped, never the whole block, and the turn
+  is never blocked.** `sanitize_memory(memory, index, *, turn)` returns a CLEAN block
+  carrying only the parts that pass, plus a `dropped` list — one entry per removed
+  thing, each with an exact `field` path (e.g. `memory.events[0].echoes[1]`), an
+  `expected`, and a narrator-facing `detail`. A structurally broken event (malformed
+  or duplicate or replayed key, missing title/summary, unknown disclosure) is dropped
+  whole, but an otherwise-good event is KEPT and loses only the individual references
+  that do not resolve — an unknown participant, a non-place `place`, an unknown
+  importance, a dangling `echoes`/`corrects` — so a real memory is never lost to one
+  bad tag. A relation is a single edge, so a bad endpoint/type/change/`reasonEvent`
+  drops that one relation and never the events. The caller
+  (`mcp_server._advance_turn`) commits what survived and surfaces each drop as a
+  non-blocking `panel: "memory"` warning; a block whose parts all fail records no
+  memory. Nothing is auto-created and nothing is back-filled from prose
+  (`test_unknown_participant_is_dropped_but_the_event_survives`), an entity kind never
+  changes without an explicit merge (`test_an_entity_kind_conflict_drops_only_that_entity`),
+  same-name-different-id is never auto-merged (`test_same_name_different_id_is_never_merged`),
+  a duplicate event key keeps the first (`test_duplicate_event_key_drops_the_second_keeps_the_first`),
+  and a `place` must resolve to a `place` (`test_a_non_place_place_is_dropped_but_the_event_survives`).
+- **A thread is its own namespace, not an entity — `opened` declares it.** Threads
+  are tracked in `index["threads"]` (opened/resolved/lastTouched), built from events
+  and independent of `entities`. So opening a thread needs no prior `kind:thread`
+  entity: an event's `threads` entry with effect `opened` DECLARES it
+  (`test_opening_a_thread_needs_no_prior_entity`), and only `advanced`/`resolved` on a
+  thread never opened is dropped (`test_advancing_a_never_opened_thread_is_dropped_but_the_event_survives`,
+  `test_resolving_a_previously_opened_thread_is_kept`). At the tool surface a bad
+  reference is salvaged and the event still recorded
+  (`test_a_bad_reference_is_salvaged_and_the_turn_keeps_the_event`), and a `memory`
+  sent as a JSON string is recovered or else dropped
+  (`test_memory_sent_as_a_json_string_is_recovered`,
   `test_memory_sent_as_a_non_json_string_is_dropped_not_fatal`).
 
 - **Append-only and `(runId, turn)` idempotent — a retry never duplicates.**

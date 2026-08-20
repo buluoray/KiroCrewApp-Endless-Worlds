@@ -123,7 +123,12 @@ _TOOLS: list[dict[str, Any]] = [
             "introduced, the events that happened, and any relation changes. When "
             "a new event answers an old one, name the old event's canonical id in "
             "`echoes` — that is the only thing that makes the world's memory of it "
-            "real. Facts are never extracted from your prose."
+            "real. To open a NEW thread, list it under an event's `threads` with "
+            "effect \"opened\" — that declares it, no separate entity needed; only "
+            "`advanced`/`resolved` need a thread opened before. Memory is salvaged, "
+            "not rejected: an unresolved reference is dropped and warned while the "
+            "event around it is still recorded. Facts are never extracted from your "
+            "prose."
         ),
         "inputSchema": {
             "type": "object",
@@ -847,29 +852,20 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
             }
 
     # The world's memory is enrichment, not the story (like milestones and systems):
-    # a block that fails validation is DROPPED and the turn still commits, so a stray
-    # formatting slip (e.g. a space inside a CJK id) never costs the prose and choices
-    # the narrator already wrote. The failure is surfaced as a non-blocking warning so
-    # the narrator re-declares those facts in a later turn. Facts are never back-filled
-    # from prose, so a turn without the block simply records no structured memory.
+    # it is SALVAGED, never rejected whole. sanitize_memory returns the block with only
+    # its valid parts kept — a structurally broken event is dropped, but an otherwise
+    # good event keeps its title/summary and loses only the references that do not
+    # resolve — so a stray slip (a space in a CJK id, one unopened thread tag) never
+    # costs the real memory around it, let alone the prose and choices already written.
+    # Each dropped piece is surfaced as a non-blocking warning so the narrator can
+    # re-declare it later. Facts are never back-filled from prose, so a block whose
+    # parts all fail simply records no structured memory.
     memory = args.get("memory")
-    memory_warning: "dict[str, Any] | None" = None
+    memory_drops: list[dict[str, Any]] = []
     if memory is not None:
         index = memory_graph.build_index(store.read_chronicle(run_id))
-        try:
-            memory_graph.validate_memory(memory, index, turn=turn)
-        except memory_graph.MemoryRejected as exc:
-            memory_warning = {
-                "panel": "memory",
-                "field": exc.field,
-                "expected": exc.expected,
-                "detail": (
-                    f"The memory block was DROPPED (not recorded) because {exc.field} "
-                    "was invalid; the turn committed without it. Re-declare those "
-                    "facts in a later turn's `memory` block."
-                ),
-            }
-            memory = None
+        clean, memory_drops = memory_graph.sanitize_memory(memory, index, turn=turn)
+        memory = clean or None
 
     state = dict(args["state"])
     # The declaration is the story's whole state, so it REPLACES the previous one
@@ -962,8 +958,15 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # resolved blank (renamed field ids). The turn is committed either way. (A
     # choiceless non-ending turn is refused ABOVE, before commit, not warned here.)
     warnings: list[dict[str, Any]] = []
-    if memory_warning is not None:
-        warnings.append(memory_warning)
+    for _drop in memory_drops:
+        warnings.append(
+            {
+                "panel": "memory",
+                "field": _drop["field"],
+                "expected": _drop["expected"],
+                "detail": _drop["detail"],
+            }
+        )
     declared = any(k not in RESERVED_STATE_KEYS and k != "turn" for k in state)
     if pack is not None and declared:
         try:

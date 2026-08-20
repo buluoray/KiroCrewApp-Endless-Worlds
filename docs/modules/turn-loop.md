@@ -19,7 +19,7 @@ turn 200 as at turn 1.
 | `backend/opening.py` | `compose_opening_prompt()` — the opening turn's prompt, passed to the same `advance_turn()` via `prompt_override` so the wait and idempotence are not forked |
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
 | `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
-| `backend/memory_graph.py` | validates the structured `memory` block; a failure is dropped and warned, never blocking the commit |
+| `backend/memory_graph.py` | salvages the structured `memory` block — a bad piece is dropped and warned, the rest recorded, never blocking the commit |
 | `content/{en,zh}.json` | every line the prompt is built from (`turn.pull`, `turn.ask`, `turn.action.*`, `shape.*`, `opening.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
 
 ## Load-bearing contracts
@@ -159,15 +159,16 @@ turn 200 as at turn 1.
   layer (`call_tool`), a `memory` sent as a JSON **string** — the double-encoding a
   narrator sometimes emits — is recovered to an object, and an unrecoverable string
   is dropped, rather than the whole call being refused on a type mismatch. At the
-  semantic layer (`_advance_turn`), a block that fails `validate_memory` is dropped
-  (not recorded) and surfaced as a non-blocking `panel: "memory"` warning, while the
-  prose, choices, and state still commit — the same "enrichment never blocks a
-  committed turn" contract milestones and systems already have. Facts are never
-  back-filled from prose. Enforced by `mcp_server.call_tool` + `_advance_turn` +
-  `memory_graph`; pinned by `test_malformed_memory_commits_the_turn_but_drops_the_block`,
+  semantic layer (`_advance_turn`), `sanitize_memory` SALVAGES the block: a bad piece
+  is dropped and surfaced as a non-blocking `panel: "memory"` warning while the rest
+  of the block — and the prose, choices, and state — still commit, the same
+  "enrichment never blocks a committed turn" contract milestones and systems already
+  have. Facts are never back-filled from prose. Enforced by `mcp_server.call_tool` +
+  `_advance_turn` + `memory_graph`; pinned by
+  `test_a_bad_reference_is_salvaged_and_the_turn_keeps_the_event`,
   `test_memory_sent_as_a_json_string_is_recovered`,
   `test_memory_sent_as_a_non_json_string_is_dropped_not_fatal`,
-  `test_the_design_example_validates_whole`,
+  `test_the_design_example_survives_whole`,
   `test_a_declared_echo_becomes_a_traceable_marker`,
   `test_prose_alone_never_fabricates_a_marker`, and
   `test_a_retried_turn_never_duplicates_nodes_or_edges`.
