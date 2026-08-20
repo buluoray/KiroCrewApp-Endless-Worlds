@@ -1,19 +1,7 @@
 import { useEffect, useState } from 'react'
 
-import { api, normalizeModels } from './api'
+import { api } from './api'
 import { t } from './strings'
-
-/** The host App SDK, reached through the window module map (an older host may not
- *  expose it). `useAppApi()` is the AUTHORIZED path to a CORE route like
- *  `/api/models`: it injects an app token and gates on the manifest's declared
- *  `permissions.api`, where the app's path-scoped session cookie cannot reach
- *  outside `/api/apps/endless-worlds/*`. Without it the model picker falls back
- *  to the bare-fetch `api.models()`, which a core route rejects — hence auto-only. */
-const appSdk = (window as unknown as {
-  __kirocrew_modules?: Record<string, unknown>
-}).__kirocrew_modules?.['@kirocrew/app-sdk'] as
-  | { useAppApi?: () => { get: (path: string) => Promise<unknown> } }
-  | undefined
 
 /**
  * Narrator settings, opened from the home page: which model writes the story and
@@ -31,11 +19,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // Called unconditionally (the module map is fixed for the app's lifetime, so
-  // the optional-chain branch never flips). A host-mounted app page renders inside
-  // the SDK's <AppApiProvider>, so the client is available and token-authed.
-  const appApi = appSdk?.useAppApi?.() ?? null
-
   useEffect(() => {
     let alive = true
     void api.settings().then((s) => {
@@ -48,14 +31,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       setEffort(s.reasoningEffort || '')
       if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts)
     }).catch(() => {})
-    // Prefer the SDK client (authorized for core routes); fall back to the bare
-    // fetch only when the host does not expose the SDK.
-    const loadModels = appApi
-      ? appApi.get('/api/models').then(normalizeModels).catch(() => api.models())
-      : api.models()
-    void loadModels.then((m) => { if (alive) setModels(m) }).catch(() => {})
+    // `api.models()` proxies through the app's own backend route, which the app's
+    // path-scoped cookie authorizes (the core /api/models route does not).
+    void api.models().then((m) => { if (alive) setModels(m) }).catch(() => {})
     return () => { alive = false }
-  }, [appApi])
+  }, [])
 
   const save = async () => {
     setBusy(true)

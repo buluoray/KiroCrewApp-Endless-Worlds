@@ -38,8 +38,7 @@
       "/api/apps/endless-worlds",
       "/api/apps/endless-worlds/*",
       "/api/chat",
-      "/api/chat/*",
-      "/api/models"
+      "/api/chat/*"
     ]
   }
 }

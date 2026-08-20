@@ -613,16 +613,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
-  /** The gateway's advertised model list. `/api/models` is a CORE dashboard
-   *  route (not under the app base), so the app's path-scoped session cookie does
-   *  NOT authorize it — the App SDK client (`useAppApi().get`) is the authorized
-   *  path (it injects an app token and gates on the declared `permissions.api`).
-   *  This bare-fetch helper is the fallback for a host too old to expose the SDK;
-   *  it returns [] rather than throwing when the list is unavailable, so the
-   *  picker degrades to "keep default". */
+  /** The gateway's advertised model list, proxied through the app's OWN backend
+   *  (`GET /api/apps/endless-worlds/models`). The core `/api/models` route needs
+   *  the dashboard token, which the app's path-scoped session cookie cannot carry;
+   *  the app route can, and reuses the core handler server-side. Returns [] rather
+   *  than throwing when the list is unavailable, so the picker degrades to "keep
+   *  default". */
   models: async (): Promise<Array<{ id: string; name?: string }>> => {
     try {
-      const res = await fetch('/api/models')
+      const res = await fetch(`${API}/models`)
       if (!res.ok) return []
       return normalizeModels(await res.json())
     } catch {

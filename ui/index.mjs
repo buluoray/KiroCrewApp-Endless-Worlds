@@ -78,16 +78,15 @@ var api = {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body)
 	}),
-	/** The gateway's advertised model list. `/api/models` is a CORE dashboard
-	*  route (not under the app base), so the app's path-scoped session cookie does
-	*  NOT authorize it — the App SDK client (`useAppApi().get`) is the authorized
-	*  path (it injects an app token and gates on the declared `permissions.api`).
-	*  This bare-fetch helper is the fallback for a host too old to expose the SDK;
-	*  it returns [] rather than throwing when the list is unavailable, so the
-	*  picker degrades to "keep default". */
+	/** The gateway's advertised model list, proxied through the app's OWN backend
+	*  (`GET /api/apps/endless-worlds/models`). The core `/api/models` route needs
+	*  the dashboard token, which the app's path-scoped session cookie cannot carry;
+	*  the app route can, and reuses the core handler server-side. Returns [] rather
+	*  than throwing when the list is unavailable, so the picker degrades to "keep
+	*  default". */
 	models: async () => {
 		try {
-			const res = await fetch("/api/models");
+			const res = await fetch(`${API}/models`);
 			if (!res.ok) return [];
 			return normalizeModels(await res.json());
 		} catch {
@@ -1532,7 +1531,7 @@ function CreateWorldScreen({ onCancel, onCreated }) {
 var WORLDSMITH_AGENT = "endless-worldsmith";
 /** The host App SDK, reached defensively through the window module map (an older
 *  host may not expose the chat launcher — the UI degrades to an inline hint). */
-var appSdk$1 = window.__kirocrew_modules?.["@kirocrew/app-sdk"];
+var appSdk = window.__kirocrew_modules?.["@kirocrew/app-sdk"];
 /** The review screen (view === 'draft'). Polls until the worldsmith is done, then
 *  shows what the world will contain and offers accept / discard / jump-to-chat. */
 function WorldDraftReview({ draftId, onInstalled, onDiscarded, onBack }) {
@@ -1543,7 +1542,7 @@ function WorldDraftReview({ draftId, onInstalled, onDiscarded, onBack }) {
 	const [chatHint, setChatHint] = useState(false);
 	const titleTouched = useRef(false);
 	const kicked = useRef(false);
-	const launcher = appSdk$1?.useChatLauncher?.() ?? null;
+	const launcher = appSdk?.useChatLauncher?.() ?? null;
 	const kickCompile = async () => {
 		try {
 			await api.compileWorldDraft(draftId);
@@ -6327,13 +6326,6 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice, resetSignal
 }
 //#endregion
 //#region src/settings.tsx
-/** The host App SDK, reached through the window module map (an older host may not
-*  expose it). `useAppApi()` is the AUTHORIZED path to a CORE route like
-*  `/api/models`: it injects an app token and gates on the manifest's declared
-*  `permissions.api`, where the app's path-scoped session cookie cannot reach
-*  outside `/api/apps/endless-worlds/*`. Without it the model picker falls back
-*  to the bare-fetch `api.models()`, which a core route rejects — hence auto-only. */
-var appSdk = window.__kirocrew_modules?.["@kirocrew/app-sdk"];
 /**
 * Narrator settings, opened from the home page: which model writes the story and
 * at what reasoning effort. Both apply to every life's narrator at its next turn.
@@ -6349,7 +6341,6 @@ function SettingsPanel({ onClose }) {
 	const [models, setModels] = useState([]);
 	const [saved, setSaved] = useState(false);
 	const [busy, setBusy] = useState(false);
-	const appApi = appSdk?.useAppApi?.() ?? null;
 	useEffect(() => {
 		let alive = true;
 		api.settings().then((s) => {
@@ -6358,13 +6349,13 @@ function SettingsPanel({ onClose }) {
 			setEffort(s.reasoningEffort || "");
 			if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts);
 		}).catch(() => {});
-		(appApi ? appApi.get("/api/models").then(normalizeModels).catch(() => api.models()) : api.models()).then((m) => {
+		api.models().then((m) => {
 			if (alive) setModels(m);
 		}).catch(() => {});
 		return () => {
 			alive = false;
 		};
-	}, [appApi]);
+	}, []);
 	const save = async () => {
 		setBusy(true);
 		try {

@@ -170,7 +170,7 @@ from widget import SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
 #: Bumped independently of app.json; identifies the route contract the UI expects.
-ROUTE_CONTRACT = 10
+ROUTE_CONTRACT = 11
 
 #: Seeds ship in the install tree, one level up from backend/.
 _SEEDS_DIR = _HERE.parent / "seeds"
@@ -298,6 +298,29 @@ async def put_settings(request: web.Request, ctx: AppContext) -> web.Response:
         )
     saved = write_settings(ctx.data_dir, model=model, reasoning_effort=effort)
     return web.json_response(saved)
+
+
+async def get_models(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /models`` — the gateway's advertised model list, proxied.
+
+    The core ``/api/models`` route needs the dashboard token. An embedded app
+    authenticates by a session cookie PATH-SCOPED to ``/api/apps/<app>/*``, so the
+    app frontend's bare ``fetch('/api/models')`` carries no credential there and is
+    refused 403 — the model picker then falls back to ``auto`` only. Proxying the
+    call through this route (which the app's own cookie IS scoped to) reuses the
+    core handler verbatim: kiro-bin resolution, the same sandbox wrap, entitlement
+    narrowing, and its 503-on-degraded contract. ``api_models`` reads
+    ``request.app["state"]`` and this handler runs on the same gateway app, so the
+    request object it receives is exactly what the core route would.
+
+    Imported at call time (like ``chat_runner._run_chat`` above) so exactly one
+    thing — the call — depends on the private core handler, not module import.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    from kiro_crew.dashboard.handlers.agents import api_models  # noqa: PLC0415
+
+    return await api_models(request)
 
 
 async def list_worlds(request: web.Request, ctx: AppContext) -> web.Response:
@@ -1806,6 +1829,7 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         AppRoute(method="GET", path="/health", handler=health),
         AppRoute(method="GET", path="/settings", handler=get_settings),
         AppRoute(method="PUT", path="/settings", handler=put_settings),
+        AppRoute(method="GET", path="/models", handler=get_models),
         AppRoute(method="GET", path="/worlds", handler=list_worlds),
         AppRoute(method="GET", path="/worlds/{world_id}", handler=get_world),
         AppRoute(method="GET", path="/worlds/{world_id}/deletion", handler=world_deletion),
