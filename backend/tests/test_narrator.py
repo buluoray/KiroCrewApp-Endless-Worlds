@@ -216,11 +216,23 @@ def test_the_narrator_can_reach_nothing_but_this_apps_own_tools():
     (chat_utils.py:1139).
     """
     agent = json.loads(AGENT_JSON.read_text(encoding="utf-8"))
-    assert agent["tools"] == [OWN_SERVER_REF]
+    own_prefix = OWN_SERVER_REF + "/"
+    assert agent["tools"], "the narrator must have its own tools"
+    for ref in agent["tools"]:
+        assert ref == OWN_SERVER_REF or ref.startswith(own_prefix), (
+            f"{ref} is not one of this app's own tools"
+        )
     for forbidden in (
         "learn_add", "learn_list", "search_chat_history", "get_chat_session",
         "local_knowledge_search", "execute_bash", "fs_write", "fs_read",
         "web_fetch", "@kirocrew-core", "@builder-mcp",
+        # Scoped OUT of the narrator: these belong to the illustrator and the
+        # worldsmith. Per-tool scoping keeps their descriptions out of the
+        # narrator's every-turn context.
+        OWN_SERVER_REF + "/endless_commit_backdrop",
+        OWN_SERVER_REF + "/endless_submit_world_draft",
+        OWN_SERVER_REF + "/endless_read_draft",
+        OWN_SERVER_REF + "/endless_export_world",
     ):
         assert forbidden not in agent["tools"]
         assert forbidden not in agent["allowedTools"]
@@ -232,7 +244,9 @@ def test_auto_approve_is_declared_because_an_unattended_prompt_means_rejected():
     app-owned slot is unattended until a human drives it through a dashboard-user
     route, so without this the narrator's every call would be denied."""
     agent = json.loads(AGENT_JSON.read_text(encoding="utf-8"))
-    assert agent["allowedTools"] == [OWN_SERVER_REF]
+    assert agent["allowedTools"] == agent["tools"], (
+        "auto-approve must mirror the granted set, or a granted tool still prompts"
+    )
 
 
 def test_the_tool_ref_uses_the_namespaced_key_registration_actually_writes():
@@ -264,7 +278,9 @@ def test_the_tool_ref_uses_the_namespaced_key_registration_actually_writes():
         app_part, sep, server_part = key.partition(":")
         assert sep, f"{ref} uses the bare key; registration namespaces it"
         assert app_part == manifest["name"], f"{ref} namespaces the wrong app"
-        assert server_part in declared, (
+        # A per-tool ref is "<app>:<server>/<tool>"; membership is by server key.
+        server_only = server_part.split("/", 1)[0]
+        assert server_only in declared, (
             f"{ref} resolves to nothing in app.json mcpServers"
         )
 

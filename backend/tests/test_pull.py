@@ -172,9 +172,13 @@ def test_the_narrators_standing_orders_survive_a_compaction():
     )
     assert "since" in prompt, "the delta parameter is never explained"
 
-    # And the seal that makes all of this safe is untouched.
-    assert agent["tools"] == ["@endless-worlds:endless-mcp"]
-    assert agent["allowedTools"] == ["@endless-worlds:endless-mcp"]
+    # And the seal that makes all of this safe is untouched: the narrator reaches
+    # only its own server, and the two tools this pull design needs are granted.
+    own_prefix = "@endless-worlds:endless-mcp/"
+    assert all(r.startswith(own_prefix) for r in agent["tools"]), "own-server tools only"
+    assert own_prefix + "endless_read_runtime" in agent["tools"]
+    assert own_prefix + "endless_advance_turn" in agent["tools"]
+    assert agent["allowedTools"] == agent["tools"]
 
 
 def test_the_tool_accepts_the_baseline_it_hands_out():
