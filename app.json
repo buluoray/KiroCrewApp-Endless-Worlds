@@ -2,7 +2,7 @@
   "name": "endless-worlds",
   "displayName": "Endless Worlds",
   "version": "0.4.0",
-  "description": "Live a whole life inside an AI-simulated world. Ships 剑火纪元 as its flagship template.",
+  "description": "Live an entire life, one text turn at a time, in worlds an AI dreams up around your choices — be a blade-master, a smuggler, a monarch, or something no one has tried. Bring your own setting or start from the flagship world, Age of Sword and Flame.",
   "author": "rayrayxu",
   "tags": ["game", "simulation", "narrative"],
   "ui": {
@@ -10,7 +10,7 @@
     "pages": [
       {
         "route": "/endless-worlds",
-        "label": "无限世界",
+        "label": "Endless Worlds",
         "iconUrl": "icon.svg"
       }
     ]
