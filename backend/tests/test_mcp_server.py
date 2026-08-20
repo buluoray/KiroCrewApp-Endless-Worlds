@@ -575,6 +575,33 @@ def test_omitting_a_merge_key_carries_the_whole_block_forward(app):
     assert after["年龄"] == "1岁"
 
 
+def test_a_run_prefix_the_narrator_adds_is_stripped_from_the_run_id():
+    """The addressing hands the run id over bare, but the narrator sometimes
+    prepends run-/run_ (the slot-key shape); a real id is 32 hex and never starts
+    with run, so the prefix is stripped rather than rejected as malformed."""
+    hexid = "a" * 32
+    for bad in (f"run-{hexid}", f"run_{hexid}"):
+        args = {"runId": bad}
+        srv._normalize_run_id_arg(args)
+        assert args["runId"] == hexid, f"{bad} should normalize to the bare id"
+    # A bare id and a genuinely different value are both left untouched.
+    for keep in (hexid, "run-not-a-bare-id", "endless-run-x"):
+        args = {"runId": keep}
+        srv._normalize_run_id_arg(args)
+        assert args["runId"] == keep
+
+
+def test_a_run_prefixed_id_reaches_the_handler_instead_of_being_refused(app):
+    """End to end: a read whose runId carries the stray prefix resolves the run
+    rather than failing with 'malformed run id', so the opening turn is not blocked."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    bare = json.dumps(call("endless_read_runtime", runId=run))
+    prefixed = json.dumps(call("endless_read_runtime", runId=f"run-{run}"))
+    assert "malformed" not in prefixed, "the run- prefix should be tolerated"
+    assert prefixed == bare, "a run-prefixed id must resolve the same run as the bare id"
+
+
 def test_milestones_are_reached_once_and_then_permanent(app):
     """An achievement is recorded the turn its condition first holds, and stays
     recorded afterwards even if the condition later goes false (app-owned)."""

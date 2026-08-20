@@ -553,6 +553,25 @@ STATE_WRITERS = frozenset({"endless_advance_turn"})
 
 _RUN_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
+#: A stored run id is a bare uuid4 hex (store._RUN_ID_RE). The addressing hands it
+#: over bare, but a narrator sometimes prepends "run-"/"run_" (the slot-key shape),
+#: which the store then rejects as malformed and the opening read fails. Since a real
+#: id never starts with "run", that prefix is safe to strip.
+_BARE_RUN_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _normalize_run_id_arg(args: dict[str, Any]) -> None:
+    """Strip a stray ``run-``/``run_`` prefix off ``runId`` in place, when the rest
+    is a bare run id. Tolerates the one id-mangling the narrator model repeats
+    despite the addressing telling it to use the id verbatim."""
+    rid = args.get("runId")
+    if not isinstance(rid, str):
+        return
+    for prefix in ("run-", "run_"):
+        if rid.startswith(prefix) and _BARE_RUN_ID.match(rid[len(prefix):]):
+            args["runId"] = rid[len(prefix):]
+            return
+
 
 def _validate(name: str, args: Any, *, path: str = "") -> None:
     """Validate a call against its declared schema, naming the first bad field.
@@ -1532,6 +1551,10 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
     field is something it can fix on the next attempt.
     """
     try:
+        # A narrator sometimes prepends "run-"/"run_" to the run id despite the
+        # addressing giving it bare; strip it before anything validates or looks it
+        # up, so the opening read does not fail on an id-mangling the model repeats.
+        _normalize_run_id_arg(args)
         # A narrator that double-encodes an object sends it as a JSON STRING, and
         # that string sometimes carries a malformed escape — both would otherwise
         # refuse the whole turn. Recover server-side instead of wasting a round.
