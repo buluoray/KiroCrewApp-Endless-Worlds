@@ -6,7 +6,7 @@ are the change-control contracts; this file only points at them.
 
 ## What this is
 
-Endless Worlds (无限世界) is an external Kiro Crew app: a text life-simulation
+Endless Worlds is an external Kiro Crew app: a text life-simulation
 where a player lives one life at a time inside a world and an LLM **narrator**
 writes each turn. A single Python backend serves a player-facing HTTP surface and
 a separate agent-facing MCP server; two app-owned agents (a narrator and a

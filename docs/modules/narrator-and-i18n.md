@@ -97,8 +97,9 @@ argument.
 
 - **No prompt module carries user-facing language in a string literal — punctuation
   included.** An AST scan of the prompt-building modules rejects CJK in string
-  literals, and the scanned set covers punctuation (fullwidth forms, `、。「」`), not
-  only ideographs, because a hardcoded `、` once joined an English world's field
+  literals, and the scanned set covers punctuation (fullwidth forms such as the
+  ideographic comma, full stop, and corner-bracket quotes), not
+  only ideographs, because a hardcoded ideographic comma once joined an English world's field
   list with a Chinese comma no ideograph-only scan would catch. Separators are
   themselves content. Pinned by
   `test_no_prompt_module_carries_language_in_a_string_literal`,

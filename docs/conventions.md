@@ -17,7 +17,8 @@ this doc states the ones that span all of them.
   `language: zh` world is a Chinese world with a Chinese rulebook, and narrating
   it in English would mismatch its own source material.
 - The no-hardcoded-text rule is guarded, and the guard **includes CJK
-  punctuation** (`、。：「」` and full-width forms), because a hardcoded separator
+  punctuation** (fullwidth forms such as the ideographic comma, full stop, colon,
+  and corner-bracket quotes), because a hardcoded separator
   is content too. See [modules/narrator-and-i18n.md](modules/narrator-and-i18n.md).
 
 ## Player free-text is untrusted input

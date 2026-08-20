@@ -1,6 +1,6 @@
 # Endless Worlds — documentation
 
-Endless Worlds (无限世界) is an external Kiro Crew app: a text life-simulation
+Endless Worlds is an external Kiro Crew app: a text life-simulation
 where a player lives out one life at a time inside a world, and an LLM
 **narrator** writes each turn. This tree records **why the app is built the way
 it is** — the design decisions and the invariants that keep them true — in the

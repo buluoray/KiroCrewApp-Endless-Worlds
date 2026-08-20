@@ -1,461 +1,461 @@
-# Endless Worlds 产品体验审计与路线图
+# Endless Worlds Product Experience Audit and Roadmap
 
-> 审计日期：2026-08-18
-> 审计基线：Endless Worlds v0.3.0
-> 审计范围：玩家流程、叙事交互、存档与长期游玩、移动端与无障碍、产品完整度
+> Audit date: 2026-08-18
+> Audit baseline: Endless Worlds v0.3.0
+> Audit scope: player flow, narrative interaction, saves and long-term play, mobile and accessibility, product completeness
 
-## 目标
+## Goal
 
-本次审计检查 Endless Worlds 已有源码与测试，寻找能够让玩家更顺畅、更容易长期游玩，但目前尚未提供的便利功能。重点不是继续堆叠新系统，而是补齐生命周期、失败恢复和已有底层能力的玩家入口。
+This audit reviews the existing Endless Worlds source and tests, looking for convenience features that would let players play more smoothly and more easily over the long term but that are not yet provided. The focus is not on stacking on more new systems, but on filling out the life cycle, failure recovery, and player entry points to capabilities that already exist underneath.
 
-## 已有基础
+## Existing foundation
 
-以下能力已经存在，不应重复建设：
+The following capabilities already exist and should not be rebuilt:
 
-- 多世界、多人生书架与桌面导航栏。
-- 分页开局、自由输入、单项随机和全部随机。
-- 开局草稿自动保存，离开后可恢复。
-- 预设选择与自由行动走同一条回合提交链路，并有二次确认。
-- 回合幂等、服务器端生成中标记、离开页面后继续生成并自动收敛。
-- Narrator 隔离运行，只能调用本 App 的 MCP 工具，无法访问玩家记忆、文件系统或网络。
-- 状态面板、世界摘要、传闻标记和动态场景基础设施。
-- 分页人生历史，并保存玩家当时采取的行动。
-- 世界删除预检、输入名称确认、并发人数校验和种子世界恢复。
-- 窄屏布局、桌面 rail、reduced-motion 和中英文字符串表。
+- Multi-world, multi-life shelf and desktop navigation bar.
+- Paginated character creation, free-form input, per-item random and all-random.
+- Character-creation drafts auto-save and can be recovered after leaving.
+- Preset selection and free-form action go through the same turn-submission path, with a confirmation step.
+- Turn idempotency, a server-side "generating" marker, and generation that continues after leaving the page and converges automatically.
+- The Narrator runs in isolation, can only call this App's MCP tools, and cannot access player memory, the file system, or the network.
+- Status panel, world summary, rumor markers, and dynamic-scene infrastructure.
+- Paginated life history that also stores the action the player took at the time.
+- World-deletion pre-check, name-confirmation, concurrent-player validation, and seed-world recovery.
+- Narrow-screen layout, desktop rail, reduced-motion, and Chinese/English string tables.
 
-当前产品的主要缺口集中在三类：
+The product's main gaps today fall into three categories:
 
-1. 人生生命周期没有闭环。
-2. 已有底层能力没有玩家入口。
-3. 失败恢复和长线回顾体验不足。
+1. The life cycle has no closed loop.
+2. Existing underlying capabilities have no player entry point.
+3. Failure recovery and long-run review experience are lacking.
 
-## P0：正确性与核心闭环
+## P0: Correctness and the core loop
 
-### 1. 执行世界声明的结局条件
+### 1. Execute the ending conditions a world declares
 
-> **状态：已实现（2026-08-18）。** `backend/view.py` 新增 `resolve_ending(template, state)`，在唯一位置执行所有 `endings` 条件并返回命中的 ending id（世界声明的条件优先于叙事者写入的 `state["ended"]` 标记）；`build_play_view` 据此回传 `ended` 与 `endingId`。`advance_run_turn` 在派发前检查，已结束人生的新回合以稳定的 `reason:"ended"` + `endingId` 拒绝而不再叙事。前端 `play.tsx` 增加终章分支：显示落幕提示、最后一段叙事作为尾声、存活回合数，并提供“在这个世界再活一次”与“回到书架”入口，编年史仍可回看。测试见 `test_view.py`。**仍未做**：`lineage: true` 世界的下一代继承流程（见 P2 §14）。
+> **Status: implemented (2026-08-18).** `backend/view.py` adds `resolve_ending(template, state)`, which evaluates all `endings` conditions in a single place and returns the matched ending id (a world's declared condition takes priority over the narrator-written `state["ended"]` marker); `build_play_view` returns `ended` and `endingId` accordingly. `advance_run_turn` checks before dispatch, and a new turn on an already-ended life is rejected with a stable `reason:"ended"` + `endingId` instead of narrating. The frontend `play.tsx` adds a final-chapter branch: it shows a closing notice, the last narrative segment as an epilogue, the number of turns survived, and provides "live again in this world" and "back to shelf" entry points, with the chronicle still viewable. Tests are in `test_view.py`. **Still not done**: the next-generation inheritance flow for `lineage: true` worlds (see P2 §14).
 
-**现状**
+**Current state**
 
-世界模板可以声明 `endings`，详情页也会展示结局条件数量，但运行时没有统一执行这些条件。`ended` 目前只能依赖 narrator 自己写入状态；即使人生已结束，游玩页和回合路由仍可能允许继续行动。
+A world template can declare `endings`, and the detail page shows the number of ending conditions, but at runtime nothing evaluates those conditions in one place. `ended` currently depends only on the narrator writing state itself; even if a life has ended, the play page and turn route may still allow further actions.
 
-**代码入口**
+**Code entry points**
 
-- `backend/template.py`：`Ending` 和结局条件解析。
-- `backend/view.py`：`build_play_view()` 只读取 `state.ended`。
-- `backend/routes.py`：`advance_run_turn()` 尚无结束态拒绝。
-- `web/src/play.tsx`：没有 `v.ended` 专用分支。
+- `backend/template.py`: `Ending` and ending-condition parsing.
+- `backend/view.py`: `build_play_view()` only reads `state.ended`.
+- `backend/routes.py`: `advance_run_turn()` has no ended-state rejection yet.
+- `web/src/play.tsx`: has no dedicated branch for `v.ended`.
 
-**建议行为**
+**Recommended behavior**
 
-- 在后端唯一位置执行所有 ending 条件，返回命中的 ending ID。
-- 已结束人生拒绝新回合，且重复请求返回稳定的机器可读原因。
-- 游玩页将行动区替换为终章页面。
-- 终章显示存活时长、关键事件、最终状态，并提供重新开一世、导出和整理人生的入口。
-- `lineage: true` 的世界在符合条件时进入继承下一代流程，而不是仅显示徽章。
+- Evaluate all ending conditions in a single place on the backend and return the matched ending ID.
+- Reject new turns for an ended life, and return a stable machine-readable reason for repeated requests.
+- The play page replaces the action area with a final-chapter page.
+- The final chapter shows time survived, key events, final state, and provides entry points to start a new life, export, and organize lives.
+- A `lineage: true` world enters the next-generation inheritance flow when conditions are met, rather than only showing a badge.
 
-### 2. 显示所有已挂载动态场景
+### 2. Show all mounted dynamic scenes
 
-> **状态：已实现（2026-08-18）。** 场景不再是单槽只显示“最新一个提问场景”：`PlayPage` 现在把全部 mounted 场景上报给 app 根，`main.tsx` 按**挂载顺序**为每个场景渲染一个持久 `SceneSlot`（keyed by sceneId，绝不重排——移动 iframe 会重载）。展示型场景（`asks:false` 的地图/账本）因此可见，已回答但未 dismiss 的场景也仍在。`scene: string` 状态改为 `scenes: SceneRow[]`。
-> **仍未做（UX 细化，非阻塞）：** 场景条/标签页与“主动展开非提问场景”的折叠交互；以及 scene 驱动的回合仍未显式传下一回合编号（当前依赖服务端 `current+1` + nonce/已答守卫，安全但非幂等最优）。
+> **Status: implemented (2026-08-18).** Scenes are no longer a single slot showing only "the latest question scene": `PlayPage` now reports all mounted scenes to the app root, and `main.tsx` renders one persistent `SceneSlot` per scene in **mount order** (keyed by sceneId, never reordered -- moving an iframe reloads it). Display-type scenes (maps/ledgers with `asks:false`) are therefore visible, and answered-but-not-dismissed scenes remain as well. The `scene: string` state becomes `scenes: SceneRow[]`.
+> **Still not done (UX polish, non-blocking):** a scene bar / tabs plus "proactively expand a non-question scene" collapse interaction; and scene-driven turns still do not explicitly pass the next turn number (they currently rely on the server's `current+1` + nonce/answered guard, which is safe but not idempotency-optimal).
 
-**现状**
+**Current state**
 
-Narrator 可以挂载 `asks: false` 的地图、账本和其他展示型场景，但前端只选择最新的、尚未回答的提问场景。因此实时生成 UI 的展示型能力已经存在，却不会出现在玩家面前。
+The Narrator can mount `asks: false` maps, ledgers, and other display-type scenes, but the frontend only selects the latest, not-yet-answered question scene. So the display capability of the live-generated UI already exists, but it never appears in front of the player.
 
-**代码入口**
+**Code entry points**
 
-- `backend/mcp_server.py`：`endless_mount_scene`。
-- `backend/view.py`：play view 已返回 mounted scenes。
-- `web/src/play.tsx`：只筛选 `asks && !answered`。
-- `web/src/main.tsx`、`web/src/scene.tsx`：当前只有一个 SceneSlot。
+- `backend/mcp_server.py`: `endless_mount_scene`.
+- `backend/view.py`: the play view already returns mounted scenes.
+- `web/src/play.tsx`: only filters `asks && !answered`.
+- `web/src/main.tsx`, `web/src/scene.tsx`: currently only one SceneSlot.
 
-**建议行为**
+**Recommended behavior**
 
-- 增加场景条或标签页，显示当前全部 mounted scenes。
-- 提问场景仍可自动前置，但非提问场景允许玩家主动打开。
-- 已回答但未 dismiss 的地图或账本仍可回看。
-- scene-driven turn 也必须提交明确的下一回合编号，保持与普通行动相同的幂等语义。
+- Add a scene bar or tabs showing all currently mounted scenes.
+- Question scenes can still auto-surface, but non-question scenes let the player open them proactively.
+- Answered-but-not-dismissed maps or ledgers remain viewable.
+- A scene-driven turn must also submit an explicit next turn number, keeping the same idempotency semantics as a normal action.
 
-### 3. 失败后保留玩家输入并支持重试
+### 3. Preserve player input after failure and support retry
 
-> **状态：已实现（2026-08-18）。** `web/src/play.tsx` 的 `take()` 只在真正推进（`advanced`）、已提交（`already`）或人生终结（`ended`）时清空输入；叙事者未响应时保留玩家写的文本，记住上次未落地的行动，并在 stalled 提示旁给出“再试一次”按钮直接重发同一行动。`ended` 不再被误判为 stalled（改由终章分支接管）。
+> **Status: implemented (2026-08-18).** `take()` in `web/src/play.tsx` only clears input when the turn truly advanced (`advanced`), was already submitted (`already`), or the life ended (`ended`); when the narrator did not respond it keeps the text the player wrote, remembers the last action that did not land, and offers a "try again" button next to the stalled notice that re-sends the same action directly. `ended` is no longer misclassified as stalled (the final-chapter branch now takes over).
 
-**现状**
+**Current state**
 
-当回合请求正常返回但 `advanced == false` 时，前端仍会清空自由输入，然后提示玩家再说一次。网络异常路径反而会保留输入，行为不一致。
+When a turn request returns normally but `advanced == false`, the frontend still clears the free-form input and then asks the player to say it again. The network-error path, on the other hand, preserves the input -- inconsistent behavior.
 
-**代码入口**
+**Code entry points**
 
-- `web/src/play.tsx`：`take()`。
+- `web/src/play.tsx`: `take()`.
 
-**建议行为**
+**Recommended behavior**
 
-- 只在成功推进或确认已提交时清空输入。
-- 保留最后一次行动，并显示“一键重试上次行动”。
-- 区分离线、超时、已有请求正在生成和 narrator 未响应。
-- 瞬时读取失败后，成功加载必须清除旧错误。
+- Clear input only on a successful advance or a confirmed already-submitted state.
+- Preserve the last action and show "retry the last action with one tap".
+- Distinguish offline, timeout, a request already generating, and narrator-did-not-respond.
+- After a transient read failure, a successful load must clear the old error.
 
-### 4. 修复恢复、语言和错误状态
+### 4. Fix recovery, language, and error states
 
-> **状态：已实现（2026-08-18）。**
-> - **语言即时生效（context 重构）：** 渲染语言改为根组件的 React 状态，根在**渲染期同步**写入 `strings.ts` 的模块 `current`（不再放在 effect 里），世界语言一变整棵树立即以新语言重渲染，不再落后一帧。`t()`/`pick()` 仍读模块 `current`，调用点零改动；语言 setter 经 `LanguageContext` 下发（`useSetLanguage`），`play.tsx` 与根的世界加载处调用它。
-> - **失效位置清理 + detail 恢复：** 恢复 `live`/`detail`/`opening` 前先 `api.run`/`api.world` 校验目标仍在，已删除则清掉 remembered location 回到书架（不再打开 404 页）；新增 `detail` 视图的恢复分支。
-> - **各页重试按钮：** 书架、游玩页、世界详情、编年史读取失败都提供“重试/Retry”按钮；书架与游玩页的按钮在 `body` 内，窄屏（rail 隐藏）也可点。
-> - **404：** `get_run` 对不存在的人生已返回 404、无世界返回 422（本次确认，未改）。
+> **Status: implemented (2026-08-18).**
+> - **Language takes effect immediately (context refactor):** the render language becomes React state on the root component, and the root writes the module `current` in `strings.ts` **synchronously during render** (no longer inside an effect), so the moment the world's language changes the whole tree re-renders in the new language, no longer lagging a frame. `t()`/`pick()` still read the module `current`, so call sites change zero; the language setter is distributed via `LanguageContext` (`useSetLanguage`), and `play.tsx` and the root's world-loading site call it.
+> - **Stale-location cleanup + detail recovery:** before recovering `live`/`detail`/`opening`, `api.run`/`api.world` verifies the target still exists; if deleted, the remembered location is cleared and the view returns to the shelf (no longer opening a 404 page); a recovery branch is added for the `detail` view.
+> - **Per-page retry buttons:** the shelf, play page, world detail, and chronicle all offer a "retry / Retry" button when a read fails; the shelf and play-page buttons are inside `body`, so they are tappable on narrow screens (rail hidden) too.
+> - **404:** `get_run` already returns 404 for a nonexistent life and 422 when there is no world (confirmed this pass, unchanged).
 
-- 世界语言变化必须触发 React 重渲染，避免英文世界首次打开仍显示中文 UI。
-- 书架、世界详情、人生页和历史读取失败都应提供重试按钮。
-- 移动端不得依赖仅桌面可见的 rail 才能重新加载。
-- 不存在的人生统一返回 404，而不是未捕获的 `StoreError`/500。
-- 恢复到已删除的人生时，应清除失效的 remembered location 并回到书架。
-- `detail` 视图若写入 remembered location，也必须能够恢复。
+- A change in the world's language must trigger a React re-render, avoiding an English world showing a Chinese UI when first opened.
+- Read failures on the shelf, world detail, life page, and history should all offer a retry button.
+- Mobile must not depend on a desktop-only visible rail to reload.
+- A nonexistent life uniformly returns 404, not an uncaught `StoreError`/500.
+- When recovering to a deleted life, the invalid remembered location should be cleared and the view returned to the shelf.
+- If the `detail` view writes a remembered location, it must also be recoverable.
 
-## P1：高价值便利功能
+## P1: High-value convenience features
 
-### 5. 单独管理人生
+### 5. Manage lives individually
 
-**目标能力**
+**Target capabilities**
 
-- 玩家自定义人生名称。
-- 单独删除一条人生，不影响世界或同世界的其他人生。
-- 归档与取消归档。
-- 将进行中、已结束、已归档分组。
-- 人生行显示世界、模拟风格、当前回合和最后游玩时间。
-- 支持置顶和按状态筛选；数量增长后再增加搜索。
+- Player-customized life names.
+- Delete a single life without affecting the world or other lives in the same world.
+- Archive and un-archive.
+- Group into in-progress, ended, and archived.
+- A life row shows the world, simulation style, current turn, and last-played time.
+- Support pinning and filtering by status; add search once the count grows.
 
-**现有基础**
+**Existing foundation**
 
-`RunStore.delete_run()` 已经负责清理 state、rollback、pending、brief、chronicle 和 index。
+`RunStore.delete_run()` already handles cleanup of state, rollback, pending, brief, chronicle, and index.
 
-**当前状态**
+**Current state**
 
-单独删除人生已落地：`backend/routes.py` 已注册 `POST /runs/{run_id}/delete`（`delete_life`，`routes.py:548/1172`），复用 `RunStore.delete_run()`，前端有 `DeleteLifeDialog`，并有 `test_delete_life.py`。
+Single-life deletion has landed: `backend/routes.py` registers `POST /runs/{run_id}/delete` (`delete_life`, `routes.py:548/1172`), reusing `RunStore.delete_run()`; the frontend has `DeleteLifeDialog`, and there is `test_delete_life.py`.
 
-> **重命名 / 归档 / 分组已实现（2026-08-18）。** 新增 `RunStore.patch_index()`（合并 `label`/`archived` 到索引行，不动 `lastPlayed` 与其它字段）+ `POST /runs/{run_id}/meta`（`set_life_meta`，`label` 空串清除，`archived` 布尔）。`list_runs` 原样透出这两个字段。前端：`LifeRow` 优先显示玩家自定义 `label`，带内联重命名（Enter 保存 / Esc 取消）、归档/取消归档、删除三个控制；书架按**进行中 / 已落幕 / 已归档（可折叠）** 分组；rail 折叠掉已归档人生并同样优先 `label`。测试 `test_store.py::test_patch_index_*`。**仍未做：** 置顶（starred）、按状态/世界筛选与搜索、`lastPlayed` 目前是创建时间（回合提交不刷新索引，属既有限制）。
+> **Rename / archive / grouping implemented (2026-08-18).** Added `RunStore.patch_index()` (merges `label`/`archived` into the index row without touching `lastPlayed` or other fields) + `POST /runs/{run_id}/meta` (`set_life_meta`, an empty `label` string clears it, `archived` is a boolean). `list_runs` passes these two fields through as-is. Frontend: `LifeRow` prefers the player-customized `label`, with inline rename (Enter to save / Esc to cancel), archive/un-archive, and delete controls; the shelf groups by **in-progress / ended / archived (collapsible)**; the rail collapses archived lives and likewise prefers `label`. Test `test_store.py::test_patch_index_*`. **Still not done:** pinning (starred), filtering/search by status/world, and `lastPlayed` is currently the creation time (turn submission does not refresh the index, an existing limitation).
 
-### 6. 前情提要与人生大事记
+### 6. Recap and life chronicle
 
-> **状态：事件时间线已实现（2026-08-18）。** `get_chronicle` 现在把每回合早已存储的 `events`（字符串）与 `gains`（`{field,amount?,source?}`）一并返回；`history.tsx` 在每回合正文下渲染这些标记（gain 带来源），并新增“只看大事”开关——只列出有 events 的回合、隐藏正文，即事件时间线。结局页也复用同一数据：`LifeSummary` 组件读取编年史（最多近 100 回合，对绝大多数人生即全程）并把事件按由早到晚汇成“这一生的大事”，无额外模型调用。**仍未做：** 回到一条人生时的“上次离开前”前情提要横幅。
+> **Status: the event timeline is implemented (2026-08-18).** `get_chronicle` now returns the `events` (strings) and `gains` (`{field,amount?,source?}`) that were already stored per turn; `history.tsx` renders these markers under each turn's body (a gain carries its source) and adds a "big events only" toggle -- listing only turns with events and hiding the body, i.e. an event timeline. The ending page reuses the same data: the `LifeSummary` component reads the chronicle (up to the most recent 100 turns, which for the vast majority of lives is the whole thing) and aggregates events from earliest to latest into "the great events of this life", with no extra model calls. **Still not done:** a "since you last left" recap banner when returning to a life.
 
-**现状**
+**Current state**
 
-每回合已经保存 `events` 和 `gains`，但玩家历史 API 只返回回合、正文和行动。
+Each turn already stores `events` and `gains`, but the player history API only returns the turn, body, and action.
 
-**建议行为**
+**Recommended behavior**
 
-- 回到一条人生时显示无额外模型调用的“上次离开前”。
-- 历史中显示本回合事件、得失及来源。
-- 提供“只看大事”时间线。
-- 结束页复用同一数据生成一生摘要。
+- Show a no-extra-model-call "since you last left" when returning to a life.
+- In history, show that turn's events, gains/losses, and their sources.
+- Provide a "big events only" timeline.
+- The ending page reuses the same data to generate a life summary.
 
-**代码入口**
+**Code entry points**
 
-- `backend/mcp_server.py`：commit chronicle 时写入 `events`、`gains`。
-- `backend/routes.py`：`get_chronicle()` 当前未返回两者。
-- `web/src/history.tsx`：历史展示。
+- `backend/mcp_server.py`: writes `events`, `gains` when committing the chronicle.
+- `backend/routes.py`: `get_chronicle()` currently does not return either.
+- `web/src/history.tsx`: history display.
 
-### 7. 改善长人生的回顾体验
+### 7. Improve the review experience for long lives
 
-> **状态：跳转、事件过滤与全文搜索已实现（2026-08-18）。** `history.tsx` 新增“跳到第 N 回合”输入（用现成的 `?before=N+1` 定位，替换而非追加当前页）、“只看大事”事件过滤，以及全文搜索——`get_chronicle` 支持 `?q=`（对正文/行动/事件不区分大小写子串过滤，在分页前应用，所以翻页翻的是命中项），前端有搜索框/清除/空匹配提示；后端 `?limit=` 已支持一次取到 100 回合。**仍未做：** 单回合折叠展开。
+> **Status: jump-to, event filtering, and full-text search implemented (2026-08-18).** `history.tsx` adds a "jump to turn N" input (using the existing `?before=N+1` to position, replacing rather than appending the current page), a "big events only" event filter, and full-text search -- `get_chronicle` supports `?q=` (case-insensitive substring filter on body/action/events, applied before pagination, so paging pages through the hits), and the frontend has a search box / clear / no-match hint; the backend `?limit=` already supports fetching up to 100 turns at once. **Still not done:** per-turn collapse/expand.
 
-当前历史固定每页 12 回合，只能连续点击“再往前”。建议增加：
+Current history is fixed at 12 turns per page and can only click "further back" repeatedly. Recommend adding:
 
-- 跳到指定回合。
-- 搜索正文与玩家行动。
-- 按关键事件过滤。
-- 单回合折叠与展开。
-- 一次加载更多或按需请求最多 100 回合。
-- 将整条人生导出为连续 Markdown 小说。
+- Jump to a specific turn.
+- Search body and player actions.
+- Filter by key events.
+- Per-turn collapse and expand.
+- Load more at once, or fetch up to 100 turns on demand.
+- Export an entire life as a continuous Markdown novel.
 
-### 8. 开局汇总、重置与复用
+### 8. Character-creation summary, reset, and reuse
 
-> **状态：汇总/重置/草稿体验已实现（2026-08-18）。** `opening.tsx`：最后一页新增“这一世的样子”出生前汇总，逐项列出选择，世界自决项以斜体“交给世界决定”明确标出；新增“全部重置”（有输入时才出现）；带回草稿时显示一次性“已恢复你上次的选择”提示；草稿加 30 天 TTL（过期即忽略），`main.tsx` 在世界列表已知时清除已删除世界的遗留草稿。**复制上一世开局已实现（2026-08-18）：** `create_run` 接受 `fromRunId`，把源人生的开局选择作为新人生的起点（只带玩家自己的选择，世界自决/random 项存 null 被丢弃、由世界重新裁决），结局页新增“以同样的开局再活一次”入口。**仍未做：** 保存为开局预设（跨世界复用一套开局）。
+> **Status: the summary/reset/draft experience is implemented (2026-08-18).** `opening.tsx`: the last page adds a "what this life looks like" pre-birth summary, listing each choice item by item, with world-decided items clearly marked in italic as "left to the world to decide"; adds "reset all" (only appears when there is input); shows a one-time "restored your previous choices" notice when a draft is brought back; drafts get a 30-day TTL (ignored once expired), and `main.tsx` clears leftover drafts for deleted worlds once the world list is known. **Copy the previous life's character creation is implemented (2026-08-18):** `create_run` accepts `fromRunId` and uses the source life's character-creation choices as the starting point of a new life (bringing only the player's own choices; world-decided/random items stored as null are dropped and re-adjudicated by the world), and the ending page adds a "live again with the same start" entry point. **Still not done:** save as a character-creation preset (reuse one start across worlds).
 
-- 出生前汇总所有选择，并明确标出留给世界决定的项目。
-- 增加“全部重置”。
-- 可复制上一世开局，或保存为开局预设。
-- 返回已有草稿时明确显示“已恢复上次选择”。
-- 草稿需要过期或清理策略，避免长期遗留在共享 localStorage。
+- Summarize all choices before birth and clearly mark the items left to the world to decide.
+- Add "reset all".
+- Copy the previous life's character creation, or save it as a character-creation preset.
+- When returning to an existing draft, clearly show "restored previous choices".
+- Drafts need an expiry or cleanup policy to avoid lingering long-term in shared localStorage.
 
-### 9. 提高行动表达能力
+### 9. Improve action expressiveness
 
-- 增加可选的 OOC/补充说明通道，让玩家纠正 narrator 对意图的理解，而不必浪费一个世界回合在剧情内解释。
-- Choice schema 可选携带风险、代价、时间跨度或前置条件。
-- 增加 pacing 控制，例如“细讲这一晚”或“快进三年”。
-- 允许在一生中切换叙述风格；后端已经支持每回合传递 style。
-- 人物、物品和 thread 面板条目可点击填入行动框。
-- 首次游玩可展示自由行动示例，而不仅是“或者做点别的”。
+- Add an optional OOC / clarification channel so a player can correct the narrator's understanding of intent without wasting a world turn explaining in-fiction.
+- The Choice schema can optionally carry risk, cost, time span, or preconditions.
+- Add pacing controls, such as "narrate this night in detail" or "fast-forward three years".
+- Allow switching narration style within a life; the backend already supports passing a style per turn.
+- Person, item, and thread panel entries can be clicked to fill the action box.
+- First-time play can show a free-form action example, not just "or do something else".
 
-## P2：长期游玩能力
+## P2: Long-term play capabilities
 
-### 10. 重来上一回合
+### 10. Redo the previous turn
 
-`RunStore.rollback()` 已保存上一状态，但目前没有玩家入口，而且只回滚 state，不会同步 chronicle、场景和 pending。
+`RunStore.rollback()` already stores the previous state, but there is no player entry point yet, and it only rolls back state -- it does not sync the chronicle, scenes, and pending.
 
-**建议约束**
+**Recommended constraints**
 
-- 第一版只允许重来最新一个已提交回合。
-- 清除 pending，并使原 chronicle 记录显式失效；不要悄悄删除审计历史。
-- 重新建立 narrator session 的 runtime baseline。
-- 明确区分“撤回行动”和“使用同一行动重新叙述”。
+- The first version only allows redoing the most recently submitted turn.
+- Clear pending and explicitly invalidate the original chronicle record; do not silently delete audit history.
+- Re-establish the narrator session's runtime baseline.
+- Clearly distinguish "withdraw the action" from "re-narrate with the same action".
 
-不要直接实现任意历史分支。当前 chronicle 不保存逐回合完整 state，无法从第 20 回合准确还原第 7 回合。若未来需要分支，应先开始写入逐回合 state snapshot。
+Do not directly implement arbitrary history branching. The current chronicle does not store a full per-turn state, so it cannot accurately restore turn 7 from turn 20. If branching is needed in the future, per-turn state snapshots should start being written first.
 
-### 11. 世界与人生导入导出
+### 11. World and life import/export
 
-世界打包已经实现为 `endless_make_pack`，但仅由 narrator MCP 写到服务器目录，玩家无法直接下载，也没有导入能力。
+World export is already implemented as `endless_export_world` (formerly `endless_make_pack`, renamed because it collided with capability-pack generation), but it is only written to a server directory by the narrator MCP -- players cannot download it directly, and there is no import capability. It exports the entire world file and is unrelated to Task 16's capability-pack generation (compile-time, the `compose` primitive).
 
-建议顺序：
+Recommended order:
 
-1. 玩家下载世界包。
-2. 导入世界包并验证 contract、世界 ID 和内容。
-3. 导出完整人生，包括当前状态、chronicle、世界引用和必要场景数据。
-4. 导入人生时重新生成 run ID，绝不覆盖本地现有人生。
-5. 导出前可作为删除人生的安全备份。
+1. Player downloads a world pack.
+2. Import a world pack and validate the contract, world ID, and content.
+3. Export a complete life, including current state, chronicle, world reference, and necessary scene data.
+4. When importing a life, regenerate the run ID and never overwrite an existing local life.
+5. Can serve as a safe backup before deleting a life.
 
-### 12. 后台完成提醒与安全放弃
+### 12. Background-completion notification and safe abandonment
 
-- 显示当前已等待时间。
-- 玩家离开页面后，生成完成时发送 Dashboard 通知。
-- 请求 deadline 后允许安全清理 stale pending。
-- 不允许过早取消，否则可能出现两个 narrator 同时写同一回合。
-- 页面隐藏或离线时降低轮询频率，恢复联网或回到前台时立即 refetch。
+- Show how long has been waited so far.
+- After the player leaves the page, send a Dashboard notification when generation completes.
+- Allow safe cleanup of stale pending after a request deadline.
+- Do not allow premature cancellation, or two narrators might write the same turn simultaneously.
+- Reduce polling frequency when the page is hidden or offline, and refetch immediately on reconnect or returning to the foreground.
 
-### 13. 世界更新与创建
+### 13. World updates and creation
 
-- “有更新版本”提示目前没有行动入口，应允许将新版本安装成独立世界，或明确解释为什么不能覆盖现有世界。
-- 增加世界包导入。
-- 后续可将已有 compiler brief 接到“粘贴规则书并创建世界”的产品流程。
-- 不应直接覆盖承载现有人生的世界定义。
+- The "a newer version exists" hint currently has no action entry point; it should allow installing the new version as a separate world, or clearly explain why an existing world cannot be overwritten.
+- Add world-pack import.
+- Later, the existing compiler brief can be connected to a "paste a rulebook and create a world" product flow.
+- An existing world definition that hosts lives must not be overwritten directly.
 
-### 14. 跨人生与世界连续性
+### 14. Cross-life and world continuity
 
-这是较大的产品方向，不属于近期快赢：
+This is a larger product direction and not a near-term quick win:
 
-- 当前每条人生及 narrator session 都是隔离的，这是正确的隐私边界。
-- 若要让第二条人生继承第一条人生造成的世界历史，应建立独立的、App 专属世界 chronicle，而不是读取玩家个人记忆。
-- 跨人生继承必须由世界模板显式允许，不能成为所有世界的默认行为。
+- Each life and narrator session is currently isolated, which is the correct privacy boundary.
+- To let a second life inherit the world history caused by a first life, an independent, App-specific world chronicle should be built, rather than reading the player's personal memory.
+- Cross-life inheritance must be explicitly allowed by the world template and must not become the default for all worlds.
 
-## 无障碍与操作快赢
+## Accessibility and interaction quick wins
 
-> **状态：主要项已实现（2026-08-18）。** 已做：开局输入用 `aria-label` 命名、开局选项/风格 pill 用 `aria-pressed`、历史与状态抽屉用 `aria-expanded`/`aria-controls`、stalled 与 scene 加载用 `role=status aria-live=polite`、场景 fullscreen 支持 Escape 退出、场景加载显示 pending 文案、`Cmd/Ctrl+Enter` 直接提交自由行动、根节点按世界语言设 `lang`、所有自定义控件加 `:focus-visible` 焦点环。**仍未做：** 44px 触控目标统一梳理、Modal 完整 focus-trap/关闭后 focus restore、字号/行距/阅读宽度偏好（属设置类功能，单独排）。
+> **Status: the main items are implemented (2026-08-18).** Done: character-creation inputs named with `aria-label`, character-creation option/style pills using `aria-pressed`, the history and status drawers using `aria-expanded`/`aria-controls`, stalled and scene loading using `role=status aria-live=polite`, scene fullscreen supporting Escape to exit, scene loading showing pending copy, `Cmd/Ctrl+Enter` to submit a free-form action directly, the root node setting `lang` per the world's language, and all custom controls getting a `:focus-visible` focus ring. **Still not done:** unifying 44px touch targets, full modal focus-trap / focus restore after close, and font-size/line-height/reading-width preferences (a settings-type feature, scheduled separately).
 
-建议在 P1 一并处理：
+Recommend handling these together in P1:
 
-- 开局输入使用真实 `<label>` 或明确的 accessible name。
-- 选项 pill 使用 `aria-pressed` 或 radiogroup 语义。
-- 历史和状态抽屉增加 `aria-expanded`、`aria-controls`。
-- 加载、失败和 stalled 状态使用适当的 live region。
-- Modal 增加 focus trap、关闭后 focus restore，工作中禁止 Escape/scrim 关闭。
-- 自定义按钮统一 focus ring。
-- 主要触控目标达到 44px。
-- Scene fullscreen 支持 Escape 退出。
-- Scene 加载过程显示 pending 状态。
-- `Cmd/Ctrl+Enter` 用于提交或确认自由行动。
-- 增加字号、行距和阅读宽度偏好。
-- 根节点根据世界语言设置正确的 `lang`。
+- Character-creation inputs use a real `<label>` or an explicit accessible name.
+- Option pills use `aria-pressed` or radiogroup semantics.
+- The history and status drawers add `aria-expanded`, `aria-controls`.
+- Loading, failure, and stalled states use appropriate live regions.
+- Modals add a focus trap and focus restore after close, and forbid Escape/scrim close while working.
+- Custom buttons get a unified focus ring.
+- Primary touch targets reach 44px.
+- Scene fullscreen supports Escape to exit.
+- Scene loading shows a pending state.
+- `Cmd/Ctrl+Enter` submits or confirms a free-form action.
+- Add font-size, line-height, and reading-width preferences.
+- The root node sets the correct `lang` per the world's language.
 
-## 第二轮并行审计补充（2026-08-18，去重后净新增）
+## Second-round parallel audit addendum (2026-08-18, net-new after dedup)
 
-> 第二轮用 4 个并行 agent 分别复审存档管理、回合机制、前端 UI、动态内容与世界系统。以下仅列出上文尚未覆盖的项；结局闭环、动态场景全显示、失败重试、单独管理人生、前情提要/事件时间线、长历史导航、开局汇总/复用、OOC 通道、回合重来、导入导出、无障碍等均已在前文覆盖，不再重复。
+> The second round used 4 parallel agents to separately re-review save management, turn mechanics, frontend UI, and dynamic content plus the world system. Only items not already covered above are listed here; the ending loop, showing all dynamic scenes, failure retry, managing lives individually, recap/event timeline, long-history navigation, character-creation summary/reuse, the OOC channel, turn redo, import/export, accessibility, and so on are all covered earlier and not repeated.
 
-### N1（并入 P0）：面板 primitive 声明了却运行时丢弃
+### N1 (folded into P0): panel primitives are declared but discarded at runtime
 
-> **状态：people 与 inventory 已修（2026-08-18）。** `backend/view.py` 的 `_shape` 现接收字段 `options`：`people` 按声明的 `attributes` 列保留每个人的属性值（态度/亲密度/身份），无声明时仍为 name+note 原状；`inventory` 保留每件物品的 `count`/`note`（“三瓶药水”不再与“一瓶”同形）。前端 `ui.tsx` 渲染人物列与物品数量，`ShapedField` 类型相应更新。测试见 `test_view.py`（`test_people_carry_declared_attribute_columns`、`test_an_inventory_keeps_count_and_note`）。
-> **仍未做（需存储/新路由，非“快且安全”）：** `resource` 的 `delayed` 后果账本、`trend` 的历史序列（sparkline）——两者都要在 store 侧记录逐回合数值或未结算项，留待专门一版。
+> **Status: people and inventory are fixed (2026-08-18).** `_shape` in `backend/view.py` now takes a field `options`: `people` preserves each person's attribute values (attitude/closeness/identity) per the declared `attributes` columns, and stays name+note when nothing is declared; `inventory` preserves each item's `count`/`note` ("three potions" is no longer identical in shape to "one bottle"). The frontend `ui.tsx` renders the person columns and item counts, and the `ShapedField` type is updated accordingly. Tests are in `test_view.py` (`test_people_carry_declared_attribute_columns`, `test_an_inventory_keeps_count_and_note`).
+> **Still not done (needs storage / a new route, not "fast and safe"):** the `delayed`-consequence ledger for `resource`, and the historical series (sparkline) for `trend` -- both require recording per-turn values or unsettled items on the store side, left for a dedicated version.
 
-模板与编译简报承诺的字段在 `backend/view.py` 的 `_shape()` 里被压扁，属于和 P0#1 同类的“世界声明未兑现”正确性问题——编译出的世界包带着这些声明，玩家侧什么都不会发生。
+Fields promised by the template and compiler brief are flattened in `_shape()` in `backend/view.py`, which is the same class of "the world declared it but it is not honored" correctness problem as P0#1 -- the compiled world pack carries these declarations, yet nothing happens on the player side.
 
-- `people`：`_shape` 只输出 `("name","note")` 两列（`view.py:126`），丢弃 `COMPILER_BRIEF` 承诺的 `attributes` 列（`compile.py:134-135`）。NPC 的态度/亲密度/身份无处展示。
-- `inventory`：dict 物品被压成纯字符串（`view.py:131-135`），数量、描述、分类全丢。“三瓶药水”和“一瓶”在界面上无差别。
-- `resource` 的 `delayed: true`：简报承诺“会被花掉、且变化有延迟后果”（`compile.py:137-138`），但 `_shape` 未读取 `delayed`，与 `stat` 无异，也没有任何“未结算后果”的记录结构。
-- `trend`：只回 `value/direction/note` 字符串，无历史序列，尽管每回合完整 state 快照已在磁盘（chronicle）。
+- `people`: `_shape` only outputs the `("name","note")` columns (`view.py:126`), discarding the `attributes` columns promised by `COMPILER_BRIEF` (`compile.py:134-135`). An NPC's attitude/closeness/identity has nowhere to be shown.
+- `inventory`: dict items are flattened into plain strings (`view.py:131-135`), losing count, description, and category. "Three potions" and "one bottle" are indistinguishable in the UI.
+- `resource` with `delayed: true`: the brief promises "will be spent, and changes have delayed consequences" (`compile.py:137-138`), but `_shape` does not read `delayed`, making it no different from `stat`, and there is no "unsettled consequence" record structure.
+- `trend`: only returns the `value/direction/note` strings, with no historical series, even though the full per-turn state snapshot is already on disk (chronicle).
 
-**建议**：`_shape` 的 people/inventory 分支保留声明的列与数量；`resource` 二选一——要么从简报删掉承诺，要么在 store 加 pending-consequences 账本并在 `advance_turn` 提示叙事者；`trend` 可新增 `GET /runs/{id}/series?path=` 从 chronicle 抽取历史值。
+**Recommendation**: the people/inventory branches of `_shape` preserve the declared columns and counts; for `resource`, pick one -- either remove the promise from the brief, or add a pending-consequences ledger in the store and prompt the narrator in `advance_turn`; for `trend`, add a `GET /runs/{id}/series?path=` that extracts historical values from the chronicle.
 
-### N2（并入 P1）：已有能力仍缺玩家入口
+### N2 (folded into P1): existing capabilities still lack a player entry point
 
-> **状态：三项已实现（2026-08-18）。** (1) 章节解锁提示：`get_run` 用 `store.read_prev` 对比上一状态与当前，经 `opened_since` 算出本回合新开章节，映射成世界自己的 heading，`build_play_view` 新增 `unlocked` 字段透传，游玩页顶部以“翻开了新的篇章：《…》”安静提示（用世界措辞，不泄漏实现词汇；首回合 prev 为空不误报）。(2) 世界设定原文入口：`api.world(id, true)` 请求 `?prose=1`，`WorldDetailView` 加“读读这个世界的设定”折叠区。(3) 世界卡足迹：`main.tsx` 按 `worldId` 聚合 `runs` 传入 `WorldCard`，显示“你在这里活过 n 次”。测试 `test_store.py::test_read_prev_*`、`test_view.py::test_unlocked_chapters_*`。
+> **Status: three items implemented (2026-08-18).** (1) Chapter-unlock hint: `get_run` uses `store.read_prev` to compare the previous state with the current one, computes the chapters newly opened this turn via `opened_since`, maps them to the world's own heading, and `build_play_view` adds an `unlocked` field to pass it through; the top of the play page quietly hints "a new chapter opened: <...>" (in the world's wording, without leaking implementation vocabulary; a first turn with an empty prev does not false-fire). (2) World-lore-text entry point: `api.world(id, true)` requests `?prose=1`, and `WorldDetailView` adds a "read this world's setting" collapsible section. (3) World-card footprint: `main.tsx` aggregates `runs` by `worldId` and passes them into `WorldCard`, showing "you have lived here n times". Tests `test_store.py::test_read_prev_*`, `test_view.py::test_unlocked_chapters_*`.
 
-- **章节解锁提示**：`backend/chapters.py` 的 `opened_since()` 已能算出本回合新解锁的章节，但 `view.py`/`routes.py` 都不回传，玩家错过“世界为你打开了魔法体系这一章”的进度感时刻。落点 `build_play_view` 加 `unlocked`，**必须用世界自己的 heading 措辞，不得泄漏 chapter/disclosure 等实现词汇**（R25.2）。难度：低。
-- **世界设定原文入口**：详情页从不请求 `?prose=1`，玩家看不到世界 lore 全文（后端已支持）。落点 `web/src/library.tsx`。难度：低。
-- **世界卡足迹计数**：世界卡只讲静态配置，不讲玩家自己的足迹。按 `worldId` 聚合已有 `runs` 传入 `WorldCard`，显示“我在这里活过 n 次”。落点 `web/src/main.tsx`。难度：低。
+- **Chapter-unlock hint**: `opened_since()` in `backend/chapters.py` can already compute the chapters newly unlocked this turn, but neither `view.py` nor `routes.py` passes it through, so the player misses the sense of progress in "the world opened the magic-system chapter for you". Landing spot: `build_play_view` adds `unlocked`, and it **must use the world's own heading wording and must not leak implementation vocabulary like chapter/disclosure** (R25.2). Difficulty: low.
+- **World-lore-text entry point**: the detail page never requests `?prose=1`, so the player cannot see the world's full lore text (the backend already supports it). Landing spot: `web/src/library.tsx`. Difficulty: low.
+- **World-card footprint count**: the world card only talks about static config, not the player's own footprint. Aggregate the existing `runs` by `worldId` and pass them into `WorldCard`, showing "I have lived here n times". Landing spot: `web/src/main.tsx`. Difficulty: low.
 
-### N3（并入 P1/无障碍）：阅读与沉浸体验
+### N3 (folded into P1/accessibility): reading and immersion experience
 
-- **当前回合与历史的连续阅读流**：游玩页只显示当前一回合正文，上一回合要开抽屉去 History；把最近 1–2 条 chronicle 接在当前正文之上，恢复叙事连续感（`api.chronicle` 已有）。落点 `web/src/play.tsx`。难度：中。
-- **阅读/沉浸模式**：一个开关隐藏 rail 与右侧面板，专心读长叙事。落点 `web/src/main.tsx` + `styles.css`。难度：低。
-- **正文段落摘录/收藏**：叙事是这个 App 唯一产出物，却无法标记喜欢的段落，翻页即失。难度：低～中。
-- **骨架屏加载态**：所有加载态都是一行文字，数据到达瞬间整体跳变；改为骨架屏。难度：低。
-- **移动端面板可粘附**：<900px 时面板只在抽屉里，打字与看状态互斥；改为可 sticky 的摘要条。落点 `web/src/play.tsx`。难度：中。
+- **A continuous reading flow across the current turn and history**: the play page only shows the current turn's body, and the previous turn requires opening the drawer to History; splice the most recent 1-2 chronicle entries above the current body to restore narrative continuity (`api.chronicle` already exists). Landing spot: `web/src/play.tsx`. Difficulty: medium.
+- **Reading / immersion mode**: a toggle that hides the rail and the right-side panel to focus on reading long narrative. Landing spot: `web/src/main.tsx` + `styles.css`. Difficulty: low.
+- **Excerpt / bookmark a body paragraph**: narrative is this App's only product, yet there is no way to mark a favorite paragraph -- turn the page and it is lost. Difficulty: low to medium.
+- **Skeleton loading states**: every loading state is a single line of text, and the layout jumps abruptly the instant data arrives; switch to skeleton screens. Difficulty: low.
+- **A pinnable panel on mobile**: below 900px the panel is only in a drawer, so typing and checking status are mutually exclusive; switch to a sticky-able summary bar. Landing spot: `web/src/play.tsx`. Difficulty: medium.
 
-### N4（并入 P2）：世界表现层
+### N4 (folded into P2): the world presentation layer
 
-- **scene widget 缺空间/关系类元素**：现有 `ELEMENT_KINDS` 10 种全是线性排版（`widget.py:52-54`：heading/text/note/stat/bar/keyvalue/list/table/choice/divider），工具描述里写着“a map”却没有任何元素能画地图或关系网。建议加受约束的封闭 kind：`grid`（固定行列的区域地图）、`links`（节点+边的关系图）、`tree`（父子层级的技能树/家族谱），**几何全部由后端在 `widget.py` 生成，叙事者只提供关系不提供坐标**，守住“模型字节不直接进 DOM”的信任边界。难度：中高。
-- **成就/里程碑系统**：零实现。header 加 `milestones: [{id, label, when}]`，**直接复用现成的 `Condition` 解释器**（机制成本近乎为零），每轮 commit 后求值，达成项写入 `RESERVED_STATE_KEYS` 保留字段（已有 carry-forward），view 回传本轮新达成项。难度：中（“只触发一次”的持久化需小心）。
+- **Scene widgets lack spatial/relational elements**: the existing 10 `ELEMENT_KINDS` are all linear layout (`widget.py:52-54`: heading/text/note/stat/bar/keyvalue/list/table/choice/divider); the tool description says "a map" yet no element can draw a map or a relationship graph. Recommend adding constrained, closed kinds: `grid` (a region map with fixed rows and columns), `links` (a relationship graph of nodes + edges), `tree` (a skill tree / family tree of parent-child hierarchy), with **all geometry generated by the backend in `widget.py` and the narrator providing only relationships, not coordinates**, holding the "model bytes do not go straight into the DOM" trust boundary. Difficulty: medium-high.
+- **Achievement / milestone system**: zero implementation. The header adds `milestones: [{id, label, when}]`, **directly reusing the existing `Condition` interpreter** (near-zero mechanism cost), evaluated after each commit; achieved items are written to a reserved field in `RESERVED_STATE_KEYS` (which already has carry-forward), and the view returns the items newly achieved this turn. Difficulty: medium (the "fires only once" persistence needs care).
 
-## 推荐实施路线
+## Recommended implementation route
 
-### 第一批：正确性闭环
+### Batch one: the correctness loop
 
-1. 执行结局条件、禁止结束后继续行动、增加终章。
-2. 显示全部动态场景。
-3. 失败输入保留与重试。
-4. 修复语言、移动端重试、失效位置和 404/500。
+1. Evaluate ending conditions, forbid further actions after ending, and add the final chapter.
+2. Show all dynamic scenes.
+3. Preserve failed input and retry.
+4. Fix language, mobile retry, stale location, and 404/500.
 
-### 第二批：日常游玩便利
+### Batch two: everyday play convenience
 
-1. 完成并验证单独删除人生。
-2. 增加人生重命名、归档、分组和元数据。
-3. 增加前情提要、事件时间线和长历史导航。
-4. 增加开局汇总、重置和复用。
-5. 完成键盘与无障碍改善。
+1. Complete and verify single-life deletion.
+2. Add life rename, archive, grouping, and metadata.
+3. Add recap, event timeline, and long-history navigation.
+4. Add character-creation summary, reset, and reuse.
+5. Complete keyboard and accessibility improvements.
 
-### 第三批：长期价值
+### Batch three: long-term value
 
-1. 世界与人生导入导出。
-2. 重来上一回合。
-3. 后台完成通知与安全放弃。
-4. 开始保存逐回合状态快照，为未来历史分支铺路。
-5. 设计 lineage 下一代与可选的世界级连续性。
+1. World and life import/export.
+2. Redo the previous turn.
+3. Background-completion notification and safe abandonment.
+4. Start saving per-turn state snapshots to pave the way for future history branching.
+5. Design lineage next-generation and optional world-level continuity.
 
-## 决策原则
+## Decision principles
 
-- 先修产品承诺和数据正确性，再加新世界或新面板。
-- 优先暴露已经存在的底层能力，而不是创建平行机制。
-- 回合重来必须维护 state、chronicle、scene 和 narrator baseline 的一致性。
-- 完整历史分支必须建立在逐回合状态快照之上。
-- Narrator 隔离和玩家记忆隔离是产品边界，便利功能不得绕过它。
+- Fix product promises and data correctness first, then add new worlds or new panels.
+- Prefer exposing capabilities that already exist underneath, rather than creating parallel mechanisms.
+- Turn redo must maintain consistency across state, chronicle, scene, and narrator baseline.
+- Full history branching must be built on top of per-turn state snapshots.
+- Narrator isolation and player-memory isolation are product boundaries, and convenience features must not bypass them.
 
 ## Mobile frontend deep audit
 
-> 深审日期：2026-08-19
-> 基线：当前 `main`（`0b807f1`），手机设计下限 320px，按 320 / 360 / 390 / 430 / 768 / 900 / 1100px 检查。
-> 方法：4 路独立源码审计后逐项回看当前 TSX/CSS。当前 host 未安装 Browser 驱动，且已安装 app bundle 与源码 bundle 不同，因此本节把确定性的 DOM/CSS 缺陷标为“源码确认”，把必须看真实像素的项目留在验证矩阵，不用旧安装包截图代替证据。
+> Deep-audit date: 2026-08-19
+> Baseline: current `main` (`0b807f1`), phone design floor 320px, checked at 320 / 360 / 390 / 430 / 768 / 900 / 1100px.
+> Method: after 4 independent parallel source audits, each item was re-checked against the current TSX/CSS. The current host has no Browser driver installed, and the installed app bundle differs from the source bundle, so this section marks deterministic DOM/CSS defects as "source-confirmed" and leaves items that require looking at real pixels in the verification matrix, rather than substituting screenshots from an old install package as evidence.
 
-本轮确认现有布局有良好基础：CSS 是 narrow-first；320–767px 使用 16px gutter；rail 只在 1100px 以上出现；面板 sidebar 只在 900px 以上出现，手机有 drawer 替代；正文保持 16px / 1.85 / 66ch；关键 choice 是 48px，主按钮、返回、输入框和 drawer 是 44px；`prefers-reduced-motion` 已完整覆盖现有动画。以下问题是在这些基础上的具体断点，而不是建议推翻现有响应式结构。
+This round confirms the existing layout has a solid foundation: the CSS is narrow-first; 320-767px uses a 16px gutter; the rail only appears above 1100px; the panel sidebar only appears above 900px, with a drawer replacement on phones; the body stays at 16px / 1.85 / 66ch; key choices are 48px, and the primary button, back, input box, and drawer are 44px; `prefers-reduced-motion` already fully covers existing animations. The problems below are specific breakpoints on top of that foundation, not a suggestion to overturn the existing responsive structure.
 
 ### Critical mobile blockers
 
-#### M0.1 Scene 放大后 iframe 高度为 0
+#### M0.1 Scene iframe height is 0 after zoom
 
-**状态：源码确认；跨宽度必现。**
+**Status: source-confirmed; occurs at all widths.**
 
-- `web/src/styles.css:559-566`：`.ew-slot-full` 使用 `position: absolute; inset: 0; height: auto`，但最近的 positioned ancestor 是 `.ew-slot-wrap { position: relative }`，不是注释所指的 `.ew-root`。
-- `web/src/scene.tsx:100-126`：full 状态下 iframe 和按钮栏都脱离文档流；wrapper 没有 in-flow child，内容高度坍缩为 0，iframe 的 top/bottom 也只能解出 0 高。
-- 手机上常规 scene 已固定为 320px，放大是查看复杂场景的唯一出口，因此不是装饰性问题。
+- `web/src/styles.css:559-566`: `.ew-slot-full` uses `position: absolute; inset: 0; height: auto`, but the nearest positioned ancestor is `.ew-slot-wrap { position: relative }`, not the `.ew-root` the comment refers to.
+- `web/src/scene.tsx:100-126`: in the full state both the iframe and the button bar leave the document flow; the wrapper has no in-flow child, the content height collapses to 0, and the iframe's top/bottom can only resolve to 0 height.
+- On phones a regular scene is fixed at 320px, and zooming is the only way out to view a complex scene, so this is not a cosmetic problem.
 
-**建议**：让 full scene 保持 in-flow（例如 wrapper 负责 overlay 几何），或把 full class 放到 wrapper 上；同时增加 Escape 退出、`aria-expanded`，并保留同一个 iframe DOM 节点不移动的现有正确约束。
+**Recommendation**: keep the full scene in-flow (for example, the wrapper owns the overlay geometry), or put the full class on the wrapper; also add Escape to exit and `aria-expanded`, and preserve the existing correct constraint that the same iframe DOM node does not move.
 
-#### M0.2 删除确认弹窗可能出现在当前视口之外
+#### M0.2 The delete-confirmation dialog can appear outside the current viewport
 
-**状态：源码确认；长书架/长详情页滚动后触发。**
+**Status: source-confirmed; triggered after scrolling a long shelf / long detail page.**
 
-- `web/src/styles.css:213-227`：`.ew-modal-wrap` 是相对整个 `.ew-root` 的 absolute box；panel 固定在 root 顶部 `4vh`，不是当前 viewport 顶部。
-- `web/src/confirm.tsx:87,219`：两种删除弹窗都使用同一结构，打开时只 focus panel，没有 `scrollIntoView`。
-- 从长列表底部点删除时，当前视口可能只看到 scrim，dialog 在上方数屏之外。输入框又 `autoFocus`，15px 字号会触发 iOS focus zoom，键盘进一步缩小可用区域。
+- `web/src/styles.css:213-227`: `.ew-modal-wrap` is an absolute box relative to the entire `.ew-root`; the panel is fixed at `4vh` from the top of the root, not the top of the current viewport.
+- `web/src/confirm.tsx:87,219`: both delete dialogs use the same structure and only focus the panel on open, with no `scrollIntoView`.
+- When deleting from the bottom of a long list, the current viewport may only show the scrim, with the dialog several screens above. The input also `autoFocus`es, and the 15px font size triggers iOS focus zoom, with the keyboard further shrinking the usable area.
 
-**建议**：保持 overlay 不遮住 host chrome 的边界，但在打开时把 panel 滚入可见区；用 `dvh` 约束 dialog body、sticky action bar、16px 输入字号；删除 working 时禁止 scrim/Escape 关闭。
+**Recommendation**: keep the overlay boundary from covering the host chrome, but scroll the panel into view on open; use `dvh` to constrain the dialog body, a sticky action bar, and a 16px input font; forbid scrim/Escape close while a delete is working.
 
-#### M0.3 手机系统 Back/边缘返回不会回到 app 上一层
+#### M0.3 The phone system Back / edge-swipe back does not go to the app's previous layer
 
-**状态：源码确认。**
+**Status: source-confirmed.**
 
-`web/src/main.tsx` 的 shelf/detail/opening/live 全是 React state；源码没有 `pushState`、`popstate` 或 hash 路由。Android 系统 Back 与 iOS 返回手势会退出 dashboard 当前页面，而不是 detail → shelf、opening → detail 或 live → shelf。现有可见返回按钮仍应保留，但浏览器历史必须反映用户进入的层级。
+The shelf/detail/opening/live in `web/src/main.tsx` are all React state; the source has no `pushState`, `popstate`, or hash routing. The Android system Back and the iOS back gesture exit the current dashboard page rather than going detail -> shelf, opening -> detail, or live -> shelf. The existing visible back button should still be kept, but the browser history must reflect the layer the user entered.
 
-#### M0.4 提问 scene 位于整页末尾，回答时没有等待反馈
+#### M0.4 A question scene sits at the very end of the page, with no waiting feedback when answering
 
-**状态：源码确认；实际“离首屏几屏”需真实数据复测。**
+**Status: source-confirmed; the actual "how many screens from the fold" needs re-testing with real data.**
 
-- `web/src/main.tsx:347` 把唯一 `SceneSlot` 挂在 `.ew-shell` 之后；`web/src/play.tsx` 只把 scene id 上报，没有 notice、anchor 或 `scrollIntoView`。手机上 scene 会出现在正文、choice、输入区和两个 drawer 之后。
-- `onSceneChoice` 直接等待 `answerScene` + `takeTurn`，没有接入 PlayPage 的 tapped/phrase/busy 状态；直到整轮完成才 refresh。一次可能耗时几十秒的 scene 点击看起来像没有响应。
+- `web/src/main.tsx:347` mounts the single `SceneSlot` after `.ew-shell`; `web/src/play.tsx` only reports the scene id, with no notice, anchor, or `scrollIntoView`. On phones the scene appears after the body, choices, input area, and two drawers.
+- `onSceneChoice` directly awaits `answerScene` + `takeTurn`, without hooking into PlayPage's tapped/phrase/busy state; it does not refresh until the whole turn completes. A scene tap that may take tens of seconds looks like it did not respond.
 
-**建议**：PlayPage 内显示 scene 到达通知/入口并把 scene 滚入可见区；scene 回答复用普通行动的 waiting 与幂等 turn 语义。
+**Recommendation**: PlayPage shows a scene-arrival notice/entry point and scrolls the scene into view; scene answers reuse the waiting and idempotent-turn semantics of a normal action.
 
-#### M0.5 一次轮询读取失败会永久盖住后来成功的数据
+#### M0.5 A single polling read failure permanently masks later successful data
 
-**状态：源码确认。**
+**Status: source-confirmed.**
 
-`web/src/play.tsx:50-56` 的 `load()` 失败时设置 `error`，成功时只 `setV`，不清除旧 error；渲染又先判断 `error`。生成中每 3 秒的轮询即使后来成功，玩家仍停留在错误页。在移动网络切换、短暂离线和后台恢复时影响最高。
+`load()` in `web/src/play.tsx:50-56` sets `error` on failure and, on success, only calls `setV` without clearing the old error; the render checks `error` first. During generation, even if the 3-second polling later succeeds, the player stays on the error page. Impact is highest during mobile network switches, brief offline periods, and background recovery.
 
 ### Layout defects by viewport
 
-#### 320–430px
+#### 320-430px
 
-- **长 chip 可制造整页横向滚动（源码确认）**：`.ew-chip` 使用 `white-space: nowrap` 且没有 max-width；库存、rank、world style、opening label 与 digest category 都可来自世界或 narrator，不能假设字符串短。应允许单个 chip 在必要时换行或截断后提供完整值。
-- **digest flex row 不能可靠收缩（源码确认）**：`.ew-dcat` 是 `flex: 0 0 auto`，正文 sibling 无 `min-width: 0` / `overflow-wrap`；长 category 或无断点 token 会撑宽页面。
-- **正文长 token 没有 containment（源码确认）**：`.ew-prose` 缺少 `overflow-wrap: anywhere`，code/pre 也没有局部横向滚动策略。普通 CJK 正文默认换行是正确的，不应全局使用 `break-all`。
-- **history 打开后把 panels drawer 推到整段历史之后（源码确认）**：`play.tsx` 顺序是 history button → 全部 History → panels button。历史越长，查看当前状态的入口越难到达。两个辅助面板应并列成 tabs/disclosure，或固定入口而不是彼此推远。
-- **choice 二次确认可能生成在 fold 以下（设计缺陷，需像素确认）**：点击最后一个 choice 后，confirm row 插在该 choice 下方，但无 `scrollIntoView`。选择会亮起，提交控制可能不在视口内。
-- **输入区是不可换行的单行 flex（潜在 i18n 缺陷）**：当前中英文短标签尚能放下，但 textarea 可被更长 locale 的按钮压成很窄的 sliver。为输入设置可用最小宽度，并允许 row 在约束不足时换行。
-- **scene 常规高度固定 320px（需真实场景确认）**：在 320×568 上约占 56% 屏高；目前唯一放大出口又被 M0.1 破坏。修 M0.1 后再决定 `min()`/`dvh` 策略，不应先武断缩短。
+- **A long chip can create full-page horizontal scroll (source-confirmed)**: `.ew-chip` uses `white-space: nowrap` and has no max-width; inventory, rank, world style, opening label, and digest category can all come from the world or the narrator, so the string cannot be assumed short. A single chip should be allowed to wrap when necessary, or truncate and provide the full value.
+- **The digest flex row cannot shrink reliably (source-confirmed)**: `.ew-dcat` is `flex: 0 0 auto`, and the body sibling has no `min-width: 0` / `overflow-wrap`; a long category or an unbreakable token stretches the page wide.
+- **Long body tokens have no containment (source-confirmed)**: `.ew-prose` lacks `overflow-wrap: anywhere`, and code/pre have no local horizontal-scroll strategy. The default wrapping of normal CJK body text is correct, and `break-all` should not be used globally.
+- **Opening history pushes the panels drawer after the entire history section (source-confirmed)**: the order in `play.tsx` is history button -> the entire History -> panels button. The longer the history, the harder the entry point to check current status becomes. The two auxiliary panels should sit side by side as tabs/disclosure, or the entry points fixed rather than pushed apart.
+- **The choice confirmation can render below the fold (design defect, needs pixel confirmation)**: after clicking the last choice, the confirm row is inserted below that choice, but with no `scrollIntoView`. The choice lights up, but the submit control may not be in the viewport.
+- **The input area is a non-wrapping single-line flex (potential i18n defect)**: current short Chinese/English labels still fit, but the textarea can be squeezed into a very narrow sliver by a longer locale's button. Set a usable minimum width for the input and allow the row to wrap when the constraints are insufficient.
+- **The scene's regular height is fixed at 320px (needs real-scene confirmation)**: on 320x568 it occupies about 56% of screen height; the only zoom-out currently is broken by M0.1. Decide the `min()`/`dvh` strategy after fixing M0.1, rather than arbitrarily shortening it first.
 
 #### 768px transition
 
-- gutter 从 16px 变为 24px，仍保持单列阅读；没有发现双栏提前挤压的问题。
-- 需要在 768px 两侧复测 opening action bar：`.ew-spacer` 在 mobile wrap 时只是残留的桌面右对齐机制，可能产生不自然的孤立空位。
+- The gutter changes from 16px to 24px, still single-column reading; no premature two-column squeeze was found.
+- The opening action bar needs re-testing on both sides of 768px: `.ew-spacer` is just a leftover desktop right-alignment mechanism when it wraps on mobile, and may produce an unnatural isolated gap.
 
 #### 900px transition
 
-- **history 被错误隐藏（源码确认）**：`@media (min-width: 900px) { .ew-drawer { display: none } }` 同时隐藏 history 与 panel drawer；只有 panel 有 `.ew-aside` 替代，history 没有。900–1099px 连 rail 也没有，因此 history 完全不可达；1100px 以上同样没有替代入口。
-- **结束人生没有 panels（源码确认）**：ended branch 只渲染 history，不渲染 `panels` 或 `.ew-aside`，所有宽度都无法查看最终状态。
+- **History is hidden by mistake (source-confirmed)**: `@media (min-width: 900px) { .ew-drawer { display: none } }` hides both the history and the panel drawer; only the panel has a `.ew-aside` replacement, history does not. Between 900-1099px there is no rail either, so history is entirely unreachable; above 1100px there is likewise no replacement entry point.
+- **An ended life has no panels (source-confirmed)**: the ended branch only renders history, not `panels` or `.ew-aside`, so the final state cannot be viewed at any width.
 
 #### 1100px transition
 
-- rail 与阅读列的 grid 分工正确，inline back 被 rail 的永久 shelf 入口替代也合理。
-- `.ew-rail` 使用 `max-height: calc(100vh - 120px)`，高度依赖 host chrome 的硬编码猜测；真实 dashboard 容器若不是 viewport scroller，sticky/高度可能不符合预期。该项必须在 host 内实测，不能仅凭源码判失败。
+- The grid division of labor between the rail and the reading column is correct, and replacing inline back with the rail's permanent shelf entry point is also reasonable.
+- `.ew-rail` uses `max-height: calc(100vh - 120px)`, a height that depends on a hard-coded guess about the host chrome; if the real dashboard container is not the viewport scroller, sticky/height may not behave as expected. This item must be tested for real inside the host and cannot be judged failed from source alone.
 
 ### Touch, keyboard and accessibility
 
-本轮把 44px 平台惯例与 WCAG 2.2 AA 的 24px target-size floor 分开评级。当前没有确认到 `<24×24` 且间距也不满足的 SC 2.5.8 失败；以下是重要的 44px 惯例缺口：
+This round rates the 44px platform convention separately from WCAG 2.2 AA's 24px target-size floor. No SC 2.5.8 failure of `<24x24` with insufficient spacing was confirmed; the following are important 44px-convention gaps:
 
-- `.ew-opt`、`.ew-btn-sm`、`.ew-btn-quiet`、`.ew-slot-btn` 是 36px。优先提升 choice 二次确认、opening option、删除和 scene zoom。
-- `.ew-input` 与行动 textarea 是 15px，iOS 聚焦会自动放大；改为至少 16px。
-- 多个按钮移除了 `-webkit-tap-highlight-color`，却没有自有 `:active` 反馈，触摸时像没有点中。
+- `.ew-opt`, `.ew-btn-sm`, `.ew-btn-quiet`, `.ew-slot-btn` are 36px. Prioritize raising the choice confirmation, opening option, delete, and scene zoom.
+- `.ew-input` and the action textarea are 15px, and iOS auto-zooms on focus; change to at least 16px.
+- Several buttons removed `-webkit-tap-highlight-color` without their own `:active` feedback, so a touch feels like it did not register.
 
-明确的语义/键盘缺口：
+Explicit semantic/keyboard gaps:
 
-- `web/src/opening.tsx` 的视觉 `.ew-glabel` 不是 `<label>`，文本/数字输入没有 accessible name。
-- opening option 与 style pill 没有 `aria-pressed` 或 radio 语义；颜色是唯一 selected state。
-- history/panel drawer 没有 `aria-expanded`、`aria-controls`，展开内容也没有命名 region。
-- action textarea 只靠 placeholder 命名；输入后名称消失，字符上限也没有关联说明。
-- loading、error、stalled、scene 到达与删除失败多数没有 status/alert live region；`Waiting` 已有正确 pattern，可复用。
-- modal 主动删除 focus outline、无 focus trap、关闭后不 restore opener；世界删除的 `.ew-doomed` 是可滚动但不可键盘聚焦的区域。
-- modal 的 Escape 与 scrim 在 working 阶段仍可关闭，使后端删除完成但 UI 不执行 `onDeleted`，留下陈旧书架。
-- scene fullscreen 没有 Escape 退出，也没有 expanded 状态。
-- 根节点没有随世界设置 `lang`；语言模块 mutation 也不保证立即触发 React rerender。
+- The visual `.ew-glabel` in `web/src/opening.tsx` is not a `<label>`, and the text/number inputs have no accessible name.
+- Opening options and style pills have no `aria-pressed` or radio semantics; color is the only selected state.
+- The history/panel drawers have no `aria-expanded`, `aria-controls`, and the expanded content has no named region.
+- The action textarea is named only by placeholder; the name disappears after input, and there is no associated description of the character limit.
+- Loading, error, stalled, scene-arrival, and delete-failure mostly have no status/alert live region; `Waiting` already has the correct pattern and can be reused.
+- Modals actively remove the focus outline, have no focus trap, and do not restore the opener after close; the world-deletion `.ew-doomed` is a scrollable but non-keyboard-focusable region.
+- The modal Escape and scrim can still close during the working phase, so the backend delete completes but the UI does not run `onDeleted`, leaving a stale shelf.
+- Scene fullscreen has no Escape to exit and no expanded state.
+- The root node does not set `lang` per the world; the language-module mutation also does not guarantee an immediate React rerender.
 
 ### Loading, error and recovery behavior
 
-- shelf backend error 在手机上没有 retry；桌面 rail 也不是一个明确重试入口。
-- PlayPage 初始 `!v` loading 只有一行文字，没有 Back；挂起请求没有 timeout/AbortController，手机可进入无法退出的等待页。
-- history 首次失败会显示错误，但加载过部分 turns 后的下一页失败没有可见提示或 retry。
-- scene fetch 没有 pending 状态；失败提示存在，但新 scene 到达不会被宣布。
-- 没有 offline/online、visibility 或 reconnect 处理；后台仍按 3 秒轮询，回到前台也不立即 refetch。
-- `view:'detail'` 会写入 localStorage，但 restore effect 只恢复 live/opening；细节页记忆是死写入。
-- view 切换和删除后回书架没有 scroll reset；操作结果 note 在 root 顶部，用户可能停在长列表中段看不到反馈。
+- The shelf backend error has no retry on phones; the desktop rail is not a clear retry entry point either.
+- PlayPage's initial `!v` loading is only a single line of text with no Back; a pending request has no timeout/AbortController, so phones can enter a waiting page that cannot be exited.
+- A history first-load failure shows an error, but a next-page failure after some turns have loaded has no visible hint or retry.
+- The scene fetch has no pending state; a failure hint exists, but a new scene arriving is not announced.
+- There is no offline/online, visibility, or reconnect handling; the background still polls every 3 seconds, and returning to the foreground does not refetch immediately.
+- `view:'detail'` is written to localStorage, but the restore effect only restores live/opening; the detail-page memory is a dead write.
+- There is no scroll reset after a view switch or after deletion returns to the shelf; the result note is at the top of the root, so the user may stay in the middle of a long list and not see the feedback.
 
 ### Recommended mobile implementation order
 
-1. **修不可用路径**：M0.1 scene full geometry；M0.2 modal 可见性/working 关闭保护；900px history；ended panels。
-2. **修手机导航与反馈**：app 内 history integration；scene 到达/等待；PlayPage 成功读取清旧 error；所有关键 error 提供 retry/back。
-3. **修触控与输入**：36→44px；输入 16px；active/focus-visible；confirm row 自动保持可见。
-4. **修 modal a11y**：focus trap/restore、可聚焦 doomed region、live regions、键盘与视觉 viewport 行为。
-5. **修内容 reflow**：chip、digest、prose/code 与长 locale；真实 CJK/Latin 长数据共同验证。
-6. **补语义**：opening labels/selected state、drawers、textarea、root language。
-7. **再做体验增强**：history/panels 的手机信息架构、离线/visibility、长历史性能与 scroll restoration。
+1. **Fix unusable paths**: M0.1 scene full geometry; M0.2 modal visibility / working-close protection; 900px history; ended panels.
+2. **Fix mobile navigation and feedback**: in-app history integration; scene arrival/waiting; PlayPage clears the old error on a successful read; all critical errors offer retry/back.
+3. **Fix touch and input**: 36 -> 44px; input 16px; active/focus-visible; keep the confirm row automatically visible.
+4. **Fix modal a11y**: focus trap/restore, a focusable doomed region, live regions, keyboard and visual-viewport behavior.
+5. **Fix content reflow**: chip, digest, prose/code, and long locales; verify together with real CJK/Latin long data.
+6. **Fill in semantics**: opening labels/selected state, drawers, textarea, root language.
+7. **Then do experience enhancements**: mobile information architecture for history/panels, offline/visibility, long-history performance, and scroll restoration.
 
 ### Verification matrix
 
 | Width | Required checks | Current evidence |
 |---:|---|---|
-| 320×568 | shelf/detail/opening/live 无整页横向滚动；所有关键目标 ≥44px；keyboard 打开后 dialog input + action 可见；scene/confirm 不被 fold 吞掉 | 源码缺陷已确认；真实像素待 Browser 驱动 |
-| 360×800 | CJK populated world；长 chip/digest；history 与 panels 互相可达 | 源码缺陷已确认；真实像素待 Browser 驱动 |
-| 390×844 | iPhone 主检查：focus zoom、返回手势、删除弹窗、scene full、safe visible height | 源码缺陷已确认；真实设备待测 |
-| 430×932 | 大屏手机：opening 4-group 页面与 action bar wrap；长标题/人生删除同行 | 源码缺陷已确认；真实像素待 Browser 驱动 |
-| 768×900 | 16→24px gutter 边界；仍为单阅读列；action bar 无异常空位 | 静态结构正确；边界截图待测 |
-| 900×900 | `.ew-aside` 出现；panel drawer 消失；history 仍必须存在 | **当前源码失败：history 一并消失** |
-| 1100×900 | rail 出现；inline back 消失但 shelf 路径仍可达；rail sticky 高度；history 可达 | rail 结构静态正确；**history 当前失败**；host sticky 待测 |
+| 320x568 | shelf/detail/opening/live have no full-page horizontal scroll; all critical targets >=44px; after the keyboard opens the dialog input + action are visible; scene/confirm are not swallowed by the fold | source defects confirmed; real pixels pending a Browser driver |
+| 360x800 | CJK-populated world; long chip/digest; history and panels are mutually reachable | source defects confirmed; real pixels pending a Browser driver |
+| 390x844 | iPhone primary checks: focus zoom, back gesture, delete dialog, scene full, safe visible height | source defects confirmed; real device pending testing |
+| 430x932 | large-screen phone: opening 4-group page and action bar wrap; long title / life delete on the same row | source defects confirmed; real pixels pending a Browser driver |
+| 768x900 | 16 -> 24px gutter boundary; still a single reading column; action bar has no abnormal gap | static structure correct; boundary screenshots pending testing |
+| 900x900 | `.ew-aside` appears; the panel drawer disappears; history must still exist | **current source failure: history disappears along with it** |
+| 1100x900 | the rail appears; inline back disappears but the shelf path is still reachable; rail sticky height; history reachable | rail structure statically correct; **history currently fails**; host sticky pending testing |
 
-视觉验证恢复后，最小自动化门槛应包括：320/390px 的 `documentElement.scrollWidth <= clientWidth + 1`；逐个列出越过 viewport 的非 fixed 元素；直接测量主内容列宽而不只测 overflow；打开 keyboard/dialog/scene/history 状态；以中文真实填充数据看截图。overflow 结果要先区分允许局部滚动的 table 与不允许溢出的 control/text，且 CJK 被挤成一字一行只能靠看图发现。
+Once visual verification is restored, the minimum automation gate should include: `documentElement.scrollWidth <= clientWidth + 1` at 320/390px; listing each non-fixed element that crosses the viewport; measuring the main content column width directly rather than only measuring overflow; opening the keyboard/dialog/scene/history states; and looking at screenshots with real Chinese fill data. Overflow results must first distinguish tables that are allowed local scroll from controls/text that are not allowed to overflow, and CJK squeezed into one character per line can only be found by looking at the image.
