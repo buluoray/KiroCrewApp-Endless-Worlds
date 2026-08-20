@@ -9,6 +9,7 @@ catch-all ``/api/apps/{app_name}/{path:.*}`` shadows it.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -1819,12 +1820,72 @@ async def discard_world_draft(request: web.Request, ctx: AppContext) -> web.Resp
     return web.json_response({"deleted": True})
 
 
+def _absolutized_mcp_spec(data: dict, backend_dir: Path) -> dict | None:
+    """The endless-mcp manifest with ``args``/``env`` made absolute for
+    *backend_dir*, or ``None`` when no rewrite is needed (already correct) or
+    possible (no such server). Pure — no IO — so it is testable without touching
+    an install or the gateway.
+    """
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        return None
+    srv = servers.get("endless-mcp")
+    if not isinstance(srv, dict):
+        return None
+    want_script = str(backend_dir / "mcp_server.py")
+    want_pythonpath = str(backend_dir)
+    env = srv.get("env") if isinstance(srv.get("env"), dict) else {}
+    if srv.get("args") == [want_script] and env.get("PYTHONPATH") == want_pythonpath:
+        return None  # already absolute and correct for this install
+    new_srv = {**srv, "args": [want_script], "env": {**env, "PYTHONPATH": want_pythonpath}}
+    return {**data, "mcpServers": {**servers, "endless-mcp": new_srv}}
+
+
+def _heal_mcp_server_path() -> None:
+    """Make the ``endless-mcp`` server path absolute for THIS install.
+
+    The gateway resolves an mcpServers ``command`` (a bare ``python3`` becomes the
+    app's venv or the gateway interpreter) but passes ``args`` and ``env`` VERBATIM
+    — it does NOT resolve a relative script path against the app dir, and it does
+    not read ``cwd``. So the shipped ``app.json`` carries a repo-relative
+    ``backend/mcp_server.py`` (no machine path, nothing to leak), and this rewrites
+    the INSTALLED copy to the absolute path of this file's own directory, then
+    re-registers so a fresh install's narrator can reach its MCP tools with no
+    hand-edit.
+
+    Idempotent (a no-op once the paths already match) and never raises: a failure
+    here must not stop the app's HTTP routes from registering. Skipped under the
+    test suite, where there is no install to heal and no gateway to re-register
+    with (the pure rewrite is exercised via :func:`_absolutized_mcp_spec`).
+    """
+    if _UNDER_TEST:
+        return
+    try:
+        app_json = _HERE.parent / "app.json"
+        data = json.loads(app_json.read_text(encoding="utf-8"))
+        healed = _absolutized_mcp_spec(data, _HERE)
+        if healed is None:
+            return
+        app_json.write_text(
+            json.dumps(healed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        try:
+            from kiro_crew.apps.bridges import reregister_app_mcp_servers  # noqa: PLC0415
+
+            reregister_app_mcp_servers("endless-worlds")
+        except Exception:  # noqa: BLE001 — the rewrite alone fixes the NEXT enable
+            pass
+    except Exception:  # noqa: BLE001 — never block route registration
+        pass
+
+
 def register_routes(ctx: AppContext) -> list[AppRoute]:
     """Declare this app's HTTP surface.
 
     Called on gateway start and on enable. Backend hook changes take effect only
     on a gateway restart or an app disable→enable cycle; UI files reload without.
     """
+    _heal_mcp_server_path()
     return [
         AppRoute(method="GET", path="/health", handler=health),
         AppRoute(method="GET", path="/settings", handler=get_settings),

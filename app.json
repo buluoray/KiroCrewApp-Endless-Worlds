@@ -24,9 +24,9 @@
   "mcpServers": {
     "endless-mcp": {
       "command": "python3",
-      "args": ["/home/rayrayxu/.kiro/crew/apps/endless-worlds/backend/mcp_server.py"],
+      "args": ["backend/mcp_server.py"],
       "env": {
-        "PYTHONPATH": "/home/rayrayxu/.kiro/crew/apps/endless-worlds/backend"
+        "PYTHONPATH": "backend"
       },
       "disabled": false
     }

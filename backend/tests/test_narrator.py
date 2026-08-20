@@ -280,11 +280,17 @@ def test_the_apps_own_server_is_launchable_as_an_external_app():
     with no tools and nothing in any log.
 
     ``args`` and ``env`` are passed through VERBATIM (no ``${APP_DIR}``, no ``~``
-    expansion, no app-root-relative resolution; ``cwd`` is not read at all), so
-    an absolute path is a hard requirement. ``command`` is the one field
-    rewritten, and only when bare — a bare ``python3`` becomes the app's venv
-    interpreter if it has one, else the gateway's own.
+    expansion, no app-root-relative resolution; ``cwd`` is not read at all), so an
+    absolute path is a hard requirement AT LAUNCH. The SHIPPED manifest therefore
+    carries a repo-relative path (portable, leaks no machine path), and the backend
+    hook absolutizes the installed copy on load — see ``_absolutized_mcp_spec`` /
+    ``_heal_mcp_server_path`` in ``routes.py``. ``command`` stays a bare ``python3``
+    so the venv-first rewrite applies.
     """
+    from pathlib import Path
+
+    from routes import _absolutized_mcp_spec
+
     manifest = json.loads(APP_JSON.read_text(encoding="utf-8"))
     spec = manifest["mcpServers"]["endless-mcp"]
 
@@ -293,11 +299,24 @@ def test_the_apps_own_server_is_launchable_as_an_external_app():
         "the url shape needs a live backend port; a backend.hooks-only app is "
         "never tracked in _processes, so registration would skip the entry"
     )
-    assert spec["args"] and all(a.startswith("/") for a in spec["args"]), (
-        "args are verbatim — a relative path is never resolved"
-    )
-    for value in (spec.get("env") or {}).values():
-        assert value.startswith("/"), "env is verbatim except for PATH"
+    # Shipped form is repo-relative: portable across installs and carries no
+    # machine path. It is NOT launchable as-is (args are verbatim) — the hook
+    # below is what makes it so.
+    assert spec["args"] == ["backend/mcp_server.py"]
+    assert (spec.get("env") or {}).get("PYTHONPATH") == "backend"
+
+    # The load-time heal turns that into the absolute paths the verbatim-args
+    # reality requires, for whatever directory the app was installed into.
+    backend_dir = Path("/somewhere/apps/endless-worlds/backend")
+    healed = _absolutized_mcp_spec(manifest, backend_dir)
+    assert healed is not None, "a relative shipped path must be rewritten"
+    hspec = healed["mcpServers"]["endless-mcp"]
+    assert hspec["args"] == [str(backend_dir / "mcp_server.py")]
+    assert hspec["env"]["PYTHONPATH"] == str(backend_dir)
+    assert all(a.startswith("/") for a in hspec["args"]), "healed args are absolute"
+    # Idempotent: healing an already-absolute manifest is a no-op.
+    assert _absolutized_mcp_spec(healed, backend_dir) is None
+
 
 
 def test_no_unresolvable_placeholder_token_in_the_agent_file():
