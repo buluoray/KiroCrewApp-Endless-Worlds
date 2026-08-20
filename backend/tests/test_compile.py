@@ -113,14 +113,11 @@ def test_the_result_round_trips_through_the_world_reader() -> None:
 @pytest.mark.parametrize(
     "mutate,expect_field",
     [
-        # An id that cannot be salvaged into a slug (nothing alphanumeric to keep)
-        # is still refused. A merely mis-cased one (Test_World) is now auto-fixed —
-        # see test_camelcase_ids_are_normalized_and_when_references_follow.
-        (lambda h: {**h, "id": "!!!"}, "template.id"),
-        (lambda h: {k: v for k, v in h.items() if k != "clock"}, "clock"),
-        (lambda h: {k: v for k, v in h.items() if k != "language"}, "language"),
+        # A present-but-wrong-typed version (the YAML 1.10 -> 1.1 corruption) is
+        # still refused — salvage only DEFAULTS a missing scalar, it never launders
+        # a data-loss bug into a plausible string.
         (lambda h: {**h, "version": 1.10}, "version"),
-        (lambda h: {**h, "styles": []}, "styles"),
+        # An empty endings list is not something salvage invents its way out of.
         (lambda h: {**h, "endings": []}, "endings"),
     ],
 )
@@ -131,18 +128,19 @@ def test_a_broken_header_is_refused_naming_the_field(mutate, expect_field) -> No
     assert res.problem and expect_field in res.problem
 
 
-def test_an_invented_primitive_is_refused_rather_than_making_a_dead_panel() -> None:
-    """A compile that invents `renown-meter` must fail loudly.
+def test_an_invented_primitive_is_coerced_to_field_not_left_dead() -> None:
+    """A compile that invents `renown-meter` used to ship a permanently blank box.
 
-    Accepting it would ship a world with one panel that renders nothing, which
-    the player would experience as a permanently blank box.
+    Salvage now coerces any unknown primitive to a plain `field` and warns, so the
+    world is playable and the change is visible in the review.
     """
     bad = json.loads(json.dumps(GOOD))
     bad["panels"][0]["fields"][1]["primitive"] = "renown-meter"
     res = accept_compiled_header(PROSE, bad)
-    assert res.ok is False
-    assert "primitive" in res.field
-    assert "renown-meter" in res.problem
+    assert res.ok is True, res.problem
+    status = next(p for p in res.pack.template.panels if p.always)
+    assert status.fields[1].primitive == "field"
+    assert any("renown-meter" in w and "field" in w for w in res.warnings)
 
 
 def test_two_always_panels_are_refused() -> None:
@@ -163,13 +161,16 @@ def test_no_always_panel_is_refused() -> None:
     assert res.field == "panels"
 
 
-def test_a_when_expression_with_a_function_call_is_refused() -> None:
-    """The brief forbids calls; the gate enforces it rather than trusting."""
+def test_a_when_expression_with_a_function_call_is_dropped_not_fatal() -> None:
+    """The brief forbids calls. A single ending that uses one is dropped and warned
+    about; the world's other, valid ending survives rather than the whole compile
+    dying on one bad condition."""
     bad = json.loads(json.dumps(GOOD))
-    bad["endings"][0]["when"] = "len(state.heirs) > 0"
+    bad["endings"].append({"id": "counted", "when": "len(state.heirs) > 0"})
     res = accept_compiled_header(PROSE, bad)
-    assert res.ok is False
-    assert res.field == "when"
+    assert res.ok is True, res.problem
+    assert [e.id for e in res.pack.template.endings] == ["line-ended"]
+    assert any("dropped ending" in w for w in res.warnings)
 
 
 @pytest.mark.parametrize("garbage", ["not json at all", "[1, 2, 3]", "", "42"])
@@ -322,3 +323,260 @@ def test_a_header_of_clean_slugs_is_left_untouched() -> None:
     result = accept_compiled_header(PROSE, json.loads(json.dumps(GOOD)))
     assert result.ok, result.problem
     assert not any("normalized id" in w for w in result.warnings)
+
+
+# -- salvage: repairing an otherwise-playable header ----------------------
+
+
+# (1) primitive synonyms / default -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "given,expected",
+    [
+        ("text", "field"), ("string", "field"), ("name", "field"),
+        ("date", "field"), ("bool", "field"),
+        ("number", "stat"), ("int", "stat"), ("counter", "stat"),
+        ("float", "stat"),
+        ("list", "inventory"), ("items", "inventory"),
+        ("ladder", "rank"), ("roster", "people"),
+        ("totally-unknown", "field"),
+    ],
+)
+def test_primitive_synonyms_are_coerced(given: str, expected: str) -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["panels"][0]["fields"][1]["primitive"] = given
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    status = next(p for p in res.pack.template.panels if p.always)
+    assert status.fields[1].primitive == expected
+    assert any("coerced primitive" in w for w in res.warnings)
+
+
+# (2) unparseable when: drop the one, keep the world -----------------------
+
+
+def test_a_conditional_panel_with_a_bad_when_is_dropped_never_the_always() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["panels"][1]["when"] = "len(state.x) > 0"  # a call — will not parse
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    ids = {p.id for p in res.pack.template.panels}
+    assert "status" in ids and "magic" not in ids
+    assert any("dropped conditional panel" in w for w in res.warnings)
+
+
+# (3) chapters are an optional optimization: drop the bad ones --------------
+
+
+def test_a_chapter_heading_absent_from_prose_is_dropped_not_fatal() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["chapters"] = [
+        {"id": "intro", "heading": "第一章", "always": True},        # present in PROSE
+        {"id": "ghost", "heading": "no such heading", "always": True},  # not present
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert [c.id for c in res.pack.template.chapters] == ["intro"]
+    assert any("dropped chapters" in w for w in res.warnings)
+
+
+def test_a_duplicate_chapter_id_is_dropped() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["chapters"] = [
+        {"id": "intro", "heading": "第一章", "always": True},
+        {"id": "intro", "heading": "第一章", "always": True},
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert len(res.pack.template.chapters) == 1
+    assert any("duplicate chapters id" in w for w in res.warnings)
+
+
+# (4) optional enrichment lists: drop bad entries, keep good ones -----------
+
+
+def test_a_bad_lore_entry_is_dropped_and_the_good_one_survives() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["lore"] = [
+        {"id": "riverport", "keys": ["Riverport"], "text": "A trade city."},
+        {"id": "broken", "text": ""},  # no keys, no text, not always
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert [entry.id for entry in res.pack.template.lore] == ["riverport"]
+    assert any("dropped lore" in w for w in res.warnings)
+
+
+def test_a_bad_system_entry_is_dropped_and_the_good_one_survives() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["systems"] = [
+        {"id": "xp", "kind": "accrual", "into": "state.hero.xp"},
+        {"id": "junk", "kind": "not-a-kind", "into": "state.hero.y"},
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert [s.id for s in res.pack.template.systems] == ["xp"]
+    assert any("dropped systems" in w for w in res.warnings)
+
+
+def test_a_non_list_optional_field_is_dropped_whole() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["lore"] = "this should have been a list"
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert res.pack.template.lore == []
+    assert any("dropped lore" in w for w in res.warnings)
+
+
+# (5) CJK / empty-slug id fallback -----------------------------------------
+
+
+def test_an_all_non_ascii_id_falls_back_to_a_digest_slug() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["id"] = "剑火纪元"
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert res.pack.id.startswith("world-")
+    assert len(res.pack.id) == len("world-") + 8
+    assert any("world id" in w for w in res.warnings)
+
+
+def test_a_missing_id_is_derived_from_the_title() -> None:
+    h = json.loads(json.dumps(GOOD))
+    del h["id"]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert res.pack.id == "test-world"  # from title "Test World"
+    assert any("derived world id" in w for w in res.warnings)
+
+
+def test_a_digest_slug_is_deterministic_for_the_same_title_and_prose() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["id"] = "剑火纪元"
+    first = accept_compiled_header(PROSE, json.loads(json.dumps(h)))
+    second = accept_compiled_header(PROSE, json.loads(json.dumps(h)))
+    assert first.pack.id == second.pack.id
+
+
+# (6) default the scalars the brief already documents ----------------------
+
+
+def test_missing_scalars_are_defaulted() -> None:
+    h = json.loads(json.dumps(GOOD))
+    for key in ("version", "language", "clock"):
+        del h[key]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    t = res.pack.template
+    assert t.version == "1.0"
+    assert t.language == "en"
+    assert t.clock_unit == "turn"
+
+
+def test_a_missing_styles_list_gets_a_default_style() -> None:
+    h = json.loads(json.dumps(GOOD))
+    del h["styles"]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert len(res.pack.template.styles) == 1
+    assert any("default style" in w for w in res.warnings)
+
+
+# (7) opening kind synonyms ------------------------------------------------
+
+
+@pytest.mark.parametrize("synonym", ["select", "choice", "dropdown", "options"])
+def test_opening_kind_synonyms_become_pick_when_options_exist(synonym: str) -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["opening"][1]["kind"] = synonym
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    race = next(g for g in res.pack.template.opening if g.id == "race")
+    assert race.kind == "pick"
+    assert any("mapped opening kind" in w for w in res.warnings)
+
+
+def test_a_pick_with_no_options_is_downgraded_to_text() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["opening"].append({"id": "guild", "label": "公会", "kind": "pick", "options": []})
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    guild = next(g for g in res.pack.template.opening if g.id == "guild")
+    assert guild.kind == "text"
+    assert any("downgraded a pick" in w for w in res.warnings)
+
+
+def test_non_string_options_are_cleaned() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["opening"][1]["options"] = ["人类", 42, {"bad": 1}, "精灵"]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    race = next(g for g in res.pack.template.opening if g.id == "race")
+    assert race.options == ["人类", "42", "精灵"]
+    assert any("cleaned non-string options" in w for w in res.warnings)
+
+
+# (8) trivial scalar coercions ---------------------------------------------
+
+
+def test_more_than_one_default_style_keeps_the_first_and_clears_the_rest() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["styles"] = [
+        {"id": "gentle", "label": "温和", "default": True},
+        {"id": "harsh", "label": "残酷", "default": True},
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    defaults = [s.id for s in res.pack.template.styles if s.default]
+    assert defaults == ["gentle"]
+    assert any("extra default flag" in w for w in res.warnings)
+
+
+def test_an_empty_field_label_defaults_to_the_field_id() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["panels"][0]["fields"][0]["label"] = ""
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    status = next(p for p in res.pack.template.panels if p.always)
+    assert status.fields[0].label == status.fields[0].id
+    assert any("defaulted field label" in w for w in res.warnings)
+
+
+# -- _as_mapping backslash repair ------------------------------------------
+
+
+def test_a_lone_backslash_in_the_json_is_repaired() -> None:
+    """A stray backslash (a path, an over-eager escape) is doubled and recovered
+    rather than wasting the compile."""
+    text = json.dumps(GOOD, ensure_ascii=False)
+    broken = text.replace('"标准"', '"标准 C:\\Users"', 1)
+    res = accept_compiled_header(PROSE, broken)
+    assert res.ok is True, res.problem
+
+
+# -- must-block: a near-empty header is a clean refusal --------------------
+
+
+@pytest.mark.parametrize("empty", ["{}", {}, {"title": "Nothing"}])
+def test_a_near_empty_header_is_refused_with_a_plain_sentence(empty) -> None:
+    res = accept_compiled_header(PROSE, empty)
+    assert res.ok is False
+    assert res.problem == "no playable world could be found"
+
+
+def test_zero_panels_is_still_a_hard_refusal() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["panels"] = []
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is False
+    assert res.problem == "no playable world could be found"
+
+
+# -- a clean header stays warning-free through salvage ---------------------
+
+
+def test_a_clean_good_header_produces_no_salvage_warnings() -> None:
+    res = accept_compiled_header(PROSE, json.loads(json.dumps(GOOD)))
+    assert res.ok is True, res.problem
+    assert res.warnings == []

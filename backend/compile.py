@@ -17,6 +17,7 @@ user what could not be worked out — an exception traceback is not that.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field as dc_field
@@ -26,7 +27,14 @@ from chapters import bodies, brief
 from template import (
     FIELD_PRIMITIVES,
     OPENING_KINDS,
+    Condition,
     TemplateError,
+    _parse_chapters,
+    _parse_handoff,
+    _parse_lore,
+    _parse_milestones,
+    _parse_roles,
+    _parse_systems,
     _tokenize,
 )
 from world import (
@@ -351,6 +359,17 @@ class CompileResult:
     warnings: list[str] = dc_field(default_factory=list)
 
 
+#: A model emitting JSON-in-a-string often leaves a lone backslash (a Windows path,
+#: a LaTeX-ish token, an escaped quote it forgot to double), which makes the whole
+#: string un-parseable and wastes the compile. Doubling exactly those backslashes
+#: repairs the common case without touching a real escape. Mirrors mcp_server.py.
+_BAD_JSON_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
+
+
+def _repair_json_escapes(raw: str) -> str:
+    return _BAD_JSON_ESCAPE.sub(r"\\\\", raw)
+
+
 def _as_mapping(header: Any) -> tuple[dict[str, Any] | None, str | None]:
     """Coerce the agent's output to a mapping, insisting on JSON."""
     if isinstance(header, dict):
@@ -364,10 +383,23 @@ def _as_mapping(header: Any) -> tuple[dict[str, Any] | None, str | None]:
         text = text.split("\n", 1)[-1]
         if text.rstrip().endswith("```"):
             text = text.rstrip()[: -3]
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError as exc:
-        return None, f"the compiled header is not valid JSON ({exc.msg} at line {exc.lineno})"
+    # Try a plain parse, then one with stray backslashes doubled: a lone backslash
+    # is a recoverable escape mistake, not a different answer.
+    parsed: Any = None
+    first_err: json.JSONDecodeError | None = None
+    for attempt in (text, _repair_json_escapes(text)):
+        try:
+            parsed = json.loads(attempt)
+            break
+        except json.JSONDecodeError as exc:
+            if first_err is None:
+                first_err = exc
+    if parsed is None:
+        assert first_err is not None
+        return None, (
+            f"the compiled header is not valid JSON "
+            f"({first_err.msg} at line {first_err.lineno})"
+        )
     if not isinstance(parsed, dict):
         return None, f"expected a JSON object, got {type(parsed).__name__}"
     return parsed, None
@@ -499,6 +531,282 @@ def _normalize_ids(header: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
     return body, rename
 
 
+#: Panel-field primitive synonyms the compiler tolerates. A model reaches for the
+#: word its training data uses ("text", "number", "list"); the app has its own eight
+#: names. Mapping the common synonyms — and defaulting anything still unknown to a
+#: plain field — turns a localized primitive slip into a warning, not a lost world.
+_PRIMITIVE_SYNONYMS = {
+    "text": "field", "string": "field", "name": "field", "date": "field",
+    "bool": "field", "boolean": "field",
+    "number": "stat", "int": "stat", "integer": "stat", "counter": "stat",
+    "float": "stat",
+    "list": "inventory", "items": "inventory",
+    "ladder": "rank",
+    "roster": "people",
+}
+
+#: Opening-kind synonyms → "pick". A model writes "select"/"dropdown"; the app calls
+#: that "pick". Resolved to a pick only when the group actually carries options.
+_OPENING_SYNONYMS = frozenset({"select", "choice", "dropdown", "options"})
+
+
+def _has_label(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _coerce_primitive(prim: Any) -> str | None:
+    """A valid primitive returns None (nothing to change); an unknown one is mapped
+    through the synonym table, defaulting to a plain field."""
+    if isinstance(prim, str) and prim in FIELD_PRIMITIVES:
+        return None
+    key = prim.strip().lower() if isinstance(prim, str) else ""
+    return _PRIMITIVE_SYNONYMS.get(key, "field")
+
+
+def _clean_options(raw: Any, i: int, warnings: list[str]) -> list[str]:
+    """Keep string options, coerce plain-scalar options to strings, drop the rest."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    changed = False
+    for o in raw:
+        if isinstance(o, str):
+            out.append(o)
+        elif isinstance(o, (int, float)) and not isinstance(o, bool):
+            out.append(str(o))
+            changed = True
+        else:
+            changed = True
+    if changed:
+        warnings.append(f"cleaned non-string options in opening group #{i}")
+    return out
+
+
+def _keep_valid_entries(
+    entries: list[Any], validate_one, label: str, warnings: list[str]
+) -> list[Any]:
+    """Validate each entry ALONE against the parser's own rules; drop the bad ones,
+    keep the good ones (and the world). Mirrors what the parser does to a whole list,
+    but per entry so one bad row cannot take the rest down."""
+    good: list[Any] = []
+    for i, entry in enumerate(entries):
+        try:
+            validate_one(entry)
+        except TemplateError as exc:
+            warnings.append(f"dropped {label}[{i}] ({exc.field}: {exc.expected})")
+            continue
+        good.append(entry)
+    return good
+
+
+def _dedup_by_id(entries: list[Any], label: str, warnings: list[str]) -> list[Any]:
+    """Drop entries whose id a prior entry already used, keeping the first."""
+    seen: set[str] = set()
+    out: list[Any] = []
+    for entry in entries:
+        eid = str(entry.get("id") or "").strip() if isinstance(entry, dict) else ""
+        if eid and eid in seen:
+            warnings.append(f"dropped duplicate {label} id {eid!r}")
+            continue
+        if eid:
+            seen.add(eid)
+        out.append(entry)
+    return out
+
+
+def _salvage_ids_and_scalars(body: dict[str, Any], prose: str, warnings: list[str]) -> None:
+    """(5) world id, (6) the scalars the brief already says to default."""
+    wid = str(body.get("id") or "").strip()
+    if not wid:
+        wid = _slugify(str(body.get("title") or ""))
+        if wid:
+            warnings.append(f"derived world id {wid!r} from the title")
+    if not (bool(_SLUG_OK.match(wid)) if wid else False):
+        slug = _slugify(wid) if wid else ""
+        if not slug:
+            basis = f"{body.get('title') or ''}\n{prose}"
+            digest = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:8]
+            slug = f"world-{digest}"
+        if slug != wid:
+            warnings.append(f"replaced unusable world id {wid!r} with {slug!r}")
+        wid = slug
+    if wid:
+        body["id"] = wid
+
+    # Default ONLY when missing/empty. A present-but-wrong-typed value (a float
+    # version) is left for the parser to reject — that is the YAML-corruption guard
+    # the brief exists to enforce, and salvaging it would launder a data-loss bug.
+    version = body.get("version")
+    if "version" not in body or (isinstance(version, str) and not version.strip()):
+        body["version"] = "1.0"
+        warnings.append('defaulted missing version to "1.0"')
+    if not _has_label(body.get("language")):
+        body["language"] = "en"
+        warnings.append('defaulted missing language to "en"')
+    clock = body.get("clock")
+    if not isinstance(clock, dict) or not str(clock.get("unit") or "").strip():
+        body["clock"] = {"unit": "turn", "label": "{turn}"}
+        warnings.append("defaulted missing clock to a per-turn clock")
+    if not _has_label(body.get("title")):
+        body["title"] = str(body.get("id") or "world")
+        warnings.append(f"derived title from id {body['title']!r}")
+
+
+def _salvage_styles(body: dict[str, Any], warnings: list[str]) -> None:
+    """(6) default a missing/empty styles list; (8) clear extra defaults, fix labels."""
+    styles = body.get("styles")
+    if not isinstance(styles, list) or not styles:
+        body["styles"] = [{"id": "default", "label": "Default", "default": True}]
+        warnings.append("added a default style (none was declared)")
+        return
+    seen_default = False
+    for i, st in enumerate(styles):
+        if not isinstance(st, dict):
+            continue
+        if "label" in st and not _has_label(st["label"]):
+            st["label"] = str(st.get("id") or f"style-{i}")
+            warnings.append(f"defaulted style label to {st['label']!r}")
+        if st.get("default") is True:
+            if seen_default:
+                st["default"] = False
+                warnings.append(f"cleared an extra default flag on style {st.get('id')!r}")
+            else:
+                seen_default = True
+
+
+def _salvage_opening(body: dict[str, Any], warnings: list[str]) -> None:
+    """(7) opening-kind synonyms and pick-without-options; (8) label defaults."""
+    groups = body.get("opening")
+    if not isinstance(groups, list):
+        return
+    for i, g in enumerate(groups):
+        if not isinstance(g, dict):
+            continue
+        options = _clean_options(g.get("options"), i, warnings)
+        if "options" in g or options:
+            g["options"] = options
+        kind = g.get("kind")
+        kind_str = kind.strip().lower() if isinstance(kind, str) else ""
+        if kind_str in _OPENING_SYNONYMS:
+            new = "pick" if options else "text"
+            warnings.append(f"mapped opening kind {kind!r} to {new!r} in group #{i}")
+            kind_str = new
+        elif kind_str not in OPENING_KINDS:
+            warnings.append(f"defaulted opening kind {kind!r} to 'text' in group #{i}")
+            kind_str = "text"
+        if kind_str == "pick" and not options:
+            warnings.append(f"downgraded a pick with no options to text in group #{i}")
+            kind_str = "text"
+        g["kind"] = kind_str
+        if "label" in g and not _has_label(g["label"]):
+            g["label"] = str(g.get("id") or f"opening-{i}")
+            warnings.append(f"defaulted opening label to {g['label']!r}")
+
+
+def _salvage_panels(body: dict[str, Any], warnings: list[str]) -> None:
+    """(2) drop a conditional panel with an unparseable when — never the always
+    panel; (1) coerce field primitives; (8) label defaults."""
+    panels = body.get("panels")
+    if not isinstance(panels, list):
+        return
+    kept: list[Any] = []
+    for i, p in enumerate(panels):
+        if not isinstance(p, dict):
+            kept.append(p)
+            continue
+        always = bool(p.get("always", False))
+        when_src = p.get("when")
+        if not always and when_src is not None:
+            try:
+                Condition.parse(str(when_src))
+            except TemplateError as exc:
+                warnings.append(
+                    f"dropped conditional panel {p.get('id')!r} (bad when: {exc.expected})"
+                )
+                continue
+        if "label" in p and not _has_label(p["label"]):
+            p["label"] = str(p.get("id") or f"panel-{i}")
+            warnings.append(f"defaulted panel label to {p['label']!r}")
+        for j, f in enumerate(p.get("fields") or []):
+            if not isinstance(f, dict):
+                continue
+            new = _coerce_primitive(f.get("primitive"))
+            if new is not None:
+                warnings.append(
+                    f"coerced primitive {f.get('primitive')!r} to {new!r} "
+                    f"in field {f.get('id')!r}"
+                )
+                f["primitive"] = new
+            if "label" in f and not _has_label(f["label"]):
+                f["label"] = str(f.get("id") or f"field-{j}")
+                warnings.append(f"defaulted field label to {f['label']!r}")
+        kept.append(p)
+    body["panels"] = kept
+
+
+def _salvage_endings(body: dict[str, Any], warnings: list[str]) -> None:
+    """(2) drop an ending whose when will not parse — keep the rest, keep the world."""
+    endings = body.get("endings")
+    if not isinstance(endings, list):
+        return
+    kept: list[Any] = []
+    for i, e in enumerate(endings):
+        when_src = e.get("when") if isinstance(e, dict) else None
+        try:
+            Condition.parse(str(when_src))
+        except TemplateError as exc:
+            warnings.append(f"dropped ending #{i} (bad when: {exc.expected})")
+            continue
+        kept.append(e)
+    body["endings"] = kept
+
+
+def _salvage_optional_lists(body: dict[str, Any], prose: str, warnings: list[str]) -> None:
+    """(3)/(4) validate each optional enrichment entry against the parser's own rules
+    and drop the bad ones; (8) drop within-list duplicate ids. The world survives one
+    bad lore entry or an unfindable chapter heading."""
+    specs = (
+        ("chapters", lambda e: _parse_chapters([e], prose)),
+        ("lore", lambda e: _parse_lore([e])),
+        ("systems", lambda e: _parse_systems([e])),
+        ("roles", lambda e: _parse_roles([e])),
+        ("milestones", lambda e: _parse_milestones([e])),
+        ("handToAgent", lambda e: _parse_handoff([e])),
+    )
+    for key, validate_one in specs:
+        raw = body.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, list):
+            warnings.append(f"dropped {key} (expected a list)")
+            body.pop(key, None)
+            continue
+        good = _keep_valid_entries(raw, validate_one, key, warnings)
+        if key != "handToAgent":
+            good = _dedup_by_id(good, key, warnings)
+        body[key] = good
+
+
+def _salvage_header(mapping: dict[str, Any], prose: str) -> tuple[dict[str, Any], list[str]]:
+    """Repair an otherwise-playable compiled header, mirroring ``_normalize_ids``:
+    fix the common, localized, non-fatal mistakes here and let the UNCHANGED strict
+    ``parse_template`` still validate the result. Everything changed is returned as a
+    warning so the review shows it (R14.6).
+
+    This never loosens the parser and never invents structure a genuinely unplayable
+    header lacks — a world with no panels still falls through to a clean refusal.
+    """
+    warnings: list[str] = []
+    body = json.loads(json.dumps(mapping))  # deep copy; a header is JSON by contract
+    _salvage_ids_and_scalars(body, prose, warnings)
+    _salvage_styles(body, warnings)
+    _salvage_opening(body, warnings)
+    _salvage_panels(body, warnings)
+    _salvage_endings(body, warnings)
+    _salvage_optional_lists(body, prose, warnings)
+    return body, warnings
+
+
 def accept_compiled_header(
     prose: str,
     header: Any,
@@ -524,6 +832,17 @@ def accept_compiled_header(
     # BEFORE the gate, following the rename into every `when` so a reference never
     # dangles. The gate below still validates; this just spares a reject-and-retry.
     mapping, rename = _normalize_ids(mapping)
+
+    # Then salvage the other common, localized, non-fatal mistakes (primitive
+    # synonyms, unparseable optional conditions, missing scalars, a zh-first id with
+    # no ASCII to slug). Same discipline: fix here, let parse_template still validate.
+    mapping, salvage_warnings = _salvage_header(mapping, prose)
+
+    # A genuinely empty header (the paste was not a world at all — R14/CLEANING says
+    # to submit `{}`) is refused with a plain sentence rather than an internal field
+    # error about a missing panels list. Zero panels stays a hard refusal.
+    if not mapping.get("panels"):
+        return CompileResult(ok=False, problem="no playable world could be found")
 
     body = dict(mapping)
     # Provenance is stamped here, never taken from the agent: the digest must be
@@ -562,7 +881,12 @@ def accept_compiled_header(
         world_text=serialize_world(pack),
         pack=pack,
         referenced_paths=paths,
-        warnings=normalized + _suspicious_paths(paths) + _chapter_warnings(pack, panel_paths),
+        warnings=(
+            normalized
+            + salvage_warnings
+            + _suspicious_paths(paths)
+            + _chapter_warnings(pack, panel_paths)
+        ),
     )
 
 
