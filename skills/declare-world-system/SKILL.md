@@ -18,9 +18,9 @@ kind; use `add-game-system-kind` for that.
 
 | Contract | Why |
 |---|---|
-| [`docs/modules/systems.md`](../../../docs/modules/systems.md) | current kinds, declaration fields, gain matching, and ownership |
-| [`docs/modules/world-schema.md`](../../../docs/modules/world-schema.md) | pack schema and the eval-free `when` language |
-| [`docs/modules/view-and-packs.md`](../../../docs/modules/view-and-packs.md) | how a derived state path becomes a player-facing panel |
+| [`docs/modules/systems.md`](../../docs/modules/systems.md) | current kinds, declaration fields, gain matching, and ownership |
+| [`docs/modules/world-schema.md`](../../docs/modules/world-schema.md) | pack schema and the eval-free `when` language |
+| [`docs/modules/view-and-packs.md`](../../docs/modules/view-and-packs.md) | how a derived state path becomes a player-facing panel |
 
 ## Workflow
 

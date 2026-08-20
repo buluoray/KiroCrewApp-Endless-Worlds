@@ -17,10 +17,10 @@ new kind is a core engine change, not a world-pack convenience.
 
 | Contract | Why |
 |---|---|
-| [`docs/modules/systems.md`](../../../docs/modules/systems.md) | runtime ownership, fail-soft behavior, existing kinds, synchronized touchpoints |
-| [`docs/modules/world-schema.md`](../../../docs/modules/world-schema.md) | `System` schema and safe `Condition` grammar |
-| [`docs/modules/data-model.md`](../../../docs/modules/data-model.md) | full-state replacement and commit ordering |
-| [`docs/modules/world-creation.md`](../../../docs/modules/world-creation.md) | worldsmith compiler brief and salvage boundary |
+| [`docs/modules/systems.md`](../../docs/modules/systems.md) | runtime ownership, fail-soft behavior, existing kinds, synchronized touchpoints |
+| [`docs/modules/world-schema.md`](../../docs/modules/world-schema.md) | `System` schema and safe `Condition` grammar |
+| [`docs/modules/data-model.md`](../../docs/modules/data-model.md) | full-state replacement and commit ordering |
+| [`docs/modules/world-creation.md`](../../docs/modules/world-creation.md) | worldsmith compiler brief and salvage boundary |
 
 ## Files that move together
 

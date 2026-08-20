@@ -110,9 +110,9 @@ There are two different changes; do not mix them:
 1. **Declare a mechanic using an existing kind.** Change the world pack and its
    tests, align the gain field with the target path, expose the derived path through
    existing panels when needed, and leave engine code unchanged. Follow
-   [declare-world-system](../../.kiro/skills/declare-world-system/SKILL.md).
+   [declare-world-system](../../skills/declare-world-system/SKILL.md).
 2. **Add a new engine kind.** Use this only when none of the current transitions can
    represent the mechanic. Update the registry/schema, runtime branch, compiler
    brief and salvage behavior, behavior/parser tests, bundled examples if any, and
    this spec in the same commit. Follow
-   [add-game-system-kind](../../.kiro/skills/add-game-system-kind/SKILL.md).
+   [add-game-system-kind](../../skills/add-game-system-kind/SKILL.md).
