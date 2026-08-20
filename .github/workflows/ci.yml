@@ -1,0 +1,53 @@
+name: CI
+
+# Basic CI: run the full test suite (and typecheck/build the UI) on every push
+# to main and every PR into it. No agent/LLM review here — just the tests.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The suite tests against the REAL host AppStorage rather than a stub
+          # (see backend/tests/conftest.py), so the gateway package must be
+          # importable. It is not published to PyPI, so install it from its
+          # public source; this also pulls the runtime deps the backend imports
+          # (aiohttp, etc.). pytest itself is the only extra.
+          pip install pytest
+          pip install "git+https://github.com/kirodotdev/KiroCrew.git"
+
+      - name: Run full backend test suite
+        working-directory: backend
+        run: python -m pytest tests -q
+
+  frontend-build:
+    name: Frontend typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Typecheck and build
+        working-directory: web
+        run: npm run build
