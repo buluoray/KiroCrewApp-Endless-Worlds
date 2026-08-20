@@ -3122,6 +3122,20 @@ var TABLES = {
 		"star.people.centre": "以谁为中心",
 		"star.people.none": "这段人生还没有记下与人的往来。",
 		"star.rel.evidence": "因为这些事",
+		"star.rel.unrecorded": "尚无关系记录",
+		"star.rel.closer": "更亲近",
+		"star.rel.farther": "更疏远",
+		"star.rel.type.trust": "信任",
+		"star.rel.type.grudge": "积怨",
+		"star.rel.type.debt": "人情",
+		"star.rel.type.fealty": "效忠",
+		"star.rel.type.love": "爱意",
+		"star.rel.type.fear": "畏惧",
+		"star.rel.type.respect": "敬重",
+		"star.rel.type.hostility": "敌意",
+		"star.rel.type.kinship": "亲缘",
+		"star.rel.type.friendship": "友谊",
+		"star.rel.type.rivalry": "竞争",
 		"star.mode.canvas": "画布",
 		"star.mode.list": "列表",
 		"star.keeps.none": "还没有纪念。在回响或星图节点上点「收藏」，把重要的时刻留在这里。",
@@ -3195,6 +3209,20 @@ var TABLES = {
 		"star.people.centre": "Centred on",
 		"star.people.none": "No dealings with anyone have been recorded yet.",
 		"star.rel.evidence": "Because of",
+		"star.rel.unrecorded": "No relationship recorded yet",
+		"star.rel.closer": "Closer",
+		"star.rel.farther": "More distant",
+		"star.rel.type.trust": "Trust",
+		"star.rel.type.grudge": "Grudge",
+		"star.rel.type.debt": "Debt",
+		"star.rel.type.fealty": "Fealty",
+		"star.rel.type.love": "Love",
+		"star.rel.type.fear": "Fear",
+		"star.rel.type.respect": "Respect",
+		"star.rel.type.hostility": "Hostility",
+		"star.rel.type.kinship": "Kinship",
+		"star.rel.type.friendship": "Friendship",
+		"star.rel.type.rivalry": "Rivalry",
 		"star.mode.canvas": "Canvas",
 		"star.mode.list": "List",
 		"star.keeps.none": "No keepsakes yet. Tap \"keep\" on an echo or a map node to hold on to a moment.",
@@ -3577,6 +3605,26 @@ function TimelineLens({ payload, lang, focus, setFocus, filters }) {
 //#region src/memory-layouts/relations.tsx
 var SIZE = 620;
 var CX = SIZE / 2;
+var LOCALIZED_RELATION_TYPES = /* @__PURE__ */ new Set([
+	"trust",
+	"grudge",
+	"debt",
+	"fealty",
+	"love",
+	"fear",
+	"respect",
+	"hostility",
+	"kinship",
+	"friendship",
+	"rivalry"
+]);
+function relationReading(lang, relation) {
+	const normalized = relation.type.trim().toLowerCase().replace(/[\s-]+/g, "_");
+	const type = LOCALIZED_RELATION_TYPES.has(normalized) ? mt(lang, `star.rel.type.${normalized}`) : relation.type.replace(/[_-]+/g, " ");
+	if (relation.value) return `${type} · ${relation.value}`;
+	if (!relation.level) return type;
+	return `${type} · ${mt(lang, relation.level > 0 ? "star.rel.closer" : "star.rel.farther")} ×${Math.abs(relation.level)}`;
+}
 function ring(index, count, radius) {
 	const angle = index / Math.max(count, 1) * Math.PI * 2 - Math.PI / 2;
 	return {
@@ -3598,6 +3646,7 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 	}
 	const inner = [...partners.keys()].map((id) => nodeById(payload, id)).filter((n) => !!n && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
 	const outer = payload.nodes.filter((n) => n.kind !== "event" && n.id !== centre && !partners.has(n.id) && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
+	const unrelatedCharacters = characters.filter((character) => character.id !== centre && !partners.has(character.id)).sort((a, b) => a.id.localeCompare(b.id));
 	const centreLabel = centre === "player" ? mt(lang, "star.lens.life") : nodeLabel(nodeById(payload, centre) ?? {
 		id: centre,
 		kind: "character",
@@ -3624,44 +3673,62 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 			}, c.id))
 		]
 	});
-	if (mode === "list") return /* @__PURE__ */ jsxs("div", { children: [picker, /* @__PURE__ */ jsx("div", {
+	if (mode === "list") return /* @__PURE__ */ jsxs("div", { children: [picker, /* @__PURE__ */ jsxs("div", {
 		className: "ews-rel-list",
-		children: relations.map((r, i) => {
-			const other = r.from === centre ? r.to : r.from;
-			const node = nodeById(payload, other);
-			return /* @__PURE__ */ jsxs("div", {
+		children: [
+			relations.map((r, i) => {
+				const other = r.from === centre ? r.to : r.from;
+				const node = nodeById(payload, other);
+				return /* @__PURE__ */ jsxs("div", {
+					className: "ews-rel-row",
+					children: [
+						/* @__PURE__ */ jsx("button", {
+							className: "ews-node" + (focus === other ? " ews-node-sel" : ""),
+							type: "button",
+							onClick: () => setFocus(other),
+							children: node ? nodeLabel(node) : other
+						}),
+						/* @__PURE__ */ jsx("span", {
+							className: "ews-rel-kind",
+							children: relationReading(lang, r)
+						}),
+						r.sources.length ? /* @__PURE__ */ jsxs("span", {
+							className: "ews-rel-srcs",
+							children: [
+								mt(lang, "star.rel.evidence"),
+								":",
+								" ",
+								r.sources.map((s) => {
+									const ev = nodeById(payload, s);
+									return ev ? /* @__PURE__ */ jsx("button", {
+										className: "ews-echo-ref",
+										type: "button",
+										onClick: () => setFocus(s),
+										children: mt(lang, "star.detail.turn", { n: ev.turn ?? 0 })
+									}, s) : null;
+								})
+							]
+						}) : null
+					]
+				}, `${r.from}-${r.type}-${r.to}-${i}`);
+			}),
+			unrelatedCharacters.map((character) => /* @__PURE__ */ jsxs("div", {
 				className: "ews-rel-row",
-				children: [
-					/* @__PURE__ */ jsx("button", {
-						className: "ews-node" + (focus === other ? " ews-node-sel" : ""),
-						type: "button",
-						onClick: () => setFocus(other),
-						children: node ? nodeLabel(node) : other
-					}),
-					/* @__PURE__ */ jsxs("span", {
-						className: "ews-rel-kind",
-						children: [r.type, r.value ? ` · ${r.value}` : r.level ? ` · ${r.level > 0 ? "+" : ""}${r.level}` : ""]
-					}),
-					r.sources.length ? /* @__PURE__ */ jsxs("span", {
-						className: "ews-rel-srcs",
-						children: [
-							mt(lang, "star.rel.evidence"),
-							":",
-							" ",
-							r.sources.map((s) => {
-								const ev = nodeById(payload, s);
-								return ev ? /* @__PURE__ */ jsx("button", {
-									className: "ews-echo-ref",
-									type: "button",
-									onClick: () => setFocus(s),
-									children: mt(lang, "star.detail.turn", { n: ev.turn ?? 0 })
-								}, s) : null;
-							})
-						]
-					}) : null
-				]
-			}, `${r.from}-${r.type}-${r.to}-${i}`);
-		})
+				children: [/* @__PURE__ */ jsx("button", {
+					className: "ews-node" + (focus === character.id ? " ews-node-sel" : ""),
+					type: "button",
+					onClick: () => setFocus(character.id),
+					children: nodeLabel(character)
+				}), /* @__PURE__ */ jsx("span", {
+					className: "ews-rel-kind",
+					children: mt(lang, "star.rel.unrecorded")
+				})]
+			}, `unrecorded-${character.id}`)),
+			!relations.length && !unrelatedCharacters.length ? /* @__PURE__ */ jsx("div", {
+				className: "ews-empty",
+				children: mt(lang, "star.people.none")
+			}) : null
+		]
 	})] });
 	return /* @__PURE__ */ jsxs("div", { children: [picker, /* @__PURE__ */ jsxs("svg", {
 		className: "ews-canvas",
@@ -4301,7 +4368,7 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 	const [focus, setFocus] = useState(initialFocus ?? "");
 	const [filters, setFilters] = useState(ALL_FILTERS);
 	const [centre, setCentre] = useState("player");
-	const [mode, setMode] = useState("canvas");
+	const [mode, setMode] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches ? "list" : "canvas");
 	const [kept, setKept] = useState([]);
 	const load = useCallback(async () => {
 		const got = await api.star(runId);
@@ -4439,6 +4506,7 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 				}), focused ? /* @__PURE__ */ jsxs("div", {
 					className: "ews-detail",
 					role: "complementary",
+					"aria-live": "polite",
 					children: [
 						/* @__PURE__ */ jsx("div", {
 							className: "ews-detail-name",
@@ -4638,15 +4706,159 @@ var CSS_TEXT = `
 .ews-kp-cites-label { font-size: 12px; color: var(--muted, #9ca3af); }
 .ews-kp-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
 .ews-kp-ask { font-size: 12px; color: var(--muted, #9ca3af); }
-/* Narrow screens: the detail panel becomes a bottom drawer (§8.3.4). */
-@media (max-width: 860px) {
-  .ews-body { flex-direction: column; }
-  .ews-detail {
-    flex: 0 0 auto; max-height: 42dvh;
-    border-inline-start: 0; border-top: 1px solid var(--border, #2d2f3d);
+/* Observatory composition: the narrator's art remains the room, while controls
+ * become local frosted instruments instead of an opaque application shell. The
+ * horizontal shade protects labels from either a bright or dark backdrop without
+ * flattening the whole image to one grey value. */
+.ews-overlay:has(> .ew-backdrop) { background: transparent; }
+.ews-overlay:has(> .ew-backdrop)::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    linear-gradient(90deg,
+      color-mix(in srgb, var(--bg, #14151f) 68%, transparent),
+      color-mix(in srgb, var(--bg, #14151f) 16%, transparent) 58%,
+      color-mix(in srgb, var(--bg, #14151f) 42%, transparent)),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--bg, #14151f) 12%, transparent),
+      color-mix(in srgb, var(--bg, #14151f) 30%, transparent));
+}
+.ews-overlay > *:not(.ew-backdrop) { z-index: 2; }
+.ews-head,
+.ews-toolbar,
+.ews-lens-pane,
+.ews-detail,
+.ews-foot {
+  border: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 82%, transparent);
+  background: color-mix(in srgb, var(--card, #1f2030) 72%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: blur(18px) saturate(1.08);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--bg, #14151f) 28%, transparent);
+}
+.ews-head {
+  margin: 12px 16px 0; padding: 10px 12px; border-radius: 14px;
+}
+.ews-title { letter-spacing: .01em; }
+.ews-lenses {
+  padding: 3px; border: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 76%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--bg, #14151f) 28%, transparent);
+}
+.ews-lens {
+  border-color: transparent; padding: 6px 16px;
+  transition: color .16s ease, background .16s ease, border-color .16s ease;
+}
+.ews-lens-on {
+  color: var(--fg, #e5e7eb); border-color: color-mix(in srgb, var(--accent, #7c3aed) 46%, transparent);
+  background: color-mix(in srgb, var(--accent, #7c3aed) 20%, transparent);
+}
+.ews-btn,
+.ews-chip {
+  background: color-mix(in srgb, var(--card, #1f2030) 50%, transparent);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.ews-btn:hover:not(:disabled),
+.ews-chip:hover {
+  border-color: color-mix(in srgb, var(--accent, #7c3aed) 72%, var(--border, #2d2f3d));
+  background: color-mix(in srgb, var(--accent, #7c3aed) 12%, transparent);
+}
+.ews-toolbar {
+  margin: 8px 16px 0; padding: 7px 10px; gap: 7px; border-radius: 12px;
+  box-shadow: none;
+}
+.ews-filter {
+  padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 74%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--card, #1f2030) 46%, transparent);
+}
+.ews-filter:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent, #7c3aed) 50%, var(--border, #2d2f3d));
+  background: color-mix(in srgb, var(--accent, #7c3aed) 10%, transparent);
+}
+.ews-body { gap: 14px; padding: 14px 16px 16px; }
+.ews-lens-pane {
+  padding: 16px; border-radius: 16px;
+  background: color-mix(in srgb, var(--card, #1f2030) 28%, transparent);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  box-shadow: none;
+}
+.ews-detail {
+  flex-basis: 300px; margin: 0; padding: 17px;
+  border-inline-start: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 82%, transparent);
+  border-radius: 16px;
+}
+.ews-detail-name { font-size: 15px; margin-bottom: 8px; }
+.ews-detail-meta { color: color-mix(in srgb, var(--fg, #e5e7eb) 68%, var(--muted, #9ca3af)); }
+.ews-detail-actions { margin: 14px 0; }
+.ews-foot {
+  margin: 0 16px 10px; padding: 7px 10px; border-radius: 10px;
+  color: color-mix(in srgb, var(--fg, #e5e7eb) 62%, var(--muted, #6b7280));
+  box-shadow: none;
+}
+.ews-orbit {
+  stroke: color-mix(in srgb, var(--accent, #7c3aed) 42%, var(--border, #2d2f3d));
+}
+.ews-rel-line { stroke: color-mix(in srgb, var(--accent, #7c3aed) 62%, transparent); }
+.ews-star circle {
+  fill: color-mix(in srgb, var(--card, #1f2030) 78%, transparent);
+  stroke: color-mix(in srgb, var(--border, #2d2f3d) 88%, transparent);
+}
+.ews-star-centre circle,
+.ews-star-sel circle {
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent, #7c3aed) 65%, transparent));
+}
+.ews-kp,
+.ews-rel-row {
+  background: color-mix(in srgb, var(--card, #1f2030) 58%, transparent);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+.ews-tl-dot-major {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent, #7c3aed) 65%, transparent);
+}
+
+/* The phone detail is a sheet, not the last row of a long column. Its entrance is
+ * the feedback that a star tap did something; anchoring it above the portalled tab
+ * bar keeps that feedback in the player's current field of view. */
+@keyframes ews-detail-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* The portalled bottom bar is rendered through 1100px, including large phones in
+ * landscape. In that whole range, raise detail as a sheet and reserve the bar plus
+ * the device safe area rather than letting either cover selected-star feedback. */
+@media (max-width: 1100px) {
+  .ews-body {
+    --ews-tab-clearance: calc(74px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: var(--ews-tab-clearance);
   }
-  .ews-lenses { margin-inline: 0; }
-  .ews-head { flex-wrap: wrap; }
+  .ews-detail {
+    position: absolute; inset-inline: 10px; bottom: var(--ews-tab-clearance); z-index: 4;
+    box-sizing: border-box; flex: 0 0 auto; max-height: 38dvh; padding: 14px;
+    border-inline-start: 1px solid color-mix(in srgb, var(--border, #2d2f3d) 82%, transparent);
+    border-top: 2px solid color-mix(in srgb, var(--accent, #7c3aed) 72%, var(--border, #2d2f3d));
+    box-shadow: 0 -12px 40px color-mix(in srgb, var(--bg, #14151f) 55%, transparent);
+    animation: ews-detail-rise .18s ease-out;
+  }
+  .ews-foot { display: none; }
+}
+
+/* Below 860px the controls also take their compact, single-column form. */
+@media (max-width: 860px) {
+  .ews-head { margin: 8px 10px 0; padding: 9px 10px; flex-wrap: wrap; gap: 8px; }
+  .ews-title { flex: 1; }
+  .ews-lenses { order: 3; width: 100%; margin-inline: 0; justify-content: center; }
+  .ews-lens { flex: 1; padding-inline: 8px; }
+  .ews-toolbar {
+    margin: 7px 10px 0; padding: 6px 8px; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ews-toolbar::-webkit-scrollbar { display: none; }
+  .ews-filter { flex: 0 0 auto; }
+  .ews-body {
+    flex-direction: column; gap: 8px; padding: 8px 10px var(--ews-tab-clearance);
+  }
+  .ews-lens-pane { padding: 12px; min-height: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ews-detail { animation: none; }
 }
 `;
 //#endregion

@@ -98,6 +98,23 @@ guarantee.
   naming all three parts by
   `test_scene_slot.py::test_a_message_must_name_this_app_this_scene_and_a_choice`.
 
+- **The star map treats the backdrop as the room, not as wallpaper behind an
+  opaque shell.** `memory.tsx` keeps the ordinary no-art fallback solid, but when
+  `StarMap` contains a `Backdrop` the overlay itself becomes transparent and adds
+  only a directional contrast shade. The header, filters, map field, detail card,
+  and hint are separate translucent instruments, so each owns its readability
+  without flattening the narrator's image. Through 1100px, while the portalled
+  bottom bar exists, selecting a star raises a bounded detail sheet over the field
+  and clears both the bar and the device safe area. Below 860px the filters also
+  scroll on one line and the lenses fill their row. The sheet uses a brief entrance
+  cue; selection changes are also announced as a polite live region. The people
+  lens defaults to its readable list on phone-sized screens; that list includes
+  visible people even before a formal relationship is recorded, labels that state
+  plainly, translates common relationship kinds, humanises unknown identifiers,
+  and explains signed strength as closer or more distant instead of exposing an
+  enum and an unlabelled number. Pinned by
+  `test_rail.py::test_the_star_map_is_a_backdrop_adaptive_observatory`.
+
 - **The server is the source of truth for "generating," backed by a poll.**
   `play.tsx` drives its generating/awaiting-opening state from what the server
   reports (`v.generating`) and polls while it holds — a local React boolean died

@@ -262,6 +262,58 @@ def test_the_star_map_has_a_way_in_at_every_width():
                 )
 
 
+def test_the_star_map_is_a_backdrop_adaptive_observatory():
+    """The backdrop is the room, not wallpaper hidden behind an opaque app shell.
+
+    The readable surfaces therefore need local blur and borders, while the map body
+    keeps a transparent stage. On a phone the same hierarchy must reserve the foot
+    of the viewport for the portalled tab bar, and a star tap must raise its detail
+    into view instead of silently adding content below the current scroll position.
+    """
+    src = module("memory.tsx")
+    assert ".ews-overlay:has(> .ew-backdrop) { background: transparent; }" in src
+    assert "backdrop-filter: blur(18px) saturate(1.08)" in src
+    assert ".ews-body { gap: 14px; padding: 14px 16px 16px; }" in src
+    tabbed = re.search(r"@media \(max-width: 1100px\) \{(.*?)\n\}", src, re.S)
+    assert tabbed, "the detail sheet does not cover the full bottom-tab range"
+    assert "--ews-tab-clearance: calc(74px + env(safe-area-inset-bottom, 0px))" in tabbed.group(1), (
+        "the phone map must clear both the portalled tab bar and the device safe area"
+    )
+    assert "position: absolute; inset-inline: 10px; bottom: var(--ews-tab-clearance)" in tabbed.group(1), (
+        "a selected star's detail must rise into view above the phone tab bar"
+    )
+    assert "animation: ews-detail-rise .18s ease-out" in tabbed.group(1), (
+        "a phone tap needs visible feedback that the detail sheet appeared"
+    )
+    assert "max-height: 38dvh" in tabbed.group(1), (
+        "the detail sheet must leave a visible field of stars above it"
+    )
+    narrow = re.search(r"@media \(max-width: 860px\) \{(.*?)\n\}", src, re.S)
+    assert narrow, "the observatory has no compact narrow-screen composition"
+    assert "padding: 8px 10px var(--ews-tab-clearance)" in narrow.group(1), (
+        "the compact phone layout must retain the bottom-tab clearance"
+    )
+    assert 'role="complementary" aria-live="polite"' in src, (
+        "selection changes must also be announced without moving keyboard focus"
+    )
+    assert "window.matchMedia('(max-width: 860px)').matches" in src, (
+        "a phone must default to the readable relation list, not a tiny scaled canvas"
+    )
+    relations = module("memory-layouts/relations.tsx")
+    assert "relationReading(lang, r)" in relations
+    assert "unrelatedCharacters.map((character)" in relations, (
+        "list mode must still show visible people before a formal relation is recorded"
+    )
+    assert "star.rel.unrecorded" in relations
+    assert "r.type}{r.value" not in relations, (
+        "the relation list must not expose a raw type plus an unexplained signed level"
+    )
+    state = module("memory-state.ts")
+    assert state.count("'star.rel.unrecorded':") == 2, (
+        "the unrecorded-relation label must exist in both star-map languages"
+    )
+
+
 def test_the_rail_marks_exactly_one_row_as_current():
     """Two rows reading as current is the failure the split axes introduce: the
     world stays selected while a life is opened. The rail's own condition has to

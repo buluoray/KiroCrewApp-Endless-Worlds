@@ -16,6 +16,22 @@ import { mt, nodeById, nodeLabel, nodeVisible, type StarFilters } from '../memor
 const SIZE = 620
 const CX = SIZE / 2
 
+const LOCALIZED_RELATION_TYPES = new Set([
+  'trust', 'grudge', 'debt', 'fealty', 'love', 'fear',
+  'respect', 'hostility', 'kinship', 'friendship', 'rivalry',
+])
+
+function relationReading(lang: string, relation: StarRelation): string {
+  const normalized = relation.type.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const type = LOCALIZED_RELATION_TYPES.has(normalized)
+    ? mt(lang, `star.rel.type.${normalized}`)
+    : relation.type.replace(/[_-]+/g, ' ')
+  if (relation.value) return `${type} · ${relation.value}`
+  if (!relation.level) return type
+  const direction = mt(lang, relation.level > 0 ? 'star.rel.closer' : 'star.rel.farther')
+  return `${type} · ${direction} ×${Math.abs(relation.level)}`
+}
+
 function ring(index: number, count: number, radius: number): { x: number; y: number } {
   const angle = (index / Math.max(count, 1)) * Math.PI * 2 - Math.PI / 2
   return { x: CX + radius * Math.cos(angle), y: CX + radius * Math.sin(angle) }
@@ -58,6 +74,9 @@ export function RelationsLens({
       (n) => n.kind !== 'event' && n.id !== centre && !partners.has(n.id)
         && nodeVisible(n, filters),
     )
+    .sort((a, b) => a.id.localeCompare(b.id))
+  const unrelatedCharacters = characters
+    .filter((character) => character.id !== centre && !partners.has(character.id))
     .sort((a, b) => a.id.localeCompare(b.id))
 
   const centreLabel =
@@ -104,7 +123,7 @@ export function RelationsLens({
                   {node ? nodeLabel(node) : other}
                 </button>
                 <span className="ews-rel-kind">
-                  {r.type}{r.value ? ` · ${r.value}` : r.level ? ` · ${r.level > 0 ? '+' : ''}${r.level}` : ''}
+                  {relationReading(lang, r)}
                 </span>
                 {r.sources.length ? (
                   <span className="ews-rel-srcs">
@@ -127,6 +146,21 @@ export function RelationsLens({
               </div>
             )
           })}
+          {unrelatedCharacters.map((character) => (
+            <div className="ews-rel-row" key={`unrecorded-${character.id}`}>
+              <button
+                className={'ews-node' + (focus === character.id ? ' ews-node-sel' : '')}
+                type="button"
+                onClick={() => setFocus(character.id)}
+              >
+                {nodeLabel(character)}
+              </button>
+              <span className="ews-rel-kind">{mt(lang, 'star.rel.unrecorded')}</span>
+            </div>
+          ))}
+          {!relations.length && !unrelatedCharacters.length ? (
+            <div className="ews-empty">{mt(lang, 'star.people.none')}</div>
+          ) : null}
         </div>
       </div>
     )
