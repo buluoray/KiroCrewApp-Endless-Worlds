@@ -119,7 +119,7 @@ _STYLE = """<style>
 body {
   margin: 0; padding: 12px;
   font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #e2e8f0; background: transparent;
+  color: #e2e8f0; background: #0b0c10;
 }
 h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
 .r { display: flex; gap: 10px; padding: 4px 0; align-items: baseline; }

@@ -1224,28 +1224,28 @@
 }
 .ew-slot-on { display: block; height: 320px; }
 
-/* Fullscreen is the SAME element with different geometry. Absolute inside the
-   app's own box rather than fixed: position fixed escapes the panel entirely and
-   would put a scene over the dashboard's own chrome. */
+/* Fullscreen is the SAME element with different geometry — a fixed viewport
+   overlay at the app's modal layer (z-index 70), so it sits ABOVE the mobile tab
+   bar instead of behind it. */
 .ew-slot-full {
   display: block;
-  /* Absolute inside .ew-slot-wrap, NOT fixed: fixed would escape the panel and
-     cover the dashboard's own chrome. The wrapper carries the height in fullscreen
-     (.ew-slot-wrap-full) so this inset:0 iframe resolves to a real box instead of
-     the 0-height one the collapsed wrapper used to give it (M0.1). */
-  position: absolute; inset: 0; z-index: 20;
+  /* Fixed viewport overlay, NOT absolute-in-panel: the mobile tab bar is portaled
+     to <body> as a fixed high-z overlay, so an in-panel absolute scene left its
+     bottom hidden behind the tab bar. z-index 70 matches the story-card / legacy
+     modals, which already cover the tab bar. */
+  position: fixed; inset: 0; z-index: 70;
   border-radius: 0; background: var(--ew-bg, #0b0c10);
 }
 
 .ew-slot-wrap { position: relative; margin: 16px 0 0; }
-/* In fullscreen the iframe and its bar both go absolute, so without a height here
-   the relative wrapper collapses to 0 and the iframe had nothing to fill (M0.1).
-   Give the wrapper the height; the scene fills the panel and stays inside it. */
-.ew-slot-wrap-full { min-height: 85dvh; }
+/* The fullscreen iframe and its bar are both FIXED (sized by inset:0), so the
+   wrapper must NOT reserve height — 85dvh here would leave a tall empty gap in the
+   page flow behind the overlay. */
+.ew-slot-wrap-full { min-height: 0; }
 .ew-slot-bar {
   display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 6px;
 }
-.ew-slot-bar-full { position: absolute; top: 8px; right: 8px; z-index: 21; margin: 0; }
+.ew-slot-bar-full { position: fixed; top: 8px; right: 8px; z-index: 71; margin: 0; }
 .ew-slot-btn {
   min-height: 36px; padding: 0 12px; font: inherit; font-size: 12px;
   color: var(--text, #e2e8f0); background: var(--card, #1f2030);

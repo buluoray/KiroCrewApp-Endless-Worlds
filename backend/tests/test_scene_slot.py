@@ -81,16 +81,17 @@ def test_the_frame_is_never_re_keyed(slot: str) -> None:
     assert "key=" not in iframe
 
 
-def test_fullscreen_is_the_same_element_with_different_geometry() -> None:
-    """"Promoted in place": a fullscreen mode that re-parented the frame would reload
-    the scene at the moment the player asked to see more of it."""
+def test_fullscreen_is_the_same_element_promoted_to_a_fixed_overlay() -> None:
+    """"Promoted in place": fullscreen toggles the frame's CLASS, never re-parents
+    it (a re-parent reloads the scene). Geometry-wise it becomes a FIXED viewport
+    overlay at the modal layer (z-index 70), so it sits ABOVE the mobile tab bar —
+    which is portaled to <body> as a fixed high-z overlay — instead of behind it.
+    An absolute-in-panel scene left its bottom hidden under the tab bar."""
     css = uisrc.styles()
     assert ".ew-slot-full" in css
     full = css.split(".ew-slot-full", 1)[1].split("}", 1)[0]
-    assert "position: absolute" in full
-    # NOT fixed: this app mounts in the dashboard's tree, so fixed escapes the panel
-    # and would put a scene over the dashboard's own chrome.
-    assert "position: fixed" not in full
+    assert "position: fixed" in full
+    assert "z-index: 70" in full
 
 
 def test_the_slot_never_becomes_the_scrolling_element() -> None:
