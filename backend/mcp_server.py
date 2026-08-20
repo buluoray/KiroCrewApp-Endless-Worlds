@@ -1087,7 +1087,6 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                         {
                             "id": e.id,
                             **({"name": e.name} if e.name else {}),
-                            **({"summary": e.summary} if e.summary else {}),
                             "text": e.text,
                         }
                         for _, e in ranked[:MAX_LORE]
