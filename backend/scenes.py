@@ -27,6 +27,61 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 logger = logging.getLogger(__name__)
 
 
+def slugify_id(value: Any, fallback: str) -> str:
+    """Coerce any string into the id-slug shape, or return ``fallback``.
+
+    Lowercase, non-slug runs collapse to a single hyphen, leading/trailing hyphens
+    trimmed, capped at 64 chars. This is the ONE place a mangled id is repaired, so
+    the ledger key, the widget path, the scene URL and the compiled button all read
+    the same slug — coercing at render time instead would let the button and the
+    answer channel disagree about what a click means.
+    """
+    if isinstance(value, str):
+        s = re.sub(r"[^a-z0-9-]+", "-", value.strip().lower())
+        s = re.sub(r"-+", "-", s).strip("-")[:64].strip("-")
+        if s and _ID_RE.match(s):
+            return s
+    return fallback
+
+
+def slugify_scene_id(value: Any) -> str:
+    """The scene id as stored: a slug, always. Falls back to ``scene`` for an id
+    that has no sluggable content at all."""
+    return slugify_id(value, "scene")
+
+
+def normalize_choice_ids(spec: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``spec`` whose every ``choice`` element carries a valid,
+    unique slug id.
+
+    Normalized in the STORED spec once, at the mount/update boundary, so the three
+    readers of a choice id — the stored spec, the compiled button's ``data-choice``,
+    and the answer channel's offered set — can never disagree. A non-slug id is
+    slugified; an unsluggable or colliding one becomes ``choice-{index}``.
+    """
+    if not isinstance(spec, dict):
+        return spec
+    elements = spec.get("elements")
+    if not isinstance(elements, list):
+        return spec
+    out = dict(spec)
+    new_elements: list[Any] = []
+    seen: set[str] = set()
+    for i, el in enumerate(elements):
+        if isinstance(el, dict) and el.get("kind") == "choice":
+            el = dict(el)
+            cid = slugify_id(el.get("id"), f"choice-{i}")
+            if cid in seen:
+                cid = f"choice-{i}"
+                while cid in seen:
+                    cid = f"{cid}-x"
+            seen.add(cid)
+            el["id"] = cid
+        new_elements.append(el)
+    out["elements"] = new_elements
+    return out
+
+
 class SceneLedgerError(RuntimeError):
     pass
 
@@ -99,10 +154,11 @@ class SceneLedger:
         ``label`` is the short tab/name shown for it. Both are optional and a bare
         remount keeps whatever the scene already had.
         """
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         if not isinstance(spec, dict):
             raise SceneLedgerError("a scene spec must be an object")
         self._reject_markup(spec)
+        spec = normalize_choice_ids(spec)
 
         data = self._read()
         existing = data.get(scene_id) or {}
@@ -124,21 +180,25 @@ class SceneLedger:
         return nonce
 
     def nonce(self, scene_id: str) -> str:
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         entry = self._read().get(scene_id)
         if not isinstance(entry, dict):
             raise SceneLedgerError(f"no mounted scene {scene_id!r}")
         return str(entry.get("nonce") or "")
 
     def update(self, scene_id: str, spec: dict[str, Any]) -> None:
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         if not isinstance(spec, dict):
             raise SceneLedgerError("a scene spec must be an object")
         self._reject_markup(spec)
+        spec = normalize_choice_ids(spec)
 
         data = self._read()
         if scene_id not in data:
-            raise SceneLedgerError(f"no mounted scene {scene_id!r} to update")
+            # Upsert: an update to a scene that is not mounted becomes a mount with
+            # a fresh nonce, rather than a refusal the narrator cannot recover from.
+            self.mount(scene_id, spec)
+            return
         entry = dict(data[scene_id])
         entry["spec"] = spec
         entry["updatedAt"] = _now()
@@ -146,14 +206,14 @@ class SceneLedger:
         self._write(data)
 
     def dismiss(self, scene_id: str) -> None:
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         data = self._read()
         if data.pop(scene_id, None) is None:
             return  # already gone; dismissing twice is not an error
         self._write(data)
 
     def answer(self, scene_id: str) -> Any:
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         entry = self._read().get(scene_id)
         if not isinstance(entry, dict):
             raise SceneLedgerError(f"no mounted scene {scene_id!r}")
@@ -162,7 +222,7 @@ class SceneLedger:
     def spec(self, scene_id: str) -> dict[str, Any]:
         """The stored spec. Read-only by construction — the compiler is handed a
         copy, so a compile pass cannot edit what the narrator declared."""
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         entry = self._read().get(scene_id)
         if not isinstance(entry, dict):
             raise SceneLedgerError(f"no mounted scene {scene_id!r}")
@@ -199,7 +259,7 @@ class SceneLedger:
           overwritten: the narrator may already have read the first, so letting a
           later message replace it would rewrite a decision the story has acted on.
         """
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         data = self._read()
         entry = data.get(scene_id)
         if not isinstance(entry, dict):
@@ -223,7 +283,7 @@ class SceneLedger:
         state, and a failure that only reached a log file is a failure the story
         never learns about.
         """
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         data = self._read()
         entry = data.get(scene_id)
         if not isinstance(entry, dict):
@@ -238,7 +298,7 @@ class SceneLedger:
         self._write(data)
 
     def failures(self, scene_id: str) -> list[dict[str, Any]]:
-        self._check(scene_id, "scene id")
+        scene_id = slugify_scene_id(scene_id)
         entry = self._read().get(scene_id)
         if not isinstance(entry, dict):
             return []

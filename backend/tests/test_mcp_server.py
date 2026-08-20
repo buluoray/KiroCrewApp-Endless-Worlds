@@ -338,11 +338,14 @@ def test_a_spec_carrying_markup_is_refused_not_stripped(app):
     assert "html" in out["error"]
 
 
-def test_updating_an_unmounted_scene_is_an_error_not_a_silent_mount(app):
+def test_updating_an_unmounted_scene_upserts_rather_than_erroring(app):
+    """An update to a scene that is not mounted is treated as a mount with a fresh
+    nonce, so a narrator that lost track of the mount still recovers."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
     out = call("endless_update_scene", runId=run, sceneId="ghost", spec={"k": 1})
-    assert out["ok"] is False and "ghost" in out["error"]
+    assert out["ok"] is True and out["updated"] == "ghost"
+    assert SceneLedger(srv._DATA, run).nonce("ghost")
 
 
 def test_dismissing_twice_is_not_an_error(app):
@@ -387,11 +390,23 @@ def test_a_remount_clears_a_stale_answer(app):
 
 
 @pytest.mark.parametrize("bad", ["../x", "A", "-x", "", "a/b"])
-def test_a_malformed_scene_id_never_becomes_a_path(app, bad):
+def test_a_malformed_scene_id_is_slugified_and_never_becomes_a_path(app, bad):
+    """A mangled scene id is normalized to a safe slug at the mount boundary rather
+    than refused, so it can never carry a path separator or a traversal segment
+    into the ledger key or the widget path."""
+    import re as _re
+
+    from widget import widget_path
+
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
     out = call("endless_mount_scene", runId=run, sceneId=bad, spec={"k": 1})
-    assert out["ok"] is False
+    assert out["ok"] is True
+    sid = out["mounted"]
+    assert _re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", sid)
+    assert "/" not in sid and ".." not in sid
+    # The compiled-bytes path stays under the run, keyed by the slug.
+    assert widget_path(srv._DATA, run, sid).name == f"{sid}.html"
 
 
 def test_the_ledger_lives_under_the_run_not_beside_it(app):

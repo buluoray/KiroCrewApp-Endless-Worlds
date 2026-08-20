@@ -71,7 +71,12 @@ except Exception as exc:  # noqa: BLE001
     if not _IMPORT_ERROR:
         _IMPORT_ERROR = f"cannot import kiro_crew.apps.app_storage: {exc}"
 
-from scenes import SceneLedger, SceneLedgerError  # noqa: E402
+from scenes import (  # noqa: E402
+    SceneLedger,
+    SceneLedgerError,
+    slugify_scene_id,
+)
+from widget import scene_warnings  # noqa: E402
 from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
 from chapters import (  # noqa: E402
     ChapterError,
@@ -1474,6 +1479,16 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _probe_state(run_id: str) -> dict[str, Any]:
+    """Run state for a compile-probe, best-effort. A scene binds against state, so
+    the probe wants it, but a scene mounts whether or not state is readable — an
+    unreadable state just means binds fall back to literals."""
+    try:
+        return _store().read_state(run_id) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _mount_scene(args: dict[str, Any]) -> dict[str, Any]:
     ledger = _scene_ledger(args["runId"])
     ledger.mount(
@@ -1483,16 +1498,21 @@ def _mount_scene(args: dict[str, Any]) -> dict[str, Any]:
         region=str(args.get("region") or ""),
         label=str(args.get("label") or ""),
     )
-    # The nonce is NOT returned to the narrator: it is the page's proof that a
-    # click came from the frame currently on screen, and a narrator holding it
-    # could forge an answer to its own question.
-    return {"mounted": args["sceneId"]}
+    # A compile-probe of the STORED (normalized) spec, so the narrator learns which
+    # elements will not render — the scene still mounts regardless, and this never
+    # raises. The mount identity is NOT returned: a narrator holding it could forge
+    # an answer to the question it just asked.
+    sid = slugify_scene_id(args["sceneId"])
+    warnings = scene_warnings(sid, ledger.spec(sid), _probe_state(args["runId"]))
+    return {"mounted": sid, **({"warnings": warnings} if warnings else {})}
 
 
 def _update_scene(args: dict[str, Any]) -> dict[str, Any]:
     ledger = _scene_ledger(args["runId"])
     ledger.update(args["sceneId"], args["spec"])
-    return {"updated": args["sceneId"]}
+    sid = slugify_scene_id(args["sceneId"])
+    warnings = scene_warnings(sid, ledger.spec(sid), _probe_state(args["runId"]))
+    return {"updated": sid, **({"warnings": warnings} if warnings else {})}
 
 
 def _await_scene(args: dict[str, Any]) -> dict[str, Any]:

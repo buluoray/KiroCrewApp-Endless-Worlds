@@ -21,13 +21,17 @@ import widget as w  # noqa: E402
 from widget import (  # noqa: E402
     CSP,
     ELEMENT_KINDS,
+    MAX_COLUMNS,
     MAX_ELEMENTS,
+    MAX_ROWS,
     MAX_SPEC_BYTES,
+    MAX_TEXT,
     SCENE_SCRIPT,
     SceneSpecError,
     compile_cached,
     compile_scene,
     resolve_bind,
+    scene_warnings,
     spec_digest,
     widget_path,
 )
@@ -140,12 +144,20 @@ def test_a_spec_carrying_markup_fields_is_refused_outright():
 # -- the closed set ------------------------------------------------------
 
 
-def test_an_unknown_kind_is_refused_before_anything_mounts():
-    """Refused, not skipped: a compiler that ignored what it did not understand
-    would let a spec fail open."""
-    with pytest.raises(SceneSpecError) as exc:
-        compile_scene("map", {"elements": [{"kind": "iframe", "src": "http://evil"}]}, STATE)
-    assert exc.value.field == "elements[0].kind"
+def test_an_unknown_kind_is_dropped_and_the_rest_of_the_scene_renders():
+    """Fail-soft: an unknown kind emits no markup (the closed set still holds) but
+    the element is dropped and recorded, rather than blanking the whole scene."""
+    spec = {"elements": [
+        {"kind": "text", "text": "留下来的"},
+        {"kind": "iframe", "src": "http://evil"},
+    ]}
+    out = compile_scene("map", spec, STATE)
+    assert "留下来的" in out          # the good element survived
+    assert "<iframe" not in out       # the unknown kind produced no tag
+    warnings = scene_warnings("map", spec, STATE)
+    assert warnings == [{"index": 1, "field": "elements[1].kind",
+                         "reason": warnings[0]["reason"]}]
+    assert "iframe" in warnings[0]["reason"]
 
 
 def test_every_declared_kind_actually_compiles():
@@ -184,13 +196,28 @@ def test_a_bind_reads_the_same_state_the_panels_read():
     assert "width:40%" in out
 
 
-def test_an_unresolvable_bind_is_rejected_rather_than_left_blank():
-    """Unlike a panel gap. A panel gap is a fact not yet mentioned; a scene bind
-    is the narrator asserting a number exists — a silent blank would ship a widget
-    that quietly disagrees with the panels."""
-    with pytest.raises(SceneSpecError) as exc:
-        compile_scene("map", {"elements": [{"kind": "stat", "label": "x", "bind": "magic.nope"}]}, STATE)
-    assert exc.value.field == "elements[0].bind"
+def test_an_unresolvable_bind_falls_back_to_the_literal():
+    """A typo'd bind is no longer fatal: it falls back to the element's own literal
+    value/text so the scene still shows something truthful the narrator wrote."""
+    spec = {"elements": [
+        {"kind": "stat", "label": "x", "bind": "magic.nope", "value": "40"},
+    ]}
+    out = compile_scene("map", spec, STATE)
+    assert "40" in out
+
+
+def test_an_unresolvable_bind_with_no_literal_drops_only_that_element():
+    """No bind and no literal means nothing to show — that one element is dropped
+    (and recorded), the rest of the scene survives."""
+    spec = {"elements": [
+        {"kind": "text", "text": "还在"},
+        {"kind": "stat", "label": "x", "bind": "magic.nope"},
+    ]}
+    out = compile_scene("map", spec, STATE)
+    assert "还在" in out
+    warnings = scene_warnings("map", spec, STATE)
+    assert [w["index"] for w in warnings] == [1]
+    assert warnings[0]["field"] == "elements[1].bind"
 
 
 @pytest.mark.parametrize("bad", ["../secret", "magic..mana", "magic.mana()", "", "__class__.x"])
@@ -216,11 +243,12 @@ def test_an_oversized_spec_is_refused():
     assert exc.value.field == "spec"
 
 
-def test_too_many_elements_is_refused():
-    spec = {"elements": [{"kind": "divider"} for _ in range(MAX_ELEMENTS + 1)]}
-    with pytest.raises(SceneSpecError) as exc:
-        compile_scene("map", spec, STATE)
-    assert exc.value.field == "spec.elements"
+def test_too_many_elements_is_truncated_not_refused():
+    """A legibility cap, not a trust boundary: render the first MAX_ELEMENTS and
+    drop the tail rather than blanking the whole scene."""
+    spec = {"elements": [{"kind": "divider"} for _ in range(MAX_ELEMENTS + 5)]}
+    out = compile_scene("map", spec, STATE)
+    assert out.count("<hr>") == MAX_ELEMENTS
 
 
 def test_an_empty_spec_is_refused():
@@ -228,19 +256,31 @@ def test_an_empty_spec_is_refused():
         compile_scene("map", {"elements": []}, STATE)
 
 
-def test_a_ragged_table_row_is_refused_by_position():
-    spec = {"elements": [{"kind": "table", "columns": ["a", "b"], "rows": [["1"]]}]}
-    with pytest.raises(SceneSpecError) as exc:
-        compile_scene("map", spec, STATE)
-    assert exc.value.field == "elements[0].rows[0]"
+def test_a_ragged_table_row_is_padded_and_truncated_to_the_columns():
+    """A short row is padded, a long row is truncated — the table still renders
+    rather than 422-ing the whole scene."""
+    spec = {"elements": [{"kind": "table", "columns": ["a", "b"],
+                          "rows": [["1"], ["2", "3", "4"]]}]}
+    out = compile_scene("map", spec, STATE)
+    # Two body rows, each with exactly two cells (2 columns).
+    rows = re.findall(r"<tr>(.*?)</tr>", out.split("<tbody>", 1)[1], re.S)
+    assert len(rows) == 2
+    for row in rows:
+        assert row.count("<td>") == 2
+    assert "4" not in out.split("<tbody>", 1)[1]  # the overflowing cell was cut
 
 
-def test_nothing_is_emitted_when_one_element_is_bad():
-    """Validated whole: a scene missing its second half looks to the player like
-    the world forgetting what it was saying."""
-    spec = {"elements": [{"kind": "text", "text": "好的"}, {"kind": "nope"}]}
-    with pytest.raises(SceneSpecError):
-        compile_scene("map", spec, STATE)
+def test_one_bad_element_is_dropped_and_the_good_ones_render():
+    """A legible partial beats a blank frame: a bad element is dropped and the
+    surrounding elements still render, unlike the old whole-scene refusal."""
+    spec = {"elements": [
+        {"kind": "text", "text": "好的"},
+        {"kind": "nope"},
+        {"kind": "text", "text": "也好"},
+    ]}
+    out = compile_scene("map", spec, STATE)
+    assert "好的" in out and "也好" in out
+    assert [w["index"] for w in scene_warnings("map", spec, STATE)] == [1]
 
 
 # -- bars ---------------------------------------------------------------
@@ -346,9 +386,18 @@ def test_grid_lays_cells_into_columns_and_escapes_labels():
     assert "危险" in out
 
 
-def test_grid_rejects_out_of_range_columns():
-    with pytest.raises(SceneSpecError):
-        _scene({"kind": "grid", "columns": 9, "cells": [{"label": "x"}]})
+def test_grid_clamps_out_of_range_columns_into_range():
+    out = _scene({"kind": "grid", "columns": 9, "cells": [{"label": "x"}]})
+    assert "grid-template-columns:repeat(8,1fr)" in out  # 9 clamped down to 8
+    out0 = _scene({"kind": "grid", "columns": 0, "cells": [{"label": "x"}]})
+    assert "grid-template-columns:repeat(1,1fr)" in out0  # 0 clamped up to 1
+
+
+def test_grid_drops_a_bad_cell_and_keeps_the_rest():
+    out = _scene({"kind": "grid", "columns": 2,
+                  "cells": [{"label": "王庭"}, "not-an-object", {"label": "矿脉"}]})
+    assert "王庭" in out and "矿脉" in out
+    assert "not-an-object" not in out
 
 
 def test_links_draws_svg_from_nodes_and_edges_with_no_author_coordinates():
@@ -362,10 +411,20 @@ def test_links_draws_svg_from_nodes_and_edges_with_no_author_coordinates():
     assert re.search(r'cx="[0-9.]+"', out)
 
 
-def test_links_rejects_an_edge_to_an_unknown_node():
-    with pytest.raises(SceneSpecError):
-        _scene({"kind": "links", "nodes": [{"id": "a", "label": "A"}],
-                "edges": [{"from": "a", "to": "ghost"}]})
+def test_links_drops_an_edge_to_an_unknown_node_and_still_draws():
+    out = _scene({"kind": "links", "nodes": [{"id": "a", "label": "A"}],
+                  "edges": [{"from": "a", "to": "ghost"}]})
+    assert "<svg" in out and "<circle" in out  # the node still draws
+    assert "<line" not in out                   # the dangling edge was dropped
+
+
+def test_links_de_dups_repeated_node_ids_keeping_the_first():
+    out = _scene({"kind": "links", "nodes": [
+        {"id": "a", "label": "第一"}, {"id": "a", "label": "第二"},
+        {"id": "b", "label": "乙"},
+    ], "edges": [{"from": "a", "to": "b"}]})
+    assert "第一" in out and "第二" not in out
+    assert out.count("<circle") == 2
 
 
 def test_tree_nests_children_under_parents_and_escapes():
@@ -379,18 +438,156 @@ def test_tree_nests_children_under_parents_and_escapes():
     assert "储君" in out
 
 
-def test_tree_rejects_a_cycle():
-    with pytest.raises(SceneSpecError):
-        _scene({"kind": "tree", "nodes": [
-            {"id": "a", "label": "A", "parent": "b"},
-            {"id": "b", "label": "B", "parent": "a"},
-        ]})
+def test_tree_survives_a_cycle_by_promoting_a_root_and_dropping_the_back_edge():
+    """A cycle no longer 422s the scene. A real root renders normally; a separate
+    pair that only points at each other is stranded, so it is promoted as its own
+    root and the back-edge that would loop back is dropped rather than raising."""
+    out = _scene({"kind": "tree", "nodes": [
+        {"id": "root", "label": "始祖"},
+        {"id": "kid", "label": "长子", "parent": "root"},
+        {"id": "a", "label": "甲", "parent": "b"},
+        {"id": "b", "label": "乙", "parent": "a"},
+    ]})
+    assert 'class="tree"' in out
+    for name in ("始祖", "长子", "甲", "乙"):
+        assert name in out
 
 
-def test_tree_rejects_an_unknown_parent():
-    with pytest.raises(SceneSpecError):
-        _scene({"kind": "tree", "nodes": [{"id": "a", "label": "A", "parent": "ghost"}]})
+def test_tree_treats_an_unknown_parent_as_a_root():
+    out = _scene({"kind": "tree", "nodes": [{"id": "a", "label": "A", "parent": "ghost"}]})
+    assert 'class="tree"' in out
+    assert "A" in out  # rendered as a root rather than refused
+
+
+def test_tree_drops_a_node_with_no_usable_id_but_keeps_the_rest():
+    out = _scene({"kind": "tree", "nodes": [
+        {"id": "root", "label": "始祖"},
+        {"id": "Bad Id", "label": "无效"},
+        {"id": "kid", "label": "长子", "parent": "root"},
+    ]})
+    assert "始祖" in out and "长子" in out
+    assert "无效" not in out
 
 
 def test_the_new_kinds_are_in_the_closed_set():
     assert {"grid", "links", "tree"} <= ELEMENT_KINDS
+
+
+# -- fail-soft salvage: a legible partial beats a blank frame -------------
+
+
+def test_over_long_text_is_truncated_with_an_ellipsis_not_refused():
+    spec = {"elements": [{"kind": "text", "text": "字" * (MAX_TEXT + 50)}]}
+    body = compile_scene("map", spec, STATE).split("<body>", 1)[1]
+    assert "…" in body
+    assert body.count("字") == MAX_TEXT - 1  # cap-1 chars, then the ellipsis
+
+
+def test_an_unexpected_scalar_is_coerced_not_refused():
+    """A bool is not text a narrator meant, but coercing it beats dropping the
+    element that carries it."""
+    out = compile_scene("map", {"elements": [{"kind": "text", "text": True}]}, STATE)
+    assert "True" in out.split("<body>", 1)[1]
+
+
+def test_a_list_longer_than_the_cap_is_truncated():
+    spec = {"elements": [{"kind": "list", "items": [str(i) for i in range(MAX_ROWS + 10)]}]}
+    assert compile_scene("map", spec, STATE).count("<li>") == MAX_ROWS
+
+
+def test_a_table_drops_a_non_array_row_and_keeps_the_rest():
+    spec = {"elements": [{"kind": "table", "columns": ["a"], "rows": [["1"], "bad", ["2"]]}]}
+    body = compile_scene("map", spec, STATE).split("<tbody>", 1)[1]
+    assert len(re.findall(r"<tr>", body)) == 2
+
+
+def test_a_table_wider_than_the_column_cap_is_truncated():
+    cols = [f"c{i}" for i in range(MAX_COLUMNS + 3)]
+    spec = {"elements": [{"kind": "table", "columns": cols, "rows": [["x"]]}]}
+    out = compile_scene("map", spec, STATE)
+    assert out.count("<th>") == MAX_COLUMNS
+
+
+def test_scene_warnings_reports_a_hard_gate_without_raising():
+    """A whole-spec gate (empty elements) surfaces as one warning at index -1 so
+    the mount tool can still succeed and tell the narrator."""
+    warnings = scene_warnings("map", {"elements": []}, STATE)
+    assert warnings and warnings[0]["index"] == -1
+
+
+def test_the_markup_ban_stays_a_hard_gate_even_with_salvage():
+    """MUST-BLOCK is untouched: a spec carrying markup is still refused outright,
+    not salvaged element by element."""
+    for banned in ("html", "script", "srcdoc"):
+        with pytest.raises(SceneSpecError):
+            compile_scene("map", {banned: "<b>x</b>", "elements": [{"kind": "divider"}]}, STATE)
+
+
+# -- id coherence across the three readers -------------------------------
+
+
+def test_a_mangled_choice_id_is_coherent_across_button_and_answer_channel(tmp_path):
+    """The single most error-prone item: the stored spec, the compiled button's
+    ``data-choice``, and the answer channel's offered set must all read the same id
+    for a valid click to be accepted. Normalizing once at the mount boundary is
+    what keeps them from disagreeing."""
+    from scenes import SceneLedger
+
+    ledger = SceneLedger(tmp_path, "run-1")
+    spec = {"elements": [
+        {"kind": "text", "text": "岔路"},
+        {"kind": "choice", "id": "Go North!", "label": "往北"},
+    ]}
+    nonce = ledger.mount("fork", spec, asks=True)
+    stored = ledger.spec("fork")                        # (a) the stored spec
+
+    out = compile_scene("fork", stored, {}, nonce=nonce)
+    button_ids = re.findall(r'data-choice="([^"]+)"', out)   # (b) the button
+    assert len(button_ids) == 1
+
+    offered = {                                          # (c) the answer channel
+        el.get("id") for el in stored["elements"]
+        if isinstance(el, dict) and el.get("kind") == "choice"
+    }
+    assert button_ids[0] in offered, "button id and offered set disagree"
+
+    # End-to-end: a click with the button's id is accepted, not refused.
+    ledger.record_answer("fork", button_ids[0], nonce=nonce)
+    assert ledger.answer("fork") == button_ids[0]
+
+
+def test_two_choices_that_slugify_to_the_same_id_stay_distinct(tmp_path):
+    from scenes import SceneLedger
+
+    ledger = SceneLedger(tmp_path, "run-1")
+    spec = {"elements": [
+        {"kind": "choice", "id": "go!", "label": "一"},
+        {"kind": "choice", "id": "go?", "label": "二"},
+    ]}
+    ledger.mount("fork", spec)
+    ids = [el["id"] for el in ledger.spec("fork")["elements"]]
+    assert len(set(ids)) == 2, "colliding slugs were not disambiguated"
+
+
+def test_a_mangled_scene_id_is_slugified_consistently(tmp_path):
+    from scenes import SceneLedger, slugify_scene_id
+
+    ledger = SceneLedger(tmp_path, "run-1")
+    ledger.mount("Battle Map!", {"elements": [{"kind": "text", "text": "x"}]})
+    sid = slugify_scene_id("Battle Map!")
+    assert sid == "battle-map"
+    assert [r["sceneId"] for r in ledger.mounted()] == [sid]
+    # Every later reader resolves the raw id to the same slug.
+    assert ledger.spec("Battle Map!") == ledger.spec(sid)
+    assert ledger.nonce(sid)
+    # The compiled-bytes path uses the slug and never the raw id.
+    assert widget_path(tmp_path, "run-1", sid).name == f"{sid}.html"
+
+
+def test_update_of_an_unmounted_scene_upserts_with_a_fresh_nonce(tmp_path):
+    from scenes import SceneLedger
+
+    ledger = SceneLedger(tmp_path, "run-1")
+    ledger.update("fresh", {"elements": [{"kind": "text", "text": "新"}]})
+    assert [r["sceneId"] for r in ledger.mounted()] == ["fresh"]
+    assert ledger.nonce("fresh"), "an upsert must produce a real mount identity"

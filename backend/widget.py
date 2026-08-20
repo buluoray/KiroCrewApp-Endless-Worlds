@@ -4,8 +4,14 @@ The trust boundary of this whole app lives in this file. A narrator describes wh
 a scene should show; it never supplies markup. Everything below follows from that:
 
 * **Element kinds are a closed set.** The narrator picks from templates; it cannot
-  name a tag. An unknown kind is refused before anything mounts, because a
-  compiler that skipped what it did not understand would let a spec fail open.
+  name a tag. An unknown (or otherwise malformed) element is DROPPED rather than
+  aborting the whole scene — a legible partial beats a blank frame — and its loss
+  is recorded (see ``scene_warnings``) so the narrator can be told. Dropping is
+  safe precisely because a dropped element emits no markup: the closed set still
+  means the compiler never turns a name it does not know into a tag.
+* **Whole-spec gates stay hard.** The markup ban (``html``/``script``/…), the byte
+  ceiling, and a spec with no elements at all still refuse outright: those are the
+  trust boundary, not a per-element legibility nicety.
 * **Every narrator string is escaped as text.** Narrator bytes reach the DOM only
   as content, never as markup or as script.
 * **The one script is a constant.** It is emitted byte-identically and carries no
@@ -164,10 +170,10 @@ ul.tree li { padding: 3px 0; }
 def resolve_bind(path: str, state: dict[str, Any]) -> Any:
     """Read a dotted path out of run state, or raise.
 
-    Unresolvable is an ERROR here rather than a blank, unlike a panel's missing
-    field. A panel gap is a fact the narrator has not mentioned yet; a scene bind
-    is the narrator asserting a number exists and asking for it to be drawn, so
-    a silent blank would ship a widget that quietly disagrees with the panels.
+    Still raises on an unresolvable path — but the caller (``_valued``) now catches
+    that and falls back to the element's literal ``value``/``text``, dropping the
+    element only when there is no literal either. A malformed PATH (not a typo'd
+    one, but a shape that could walk into internals) is refused here regardless.
     """
     if not isinstance(path, str) or not _PATH_RE.match(path):
         raise SceneSpecError("bind", f"a dotted path, got {path!r}")
@@ -183,14 +189,42 @@ def resolve_bind(path: str, state: dict[str, Any]) -> Any:
 
 
 def _text(value: Any, field: str, *, cap: int = MAX_TEXT) -> str:
+    """Coerce a scalar to display text, truncating rather than refusing.
+
+    A legible partial beats a blank frame: an over-long string is cut to the cap
+    with an ellipsis, and an unexpected scalar (bool, etc.) is stringified. Only a
+    genuinely unrenderable container (dict/list) is refused, so the ONE element
+    carrying it is dropped by the salvage loop instead of the whole scene.
+    """
     if value is None:
         return ""
-    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+    if isinstance(value, (dict, list)):
         raise SceneSpecError(field, "text")
     out = str(value)
     if len(out) > cap:
-        raise SceneSpecError(field, f"at most {cap} characters, got {len(out)}")
+        out = out[: max(1, cap - 1)] + "…"
     return out
+
+
+def _celltext(value: Any, field: str, *, cap: int = MAX_TEXT) -> str:
+    """``_text`` that degrades a bad cell to empty rather than dropping its whole
+    container — used where one broken cell should not cost the entire table/graph."""
+    try:
+        return _text(value, field, cap=cap)
+    except SceneSpecError:
+        return ""
+
+
+def _valued(el: dict[str, Any], where: str, bound: Any, bind_failed: bool, key: str) -> Any:
+    """The value a value-bearing element should show: the resolved bind if it
+    resolved, else the element's literal. A bind that failed AND has no literal to
+    fall back to raises, so the salvage loop drops just that element (item 5)."""
+    if "bind" in el and not bind_failed:
+        return bound
+    literal = el.get(key)
+    if bind_failed and literal is None:
+        raise SceneSpecError(f"{where}.bind", "unresolved, and no literal fallback")
+    return literal
 
 
 def _esc(value: Any) -> str:
@@ -225,13 +259,16 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
             f"{where}.kind", f"one of {sorted(ELEMENT_KINDS)}, got {kind!r}"
         )
 
-    # A bound value replaces `value`/`text` wherever an element takes one.
+    # A bound value replaces `value`/`text`. An unresolvable bind is NOT fatal
+    # here: it falls back to the element's literal, and drops only this element
+    # (via the salvage loop) when there is no literal to fall back to.
     bound: Any = None
+    bind_failed = False
     if "bind" in el:
         try:
             bound = resolve_bind(el["bind"], state)
-        except SceneSpecError as exc:
-            raise SceneSpecError(f"{where}.bind", exc.expected) from exc
+        except SceneSpecError:
+            bind_failed = True
 
     if kind == "divider":
         return "<hr>"
@@ -240,17 +277,19 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         return f"<h3>{_esc(_text(el.get('text'), f'{where}.text'))}</h3>"
 
     if kind in ("text", "note"):
-        body = _esc(_text(bound if bound is not None else el.get("text"), f"{where}.text"))
+        raw = _valued(el, where, bound, bind_failed, "text")
+        body = _esc(_text(raw, f"{where}.text"))
         return f'<p class="n">{body}</p>' if kind == "note" else f"<p>{body}</p>"
 
     if kind == "keyvalue":
         label = _esc(_text(el.get("label"), f"{where}.label"))
-        value = _esc(_text(bound if bound is not None else el.get("value"), f"{where}.value"))
+        raw = _valued(el, where, bound, bind_failed, "value")
+        value = _esc(_text(raw, f"{where}.value"))
         return f'<div class="r"><div class="k">{label}</div><div class="v">{value}</div></div>'
 
     if kind in ("stat", "bar"):
         label = _esc(_text(el.get("label"), f"{where}.label"))
-        raw = bound if bound is not None else el.get("value")
+        raw = _valued(el, where, bound, bind_failed, "value")
         value = _esc(_text(raw, f"{where}.value", cap=64))
         cap = el.get("max")
         pct = _pct(raw, cap) if cap is not None else None
@@ -265,60 +304,53 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         items = el.get("items")
         if not isinstance(items, list):
             raise SceneSpecError(f"{where}.items", "an array")
-        if len(items) > MAX_ROWS:
-            raise SceneSpecError(f"{where}.items", f"at most {MAX_ROWS} entries")
+        items = items[:MAX_ROWS]  # truncate rather than reject
         cells = "".join(
-            f"<li>{_esc(_text(i, f'{where}.items[{n}]'))}</li>" for n, i in enumerate(items)
+            f"<li>{_esc(_celltext(i, f'{where}.items[{n}]'))}</li>"
+            for n, i in enumerate(items)
         )
         return f"<ul>{cells}</ul>"
 
     if kind == "table":
         cols = el.get("columns")
-        rows = el.get("rows")
         if not isinstance(cols, list) or not cols:
             raise SceneSpecError(f"{where}.columns", "a non-empty array")
-        if len(cols) > MAX_COLUMNS:
-            raise SceneSpecError(f"{where}.columns", f"at most {MAX_COLUMNS}")
-        if not isinstance(rows, list):
-            raise SceneSpecError(f"{where}.rows", "an array")
-        if len(rows) > MAX_ROWS:
-            raise SceneSpecError(f"{where}.rows", f"at most {MAX_ROWS} rows")
+        cols = cols[:MAX_COLUMNS]  # truncate wide headers
+        rows = el.get("rows")
+        rows = rows[:MAX_ROWS] if isinstance(rows, list) else []
         head = "".join(
-            f"<th>{_esc(_text(c, f'{where}.columns[{n}]'))}</th>" for n, c in enumerate(cols)
+            f"<th>{_esc(_celltext(c, f'{where}.columns[{n}]'))}</th>"
+            for n, c in enumerate(cols)
         )
         body = ""
         for rn, row in enumerate(rows):
             if not isinstance(row, list):
-                raise SceneSpecError(f"{where}.rows[{rn}]", "an array")
-            if len(row) != len(cols):
-                raise SceneSpecError(
-                    f"{where}.rows[{rn}]", f"{len(cols)} cells, got {len(row)}"
-                )
+                continue  # drop a non-array row, keep the table
+            cells = list(row[: len(cols)])              # truncate a long row
+            cells += [""] * (len(cols) - len(cells))    # pad a short row
             body += "<tr>" + "".join(
-                f"<td>{_esc(_text(c, f'{where}.rows[{rn}][{cn}]'))}</td>"
-                for cn, c in enumerate(row)
+                f"<td>{_esc(_celltext(c, f'{where}.rows[{rn}][{cn}]'))}</td>"
+                for cn, c in enumerate(cells)
             ) + "</tr>"
         return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
     if kind == "grid":
         cols = el.get("columns")
-        if not isinstance(cols, int) or isinstance(cols, bool) or not (1 <= cols <= 8):
-            raise SceneSpecError(f"{where}.columns", "an integer 1–8")
+        if not isinstance(cols, int) or isinstance(cols, bool):
+            cols = 1
+        cols = max(1, min(8, cols))  # clamp into range rather than reject
         cells = el.get("cells")
         if not isinstance(cells, list) or not cells:
             raise SceneSpecError(f"{where}.cells", "a non-empty array")
-        if len(cells) > MAX_ROWS:
-            raise SceneSpecError(f"{where}.cells", f"at most {MAX_ROWS} cells")
+        cells = cells[:MAX_ROWS]  # truncate rather than reject
         out = []
         for cn, c in enumerate(cells):
             if not isinstance(c, dict):
-                raise SceneSpecError(f"{where}.cells[{cn}]", "an object")
-            label = _esc(_text(c.get("label"), f"{where}.cells[{cn}].label", cap=64))
+                continue  # drop a bad cell, keep the grid
+            label = _esc(_celltext(c.get("label"), f"{where}.cells[{cn}].label", cap=64))
             note = c.get("note")
-            note_html = (
-                f'<span class="gn">{_esc(_text(note, f"{where}.cells[{cn}].note", cap=64))}</span>'
-                if note not in (None, "") else ""
-            )
+            nt = _esc(_celltext(note, f"{where}.cells[{cn}].note", cap=64))
+            note_html = f'<span class="gn">{nt}</span>' if note not in (None, "") else ""
             # `columns` is a validated int and `mark` a bool — the only non-narrator
             # values that reach markup, so no coordinate or class is ever author text.
             mark = " gm" if bool(c.get("mark")) else ""
@@ -330,39 +362,36 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
 
     if kind == "links":
         nodes = el.get("nodes")
-        edges = el.get("edges")
         if not isinstance(nodes, list) or not nodes:
             raise SceneSpecError(f"{where}.nodes", "a non-empty array")
-        if len(nodes) > MAX_NODES:
-            raise SceneSpecError(f"{where}.nodes", f"at most {MAX_NODES} nodes")
+        nodes = nodes[:MAX_NODES]  # truncate rather than reject
         seen: dict[str, str] = {}
         parsed_nodes: list[tuple[str, str]] = []
         for nn, n in enumerate(nodes):
             if not isinstance(n, dict):
-                raise SceneSpecError(f"{where}.nodes[{nn}]", "an object")
+                continue  # drop a malformed node
             nid = n.get("id")
             if not isinstance(nid, str) or not _ID_RE.match(nid):
-                raise SceneSpecError(f"{where}.nodes[{nn}].id", "a slug (a-z, 0-9, hyphen)")
+                continue  # drop a node with no usable id
             if nid in seen:
-                raise SceneSpecError(f"{where}.nodes[{nn}].id", "an id no other node uses")
-            label = _text(n.get("label"), f"{where}.nodes[{nn}].label", cap=48)
+                continue  # de-dup, keeping the first
+            label = _celltext(n.get("label"), f"{where}.nodes[{nn}].label", cap=48)
             seen[nid] = label
             parsed_nodes.append((nid, label))
-        if not isinstance(edges, list):
-            raise SceneSpecError(f"{where}.edges", "an array")
-        if len(edges) > MAX_EDGES:
-            raise SceneSpecError(f"{where}.edges", f"at most {MAX_EDGES} edges")
+        if not parsed_nodes:
+            raise SceneSpecError(f"{where}.nodes", "no renderable node")
+        edges = el.get("edges")
+        edges = edges[:MAX_EDGES] if isinstance(edges, list) else []
         parsed_edges: list[tuple[str, str, str]] = []
         for en, e in enumerate(edges):
             if not isinstance(e, dict):
-                raise SceneSpecError(f"{where}.edges[{en}]", "an object")
+                continue  # drop a malformed edge
             a, b = e.get("from"), e.get("to")
             if a not in seen or b not in seen:
-                raise SceneSpecError(
-                    f"{where}.edges[{en}]", "from and to must be declared node ids"
-                )
+                continue  # drop an edge to an undeclared node
             lbl = e.get("label")
-            elabel = _text(lbl, f"{where}.edges[{en}].label", cap=32) if lbl not in (None, "") else ""
+            lf = f"{where}.edges[{en}].label"
+            elabel = _celltext(lbl, lf, cap=32) if lbl not in (None, "") else ""
             parsed_edges.append((a, b, elabel))
         return _render_links(parsed_nodes, parsed_edges)
 
@@ -370,54 +399,66 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         nodes = el.get("nodes")
         if not isinstance(nodes, list) or not nodes:
             raise SceneSpecError(f"{where}.nodes", "a non-empty array")
-        if len(nodes) > MAX_ROWS:
-            raise SceneSpecError(f"{where}.nodes", f"at most {MAX_ROWS} nodes")
+        nodes = nodes[:MAX_ROWS]  # truncate rather than reject
         byid: dict[str, dict[str, Any]] = {}
         order: list[str] = []
         for nn, n in enumerate(nodes):
             if not isinstance(n, dict):
-                raise SceneSpecError(f"{where}.nodes[{nn}]", "an object")
+                continue  # drop a malformed node
             nid = n.get("id")
             if not isinstance(nid, str) or not _ID_RE.match(nid):
-                raise SceneSpecError(f"{where}.nodes[{nn}].id", "a slug (a-z, 0-9, hyphen)")
+                continue  # drop a node with no usable id
             if nid in byid:
-                raise SceneSpecError(f"{where}.nodes[{nn}].id", "an id no other node uses")
-            label = _text(n.get("label"), f"{where}.nodes[{nn}].label", cap=64)
+                continue  # de-dup, keeping the first
+            label = _celltext(n.get("label"), f"{where}.nodes[{nn}].label", cap=64)
             note = n.get("note")
-            note_s = _text(note, f"{where}.nodes[{nn}].note", cap=64) if note not in (None, "") else ""
+            nf = f"{where}.nodes[{nn}].note"
+            note_s = _celltext(note, nf, cap=64) if note not in (None, "") else ""
             parent = n.get("parent")
-            if parent not in (None, "") and not isinstance(parent, str):
-                raise SceneSpecError(f"{where}.nodes[{nn}].parent", "a node id or omitted")
-            byid[nid] = {"label": label, "note": note_s, "parent": (parent or None), "children": []}
+            if not isinstance(parent, str) or not parent:
+                parent = None
+            byid[nid] = {"label": label, "note": note_s, "parent": parent, "children": []}
             order.append(nid)
+        if not byid:
+            raise SceneSpecError(f"{where}.nodes", "no renderable node")
+        # An undeclared parent is treated as a root rather than a fatal error.
         roots: list[str] = []
         for nid in order:
             parent = byid[nid]["parent"]
-            if parent is None:
+            if parent is None or parent not in byid:
+                byid[nid]["parent"] = None
                 roots.append(nid)
-            elif parent not in byid:
-                raise SceneSpecError(f"{where}", f"parent {parent!r} is not a declared node")
             else:
                 byid[parent]["children"].append(nid)
+        # No root at all (every node points at another — a cycle): promote the first.
         if not roots:
-            raise SceneSpecError(f"{where}.nodes", "at least one root (a node with no parent)")
+            first = order[0]
+            byid[first]["parent"] = None
+            for k in byid:
+                if first in byid[k]["children"]:
+                    byid[k]["children"].remove(first)
+            roots.append(first)
         visited: set[str] = set()
 
         def _branch(nid: str, depth: int) -> str:
+            # A back-edge or an over-deep branch is dropped, not fatal.
             if nid in visited or depth > MAX_TREE_DEPTH:
-                raise SceneSpecError(f"{where}", "a cycle or a hierarchy nested too deep")
+                return ""
             visited.add(nid)
             node = byid[nid]
             note_html = f' <span class="tn">{_esc(node["note"])}</span>' if node["note"] else ""
             inner = f'{_esc(node["label"])}{note_html}'
-            if node["children"]:
-                inner += "<ul>" + "".join(_branch(k, depth + 1) for k in node["children"]) + "</ul>"
+            kids = "".join(_branch(k, depth + 1) for k in node["children"])
+            if kids:
+                inner += "<ul>" + kids + "</ul>"
             return f"<li>{inner}</li>"
 
-        tree_html = '<ul class="tree">' + "".join(_branch(r, 0) for r in roots) + "</ul>"
-        if len(visited) != len(byid):
-            raise SceneSpecError(f"{where}.nodes", "every node must be reachable — no orphans or cycles")
-        return tree_html
+        branches = "".join(_branch(r, 0) for r in roots)
+        # Any node still unreached (stranded by a cycle) is promoted as its own root.
+        for nid in order:
+            if nid not in visited:
+                branches += _branch(nid, 0)
+        return '<ul class="tree">' + branches + "</ul>"
 
     # choice
     cid = el.get("id")
@@ -466,14 +507,15 @@ def _render_links(nodes: list[tuple[str, str]], edges: list[tuple[str, str, str]
     return '<div class="lkwrap">' + "".join(parts) + "</div>"
 
 
-def compile_scene(
+def _compile_scene(
     scene_id: str, spec: dict[str, Any], state: dict[str, Any], *, nonce: str = ""
-) -> str:
-    """A spec plus run state becomes one self-contained document.
+) -> tuple[str, list[dict[str, Any]]]:
+    """The salvaging core: ``(html, dropped)``.
 
-    Validates the WHOLE spec before emitting anything, so a scene never mounts
-    half-drawn: a widget missing its second half looks to the player like the
-    world forgetting what it was saying.
+    The WHOLE-spec gates (id, byte ceiling, markup ban, non-empty elements) are the
+    trust boundary and stay hard — they raise. Per-ELEMENT faults are soft: a bad
+    element is dropped, recorded in ``dropped``, and the rest render, because a
+    legible partial scene beats a blank frame. Every string is still HTML-escaped.
     """
     if not isinstance(scene_id, str) or not _ID_RE.match(scene_id):
         raise SceneSpecError("sceneId", "a slug (a-z, 0-9, hyphen)")
@@ -491,15 +533,24 @@ def compile_scene(
     elements = spec.get("elements")
     if not isinstance(elements, list) or not elements:
         raise SceneSpecError("spec.elements", "a non-empty array")
-    if len(elements) > MAX_ELEMENTS:
-        raise SceneSpecError("spec.elements", f"at most {MAX_ELEMENTS}, got {len(elements)}")
+    elements = elements[:MAX_ELEMENTS]  # truncate rather than reject the whole scene
 
     title = _text(spec.get("title"), "spec.title", cap=120)
-    body = "".join(_element(el, i, state) for i, el in enumerate(elements))
+
+    dropped: list[dict[str, Any]] = []
+    parts: list[str] = []
+    for i, el in enumerate(elements):
+        try:
+            parts.append(_element(el, i, state))
+        except SceneSpecError as exc:
+            # One bad element is skipped, not fatal — its loss is recorded so the
+            # narrator can be told, but the scene still mounts and renders.
+            dropped.append({"index": i, "field": exc.field, "reason": exc.expected})
+    body = "".join(parts)
 
     # The CSP meta is the FIRST thing in <head>, ahead of every generated byte: a
     # policy that arrives after the content it governs has already lost.
-    return (
+    html_out = (
         "<!DOCTYPE html><html lang=\"zh\" data-scene=\"" + _esc(scene_id) + "\""
         + " data-nonce=\"" + _esc(nonce) + "\"><head>"
         '<meta charset="utf-8">'
@@ -511,6 +562,37 @@ def compile_scene(
         + SCENE_SCRIPT
         + "</body></html>"
     )
+    return html_out, dropped
+
+
+def compile_scene(
+    scene_id: str, spec: dict[str, Any], state: dict[str, Any], *, nonce: str = ""
+) -> str:
+    """A spec plus run state becomes one self-contained document.
+
+    Fail-soft per element: one bad element is dropped and the rest render, so a
+    single typo never turns the whole scene into a blank box. The whole-spec gates
+    (markup ban, byte ceiling, empty elements) stay hard. Use ``scene_warnings`` to
+    learn what was dropped so the narrator can fix it on its next turn.
+    """
+    html_out, _dropped = _compile_scene(scene_id, spec, state, nonce=nonce)
+    return html_out
+
+
+def scene_warnings(
+    scene_id: str, spec: dict[str, Any], state: dict[str, Any], *, nonce: str = ""
+) -> list[dict[str, Any]]:
+    """The dropped-element records for a spec — never raises.
+
+    The mount/update tools return this so the narrator learns what would not
+    render. A whole-spec hard gate (markup / size / empty) surfaces as one warning
+    (index ``-1``) rather than an exception, so the mount itself still succeeds.
+    """
+    try:
+        _html, dropped = _compile_scene(scene_id, spec, state, nonce=nonce)
+        return dropped
+    except SceneSpecError as exc:
+        return [{"index": -1, "field": exc.field, "reason": exc.expected}]
 
 
 # ── caching, per run ────────────────────────────────────────────────────
