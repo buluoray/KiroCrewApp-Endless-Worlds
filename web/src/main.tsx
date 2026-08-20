@@ -717,7 +717,8 @@ export default function EndlessWorlds() {
   return (
     <LanguageContext.Provider value={applyLanguage}>
     <div
-      className={'ew-root ew-w-' + readWidth + (view === 'library' ? ' ew-home' : '')}
+      className={'ew-root ew-view-' + view + ' ew-w-' + readWidth
+        + (view === 'library' ? ' ew-home' : '')}
       lang={lang}
       ref={rootRef}
     >

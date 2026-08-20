@@ -65,13 +65,16 @@ guarantee.
   `test_the_shelf_drawer_rests_closed_and_unmounts_when_it_is`; the desktop having
   exactly one way back by `test_the_desktop_has_one_way_back_not_two`.
 
-- **The reading column has a fixed cap lifted only by the reader.** The reading
-  measure does not grow with the window on its own; the width cap moved off the
-  root onto the measure, and only the reader's own fluid/fixed choice lifts it. A
-  long world title cannot widen the rail, and a label that is really a sentence
-  stops columnising. Pinned by
+- **The reading column has a fixed cap lifted only by the reader; pages do not.**
+  The reading measure does not grow with the window on its own, and only the
+  reader's fluid/fixed choice lifts it. That cap and the closed-shell centring are
+  scoped to the live view: the shelf, world detail, opening, creation, and review
+  pages fill the available main track and begin at its top-left even when their
+  content is short. A long world title cannot widen the rail, and a label that is
+  really a sentence stops columnising. Pinned by
   `test_rail.py::test_the_reading_column_does_not_grow_with_the_window_on_its_own`,
   `test_the_cap_is_lifted_only_by_the_readers_own_choice`,
+  `test_non_reading_desktop_pages_fill_the_canvas_from_the_top_left`,
   `test_a_world_title_cannot_widen_the_rail`, and
   `test_a_label_that_is_really_a_sentence_stops_columnising`.
 

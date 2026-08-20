@@ -6,13 +6,17 @@
 
 .ew-root {
   --ew-gutter: 16px;
+  width: 100%; box-sizing: border-box;
   color: var(--text, #e2e8f0);
   padding: var(--ew-gutter);
   /* Scopes any future overlay to this panel instead of the whole dashboard. */
   position: relative;
 }
 @media (min-width: 768px) {
-  .ew-root { max-width: 900px; margin: 0 auto; --ew-gutter: 24px; }
+  /* Every app page owns the available canvas. A short workflow is not centred or
+     narrowed merely because it has less content; it begins at the top-left like
+     every other page. Reading measure is scoped separately to the live view. */
+  .ew-root { max-width: none; margin: 0; --ew-gutter: 24px; }
 }
 
 /* ── the desktop shelf drawer ──────────────────────────────────────────────
@@ -103,12 +107,10 @@
      scanned — so it is set in ch and does not grow with the window. It is the
      DEFAULT, not the law: `.ew-w-fluid` below is the reader's own explicit
      override and the only thing that lifts it. */
-  .ew-main { max-width: 74ch; }
-  /* Closed shell has no rail column, so the reading measure would otherwise pin to
-     the LEFT of the full-width app and look cramped with empty backdrop filling the
-     right. Centre it so the closed reading view is balanced. The open shell is a
-     grid that positions the column itself, so this is scoped to the closed state. */
-  .ew-shell:not(.ew-shell-open) .ew-main { margin-inline: auto; }
+  .ew-view-live .ew-main { max-width: 74ch; }
+  /* Only live prose honours the reader's measure preference. Workflow, detail and
+     shelf pages always fill their main track and begin at its top-left. */
+  .ew-view-live .ew-shell:not(.ew-shell-open) .ew-main { margin-inline: auto; }
 }
 
 /* ── the reading measure, as the reader set it ─────────────────────────────
@@ -120,7 +122,7 @@
    on specificity rather than on source order. */
 .ew-root.ew-w-fluid { max-width: none; }
 @media (min-width: 1100px) {
-  .ew-root.ew-w-fluid .ew-main { max-width: none; }
+  .ew-root.ew-view-live.ew-w-fluid .ew-main { max-width: none; }
 }
 
 .ew-rail-home {
@@ -417,7 +419,7 @@
   );
 }
 
-.ew-create { max-width: 720px; }
+.ew-create { max-width: none; }
 .ew-create-ta {
   width: 100%; min-height: 320px; resize: vertical; box-sizing: border-box;
   background: color-mix(in srgb, var(--card, #1f2030) 85%, #000);

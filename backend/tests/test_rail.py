@@ -114,6 +114,38 @@ def test_the_cap_is_lifted_only_by_the_readers_own_choice():
     )
 
 
+def test_non_reading_desktop_pages_fill_the_canvas_from_the_top_left():
+    """A reading measure is not a generic page measure.
+
+    Short workflows once inherited the prose cap and the closed-shell auto margins,
+    which made life opening and world creation float as centred columns. Every
+    non-reading page owns the full main track and starts at its top-left instead.
+    """
+    src = module("main.tsx")
+    assert "ew-root ew-view-' + view + ' ew-w-' + readWidth" in src, (
+        "the stylesheet cannot distinguish live prose from non-reading pages"
+    )
+
+    css = styles()
+    assert re.search(
+        r"@media \(min-width: 768px\).*?\.ew-root\s*\{[^}]*"
+        r"max-width:\s*none;[^}]*margin:\s*0;",
+        css,
+        re.S,
+    ), "tablet and desktop pages still fall back to a centred 900px root"
+    assert re.search(r"\.ew-view-live\s+\.ew-main\s*\{[^}]*max-width:\s*74ch", css), (
+        "the readable measure must be scoped to the live view"
+    )
+    assert re.search(
+        r"\.ew-view-live\s+\.ew-shell:not\(\.ew-shell-open\)\s+\.ew-main"
+        r"\s*\{[^}]*margin-inline:\s*auto",
+        css,
+    ), "closed-shell centring must be scoped to live reading only"
+    assert ".ew-create { max-width: none; }" in css, (
+        "the create-world workflow still carries a page-level width cap"
+    )
+
+
 def test_the_two_width_modes_are_the_only_two_and_one_of_them_is_stored():
     """The choice is a standing preference, not a per-visit toggle: a reader who set
     a measure and came back to the app's own default would have to set it again every
