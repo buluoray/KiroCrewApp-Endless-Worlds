@@ -481,13 +481,23 @@ def test_read_runtime_serves_a_bounded_neighbourhood_by_id(app):
     assert involved == {"elin", "elin-debt", "old-stone-bridge", "player"}
 
 
-def test_the_schema_refuses_an_unknown_disclosure_before_any_handler(app):
-    out = call("endless_advance_turn", runId="r", turn=1, prose="p", state={},
+def test_a_bad_disclosure_is_salvaged_not_schema_refused(app):
+    """A bad disclosure is no longer refused at the SCHEMA layer: the field is a
+    plain string there, so sanitize_memory is the sole memory gate — it drops the
+    one offending event, and the turn's prose/state/choices still commit with a
+    non-blocking warning naming the dropped field. The whole call is never refused."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
+               choices=[{"id": "go", "label": "go"}], state={"alive": True},
                memory={"events": [{"key": "k", "title": "t", "summary": "s",
                                    "disclosure": "loud"}]})
-    assert out["ok"] is False
-    assert out["applied"] is False
-    assert "disclosure" in out["field"]
+    assert out.get("committed") is True, "the turn commits despite the bad disclosure"
+    assert out.get("ok") is not False, "the call is not schema-refused"
+    (entry,) = store.read_chronicle(run)
+    assert "memory" not in entry, "the bad-disclosure event was dropped, nothing recorded"
+    fields = {w["field"] for w in out.get("warnings") or [] if w.get("panel") == "memory"}
+    assert "memory.events[0].disclosure" in fields, "the drop is surfaced as a warning"
 
 
 def test_deleting_a_life_leaves_no_graph_residue(app):

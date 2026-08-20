@@ -148,7 +148,10 @@ _TOOLS: list[dict[str, Any]] = [
                 "ending": {"type": "boolean"},
                 "memory": {
                     "type": "object",
-                    "additionalProperties": False,
+                    # Unknown top-level memory keys are tolerated: sanitize_memory
+                    # rebuilds a clean block from entities/events/relations only, so
+                    # anything else is silently dropped rather than refusing the turn.
+                    "additionalProperties": True,
                     "properties": {
                         "entities": {
                             "type": "array",
@@ -163,10 +166,16 @@ _TOOLS: list[dict[str, Any]] = [
                                 "additionalProperties": False,
                                 "properties": {
                                     "id": {"type": "string", "maxLength": 64},
-                                    "kind": {
-                                        "type": "string",
-                                        "enum": list(memory_graph.KINDS),
-                                    },
+                                    # Relaxed from an enum to a bounded string:
+                                    # sanitize_memory validates the kind against
+                                    # KINDS and DROPS an entity with an unknown one,
+                                    # so a mangled value never refuses the turn. The
+                                    # `additionalProperties: False` here is KEPT on
+                                    # purpose — it is the security guard that stops a
+                                    # narrator declaring the app-only `inheritsFrom`
+                                    # provenance (see legacy.py), which sanitize does
+                                    # not strip.
+                                    "kind": {"type": "string", "maxLength": 64},
                                     "name": {"type": "string", "maxLength": 120},
                                     "aliases": {
                                         "type": "array",
@@ -182,16 +191,17 @@ _TOOLS: list[dict[str, Any]] = [
                             "maxItems": 6,
                             "items": {
                                 "type": "object",
-                                # No `required` — see the entities note above.
-                                "additionalProperties": False,
+                                # No `required` — see the entities note above. Unknown
+                                # fields are tolerated (not refused): sanitize_memory
+                                # is the sole gate, and there is no security-critical
+                                # reserved field on an event the way `inheritsFrom` is
+                                # on an entity.
+                                "additionalProperties": True,
                                 "properties": {
                                     "key": {"type": "string", "maxLength": 64},
                                     "title": {"type": "string", "maxLength": 120},
                                     "summary": {"type": "string", "maxLength": 300},
-                                    "importance": {
-                                        "type": "string",
-                                        "enum": list(memory_graph.IMPORTANCE),
-                                    },
+                                    "importance": {"type": "string", "maxLength": 64},
                                     "participants": {
                                         "type": "array",
                                         "maxItems": 8,
@@ -203,14 +213,12 @@ _TOOLS: list[dict[str, Any]] = [
                                         "maxItems": 4,
                                         "items": {
                                             "type": "object",
-                                            "additionalProperties": False,
+                                            "additionalProperties": True,
                                             "properties": {
                                                 "id": {"type": "string", "maxLength": 64},
                                                 "effect": {
                                                     "type": "string",
-                                                    "enum": list(
-                                                        memory_graph.THREAD_EFFECTS
-                                                    ),
+                                                    "maxLength": 64,
                                                 },
                                             },
                                         },
@@ -221,10 +229,7 @@ _TOOLS: list[dict[str, Any]] = [
                                         "items": {"type": "string", "maxLength": 96},
                                     },
                                     "corrects": {"type": "string", "maxLength": 96},
-                                    "disclosure": {
-                                        "type": "string",
-                                        "enum": list(memory_graph.DISCLOSURES),
-                                    },
+                                    "disclosure": {"type": "string", "maxLength": 64},
                                 },
                             },
                         },
@@ -234,15 +239,12 @@ _TOOLS: list[dict[str, Any]] = [
                             "items": {
                                 "type": "object",
                                 # No `required` — see the entities note above.
-                                "additionalProperties": False,
+                                "additionalProperties": True,
                                 "properties": {
                                     "from": {"type": "string", "maxLength": 64},
                                     "type": {"type": "string", "maxLength": 64},
                                     "to": {"type": "string", "maxLength": 64},
-                                    "change": {
-                                        "type": "string",
-                                        "enum": list(memory_graph.RELATION_CHANGES),
-                                    },
+                                    "change": {"type": "string", "maxLength": 64},
                                     "value": {"type": "string", "maxLength": 64},
                                     "reasonEvent": {"type": "string", "maxLength": 96},
                                 },
@@ -250,45 +252,22 @@ _TOOLS: list[dict[str, Any]] = [
                         },
                     },
                 },
-                "events": {
-                    "type": "array",
-                    "maxItems": 12,
-                    "items": {"type": "string", "maxLength": 200},
-                },
-                "gains": {
-                    "type": "array",
-                    "maxItems": 12,
-                    "items": {
-                        "type": "object",
-                        "required": ["field"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "field": {"type": "string", "maxLength": 64},
-                            "amount": {"type": "string", "maxLength": 32},
-                            "source": {"type": "string", "maxLength": 200},
-                        },
-                    },
-                },
-                "choices": {
-                    "type": "array",
-                    "maxItems": 8,
-                    "items": {
-                        "type": "object",
-                        "required": ["id", "label"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "id": {"type": "string", "maxLength": 64},
-                            "label": {"type": "string", "maxLength": 200},
-                            # Marks a choice that could lead to a major event or
-                            # turning point — the UI gives it a distinctive look.
-                            "fateful": {"type": "boolean"},
-                            # An optional tiny SVG you design for a fateful choice,
-                            # shown as an inert image behind the button label. Same
-                            # rules as a backdrop; validated, and dropped if invalid.
-                            "art": {"type": "string", "maxLength": 6000},
-                        },
-                    },
-                },
+                # Enrichment (the anti-halo notable-events log): relaxed to a
+                # bare array so a mangled entry never refuses the turn. Coerced to
+                # at most 12 strings of 200 chars each at commit.
+                "events": {"type": "array"},
+                # Enrichment (per-turn gains the systems engine reads): relaxed to
+                # a bare array; `_clean_gains` drops any entry with no string
+                # `field`, strips unknown keys, and caps the list at 12, warning on
+                # each drop instead of refusing the turn.
+                "gains": {"type": "array"},
+                # Player-facing, but SALVAGED rather than schema-refused:
+                # `_clean_choices` is the gate. It drops entries with no usable
+                # `label`, synthesizes a missing id, strips unknown keys, caps the
+                # list at 8, and drops invalid/over-size `art`. The
+                # choices-required gate still fires on the CLEANED result, so a
+                # living turn left with no usable choice is still refused.
+                "choices": {"type": "array"},
             },
         },
     },
@@ -574,6 +553,12 @@ def _normalize_run_id_arg(args: dict[str, Any]) -> None:
         if rid.startswith(prefix) and _BARE_RUN_ID.match(rid[len(prefix):]):
             args["runId"] = rid[len(prefix):]
             return
+    # Surrounding whitespace or a case-mangle of an otherwise-bare id. A stored id
+    # is uuid4().hex — always 32 lowercase hex — so if the trimmed, lowercased value
+    # is a bare id, that is the id the narrator meant; any other value is left alone.
+    trimmed = rid.strip().lower()
+    if trimmed != rid and _BARE_RUN_ID.match(trimmed):
+        args["runId"] = trimmed
 
 
 def _validate(name: str, args: Any, *, path: str = "") -> None:
@@ -699,25 +684,122 @@ def _backdrop_turn(run_id: str) -> int:
         return 0
 
 
+#: The only keys a stored choice carries. Anything else the narrator sends is
+#: model noise and is stripped rather than stored.
+_CHOICE_KEYS = ("id", "label", "fateful", "art")
+
+#: The only keys a stored gain carries (the anti-halo `source` is optional).
+_GAIN_KEYS = ("field", "amount", "source")
+
+
 def _clean_choices(choices: list[Any]) -> list[Any]:
-    """Validate any narrator-designed choice ``art`` (a small SVG shown behind the
-    button) exactly as a backdrop is validated, and DROP art that fails rather than
-    refusing the turn — a fateful choice losing its art still narrates a real month,
-    and its label and ``fateful`` flag are untouched. Non-dict entries pass through.
+    """The gate for the player's choices — the schema only bounds the array, so
+    this is what makes each entry usable.
+
+    An entry with no usable ``label`` is dropped (a button with no text is nothing
+    to click); a missing/blank ``id`` is synthesized (``c<index>``) so the click
+    always resolves; unknown keys are stripped; the list is capped at 8. Any
+    narrator-designed ``art`` (a small SVG shown behind the button) is validated
+    exactly as a backdrop and DROPPED if invalid or over-size, rather than refusing
+    the turn — a fateful choice losing its art still narrates a real month. The
+    choices-required gate runs on THIS result, so dropping every entry on a living
+    turn still (correctly) forces a resend.
     """
     out: list[Any] = []
-    for c in choices:
+    for i, c in enumerate(choices):
         if not isinstance(c, dict):
-            out.append(c)
             continue
-        art = c.get("art")
-        if isinstance(art, str) and art.strip():
+        label = c.get("label")
+        if not (isinstance(label, str) and label.strip()):
+            continue
+        clean = {k: v for k, v in c.items() if k in _CHOICE_KEYS}
+        clean["label"] = label[:200]
+        cid = clean.get("id")
+        clean["id"] = cid[:64] if isinstance(cid, str) and cid.strip() else f"c{i}"
+        art = clean.get("art")
+        if isinstance(art, str) and art.strip() and len(art) <= 6000:
             try:
-                c = {**c, "art": compile_backdrop(art)}
+                clean["art"] = compile_backdrop(art)
             except BackdropError:
-                c = {k: v for k, v in c.items() if k != "art"}
-        out.append(c)
+                clean.pop("art", None)
+        else:
+            clean.pop("art", None)
+        out.append(clean)
+        if len(out) >= 8:
+            break
     return out
+
+
+def _clean_gains(gains: list[Any]) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Salvage the anti-halo ``gains`` list the way choices are salvaged. An entry
+    with no string ``field`` anchors nothing, so it is dropped; unknown keys are
+    stripped; the list is capped at 12. Each drop is returned as a warning so the
+    narrator learns of it, and the turn commits regardless. Mirrors _clean_choices.
+    """
+    out: list[Any] = []
+    drops: list[dict[str, Any]] = []
+    for i, g in enumerate(gains):
+        path = f"gains[{i}]"
+        if not isinstance(g, dict):
+            drops.append(
+                {
+                    "panel": "gains",
+                    "field": path,
+                    "expected": "an object with a `field`",
+                    "detail": f"Dropped the gain at {path}: it is not an object.",
+                }
+            )
+            continue
+        field = g.get("field")
+        if not (isinstance(field, str) and field.strip()):
+            drops.append(
+                {
+                    "panel": "gains",
+                    "field": f"{path}.field",
+                    "expected": "a non-empty field name",
+                    "detail": f"Dropped the gain at {path}: it names no field.",
+                }
+            )
+            continue
+        out.append({k: v for k, v in g.items() if k in _GAIN_KEYS})
+        if len(out) >= 12:
+            break
+    return out, drops
+
+
+def _sanitize_read_runtime_args(args: dict[str, Any]) -> None:
+    """Normalize the optional, model-manglable args of the MANDATORY first read so
+    a bad one never refuses it — the narrator must be able to look before it
+    narrates. ``recentTurns`` is clamped to [0, 50] (dropped if not an int);
+    ``since`` is dropped if not a string and truncated to 64; ``memoryEvents`` and
+    ``chapters`` are coerced to bounded string lists; ``includeProse`` is coerced to
+    a bool. ``runId`` is left for _validate — the read cannot resolve without it.
+    Mirrors the advance_turn recovery block.
+    """
+    if "recentTurns" in args:
+        rt = args.get("recentTurns")
+        if isinstance(rt, bool) or not isinstance(rt, int):
+            args.pop("recentTurns", None)
+        else:
+            args["recentTurns"] = max(0, min(50, rt))
+    if "since" in args:
+        since = args.get("since")
+        if not isinstance(since, str):
+            args.pop("since", None)
+        elif len(since) > 64:
+            args["since"] = since[:64]
+    if "memoryEvents" in args:
+        v = args.get("memoryEvents")
+        args["memoryEvents"] = (
+            [str(e)[:96] for e in list(v)][:6] if isinstance(v, list) else []
+        )
+    if "chapters" in args:
+        v = args.get("chapters")
+        args["chapters"] = (
+            [str(c)[:64] for c in list(v)][:8] if isinstance(v, list) else []
+        )
+    if "includeProse" in args:
+        args["includeProse"] = bool(args.get("includeProse"))
 
 
 # ── handlers ─────────────────────────────────────────────────────────────
@@ -918,6 +1000,11 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         clean, memory_drops = memory_graph.sanitize_memory(memory, index, turn=turn)
         memory = clean or None
 
+    # Enrichment lists are salvaged, never rejected: gains with no `field` are
+    # dropped-and-warned, and the notable-events log is coerced to bounded strings.
+    gains, gain_drops = _clean_gains(args.get("gains") or [])
+    events = [str(e)[:200] for e in (args.get("events") or [])][:12]
+
     state = dict(args["state"])
     # The declaration is the story's whole state, so it REPLACES the previous one
     # — a field the narrator stops declaring is a fact that stopped being true.
@@ -947,7 +1034,7 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # the prior state, writing derived keys (xp/level, resources, unlocks) the
     # narrator declared but does not own.
     try:
-        _apply_systems(run_id, state, current, args.get("gains") or [])
+        _apply_systems(run_id, state, current, gains)
     except Exception:  # noqa: BLE001
         pass  # a system is enrichment; a bad one never blocks a committed turn
 
@@ -1006,8 +1093,8 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         # deliberately NOT required — a narrator that forgot to say where five
         # gold came from has still narrated a real turn, and the omission is
         # surfaced to the next turn rather than refused here.
-        "events": args.get("events") or [],
-        "gains": args.get("gains") or [],
+        "events": events,
+        "gains": gains,
     }
     if memory is not None:
         # Same JSON record as the prose (design §6.2): the fact delta and the
@@ -1027,6 +1114,20 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                 "field": _drop["field"],
                 "expected": _drop["expected"],
                 "detail": _drop["detail"],
+            }
+        )
+    # Salvaged enrichment: gains that named no field, and stray top-level args the
+    # schema would once have refused the whole turn over.
+    warnings.extend(gain_drops)
+    for _key in args.get("_dropped_top_level") or []:
+        warnings.append(
+            {
+                "field": _key,
+                "expected": "a declared field of endless_advance_turn",
+                "detail": (
+                    f"Dropped the unknown top-level argument {_key!r}; the turn "
+                    "committed without it."
+                ),
             }
         )
     declared = any(k not in RESERVED_STATE_KEYS and k != "turn" for k in state)
@@ -1553,11 +1654,17 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
     reaches the narrator as a protocol error it cannot act on, while a named
     field is something it can fix on the next attempt.
     """
+    dropped_top_level: list[str] = []
     try:
         # A narrator sometimes prepends "run-"/"run_" to the run id despite the
         # addressing giving it bare; strip it before anything validates or looks it
         # up, so the opening read does not fail on an id-mangling the model repeats.
         _normalize_run_id_arg(args)
+        # The mandatory first read must never be refused over a bad OPTIONAL arg —
+        # the narrator has to be able to look before it narrates. Normalize/drop the
+        # enrichment args before the schema sees them.
+        if name == "endless_read_runtime":
+            _sanitize_read_runtime_args(args)
         # A narrator that double-encodes an object sends it as a JSON STRING, and
         # that string sometimes carries a malformed escape — both would otherwise
         # refuse the whole turn. Recover server-side instead of wasting a round.
@@ -1577,6 +1684,14 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
                     args["memory"] = recovered
                 else:
                     args.pop("memory", None)
+            # A stray top-level key (a model typo, a field from a different tool) is
+            # DROPPED-and-warned rather than letting `additionalProperties: False`
+            # refuse the whole turn. The prose/choices/state the narrator DID send
+            # are the story; one misplaced key must not cost them.
+            _props = _INPUT_SCHEMAS["endless_advance_turn"].get("properties", {})
+            for _key in [k for k in args if k not in _props]:
+                dropped_top_level.append(_key)
+                args.pop(_key, None)
         _validate(name, args)
     except ToolInputError as exc:
         return json.dumps(
@@ -1600,7 +1715,12 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
             pass
 
     try:
-        result = handler(dict(args))
+        call_args = dict(args)
+        if dropped_top_level:
+            # Handed to the handler under a private key (added AFTER validation, so
+            # the schema never sees it) so it can surface each drop as a warning.
+            call_args["_dropped_top_level"] = dropped_top_level
+        result = handler(call_args)
     except ToolInputError as exc:
         return json.dumps(
             {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False},

@@ -139,11 +139,6 @@ def test_a_malformed_turn_applies_nothing(app):
         ({"runId": "r", "turn": True, "prose": "p", "state": {}}, "arguments.turn"),
         ({"runId": "r", "turn": 2, "prose": "p", "state": []}, "arguments.state"),
         ({"runId": "r", "turn": 2, "prose": 5, "state": {}}, "arguments.prose"),
-        ({"runId": "r", "turn": 2, "prose": "p", "state": {}, "nope": 1}, "arguments.nope"),
-        (
-            {"runId": "r", "turn": 2, "prose": "p", "state": {}, "choices": [{"id": "a"}]},
-            "arguments.choices[0].label",
-        ),
     ],
 )
 def test_every_bad_field_is_named(args, field):
@@ -666,3 +661,127 @@ def test_resolve_handoff_selects_named_entries_and_stars() -> None:
     assert out["lore"][0]["summary"] == "a fort"
     assert [s["id"] for s in out["systems"]] == ["xp"]     # systems.* = all
     assert "roles" not in out                               # roles not referenced
+
+
+# -- per-turn tool calls are fail-soft (Tier 1) ---------------------------
+
+
+def test_sanitize_read_runtime_args_clamps_and_coerces():
+    """The optional read args are model-manglable, so they are normalized rather
+    than allowed to refuse the mandatory first read."""
+    a = {"runId": "x", "recentTurns": 9999, "since": 123,
+         "memoryEvents": "nope", "chapters": [1, 2], "includeProse": "yes"}
+    srv._sanitize_read_runtime_args(a)
+    assert a["recentTurns"] == 50            # clamped into [0, 50]
+    assert "since" not in a                  # a non-string since is dropped
+    assert a["memoryEvents"] == []           # a non-list becomes empty
+    assert a["chapters"] == ["1", "2"]       # coerced to bounded strings
+    assert a["includeProse"] is True         # coerced to a bool
+
+    b = {"recentTurns": -3}
+    srv._sanitize_read_runtime_args(b)
+    assert b["recentTurns"] == 0             # negative clamps to 0
+
+    c = {"recentTurns": "nope"}
+    srv._sanitize_read_runtime_args(c)
+    assert "recentTurns" not in c            # a non-int is dropped, not clamped
+
+    d = {"since": "z" * 100}
+    srv._sanitize_read_runtime_args(d)
+    assert len(d["since"]) == 64             # over-long since is truncated
+
+
+def test_read_runtime_is_never_refused_over_a_bad_optional_arg(app):
+    """End to end: the first read survives every mangled optional arg and returns,
+    instead of a schema refusal that would leave the narrator unable to look."""
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_read_runtime", runId=run, recentTurns=9999, since=123,
+               memoryEvents="not-a-list", chapters=[1, 2], includeProse="yes")
+    assert out["ok"] is True, out
+    assert out["turn"] == 4
+
+
+def test_a_stray_top_level_arg_is_dropped_and_warned_not_refused(app):
+    """A misplaced top-level key (a model typo, a field from another tool) is
+    dropped-and-warned; the prose/choices/state the narrator DID send still commit."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w", "age": 1},
+               choices=[{"id": "go", "label": "go on"}], nonsense={"x": 1})
+    assert out["ok"] is True and out["committed"] is True
+    assert "nonsense" in {w["field"] for w in out.get("warnings") or []}
+    assert store.read_state(run)["age"] == 1
+
+
+def test_gains_without_a_field_are_dropped_and_warned(app):
+    """A gain anchors on its `field`; one without a usable field is dropped-and-
+    warned and unknown keys are stripped, rather than refusing the turn."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"}, choices=[{"id": "go", "label": "go on"}],
+               gains=[{"amount": "5"}, {"field": "gold", "amount": "5", "junk": 1}])
+    assert out["ok"] is True and out["committed"] is True
+    gain_fields = {w["field"] for w in out.get("warnings") or [] if w.get("panel") == "gains"}
+    assert "gains[0].field" in gain_fields
+    assert store.read_chronicle(run)[-1]["gains"] == [{"field": "gold", "amount": "5"}]
+
+
+def test_choices_are_salvaged_labelless_dropped_id_synthesized(app):
+    """_clean_choices is the gate: a labelless entry is dropped, a missing id is
+    synthesized, and unknown keys are stripped — the schema only bounds the array."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"},
+               choices=[{"label": "no id here", "junk": 9},
+                        {"id": ""},
+                        {"id": "keep", "label": "keep me"}])
+    assert out["ok"] is True and out["committed"] is True
+    assert store.read_chronicle(run)[-1]["choices"] == [
+        {"label": "no id here", "id": "c0"},
+        {"id": "keep", "label": "keep me"},
+    ]
+
+
+def test_a_living_turn_left_with_no_usable_choice_is_still_refused(app):
+    """The choices-required gate runs on the CLEANED result: a living turn whose
+    only choice was unusable is refused, exactly as an empty choices array is."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w", "alive": True}, choices=[{"id": "x"}])
+    assert out["committed"] is False
+    assert out["reason"] == "choices-required"
+
+
+def test_events_are_coerced_to_bounded_strings(app):
+    """The anti-halo events log is enrichment: non-strings are coerced, long lines
+    truncated, and the list capped at 12 — a mangled entry never refuses the turn."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"}, choices=[{"id": "go", "label": "go on"}],
+               events=[123, "x" * 500] + ["e"] * 20)
+    assert out["ok"] is True and out["committed"] is True
+    stored = store.read_chronicle(run)[-1]["events"]
+    assert len(stored) == 12
+    assert stored[0] == "123"
+    assert len(stored[1]) == 200
+    assert all(isinstance(e, str) for e in stored)
+
+
+def test_a_whitespace_or_case_mangled_bare_run_id_is_repaired():
+    """A stored id is uuid4().hex — 32 lowercase hex — so a trimmed/lowercased
+    value that IS a bare id is the one the narrator meant; anything else is left."""
+    hexid = "a1b2c3d4" * 4  # 32 lowercase hex
+    for bad in (f"  {hexid}  ", hexid.upper(), f"\n{hexid.upper()}\t"):
+        args = {"runId": bad}
+        srv._normalize_run_id_arg(args)
+        assert args["runId"] == hexid, f"{bad!r} should repair to the bare id"
+    for keep in ("Run-Not-Bare", "some-slug-id"):
+        args = {"runId": keep}
+        srv._normalize_run_id_arg(args)
+        assert args["runId"] == keep
