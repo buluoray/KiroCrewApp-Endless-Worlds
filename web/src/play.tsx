@@ -375,7 +375,11 @@ export function PlayPage({
     setTapped('')
   }
 
-  if (error) {
+  // The full error page is for a life that never loaded. Once `v` holds a real
+  // view, a dropped 3s poll mid-generation must NOT replace the story the player
+  // is reading with an error screen for a beat — it shows as an inline notice
+  // below instead, and the next successful poll clears it (M0.5).
+  if (error && !v) {
     return (
       <div>
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
@@ -581,7 +585,7 @@ export function PlayPage({
             <>
               <div className="ew-recap-label">{t('play.recapRecent')}</div>
               <ul className="ew-recap-list">
-                {recap.events.map((event) => <li key={event}>{event}</li>)}
+                {recap.events.map((event, i) => <li key={`${i}-${event}`}>{event}</li>)}
               </ul>
             </>
           ) : null}
@@ -591,8 +595,8 @@ export function PlayPage({
       {isLive && v.turn === 1 && reveals.length ? (
         <section className="ew-story-moment" aria-label={t('play.birthRevealTitle')}>
           <div className="ew-story-moment-title">{t('play.birthRevealTitle')}</div>
-          {reveals.map((reveal) => (
-            <div className="ew-reveal-row" key={reveal.label}>
+          {reveals.map((reveal, i) => (
+            <div className="ew-reveal-row" key={`${i}-${reveal.label}`}>
               <span className="ew-reveal-label">{reveal.label}</span>
               <span className="ew-reveal-value">{reveal.value}</span>
             </div>
@@ -939,6 +943,11 @@ export function PlayPage({
         <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
         {pager}
       </div>
+      {error ? (
+        // A dropped poll while a real view is on screen: say so quietly and keep
+        // the story readable. The next successful poll clears it (M0.5).
+        <div className="ew-note" role="status">{t('play.pollHiccup')}</div>
+      ) : null}
       <div className="ew-titleline">
         <h3 className="ew-detail-title">{v.title}</h3>
         {v.clock ? <span className="ew-clock">{v.clock}</span> : null}

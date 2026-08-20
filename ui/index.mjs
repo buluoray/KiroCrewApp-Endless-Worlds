@@ -383,6 +383,7 @@ var TABLES$1 = {
 		"play.generating": "下一页正在落笔。放心离开，归来时故事还在这里。",
 		"play.nothingToShow": "这一刻还没有什么可看的——有些面板要等条件满足了才会出现。",
 		"play.opening": "正在翻到你留下的那一页…",
+		"play.pollHiccup": "连接不稳，正在重试……",
 		"play.retry": "再试一次",
 		"play.rumour": "传闻",
 		"play.rumourSuffix": "——只是听说",
@@ -682,6 +683,7 @@ var TABLES$1 = {
 		"play.generating": "The next page is being written. You can leave; the story will be here when you return.",
 		"play.nothingToShow": "Nothing to show yet — this life's panels appear once their conditions are met.",
 		"play.opening": "Turning to the page where you left off…",
+		"play.pollHiccup": "Connection hiccup — retrying…",
 		"play.retry": "Try again",
 		"play.rumour": "Rumor",
 		"play.rumourSuffix": " — only hearsay",
@@ -3451,16 +3453,31 @@ function Backdrop({ runId, version, turn }) {
 	const q = turn != null ? `?turn=${turn}&v=${version}` : `?v=${version}`;
 	const src = `${API}/runs/${encodeURIComponent(runId)}/backdrop${q}`;
 	const [shownSrc, setShownSrc] = useState(null);
+	const retried = useRef(null);
 	useEffect(() => {
 		if (src === shownSrc) return;
 		let alive = true;
+		let timer = 0;
 		const img = new Image();
 		img.onload = () => {
 			if (alive) setShownSrc(src);
 		};
+		img.onerror = () => {
+			if (!alive || retried.current === src) return;
+			retried.current = src;
+			timer = window.setTimeout(() => {
+				if (!alive) return;
+				const again = new Image();
+				again.onload = () => {
+					if (alive) setShownSrc(src);
+				};
+				again.src = src;
+			}, 1500);
+		};
 		img.src = src;
 		return () => {
 			alive = false;
+			if (timer) window.clearTimeout(timer);
 		};
 	}, [src, shownSrc]);
 	if (shownSrc == null) return null;
@@ -5202,7 +5219,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 		}
 		setTapped("");
 	};
-	if (error) return /* @__PURE__ */ jsxs("div", { children: [
+	if (error && !v) return /* @__PURE__ */ jsxs("div", { children: [
 		/* @__PURE__ */ jsx("button", {
 			className: "ew-back",
 			type: "button",
@@ -5434,7 +5451,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 					children: t("play.recapRecent")
 				}), /* @__PURE__ */ jsx("ul", {
 					className: "ew-recap-list",
-					children: recap.events.map((event) => /* @__PURE__ */ jsx("li", { children: event }, event))
+					children: recap.events.map((event, i) => /* @__PURE__ */ jsx("li", { children: event }, `${i}-${event}`))
 				})] }) : null
 			]
 		}) : null,
@@ -5446,7 +5463,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 					className: "ew-story-moment-title",
 					children: t("play.birthRevealTitle")
 				}),
-				reveals.map((reveal) => /* @__PURE__ */ jsxs("div", {
+				reveals.map((reveal, i) => /* @__PURE__ */ jsxs("div", {
 					className: "ew-reveal-row",
 					children: [/* @__PURE__ */ jsx("span", {
 						className: "ew-reveal-label",
@@ -5455,7 +5472,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 						className: "ew-reveal-value",
 						children: reveal.value
 					})]
-				}, reveal.label)),
+				}, `${i}-${reveal.label}`)),
 				/* @__PURE__ */ jsx("div", {
 					className: "ew-story-moment-hint",
 					children: t("play.birthRevealHint")
@@ -5749,6 +5766,11 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 					children: t("play.back")
 				}), pager]
 			}),
+			error ? /* @__PURE__ */ jsx("div", {
+				className: "ew-note",
+				role: "status",
+				children: t("play.pollHiccup")
+			}) : null,
 			/* @__PURE__ */ jsxs("div", {
 				className: "ew-titleline",
 				children: [/* @__PURE__ */ jsx("h3", {

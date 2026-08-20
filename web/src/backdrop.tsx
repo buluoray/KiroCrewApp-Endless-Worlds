@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { API } from './api'
 
@@ -37,19 +37,34 @@ export function Backdrop(
   // background is never torn down for a blank/half-loaded frame while the next
   // image is still loading. The old backdrop holds until the new one is ready.
   const [shownSrc, setShownSrc] = useState<string | null>(null)
+  // One retry per src: a transient blip (dropped byte serve, brief offline) should
+  // not blank the page's mood art until the narrator happens to change backdrops.
+  const retried = useRef<string | null>(null)
 
   useEffect(() => {
     if (src === shownSrc) return
     let alive = true
+    let timer = 0
     // Preload into the browser cache; the DOM <img> below then paints the already
     // decoded frame with no network gap (same URL = cache hit), so the swap is
     // instant and flash-free.
     const img = new Image()
     img.onload = () => { if (alive) setShownSrc(src) }
     // Keep an already-painted backdrop on error; a first backdrop that never loads
-    // just leaves the plain page (the story reads fine without one).
+    // just leaves the plain page (the story reads fine without one) — after ONE
+    // delayed retry, since the common failure here is a blip, not a bad image.
+    img.onerror = () => {
+      if (!alive || retried.current === src) return
+      retried.current = src
+      timer = window.setTimeout(() => {
+        if (!alive) return
+        const again = new Image()
+        again.onload = () => { if (alive) setShownSrc(src) }
+        again.src = src
+      }, 1500)
+    }
     img.src = src
-    return () => { alive = false }
+    return () => { alive = false; if (timer) window.clearTimeout(timer) }
   }, [src, shownSrc])
 
   // Nothing painted yet: a plain page until the first backdrop finishes loading.

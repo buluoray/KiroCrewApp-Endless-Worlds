@@ -201,6 +201,7 @@
   "play.generating": "The next page is being written. You can leave; the story will be here when you return.",
   "play.nothingToShow": "Nothing to show yet — this life's panels appear once their conditions are met.",
   "play.opening": "Turning to the page where you left off…",
+  "play.pollHiccup": "Connection hiccup — retrying…",
   "play.retry": "Try again",
   "play.rumour": "Rumor",
   "play.rumourSuffix": " — only hearsay",
