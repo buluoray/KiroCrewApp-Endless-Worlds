@@ -15,8 +15,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Local Kiro/agent dev config — machine-specific, never shipped.
-.kiro/
+# Local Kiro/agent dev config — machine-specific, never shipped. Repository-local
+# development skills are the exception: they travel with the source they describe.
+.kiro/*
+!.kiro/skills/
+!.kiro/skills/**
 
 # Node — only present once a bundled renderer is introduced.
 node_modules/

@@ -3,7 +3,9 @@
 `view.py` resolves *what the player sees*: `build_play_view` assembles the entire
 play-page body from a run's world and state, and every other function in the file
 feeds it. `packs.py` is the render half of capability packs — declarative JSON a
-world carries that composes existing field primitives into an extra panel. Both
+world carries that composes existing field primitives into an extra panel. The
+manage half is the backend-run [systems engine](systems.md), which computes the
+state these panels may surface without teaching the renderer any system kind. Both
 share one hard rule: the app draws every world with the same code paths, so there
 is exactly one `when` interpreter and exactly one shaping function, both
 server-side, and neither branches on a field id. The reader-facing risk they guard

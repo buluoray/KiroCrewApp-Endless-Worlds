@@ -88,10 +88,12 @@ pinning test, in the module that owns it.
 - **Reserved state keys are app-owned and carried forward** across the
   full-state replacement each turn performs; losing one (e.g. `worldId`) makes a
   life unreadable. ([modules/data-model.md](modules/data-model.md))
-- **The narrator supplies structure and meaning, never markup, geometry, or
-  identifiers the app owns** — scene layout, event ids, milestones, and lineage
-  provenance are all computed or stamped server-side.
-  ([modules/scenes-and-backdrop.md](modules/scenes-and-backdrop.md),
+- **The narrator supplies structure and meaning, never markup, geometry, numbers,
+  or identifiers the app owns** — scene layout, event ids, milestones, lineage
+  provenance, and system-owned values are computed or stamped server-side. The
+  narrator reports gains; the systems engine applies them from prior committed
+  state. ([modules/systems.md](modules/systems.md),
+  [modules/scenes-and-backdrop.md](modules/scenes-and-backdrop.md),
   [modules/memory-graph.md](modules/memory-graph.md),
   [modules/library-and-lineage.md](modules/library-and-lineage.md))
 - **Untrusted content never executes.** The `when` condition language has no call

@@ -32,6 +32,7 @@ update it in the **same commit** when you change what it documents.
 | `library.py`, `legacy.py` — the world shelf and the lineage bridge | [library-and-lineage.md](docs/modules/library-and-lineage.md) |
 | `opening.py`, `halo.py` — character creation and the anti-halo instruments | [character-creation.md](docs/modules/character-creation.md) |
 | `turn.py` — the turn loop and the pull-only protocol | [turn-loop.md](docs/modules/turn-loop.md) |
+| `systems.py` or `.kiro/skills/*system*/` — backend-run game mechanics and their development workflows | [systems.md](docs/modules/systems.md) |
 | `narrator.py`, `content.py`, `settings.py`, `agents/narrator.json` | [narrator-and-i18n.md](docs/modules/narrator-and-i18n.md) |
 | `view.py`, `packs.py` — play-view assembly, shaping, capability packs | [view-and-packs.md](docs/modules/view-and-packs.md) |
 | `scenes.py`, `widget.py`, `backdrop.py` — mounted scenes and backdrops | [scenes-and-backdrop.md](docs/modules/scenes-and-backdrop.md) |
