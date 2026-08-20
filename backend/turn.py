@@ -437,6 +437,10 @@ def generating(
         "askedAt": float(live.get("askedAt") or 0.0),
         "readAt": read_at,
         "stage": "writing" if read_at else "reading",
+        # What the player asked for, straight from the pending record — so a page
+        # that navigated away and came back can still show WHICH choice is being
+        # written, instead of an anonymous progress bar.
+        "action": str(live.get("action") or ""),
         # How many tool calls the narrator has made this turn, and the last one —
         # the fine-grained signal the play page advances a cell per.
         "steps": int(live.get("steps") or 0),

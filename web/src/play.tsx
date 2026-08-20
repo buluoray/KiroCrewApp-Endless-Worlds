@@ -284,6 +284,15 @@ export function PlayPage({
   // work — including one asked for by a page they have since closed.
   const busy = !!tapped || generating || turnPending
 
+  // What the in-flight turn is about, from the SERVER's pending record — so it
+  // survives leaving and returning mid-generation. When it matches a choice
+  // label, the progress renders inside that option; a free-typed action shows
+  // above the standalone bar instead.
+  const gAction = v?.generating?.action ?? ''
+  const genChoice = generating && gAction
+    ? (v?.choices ?? []).find((c) => c.label === gAction)
+    : undefined
+
   // Cycle the arranging flavour while a life is being born.
   useEffect(() => {
     if (!(v?.awaitingOpening && generating)) return undefined
@@ -343,7 +352,11 @@ export function PlayPage({
     const latest = v.turn
     const shown = viewTurn ?? latest
     if (shown >= latest) {
-      onBackdrop(v.backdrop ?? null)
+      // The live page pins its backdrop to ITS OWN turn too: the narrator stores
+      // the NEXT page's backdrop mid-generation (tagged with the pending turn),
+      // and an un-pinned request would repaint the page still being read. With
+      // `?turn=` the new art appears exactly when the new page does.
+      onBackdrop(v.backdrop ? { version: v.backdrop.version, turn: latest } : null)
     } else {
       const past = chron.find((c) => c.turn === shown)?.backdrop
       onBackdrop(past ? { version: past.version, turn: shown } : (v.backdrop ?? null))
@@ -678,11 +691,15 @@ export function PlayPage({
       ) : null}
 
       {/* Still being written: the pending record is fresh, so the narrator is
-          working — show the normal waiting indicator, never the retry. `takeTurn`
-          returns advanced:false the moment its wait deadline passes, but that is the
-          app's deadline, NOT proof the narrator stopped. */}
-      {generating ? (
+          working. When the action matches a choice, the progress renders INSIDE
+          that option below (so the player sees which fork is being written);
+          this standalone bar remains only for free-typed actions and openings,
+          echoing the player's own words when there are any. */}
+      {generating && !genChoice ? (
         <div className="ew-note ew-note-live" role="status" aria-live="polite">
+          {gAction ? (
+            <div className="ew-writing-action">{t('play.writingAction', { action: gAction })}</div>
+          ) : null}
           <TurnProgress g={v.generating} label={phrase || t('play.generating')} />
         </div>
       ) : null}
@@ -713,6 +730,13 @@ export function PlayPage({
             const target = choiceTarget(c.id)
             const armed = arm === target
             const sending = tapped === target
+            // THIS choice is the one being written: either just tapped locally,
+            // or matched against the server's pending action — so coming back to
+            // a generating life still shows which fork was taken, with the
+            // progress bar inside the chosen option rather than an anonymous
+            // bar below the prose.
+            const writing = sending || (generating && !!gAction && c.label === gAction)
+            const dimmed = generating && !!genChoice && !writing
             return (
               <div className="ew-choicewrap" key={c.id}>
                 <button
@@ -721,14 +745,15 @@ export function PlayPage({
                     + (c.fateful || c.art ? ' ew-choice-fateful' : '')
                     + (c.art ? ' ew-choice-arted' : '')
                     + (armed ? ' ew-choice-armed' : '')
-                    + (sending ? ' ew-choice-waiting' : '')
+                    + (writing ? ' ew-choice-waiting' : '')
+                    + (dimmed ? ' ew-choice-dimmed' : '')
                   }
                   type="button"
                   // A choice stays tappable while another is armed: changing your
                   // mind must not require a cancel first.
                   disabled={busy}
                   aria-pressed={armed}
-                  aria-busy={sending}
+                  aria-busy={writing}
                   onClick={() => setArm(armed ? '' : target)}
                 >
                   {/* The narrator's own pattern behind the label, as an INERT
@@ -749,7 +774,7 @@ export function PlayPage({
                   ) : v.backdrop?.buttons ? (
                     <img
                       className="ew-choice-art ew-choice-art-common"
-                      src={`${API}/runs/${encodeURIComponent(runId)}/backdrop?part=buttons&v=${v.backdrop.version}`}
+                      src={`${API}/runs/${encodeURIComponent(runId)}/backdrop?part=buttons&turn=${v.turn}&v=${v.backdrop.version}`}
                       alt=""
                       aria-hidden="true"
                       draggable={false}
@@ -757,7 +782,14 @@ export function PlayPage({
                     />
                   ) : null}
                   <span className="ew-choice-label">{c.label}</span>
-                  {sending ? <Waiting label={phrase} /> : null}
+                  {/* Server-confirmed writing shows the real per-tool-call
+                      progress inside the chosen option; the sub-second window
+                      before the pending record lands keeps the light spinner. */}
+                  {writing && generating ? (
+                    <TurnProgress g={v.generating} label={phrase || t('play.generating')} />
+                  ) : sending ? (
+                    <Waiting label={phrase} />
+                  ) : null}
                 </button>
 
                 {/* The second step. A turn is a month of a life and cannot be

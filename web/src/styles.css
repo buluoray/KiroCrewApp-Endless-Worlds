@@ -1060,6 +1060,13 @@
   border-color: var(--accent, #7c3aed);
   background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030));
 }
+/* Siblings of the choice being written: still present (the fork stays readable)
+   but clearly not the one happening. */
+.ew-choice-dimmed { opacity: .45; }
+/* The turn progress living INSIDE the chosen option: full-width under the label,
+   above the sweep light. */
+.ew-choice .ew-progress { position: relative; z-index: 1; width: 100%; margin-top: 6px; }
+.ew-writing-action { margin-bottom: 6px; font-style: italic; opacity: .9; }
 /* A light sweeping across the chosen line, once every couple of seconds. Chosen
    over a spinner because it belongs to the SENTENCE the player picked rather than
    to the page: what is being waited on is that line becoming a month. */

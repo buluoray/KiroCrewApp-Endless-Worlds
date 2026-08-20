@@ -317,6 +317,17 @@ def test_a_dead_writers_record_is_recovered_without_waiting_out_the_age_bound(st
     assert retried.reason != "already", "nothing was committed; this is a fresh ask"
 
 
+def test_generating_carries_the_players_action_back_to_the_page(store, run):
+    """The pending record stores what the player asked for; `generating()` must
+    hand it back so a page that navigated away and returned can still show WHICH
+    choice is being written — not an anonymous progress bar."""
+    calls: list[str] = []
+    asyncio.run(_advance(store, run, _silent(calls), action="take up the ledger"))
+    g = generating(store, run)
+    assert g is not None
+    assert g["action"] == "take up the ledger"
+
+
 def test_generating_reports_nothing_when_the_recorded_slot_is_gone(store, run):
     """The read path: a pending record whose slot no longer exists must not show
     'a month is being written' (and block deletion) for the full age bound."""

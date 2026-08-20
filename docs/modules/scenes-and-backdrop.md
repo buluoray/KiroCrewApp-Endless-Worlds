@@ -105,6 +105,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   (`test_same_origin_is_never_granted`) and the HTML is handed over as `srcDoc`, never
   navigated to (`test_the_scene_is_handed_over_as_srcdoc_not_navigated_to`).
 
+- **A backdrop only takes effect on the page it belongs to — never mid-read.**
+  The narrator stores the NEXT page's backdrop while the turn is still being
+  written (tagged with the pending turn by `_backdrop_turn`), and the play page
+  polls every 3s during generation — so every read path resolves by turn, never
+  "latest": the run view pins its backdrop to the committed turn
+  (`BackdropStore.at(view["turn"])` in `get_run`), and the live page passes
+  `?turn=` on both the backdrop image and the `part=buttons` motif URL. The new
+  art appears exactly when the new page does.
+
 - **One turn in flight, across every surface.** A scene answer dispatches from
   `main.tsx` (`onSceneChoice`), not from the play page, so the page's own `busy`
   cannot see it — a hoisted `turnPending` lock (ref-gated against same-frame

@@ -1277,7 +1277,13 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     # compiled HTML into a scriptless, behind-text sandbox frame; `version` is the
     # cache-buster so a replaced background actually swaps.
     try:
-        backdrop = BackdropStore(ctx.data_dir, run_id).current()
+        # Pinned to the COMMITTED turn, never `current()`: the narrator stores the
+        # next page's backdrop mid-generation (tagged with the pending turn), and
+        # the play page polls every 3s while it works — `current()` here would
+        # swap the background out from under the page the player is still
+        # reading. `at(N)` only sees backdrops tagged turn <= N, so the new art
+        # appears exactly when the new page does.
+        backdrop = BackdropStore(ctx.data_dir, run_id).at(int(view["turn"] or 0))
     except BackdropError:
         backdrop = None
     view["backdrop"] = (

@@ -202,6 +202,7 @@
   "play.nothingToShow": "Nothing to show yet — this life's panels appear once their conditions are met.",
   "play.opening": "Turning to the page where you left off…",
   "play.pollHiccup": "Connection hiccup — retrying…",
+  "play.writingAction": "Writing your choice: \u201c{action}\u201d",
   "play.retry": "Try again",
   "play.rumour": "Rumor",
   "play.rumourSuffix": " — only hearsay",

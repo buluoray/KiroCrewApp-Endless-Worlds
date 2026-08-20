@@ -291,6 +291,9 @@ export interface PlayView {
     readAt?: number
     /** Coarse in-flight stage: 'reading' the life, then 'writing' the month. */
     stage?: 'reading' | 'writing'
+    /** What the player asked for (the tapped choice's label, or their typed
+     *  action) — from the server's pending record, so it survives navigation. */
+    action?: string
     /** How many tool calls the narrator has made this turn (advances per call). */
     steps?: number
     /** The narrator's most recent tool call, for a per-step label. */
