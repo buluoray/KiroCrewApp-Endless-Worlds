@@ -39,8 +39,11 @@ per-module contracts live under [`docs/modules/`](docs/modules/README.md).
 Requires a running [Kiro Crew](https://github.com/kirodotdev/KiroCrew) gateway
 (Python 3.10+, Node.js 22+ to build the UI).
 
+Install a local checkout (this repository does not currently declare a public
+remote URL):
+
 ```bash
-kirocrew app install https://github.com/<owner>/endless-worlds
+kirocrew app install /absolute/path/to/endless-worlds
 kirocrew app enable endless-worlds
 ```
 

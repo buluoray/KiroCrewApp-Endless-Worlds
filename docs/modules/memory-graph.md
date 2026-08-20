@@ -19,7 +19,7 @@ meaning half (keepsakes, story cards, star lenses) is in
 | `backend/memory_routes.py` | the HTTP surface that commits/serves the graph and gates disclosure per life (star payload, echo markers, legacy bridge) |
 | `backend/tests/test_memory_graph.py` | the pinning tests for index rebuild, validation, relations, recall, echoes, and the tool surface (no partial write, `(runId,turn)` idempotency, per-life candidate isolation, bounded neighbourhood) |
 | `backend/tests/test_full_chain.py` | the one birth-to-inheritance life test that exercises the whole memory-graph chain end to end |
-| `MEMORY_GRAPH_DESIGN.md` | the design rationale (§1–§15) these contracts implement |
+| [`../design/memory-graph-design.md`](../design/memory-graph-design.md) | the design rationale (§1–§15) these contracts implement |
 
 ## Load-bearing contracts
 

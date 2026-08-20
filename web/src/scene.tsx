@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { api } from './api'
+import { API, api } from './api'
 import { t } from './strings'
+
+/** A short, stable token that changes only when the scene's compiled HTML does, so
+ *  the iframe `src` reloads on a real content change but NOT on a tab switch or
+ *  re-render (which would otherwise reload and lose what the player was looking at). */
+function sceneVersion(html: string): string {
+  let h = 5381
+  for (let i = 0; i < html.length; i++) h = (((h << 5) + h) + html.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
 
 /** What a scene's frame posts back when the player acts. */
 interface SceneMessage {
@@ -49,7 +58,6 @@ export function SceneSlot({
 }) {
   const [everNeeded, setEverNeeded] = useState(false)
   const [html, setHtml] = useState('')
-  const [full, setFull] = useState(false)
   const [failed, setFailed] = useState(false)
   /** Set the instant the player acts, cleared when the scene changes — so a scene
    *  tap has immediate feedback instead of looking dead for the seconds a turn
@@ -132,23 +140,22 @@ export function SceneSlot({
     return () => window.removeEventListener('message', onMessage)
   }, [sceneId, onChoice, everNeeded])
 
-  // Escape leaves fullscreen — a scene blown up to fill the panel needs a keyboard
-  // way back out, not only the zoom button.
-  useEffect(() => {
-    if (!full) return undefined
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFull(false) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [full])
-
   const on = !!(html && sceneId)
   // A scene that has been asked for but whose picture has not arrived yet: say so,
   // rather than leaving a blank slot that reads as broken.
   const loading = !!sceneId && !html && !failed
+  // The iframe loads the scene as a real same-origin DOCUMENT via `src` (not
+  // `srcdoc`, which blank-rendered on WebKit). The `v` token changes only when the
+  // compiled html changes, so the frame reloads on a real content change but not on
+  // a tab switch. The fetched `html` above is still what tells us loading vs failed.
+  const src = on && runId
+    ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}`
+      + `?v=${sceneVersion(html)}`
+    : undefined
 
   return (
     <div
-      className={`ew-slot-wrap${full ? ' ew-slot-wrap-full' : ''}`}
+      className="ew-slot-wrap"
       ref={wrapRef}
       style={!visible ? { display: 'none' } : on ? undefined : { margin: 0 }}
     >
@@ -164,26 +171,21 @@ export function SceneSlot({
           with display instead. Before the first scene there is nothing to protect,
           so it is not created at all.
 
-          The sandbox values are the dashboard's own host values for server-compiled
-          content, and allow-same-origin is never granted: with it, srcdoc content
-          shares the dashboard's origin and the sandbox stops being one. */}
+          Loaded via `src` (a real same-origin document), NOT `srcdoc`: WebKit /
+          iOS WKWebView blank-render a sandboxed srcdoc frame. The sandbox is
+          unchanged — allow-scripts allow-forms, and NEVER allow-same-origin, so the
+          document stays null-origin (its postMessage origin is the string "null"
+          the handler checks) and cannot reach the dashboard; its CSP travels in the
+          document itself. */}
       {everNeeded ? (
         <iframe
           title={t('play.sceneTitle')}
-          className={`ew-slot${full ? ' ew-slot-full' : on ? ' ew-slot-on' : ''}`}
+          className={`ew-slot${on ? ' ew-slot-on' : ''}`}
           sandbox="allow-scripts allow-forms"
-          srcDoc={html}
+          src={src}
           allow=""
           referrerPolicy="no-referrer"
         />
-      ) : null}
-
-      {on ? (
-        <div className={`ew-slot-bar${full ? ' ew-slot-bar-full' : ''}`}>
-          <button className="ew-slot-btn" type="button" onClick={() => setFull((f) => !f)}>
-            {full ? t('play.zoomOut') : t('play.zoomIn')}
-          </button>
-        </div>
       ) : null}
     </div>
   )

@@ -37,11 +37,13 @@ player text as a command. See [modules/turn-loop.md](modules/turn-loop.md).
   unrepresentable — and it is depth-capped. There is exactly **one** interpreter,
   server-side. ([modules/world-schema.md](modules/world-schema.md),
   [modules/view-and-packs.md](modules/view-and-packs.md))
-- Scene and backdrop SVG is validated and delivered so it cannot run script or
-  fetch: a scene is a sandboxed `srcdoc` with a CSP as its first byte and a single
-  non-interpolated script; a backdrop is an inert `<img>` of `image/svg+xml` —
-  the safety is that it is **never run**, not that it is sanitized well enough to
-  run. ([modules/scenes-and-backdrop.md](modules/scenes-and-backdrop.md))
+- Scene and backdrop SVG is validated and delivered so narrator content cannot
+  execute or fetch: a scene is a compiler-owned CSP-first document loaded through
+  an iframe `src`, sandboxed without `allow-same-origin`, and its only script is a
+  single non-interpolated app constant; a backdrop is an inert `<img>` of
+  `image/svg+xml` — the backdrop's safety is that it is **never run**, not that it
+  is sanitized well enough to run.
+  ([modules/scenes-and-backdrop.md](modules/scenes-and-backdrop.md))
 
 ## The player is never shown the machinery
 

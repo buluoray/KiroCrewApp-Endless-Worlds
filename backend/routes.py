@@ -1379,13 +1379,17 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
 
 
 async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
-    """``GET /runs/{run_id}/scenes/{scene_id}`` — one scene, compiled.
+    """``GET /runs/{run_id}/scenes/{scene_id}`` — one scene, compiled, as a document.
 
-    Returns HTML as **text**, for the page to hand to a sandboxed frame's
-    ``srcdoc``. It is deliberately not served as a document the browser could
-    navigate to: nothing here should ever become a top-level page, and a scene
-    that could be opened in its own tab would have escaped the frame's sandbox
-    along with it.
+    Served as ``text/html`` and loaded by the page into a SANDBOXED iframe's ``src``
+    (not ``srcdoc``). The ``srcdoc`` path blank-rendered on WebKit / iOS WKWebView —
+    the same failure that forced backdrops onto an ``<img>`` — while a real ``src``
+    document renders everywhere. Security is unchanged: the iframe keeps
+    ``sandbox="allow-scripts allow-forms"`` with NO ``allow-same-origin``, so the
+    document is null-origin (it cannot reach the dashboard, and its postMessage
+    origin is the string ``"null"`` the page checks for), and the compiled document
+    carries its own CSP. It is same-origin-framable but nothing here grants it
+    top-navigation, so it still cannot become the dashboard's own page.
     """
     if request.get("user") is None:
         return _unauthorized()
@@ -1422,7 +1426,7 @@ async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
 
     return web.Response(
         text=html_text,
-        content_type="text/plain",
+        content_type="text/html",
         charset="utf-8",
         headers={"Cache-Control": "no-store", "X-Scene-Cached": "1" if cached else "0"},
     )

@@ -50,8 +50,11 @@ the bare form resolves to zero tools silently. See
    player's quoted action. It does not carry world state or history.
 3. The narrator calls `endless_read_runtime` first — pulling the rulebook (once),
    the current state, recent turns, restraint readings, and memory candidates —
-   then calls `endless_advance_turn` with the whole new state + prose (+ an
-   optional structured memory block validated atomically with the prose).
+   then calls `endless_advance_turn` with the whole new state + prose and an
+   optional structured memory block. The memory block is validated as one unit:
+   if it is invalid, the app drops that block and warns the narrator while the
+   prose, choices, and state still commit; a valid block shares the turn's same
+   chronicle record and cannot drift into a second log.
 4. The commit lands as a filesystem write; the SPA polls and converges.
 
 Why pull, not push: the narrator's session is one continuous conversation per

@@ -81,14 +81,20 @@ guarantee.
 - **`SceneSlot` is created once and never moved.** The scene iframe is created on
   first need and rendered at the root, outside every view branch; switching away
   hides it with `display:none` and never unmounts or re-keys it — moving or
-  re-keying an iframe reloads it, discarding a mounted scene. Its sandbox is the
-  dashboard's own host values with same-origin never granted, and the scene is
-  handed over as `srcdoc`, not navigated to. Pinned by
+  re-keying an iframe reloads it, discarding a mounted scene. The compiled bytes
+  load through the authenticated scene URL as the iframe's `src`, because a
+  sandboxed `srcdoc` blank-renders in WebKit/iOS WKWebView; a content-version token
+  changes only when the compiled HTML changes. The frame remains
+  `sandbox="allow-scripts allow-forms"` with same-origin never granted, so the
+  document has an opaque origin and cannot reach the dashboard. There is no
+  fullscreen affordance: the scene remains an inline panel instead of covering
+  host chrome or colliding with the mobile tab bar. Pinned by
   `test_scene_slot.py::test_the_slot_is_hidden_with_display_and_never_destroyed_once_created`,
   `test_the_frame_is_never_re_keyed`,
   `test_the_slot_is_rendered_at_the_root_outside_every_view_branch`,
-  `test_same_origin_is_never_granted`, and
-  `test_the_scene_is_handed_over_as_srcdoc_not_navigated_to`.
+  `test_same_origin_is_never_granted`,
+  `test_the_scene_is_loaded_as_a_sandboxed_src_document`, and
+  `test_the_scene_has_no_fullscreen_affordance`.
 
 - **A scene answer takes the same road as any turn.** A scene posts its answer
   back via `postMessage` carrying a nonce that names this app, this scene, and a

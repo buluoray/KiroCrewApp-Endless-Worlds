@@ -1,6 +1,6 @@
 # World as data: lore · systems · roles · opening hand-off
 
-> Status: design agreed, phased build in progress (P1 lore / P2 systems / P3 opening.handToAgent + roles / P4 worldsmith).
+> Status: P1–P4 implemented (structured lore and setting view, backend systems, roles and opening `handToAgent`, worldsmith extraction, and both bundled worlds populated).
 > Date: 2026-08-20
 > Scope: move a world's setting, characters, and mechanics out of prose and into the world pack's data structure; have the backend manage those elements; give the user a structured view of the world's setting.
 > Not in scope: visual mockups, arbitrary history branching, validating the world's own concept vocabulary.

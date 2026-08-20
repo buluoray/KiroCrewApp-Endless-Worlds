@@ -81,17 +81,15 @@ def test_the_frame_is_never_re_keyed(slot: str) -> None:
     assert "key=" not in iframe
 
 
-def test_fullscreen_is_the_same_element_promoted_to_a_fixed_overlay() -> None:
-    """"Promoted in place": fullscreen toggles the frame's CLASS, never re-parents
-    it (a re-parent reloads the scene). Geometry-wise it becomes a FIXED viewport
-    overlay at the modal layer (z-index 70), so it sits ABOVE the mobile tab bar —
-    which is portaled to <body> as a fixed high-z overlay — instead of behind it.
-    An absolute-in-panel scene left its bottom hidden under the tab bar."""
+def test_the_scene_has_no_fullscreen_affordance() -> None:
+    """Fullscreen was removed. As a fixed overlay it covered the crew dashboard's own
+    chrome on desktop; as an in-panel absolute box it sat under the mobile tab bar.
+    Neither geometry worked, and a map/ledger reads fine inline — so the scene
+    renders in the panel only, with no zoom control."""
+    slot = uisrc.module("scene.tsx")
     css = uisrc.styles()
-    assert ".ew-slot-full" in css
-    full = css.split(".ew-slot-full", 1)[1].split("}", 1)[0]
-    assert "position: fixed" in full
-    assert "z-index: 70" in full
+    assert "ew-slot-full" not in slot and "ew-slot-full" not in css
+    assert "setFull" not in slot and "zoomIn" not in slot and "zoomOut" not in slot
 
 
 def test_the_slot_never_becomes_the_scrolling_element() -> None:
@@ -124,10 +122,14 @@ def test_same_origin_is_never_granted(ui: str) -> None:
         assert "allow-modals" not in value
 
 
-def test_the_scene_is_handed_over_as_srcdoc_not_navigated_to(slot: str) -> None:
-    """Nothing here should ever be able to become a top-level page."""
-    assert "srcDoc={" in slot
-    assert not re.search(r"\bsrc=\{", slot)
+def test_the_scene_is_loaded_as_a_sandboxed_src_document(slot: str) -> None:
+    """Loaded via `src` (a real same-origin document), not `srcdoc`: WebKit / iOS
+    WKWebView blank-render a sandboxed srcdoc frame. Security is unchanged — the
+    frame keeps its sandbox with no allow-same-origin (asserted separately), so the
+    document is null-origin and cannot reach the dashboard even though it is
+    same-origin-framable."""
+    assert re.search(r"\bsrc=\{", slot), "scene must load via src"
+    assert "srcDoc={" not in slot, "srcdoc blank-renders on WebKit; use src"
 
 
 # -- what the slot accepts back -----------------------------------------

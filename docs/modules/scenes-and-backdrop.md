@@ -17,7 +17,7 @@ sees is produced locally from a closed, code-owned vocabulary.
 | `backend/scenes.py` | `SceneLedger` — per-run mount table (`mount`/`update`/`dismiss`/`mounted`), the answer channel (`answer`, `record_answer`), and `_reject_markup` |
 | `backend/backdrop.py` | `compile_backdrop` (the one SVG validation funnel) + `BackdropStore` (per-turn, per-page background and its button motif) |
 | `backend/mcp_server.py` | the narrator-facing tools (`_mount_scene`, backdrop set/clear) that feed specs into the compiler and ledger |
-| `website/…/SceneSlot` | the single root-level iframe that renders the mounted scene (pinned by `tests/test_scene_slot.py`) |
+| `web/src/scene.tsx` | the single root-level iframe that renders the mounted scene (pinned by `backend/tests/test_scene_slot.py`) |
 | `backend/tests/test_widget.py` | compiler contracts — kinds, geometry, escaping, CSP, bounds, cache |
 | `backend/tests/test_scene_slot.py` | the mount-stability and sandbox contracts for the iframe host |
 | `backend/tests/test_result_channel.py` | the answer-channel contracts (nonce, first-result, no-write-on-reject) |
@@ -95,15 +95,23 @@ sees is produced locally from a closed, code-owned vocabulary.
   It renders at the app root outside every view branch
   (`test_the_slot_is_rendered_at_the_root_outside_every_view_branch`), is created
   lazily then kept (`test_the_slot_is_hidden_with_display_and_never_destroyed_once_created`),
-  is never re-keyed (`test_the_frame_is_never_re_keyed`), and its fullscreen state is
-  the same element with different geometry
-  (`test_fullscreen_is_the_same_element_with_different_geometry`). Moving or re-keying
-  an iframe reloads it and throws away what the player is viewing.
+  and is never re-keyed (`test_the_frame_is_never_re_keyed`). Moving or re-keying
+  an iframe reloads it and throws away what the player is viewing. The frame has no
+  fullscreen affordance (`test_the_scene_has_no_fullscreen_affordance`): keeping it
+  inline avoids covering dashboard chrome on desktop and colliding with the
+  portalled tab bar on mobile.
 
-- **The sandbox never gains `allow-same-origin`, and content arrives as `srcdoc`.**
+- **The sandbox never gains `allow-same-origin`, and content loads through `src`.**
   The frame is `sandbox="allow-scripts allow-forms"`
-  (`test_same_origin_is_never_granted`) and the HTML is handed over as `srcDoc`, never
-  navigated to (`test_the_scene_is_handed_over_as_srcdoc_not_navigated_to`).
+  (`test_same_origin_is_never_granted`), so the scene document has an opaque origin
+  even though `get_scene` serves the compiler-owned bytes as `text/html`. `SceneSlot`
+  first fetches the bytes to distinguish loading from failure, then points `src` at
+  the authenticated scene URL with a version token derived from those bytes; the
+  token changes only when the scene content changes. This replaces `srcdoc`, which
+  blank-rendered in WebKit/iOS WKWebView, without granting the document access to
+  the dashboard. The CSP-first compiler output and escaped narrator text remain the
+  document-level defenses. Pinned by
+  `test_the_scene_is_loaded_as_a_sandboxed_src_document`.
 
 - **A backdrop only takes effect on the page it belongs to — never mid-read.**
   The narrator stores the NEXT page's backdrop while the turn is still being

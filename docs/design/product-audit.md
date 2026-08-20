@@ -57,25 +57,13 @@ A world template can declare `endings`, and the detail page shows the number of 
 ### 2. Show all mounted dynamic scenes
 
 > **Status: implemented (2026-08-18).** Scenes are no longer a single slot showing only "the latest question scene": `PlayPage` now reports all mounted scenes to the app root, and `main.tsx` renders one persistent `SceneSlot` per scene in **mount order** (keyed by sceneId, never reordered -- moving an iframe reloads it). Display-type scenes (maps/ledgers with `asks:false`) are therefore visible, and answered-but-not-dismissed scenes remain as well. The `scene: string` state becomes `scenes: SceneRow[]`.
-> **Still not done (UX polish, non-blocking):** a scene bar / tabs plus "proactively expand a non-question scene" collapse interaction; and scene-driven turns still do not explicitly pass the next turn number (they currently rely on the server's `current+1` + nonce/answered guard, which is safe but not idempotency-optimal).
-
-**Current state**
-
-The Narrator can mount `asks: false` maps, ledgers, and other display-type scenes, but the frontend only selects the latest, not-yet-answered question scene. So the display capability of the live-generated UI already exists, but it never appears in front of the player.
-
-**Code entry points**
-
-- `backend/mcp_server.py`: `endless_mount_scene`.
-- `backend/view.py`: the play view already returns mounted scenes.
-- `web/src/play.tsx`: only filters `asks && !answered`.
-- `web/src/main.tsx`, `web/src/scene.tsx`: currently only one SceneSlot.
-
-**Recommended behavior**
-
-- Add a scene bar or tabs showing all currently mounted scenes.
-- Question scenes can still auto-surface, but non-question scenes let the player open them proactively.
-- Answered-but-not-dismissed maps or ledgers remain viewable.
-- A scene-driven turn must also submit an explicit next turn number, keeping the same idempotency semantics as a normal action.
+> **Current status:** all mounted scenes render in stable mount order, and the
+> region-driven desktop rail / mobile tab bar can navigate to scene-backed regions.
+> Answered-but-not-dismissed maps and ledgers remain viewable. There is still no
+> dedicated scene-only bar or proactive expand/collapse control, and scene-driven
+> turns still rely on the server's `current+1` plus nonce/answered guard rather than
+> submitting an explicit next turn number. Those are UX and idempotency refinements,
+> not missing scene visibility.
 
 ### 3. Preserve player input after failure and support retry
 
@@ -260,19 +248,18 @@ Recommend handling these together in P1:
 
 > The second round used 4 parallel agents to separately re-review save management, turn mechanics, frontend UI, and dynamic content plus the world system. Only items not already covered above are listed here; the ending loop, showing all dynamic scenes, failure retry, managing lives individually, recap/event timeline, long-history navigation, character-creation summary/reuse, the OOC channel, turn redo, import/export, accessibility, and so on are all covered earlier and not repeated.
 
-### N1 (folded into P0): panel primitives are declared but discarded at runtime
+### N1 (folded into P0): remaining panel-history gaps
 
-> **Status: people and inventory are fixed (2026-08-18).** `_shape` in `backend/view.py` now takes a field `options`: `people` preserves each person's attribute values (attitude/closeness/identity) per the declared `attributes` columns, and stays name+note when nothing is declared; `inventory` preserves each item's `count`/`note` ("three potions" is no longer identical in shape to "one bottle"). The frontend `ui.tsx` renders the person columns and item counts, and the `ShapedField` type is updated accordingly. Tests are in `test_view.py` (`test_people_carry_declared_attribute_columns`, `test_an_inventory_keeps_count_and_note`).
-> **Still not done (needs storage / a new route, not "fast and safe"):** the `delayed`-consequence ledger for `resource`, and the historical series (sparkline) for `trend` -- both require recording per-turn values or unsettled items on the store side, left for a dedicated version.
-
-Fields promised by the template and compiler brief are flattened in `_shape()` in `backend/view.py`, which is the same class of "the world declared it but it is not honored" correctness problem as P0#1 -- the compiled world pack carries these declarations, yet nothing happens on the player side.
-
-- `people`: `_shape` only outputs the `("name","note")` columns (`view.py:126`), discarding the `attributes` columns promised by `COMPILER_BRIEF` (`compile.py:134-135`). An NPC's attitude/closeness/identity has nowhere to be shown.
-- `inventory`: dict items are flattened into plain strings (`view.py:131-135`), losing count, description, and category. "Three potions" and "one bottle" are indistinguishable in the UI.
-- `resource` with `delayed: true`: the brief promises "will be spent, and changes have delayed consequences" (`compile.py:137-138`), but `_shape` does not read `delayed`, making it no different from `stat`, and there is no "unsettled consequence" record structure.
-- `trend`: only returns the `value/direction/note` strings, with no historical series, even though the full per-turn state snapshot is already on disk (chronicle).
-
-**Recommendation**: the people/inventory branches of `_shape` preserve the declared columns and counts; for `resource`, pick one -- either remove the promise from the brief, or add a pending-consequences ledger in the store and prompt the narrator in `advance_turn`; for `trend`, add a `GET /runs/{id}/series?path=` that extracts historical values from the chronicle.
+> **Status: people and inventory are fixed (2026-08-18).** `_shape` in
+> `backend/view.py` preserves declared person attributes and inventory count/note;
+> the frontend renders both, pinned by
+> `test_people_carry_declared_attribute_columns` and
+> `test_an_inventory_keeps_count_and_note`.
+>
+> **Still not done:** a pending-consequences ledger for `resource` declarations
+> that promise delayed effects, and historical series/sparklines for `trend`.
+> Both need per-turn storage or a history-extraction route rather than another
+> shaping-only frontend branch.
 
 ### N2 (folded into P1): existing capabilities still lack a player entry point
 
@@ -292,8 +279,15 @@ Fields promised by the template and compiler brief are flattened in `_shape()` i
 
 ### N4 (folded into P2): the world presentation layer
 
-- **Scene widgets lack spatial/relational elements**: the existing 10 `ELEMENT_KINDS` are all linear layout (`widget.py:52-54`: heading/text/note/stat/bar/keyvalue/list/table/choice/divider); the tool description says "a map" yet no element can draw a map or a relationship graph. Recommend adding constrained, closed kinds: `grid` (a region map with fixed rows and columns), `links` (a relationship graph of nodes + edges), `tree` (a skill tree / family tree of parent-child hierarchy), with **all geometry generated by the backend in `widget.py` and the narrator providing only relationships, not coordinates**, holding the "model bytes do not go straight into the DOM" trust boundary. Difficulty: medium-high.
-- **Achievement / milestone system**: zero implementation. The header adds `milestones: [{id, label, when}]`, **directly reusing the existing `Condition` interpreter** (near-zero mechanism cost), evaluated after each commit; achieved items are written to a reserved field in `RESERVED_STATE_KEYS` (which already has carry-forward), and the view returns the items newly achieved this turn. Difficulty: medium (the "fires only once" persistence needs care).
+- **Spatial/relational scene elements are implemented.** The closed
+  `ELEMENT_KINDS` includes `grid`, `links`, and `tree`; the narrator provides only
+  cells, nodes, edges, and parent references while `backend/widget.py` computes
+  geometry and rejects invalid references or cycles.
+- **Milestones are implemented.** The header declares
+  `milestones: [{id, label, when}]`; `_apply_milestones` evaluates the existing
+  `Condition` language after each commit and persists each achievement once. The
+  view exposes newly reached labels, pinned by
+  `test_milestones_are_reached_once_and_then_permanent`.
 
 ## Recommended implementation route
 
