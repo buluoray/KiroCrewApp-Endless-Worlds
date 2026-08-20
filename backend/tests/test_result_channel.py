@@ -7,6 +7,7 @@ pass a test that only looked at the response.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -191,3 +192,19 @@ def test_an_accepted_answer_becomes_the_turns_action():
 
 def test_a_refused_answer_still_reloads_so_the_player_is_not_stranded():
     assert "setRefresh" in uisrc.module("main.tsx")
+
+
+# -- damaged ledger -------------------------------------------------------
+
+
+def test_a_corrupt_scene_ledger_degrades_to_no_mounted_scenes(ledger):
+    ledger._path.parent.mkdir(parents=True, exist_ok=True)
+    damaged = "{ not json"
+    ledger._path.write_text(damaged, encoding="utf-8")
+
+    assert ledger.mounted() == []
+    assert ledger._path.read_text(encoding="utf-8") == damaged
+
+    ledger.mount("fork", SPEC)
+    assert [row["sceneId"] for row in ledger.mounted()] == ["fork"]
+    assert "fork" in json.loads(ledger._path.read_text(encoding="utf-8"))

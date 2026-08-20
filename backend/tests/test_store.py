@@ -9,7 +9,6 @@ AppStorage's real semantics (atomic set, and get() returning None for BOTH
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -218,34 +217,12 @@ def test_read_prev_is_empty_before_a_commit_then_holds_the_outgoing_state(
     assert store.read_state(run_id)["turn"] == 2, "read_prev must not mutate current"
 
 
-# -- locking --------------------------------------------------------------
+# -- process lifetime -----------------------------------------------------
 
 
-def test_lock_is_per_run_and_stable(store: RunStore) -> None:
-    a, b = new_run_id(), new_run_id()
-    assert store.lock(a) is store.lock(a)
-    assert store.lock(a) is not store.lock(b)
-
-
-def test_a_second_concurrent_turn_on_one_run_is_rejected(store: RunStore) -> None:
-    """The caller rejects rather than queues (design §3).
-
-    The UI already disables choices during a turn, so a queued duplicate could
-    only ever be a double-submit.
-    """
-    run_id = store.create_run(_state(1), {"templateId": "t"})
-
-    async def scenario() -> tuple[bool, bool]:
-        lock = store.lock(run_id)
-        async with lock:
-            second_got_in = not lock.locked() or lock.locked() and False
-            # A real handler does exactly this test and returns 409.
-            busy = lock.locked()
-        return busy, second_got_in
-
-    busy, second_got_in = asyncio.run(scenario())
-    assert busy, "the lock must be observably held during a turn"
-    assert not second_got_in
+def test_store_has_no_process_lifetime_per_run_lock_table(store: RunStore) -> None:
+    assert not hasattr(store, "_locks")
+    assert not hasattr(store, "lock")
 
 
 # -- deletion -------------------------------------------------------------

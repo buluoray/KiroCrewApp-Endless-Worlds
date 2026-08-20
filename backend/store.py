@@ -18,7 +18,6 @@ final suffix, so ``run.<id>.state`` round-trips through ``list_keys()``.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -68,7 +67,6 @@ class RunStore:
     def __init__(self, storage: AppStorage, data_dir: Path) -> None:
         self._kv = storage
         self._runs_dir = data_dir / "runs"
-        self._locks: dict[str, asyncio.Lock] = {}
 
     # -- keys -------------------------------------------------------------
 
@@ -82,20 +80,6 @@ class RunStore:
 
     def _chronicle_path(self, run_id: str) -> Path:
         return self._runs_dir / run_id / "chronicle.jsonl"
-
-    # -- locking ----------------------------------------------------------
-
-    def lock(self, run_id: str) -> asyncio.Lock:
-        """The per-run turn lock.
-
-        A second concurrent turn on one run is *rejected* by the caller rather
-        than queued (design §3): the UI already disables choices during a turn,
-        so a queued duplicate would only ever be a double-submit.
-        """
-        _check_run_id(run_id)
-        if run_id not in self._locks:
-            self._locks[run_id] = asyncio.Lock()
-        return self._locks[run_id]
 
     # -- state ------------------------------------------------------------
 
@@ -488,4 +472,3 @@ class RunStore:
             for child in sorted(run_dir.rglob("*"), reverse=True):
                 child.unlink() if child.is_file() else child.rmdir()
             run_dir.rmdir()
-        self._locks.pop(run_id, None)

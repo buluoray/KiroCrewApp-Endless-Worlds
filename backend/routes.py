@@ -168,7 +168,7 @@ from turn import (  # noqa: E402
 )
 from view import build_play_view, resolve_ending, world_detail  # noqa: E402
 from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
-from widget import SceneSpecError, bound_values, compile_cached  # noqa: E402
+from widget import CSP, SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
 #: Bumped independently of app.json; identifies the route contract the UI expects.
@@ -1379,17 +1379,15 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
 
 
 async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
-    """``GET /runs/{run_id}/scenes/{scene_id}`` — one scene, compiled, as a document.
+    """``GET /runs/{run_id}/scenes/{scene_id}`` — one compiled scene document.
 
-    Served as ``text/html`` and loaded by the page into a SANDBOXED iframe's ``src``
-    (not ``srcdoc``). The ``srcdoc`` path blank-rendered on WebKit / iOS WKWebView —
-    the same failure that forced backdrops onto an ``<img>`` — while a real ``src``
-    document renders everywhere. Security is unchanged: the iframe keeps
-    ``sandbox="allow-scripts allow-forms"`` with NO ``allow-same-origin``, so the
-    document is null-origin (it cannot reach the dashboard, and its postMessage
-    origin is the string ``"null"`` the page checks for), and the compiled document
-    carries its own CSP. It is same-origin-framable but nothing here grants it
-    top-navigation, so it still cannot become the dashboard's own page.
+    The page loads this ``text/html`` response through a sandboxed iframe ``src``
+    rather than ``srcdoc`` (which blank-rendered in WebKit / iOS WKWebView). The
+    iframe omits ``allow-same-origin``, and the response repeats that boundary with
+    a CSP ``sandbox`` directive. The response-level directive matters independently:
+    unlike a meta CSP or iframe attribute, it also gives a directly navigated scene
+    an opaque origin. ``frame-ancestors 'self'`` still lets the dashboard embed the
+    document while refusing framing by another origin.
     """
     if request.get("user") is None:
         return _unauthorized()
@@ -1428,7 +1426,17 @@ async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
         text=html_text,
         content_type="text/html",
         charset="utf-8",
-        headers={"Cache-Control": "no-store", "X-Scene-Cached": "1" if cached else "0"},
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": (
+                f"{CSP}; sandbox allow-scripts allow-forms; frame-ancestors 'self'"
+            ),
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "SAMEORIGIN",
+            "X-Scene-Cached": "1" if cached else "0",
+        },
     )
 
 

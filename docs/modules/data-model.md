@@ -141,6 +141,14 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   key-sweep pinned by
   `test_delete_life.test_one_life_is_erased_and_its_world_is_untouched`.
 
+- **No process-lifetime per-run lock table is retained.** Turn concurrency is
+  guarded by the durable `pending-<runId>` record described above; the former
+  `RunStore._locks`/`lock()` API had no production caller and only accumulated
+  process-local identity in long-lived store instances. The dead mechanism is
+  absent rather than bounded with another cache policy. Enforced by `RunStore`'s
+  surface; pinned by
+  `test_store.test_store_has_no_process_lifetime_per_run_lock_table`.
+
 - **A torn chronicle line costs only that line.** The chronicle is appended one
   JSON line per turn; `read_chronicle` skips an unparseable trailing line rather
   than failing the whole read. Load-bearing because it bounds the blast radius of

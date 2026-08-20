@@ -15,6 +15,7 @@ locally produced" true even for a world pack that came from someone else.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -22,6 +23,8 @@ from pathlib import Path
 from typing import Any
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+logger = logging.getLogger(__name__)
 
 
 class SceneLedgerError(RuntimeError):
@@ -56,7 +59,15 @@ class SceneLedger:
             return {}
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
+            # A damaged optional scene must not take down the life page. Preserve
+            # the bytes for diagnosis; the next explicit mount replaces the empty
+            # logical ledger through the normal atomic write path.
+            logger.warning("scene ledger unreadable at %s: %s", self._path, exc)
+            return {}
+        except OSError as exc:
+            # Permissions and device errors are operational failures, not corrupt
+            # content. Hiding them as an empty scene would make repair impossible.
             raise SceneLedgerError(f"scene ledger unreadable: {exc}") from exc
         return data if isinstance(data, dict) else {}
 

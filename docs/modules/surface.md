@@ -92,6 +92,16 @@ processes self-locate the same data dir so routes and tools see one set of files
   `test_route_errors.py` (ghost life polls as 404 everywhere, damaged life as
   422, malformed id as 4xx).
 
+- **A scene document stays sandboxed even outside its iframe.** `get_scene` serves
+  compiler-owned HTML with a response-level CSP `sandbox allow-scripts allow-forms`
+  plus same-origin-only `frame-ancestors`, in addition to the document's CSP-first
+  meta policy and the host iframe sandbox. Directly navigating to the authenticated
+  scene URL therefore does not regain the dashboard origin, and another origin
+  cannot frame it. `nosniff`, no-referrer, same-origin resource policy, and
+  `SAMEORIGIN` framing headers provide defense in depth. Enforced by
+  `routes.get_scene`; pinned by
+  `test_route_errors.test_scene_document_is_response_sandboxed_even_when_navigated_directly`.
+
 - **Create-then-open and draft-then-compile are split for retryability.**
   `create_run` writes the life to disk *before* asking the narrator for the
   opening turn, and `open_run` is a separate idempotent call (turn ≥ 1 returns the

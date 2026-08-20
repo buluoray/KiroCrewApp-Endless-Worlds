@@ -21,6 +21,7 @@ sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import routes as routes_mod  # noqa: E402
+from scenes import SceneLedger  # noqa: E402
 from store import RunStore  # noqa: E402
 from test_delete_world import FakeCtx, FakeRequest, body_of, call  # noqa: E402
 
@@ -96,3 +97,29 @@ def test_advance_on_a_damaged_life_is_422_not_500(app):
         app["ctx"], match={"run_id": run_id}, body={"action": "look around"}
     )
     assert res.status == 422
+
+
+def test_scene_document_is_response_sandboxed_even_when_navigated_directly(app):
+    run_id = app["store"].create_run(
+        {"turn": 1, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    SceneLedger(app["data"], run_id).mount(
+        "map", {"elements": [{"kind": "text", "text": "safe"}]}
+    )
+
+    res = call(
+        routes_mod.get_scene,
+        app["ctx"],
+        match={"run_id": run_id, "scene_id": "map"},
+    )
+
+    assert res.status == 200
+    csp = res.headers["Content-Security-Policy"]
+    assert "sandbox allow-scripts allow-forms" in csp
+    assert "allow-same-origin" not in csp
+    assert "frame-ancestors 'self'" in csp
+    assert res.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+    assert res.headers["Referrer-Policy"] == "no-referrer"
+    assert res.headers["X-Content-Type-Options"] == "nosniff"
+    assert res.headers["X-Frame-Options"] == "SAMEORIGIN"

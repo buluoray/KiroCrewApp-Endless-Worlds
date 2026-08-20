@@ -104,13 +104,17 @@ sees is produced locally from a closed, code-owned vocabulary.
 - **The sandbox never gains `allow-same-origin`, and content loads through `src`.**
   The frame is `sandbox="allow-scripts allow-forms"`
   (`test_same_origin_is_never_granted`), so the scene document has an opaque origin
-  even though `get_scene` serves the compiler-owned bytes as `text/html`. `SceneSlot`
+  even though `get_scene` serves the compiler-owned bytes as `text/html`. `get_scene`
+  repeats that sandbox in the HTTP CSP response header and limits `frame-ancestors`
+  to `'self'`; therefore opening the authenticated URL as a top-level document does
+  not restore its origin privileges, and another site cannot embed it. `SceneSlot`
   first fetches the bytes to distinguish loading from failure, then points `src` at
   the authenticated scene URL with a version token derived from those bytes; the
   token changes only when the scene content changes. This replaces `srcdoc`, which
   blank-rendered in WebKit/iOS WKWebView, without granting the document access to
   the dashboard. The CSP-first compiler output and escaped narrator text remain the
-  document-level defenses. Pinned by
+  document-level defenses. Enforced by `routes.get_scene`; pinned by
+  `test_scene_document_is_response_sandboxed_even_when_navigated_directly` and
   `test_the_scene_is_loaded_as_a_sandboxed_src_document`.
 
 - **A backdrop only takes effect on the page it belongs to — never mid-read.**
@@ -143,6 +147,13 @@ sees is produced locally from a closed, code-owned vocabulary.
 - **A rejected answer writes no state.** Every rejection path in `record_answer` is
   pinned to assert both the response and that nothing was persisted
   (`test_a_failure_record_does_not_touch_the_answer`).
+
+- **A corrupt optional ledger degrades to no mounted scenes.** Malformed JSON in
+  `scenes.json` is logged and read as an empty ledger without rewriting the damaged
+  bytes; the next explicit mount can recover through the normal atomic write path.
+  Real filesystem errors still raise rather than masquerading as empty content.
+  Enforced by `SceneLedger._read`; pinned by
+  `test_a_corrupt_scene_ledger_degrades_to_no_mounted_scenes`.
 
 - **The nonce is a per-mount identity: stale is refused, first-result wins.** `mount`
   issues a fresh nonce; an answer aimed at a replaced scene is refused with no write
