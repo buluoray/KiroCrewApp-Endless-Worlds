@@ -20,7 +20,7 @@ turn 200 as at turn 1.
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
 | `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
 | `backend/memory_graph.py` | salvages the structured `memory` block — a bad piece is dropped and warned, the rest recorded, never blocking the commit |
-| `content/{en,zh}.json` | every line the prompt is built from (`turn.pull`, `turn.ask`, `turn.action.*`, `shape.*`, `opening.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
+| `content/{en,zh}.json` | every line the prompt is built from (`turn.ask`, `turn.action.*`, `shape.*`, `opening.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
 
 ## Load-bearing contracts
 

@@ -96,7 +96,7 @@ What cannot be structurally repaired (unknown kind, malformed path) goes to warn
 
 | Phase | Contents | Main files |
 |---|---|---|
-| **P1** | `lore` gains structure (open vocabulary, no concept validation); `world_detail` exposes lore; a frontend setting view (grouped by category + relations via the scene `links` renderer); narrator injection carries name+summary+text | `template.py` `view.py` `mcp_server.py`(read) + a frontend setting view |
+| **P1** | `lore` gains structure (open vocabulary, no concept validation); `world_detail` exposes lore; a frontend setting view (grouped by category + relations via the scene `links` renderer); narrator injection carries name+summary+text at the opening hand-off, and name+text per turn (summary dropped and the set capped, so the per-turn context stays small) | `template.py` `view.py` `mcp_server.py`(read) + a frontend setting view |
 | **P2** | `systems` engine (accrual/resource/decay/unlock), applied at commit to write derived state (milestones fold into unlock); panels show the derived keys automatically | new `systems.py`, `template.py`, `mcp_server.py`(_advance_turn), `compile.py` |
 | **P3** | `roles` + `opening.handToAgent`; read_runtime hands over per handToAgent at the opening; the cleaning contract becomes "extract mechanics into a system, setting into lore" | `template.py` `view.py` `mcp_server.py` `compile.py` |
 | **P4** | teach the worldsmith to emit lore/systems/roles on the first cleaning; populate both builtin worlds (flagship magic/combat → systems; Last Echoes XP/resources → systems; both worlds' setting → lore) | `agents/worldsmith.json` `compile.py` seeds |

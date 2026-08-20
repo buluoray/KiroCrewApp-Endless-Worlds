@@ -14,7 +14,7 @@ argument.
 
 | Path | What it is |
 |---|---|
-| `agents/narrator.json` | the packaged agent: `name` `endless-narrator`, `model` `auto`, `tools` == `allowedTools` == the single ref `@endless-worlds:endless-mcp`, and no `mcpServers` of its own |
+| `agents/narrator.json` | the packaged agent: `name` `endless-narrator`, `model` `auto`, `tools` == `allowedTools` == the eight per-tool refs it uses under `@endless-worlds:endless-mcp/…` (its own tools only), and no `mcpServers` of its own |
 | `backend/narrator.py` | slot lifecycle + the seal: `ensure_narrator_slot_ex()` (ownership + memory-mode guards), `_apply_choice()`, and the constants `NARRATOR_AGENT`, `OWN_SERVER_REF`, `MEMORY_MODE` |
 | `backend/content.py` | `Content(language)` — one language's text with English behind it: `resolve()`, `__call__()`, `_table()` |
 | `content/{en,zh}.json` | the text tables themselves (prompt lines, shape descriptions, separators) |
@@ -23,7 +23,7 @@ argument.
 ## Load-bearing contracts
 
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
-  declares no filesystem, shell, network, or other MCP server — only the one ref.
+  declares no filesystem, shell, network, or other MCP server — only its own tools.
   This is the R26 control: the narrator must not read or write the player's memory,
   and while `memory_mode="temporary"` blocks memory context injection and the
   consolidator, a direct memory *tool* call is a third path only the `tools`
@@ -31,17 +31,26 @@ argument.
   memory tools is advice a model can ignore). Pinned by
   `test_the_narrator_can_reach_nothing_but_this_apps_own_tools`.
 
-- **The tool ref is the namespaced key, and the bare key resolves to zero tools.**
-  The ref must be `@endless-worlds:endless-mcp` (`OWN_SERVER_REF`), not the bare
-  `@endless-mcp`. Registration writes every app server under
-  `f"{app_name}:{server_name}"` and merges those entries, unrenamed, into the
-  materialized agent's `mcpServers`; kiro-cli resolves `@x` against those keys, so
-  the bare form matches nothing and is dropped silently at mount time — no error,
-  no log, just an agent with no tools. Pinned by
-  `test_the_tool_ref_uses_the_namespaced_key_registration_actually_writes`; the
-  agent declares no `mcpServers` of its own, since a hand-written entry would
-  shadow the framework-injected one
-  (`test_the_agent_declares_no_mcp_servers_of_its_own`).
+- **Tools are scoped per tool, not per server, so each agent carries only its own
+  tool schemas.** The refs are `@endless-worlds:endless-mcp/<tool>`, not the bare
+  server: the narrator lists the eight it uses (`endless_read_runtime`,
+  `endless_advance_turn`, the four scene tools, `endless_paint_backdrop`,
+  `endless_clear_backdrop`), the illustrator only `endless_commit_backdrop`, and the
+  worldsmith `endless_read_draft`/`endless_submit_world_draft`/`endless_export_world`.
+  Advertising the whole server put every tool's description in every agent's
+  every-turn context, so the narrator paid for the worldsmith's and illustrator's
+  tools it never calls. The SERVER half of the ref must still be the namespaced key
+  `endless-worlds:endless-mcp` (`OWN_SERVER_REF`), never the bare `@endless-mcp`:
+  registration writes every app server under `f"{app_name}:{server_name}"` and merges
+  those entries, unrenamed, into the materialized agent's `mcpServers`; kiro-cli
+  resolves `@x` against those keys, so the bare form matches nothing and is dropped
+  silently at mount time — no error, no log, just an agent with no tools.
+  `allowedTools` mirrors `tools` so no granted call prompts an unattended slot into a
+  rejection. Pinned by
+  `test_the_tool_ref_uses_the_namespaced_key_registration_actually_writes` and
+  `test_the_narrator_can_reach_nothing_but_this_apps_own_tools`; the agent declares no
+  `mcpServers` of its own, since a hand-written entry would shadow the
+  framework-injected one (`test_the_agent_declares_no_mcp_servers_of_its_own`).
 
 - **`allowedTools` equals `tools` because the slot is unattended.** An app-owned
   narrator slot has no human at the approval prompt, so a server that is granted
