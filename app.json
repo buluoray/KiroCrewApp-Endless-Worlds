@@ -20,7 +20,7 @@
       "routes": "backend.routes:register_routes"
     }
   },
-  "agents": ["agents/narrator.json", "agents/worldsmith.json"],
+  "agents": ["agents/narrator.json", "agents/worldsmith.json", "agents/illustrator.json"],
   "mcpServers": {
     "endless-mcp": {
       "command": "python3",
@@ -34,6 +34,7 @@
   "permissions": {
     "storage": true,
     "network": false,
+    "spawn": true,
     "api": [
       "/api/apps/endless-worlds",
       "/api/apps/endless-worlds/*",

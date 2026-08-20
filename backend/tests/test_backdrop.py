@@ -120,21 +120,22 @@ def _call(name, **args):
     return json.loads(srv.call_tool(name, args))
 
 
-def test_set_backdrop_tool_stores_and_versions(data):
-    out = _call("endless_set_backdrop", runId="run-x", markup=_svg("#111"))
+def test_commit_backdrop_tool_stores_and_versions(data):
+    out = _call("endless_commit_backdrop", runId="run-x", turn=1, markup=_svg("#111"))
     assert out["ok"] is True and out["version"] == 1
-    assert _call("endless_set_backdrop", runId="run-x", markup=_svg("#222"))["version"] == 2
+    assert _call("endless_commit_backdrop", runId="run-x", turn=2,
+                 markup=_svg("#222"))["version"] == 2
     assert BackdropStore(data, "run-x").current()["version"] == 2
 
 
-def test_set_backdrop_tool_refuses_non_svg(data):
-    out = _call("endless_set_backdrop", runId="run-x", markup="<div>x</div>")
+def test_commit_backdrop_tool_refuses_non_svg(data):
+    out = _call("endless_commit_backdrop", runId="run-x", turn=1, markup="<div>x</div>")
     assert out["ok"] is False and "error" in out
     assert BackdropStore(data, "run-x").current() is None
 
 
 def test_clear_backdrop_tool(data):
-    _call("endless_set_backdrop", runId="run-x", markup=_svg("#111"))
+    _call("endless_commit_backdrop", runId="run-x", turn=0, markup=_svg("#111"))
     assert _call("endless_clear_backdrop", runId="run-x")["ok"] is True
     assert BackdropStore(data, "run-x").current() is None
 

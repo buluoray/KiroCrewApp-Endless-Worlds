@@ -333,6 +333,39 @@ class RunStore:
         _check_run_id(run_id)
         self._kv.delete(self._pending_key(run_id))
 
+    # -- backdrop request (the narrator's brief for the illustrator) -------
+
+    @staticmethod
+    def _backdrop_request_key(run_id: str) -> str:
+        return f"backdrop-request-{run_id}"
+
+    def request_backdrop(self, run_id: str, *, turn: int, brief: str) -> None:
+        """Record the narrator's BRIEF for a backdrop, for the illustrator to draw.
+
+        The narrator sends a short brief and moves on; the SVG is never authored in
+        its session (that is the whole point — 24k of art neither accumulates in nor
+        slows its turn). The app backend reads this after the turn commits and spawns
+        the illustrator, which draws and commits the art directly. Bound to ``turn``
+        so the art lands on the page it belongs to.
+        """
+        _check_run_id(run_id)
+        self._kv.set(
+            self._backdrop_request_key(run_id),
+            {"turn": int(turn), "brief": str(brief), "askedAt": time.time()},
+        )
+
+    def read_backdrop_request(self, run_id: str) -> dict[str, Any] | None:
+        """The pending backdrop brief, or ``None``."""
+        _check_run_id(run_id)
+        raw = self._kv.get(self._backdrop_request_key(run_id))
+        return raw if isinstance(raw, dict) else None
+
+    def clear_backdrop_request(self, run_id: str) -> None:
+        """Forget the backdrop brief once the illustrator has been dispatched."""
+        _check_run_id(run_id)
+        self._kv.delete(self._backdrop_request_key(run_id))
+
+
     # -- chronicle --------------------------------------------------------
 
     def append_turn(self, run_id: str, entry: dict[str, Any]) -> None:

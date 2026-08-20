@@ -35,6 +35,7 @@ from narrator import (  # noqa: E402
 )
 
 AGENT_JSON = _BACKEND.parent / "agents" / "narrator.json"
+ILLUSTRATOR_JSON = _BACKEND.parent / "agents" / "illustrator.json"
 APP_JSON = _BACKEND.parent / "app.json"
 
 
@@ -360,27 +361,30 @@ def test_the_narrators_prompt_leaks_no_implementation_vocabulary_to_the_player()
 
 
 def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
-    """The narrator chooses an image from the turn's meaning; it is not trained to
-    stamp the same gradient/vignette/grain stack onto every page. Safety belongs
-    to ``compile_backdrop`` — this prompt contract protects visual diversity."""
-    prompt = json.loads(AGENT_JSON.read_text(encoding="utf-8"))["prompt"]
+    """The drawing lives in the ILLUSTRATOR now (the narrator only sends a brief),
+    so the diversity contract that keeps every page from wearing the same
+    gradient/vignette/grain stack belongs to the illustrator's prompt. Safety
+    belongs to ``compile_backdrop``; this contract protects visual variety.
+
+    The NARRATOR must carry none of the SVG recipe — it delegates via a brief."""
+    prompt = json.loads(ILLUSTRATOR_JSON.read_text(encoding="utf-8"))["prompt"]
 
     for required in (
-        "IRREVERSIBLE CHANGE",
-        "one visual thesis",
-        "OPTIONAL tools, never required layers",
-        "previous two you authored",
-        "MEANING HAS CHANGED",
-        "zero or one motion system",
+        "not a checklist of SVG effects",
+        "one dominant image",
+        "SMALL palette",
+        "one motion verb, or none",
+        "do not reuse the same composition family",
+        "SMIL only",
     ):
-        assert required in prompt
+        assert required in prompt, f"illustrator prompt missing: {required!r}"
 
-    for old_recipe in (
-        "Recipe, adapted so no two scenes look alike",
-        "faint feTurbulence grain (opacity about 0.05)",
-        "roughly 0.08 to 0.2",
-    ):
-        assert old_recipe not in prompt
+    # The narrator delegates and never authors SVG itself.
+    narrator = json.loads(AGENT_JSON.read_text(encoding="utf-8"))["prompt"]
+    assert "endless_paint_backdrop" in narrator
+    assert "endless_set_backdrop" not in narrator
+    for recipe in ("viewBox='0 0 800 600'", "feTurbulence", "<animateTransform>"):
+        assert recipe not in narrator, f"narrator still carries SVG recipe: {recipe!r}"
 
 
 # -- fakes vs the real thing ---------------------------------------------

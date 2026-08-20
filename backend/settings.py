@@ -19,7 +19,7 @@ from pathlib import Path
 #: the set is the one core accepts.
 REASONING_EFFORTS: tuple[str, ...] = ("", "low", "medium", "high", "xhigh", "max")
 
-_DEFAULT: dict[str, str] = {"model": "", "reasoningEffort": ""}
+_DEFAULT: dict[str, str] = {"model": "", "reasoningEffort": "", "painterModel": ""}
 
 
 def _path(data_dir: Path) -> Path:
@@ -37,25 +37,34 @@ def read_settings(data_dir: Path) -> dict[str, str]:
         return dict(_DEFAULT)
     model = raw.get("model")
     effort = raw.get("reasoningEffort")
+    painter = raw.get("painterModel")
     return {
         "model": model if isinstance(model, str) else "",
         "reasoningEffort": (
             effort if isinstance(effort, str) and effort in REASONING_EFFORTS else ""
         ),
+        # The illustrator's model, chosen separately from the narrator's: drawing an
+        # SVG is a different job than writing prose, and a player may want a cheaper
+        # or faster model for the background art. Empty = inherit the agent default.
+        "painterModel": painter if isinstance(painter, str) else "",
     }
 
 
-def write_settings(data_dir: Path, *, model: str, reasoning_effort: str) -> dict[str, str]:
+def write_settings(
+    data_dir: Path, *, model: str, reasoning_effort: str, painter_model: str = ""
+) -> dict[str, str]:
     """Persist the settings (atomic tmp+rename). Returns what was written.
 
     ``reasoning_effort`` is validated against the known set; an unknown value is
     coerced to "" (the default) rather than smuggled onward — it becomes a
-    subprocess argument downstream. ``model`` is an explicit pick from the
-    advertised list, so it is stored verbatim (empty = inherit the agent default).
+    subprocess argument downstream. ``model`` and ``painter_model`` are explicit
+    picks from the advertised list, so they are stored verbatim (empty = inherit
+    the agent default).
     """
     written = {
         "model": model if isinstance(model, str) else "",
         "reasoningEffort": reasoning_effort if reasoning_effort in REASONING_EFFORTS else "",
+        "painterModel": painter_model if isinstance(painter_model, str) else "",
     }
     data_dir.mkdir(parents=True, exist_ok=True)
     tmp = _path(data_dir).with_suffix(".json.tmp")

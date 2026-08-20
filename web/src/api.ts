@@ -606,9 +606,11 @@ export const api = {
       `/worlds${language ? `?language=${encodeURIComponent(language)}` : ''}`,
     ),
   settings: () =>
-    json<{ model: string; reasoningEffort: string; efforts: string[] }>('/settings'),
-  saveSettings: (body: { model: string; reasoningEffort: string }) =>
-    json<{ model: string; reasoningEffort: string }>('/settings', {
+    json<{ model: string; reasoningEffort: string; painterModel: string; efforts: string[] }>(
+      '/settings',
+    ),
+  saveSettings: (body: { model: string; reasoningEffort: string; painterModel: string }) =>
+    json<{ model: string; reasoningEffort: string; painterModel: string }>('/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

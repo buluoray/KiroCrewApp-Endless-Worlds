@@ -55,7 +55,7 @@ def test_the_surface_is_exactly_the_declared_tools():
     assert {t["name"] for t in srv.list_tools()} == {
         "endless_advance_turn", "endless_read_runtime", "endless_mount_scene",
         "endless_update_scene", "endless_await_scene", "endless_dismiss_scene",
-        "endless_set_backdrop", "endless_clear_backdrop",
+        "endless_paint_backdrop", "endless_commit_backdrop", "endless_clear_backdrop",
         "endless_export_world",
         "endless_read_draft", "endless_submit_world_draft",
     }
@@ -219,6 +219,80 @@ def test_read_runtime_returns_state_world_and_scenes(app):
 
     with_prose = call("endless_read_runtime", runId=run, includeProse=True)
     assert "勇者不总是赢" in with_prose["rulebook"]
+
+
+def test_paint_backdrop_records_a_brief_and_draws_nothing(app):
+    """The narrator's paint call only stores a brief — no SVG is authored here, so
+    nothing lands in the backdrop store until the illustrator commits."""
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_paint_backdrop", runId=run, brief="a grey dawn over the wall")
+    assert out["ok"] is True and out["backdrop"] == "queued"
+    req = store.read_backdrop_request(run)
+    assert req and req["brief"] == "a grey dawn over the wall"
+
+
+def test_lenient_json_object_recovers_double_encode_and_repairs_bad_escape():
+    assert srv._lenient_json_object('{"a": 1}') == {"a": 1}
+    # A lone backslash (an invalid JSON escape, e.g. a Windows path) is repaired.
+    assert srv._lenient_json_object('{"p": "C:\\Users"}') == {"p": "C:\\Users"}
+    assert srv._lenient_json_object("not json at all") is None
+    assert srv._lenient_json_object("[1, 2]") is None  # a list is not an object
+
+
+def test_advance_turn_recovers_a_double_encoded_state_with_a_bad_escape(app):
+    """A narrator that double-encodes `state` as a JSON string — even with a
+    malformed escape — must not waste the turn: the server recovers it instead of
+    refusing with 'arguments.state: got str'."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call(
+        "endless_advance_turn",
+        runId=run, turn=2, prose="the tower fell", ending=True,
+        state='{"alive": false, "path": "C:\\Users"}',  # invalid \\U escape
+    )
+    assert out["ok"] is True, out
+    assert store.read_state(run).get("path") == "C:\\Users"
+
+
+WORLD_WITH_LORE = """---
+{"id": "wl", "title": "WL", "version": "1.0", "language": "en",
+ "clock": {"unit": "month", "label": "{year}"},
+ "styles": [{"id": "s", "label": "S", "default": true}],
+ "opening": [{"id": "name", "label": "Name", "kind": "text"}],
+ "panels": [{"id": "status", "always": true,
+             "fields": [{"id": "age", "label": "Age", "primitive": "field"}]}],
+ "lore": [
+   {"id": "premise", "always": true, "keys": [], "text": "the world overview"},
+   {"id": "dragon", "keys": ["dragon"], "text": "the last dragon sleeps"}
+ ],
+ "endings": [{"id": "died", "when": "state.alive == false"}]}
+---
+勇者不总是赢。
+"""
+
+
+def test_always_lore_rides_only_a_full_read_not_a_delta(app):
+    """`always` lore is the world's standing setting. On a continuous session the
+    narrator already holds it, so — like the recent months, restraint reading and
+    table of contents — it rides only a FULL read (a missing/unrecognised baseline:
+    the first read, or a compaction). Keyword-triggered lore is relevant NOW by
+    definition and still surfaces on any read. This is the fix for 'turn 18 still
+    receives the whole game premise every turn'."""
+    (app / "worlds" / "wl.md").write_text(WORLD_WITH_LORE, encoding="utf-8")
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "wl"}, {"runId": "r1"})
+    # The player's action names the dragon, so the keyword entry matches this turn.
+    store.mark_pending(run, turn=5, slot="", action="I wake the dragon")
+
+    full = call("endless_read_runtime", runId=run)
+    assert "state" in full, "no baseline yet, so this is a full read"
+    assert {e["id"] for e in full.get("lore", [])} == {"premise", "dragon"}
+
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert "changed" in delta, "same state + valid fingerprint must be a delta read"
+    ids = {e["id"] for e in delta.get("lore", [])}
+    assert ids == {"dragon"}, f"always-lore must be dropped on a delta read; got {ids}"
 
 
 # -- scenes ---------------------------------------------------------------

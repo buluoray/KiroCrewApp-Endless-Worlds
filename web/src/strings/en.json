@@ -52,6 +52,7 @@
   "settings.close": "Close",
   "settings.model": "Model",
   "settings.modelDefault": "Default (auto)",
+  "settings.painterModel": "Backdrop painter model",
   "settings.effort": "Reasoning effort",
   "settings.effortDefault": "Default",
   "settings.save": "Save",

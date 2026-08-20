@@ -52,6 +52,7 @@
   "settings.close": "关闭",
   "settings.model": "模型",
   "settings.modelDefault": "默认（auto）",
+  "settings.painterModel": "背景绘制模型",
   "settings.effort": "推理强度",
   "settings.effortDefault": "默认",
   "settings.save": "保存",

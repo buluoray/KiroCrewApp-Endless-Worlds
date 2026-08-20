@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -411,25 +412,47 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "endless_set_backdrop",
+        "name": "endless_paint_backdrop",
         "description": (
-            "Set the background art behind the story for this life — a single "
-            "self-contained SVG image (gradients, patterns, filters) that sets the "
-            "mood of the current scene. Optionally also pass `buttons`: a second SVG "
-            "you design as the COMMON motif shown behind the ordinary choice buttons "
-            "this scene — it is set and replaced TOGETHER with the backdrop, so the "
-            "buttons always match the scene. Both are shown as inert images: no "
-            "script, no interactivity. Setting a new one replaces the old — CHANGE "
-            "it at every major event or turning point and at significant jumps in "
-            "time or place. Refused if either is not an <svg> document or carries "
-            "script, an event handler, <foreignObject>, or an external link."
+            "Ask for background art behind the story — you do NOT draw it. Pass a "
+            "short BRIEF and a separate illustrator paints the SVG and hangs it "
+            "behind this page while you move on; call this BEFORE endless_advance_turn "
+            "and never wait for it. The brief is the art direction, in a few lines: "
+            "the turn's irreversible change or mood, one dominant image, a small "
+            "palette, at most one motion verb (or none), and how it should differ "
+            "from the previous backdrop — plus, if you want one, the common motif for "
+            "the choice buttons. Describe the picture; never write SVG here. Setting a "
+            "new one replaces the old, so ask for a fresh backdrop at a major turning "
+            "point or a real jump in time or place, and simply omit this call when the "
+            "current background still fits."
         ),
         "inputSchema": {
             "type": "object",
-            "required": ["runId", "markup"],
+            "required": ["runId", "brief"],
             "additionalProperties": False,
             "properties": {
                 "runId": _RUN_ID,
+                "brief": {"type": "string", "maxLength": 2000},
+            },
+        },
+    },
+    {
+        "name": "endless_commit_backdrop",
+        "description": (
+            "Hang a finished backdrop behind a page. This is the ILLUSTRATOR's "
+            "commit — `markup` is a single self-contained SVG image, and `turn` is "
+            "the page it belongs to (given to you in your task). Optionally also pass "
+            "`buttons`: a second SVG, the common motif shown behind the ordinary "
+            "choice buttons this scene. Refused if either is not an <svg> document or "
+            "carries script, an event handler, <foreignObject>, or an external link."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "turn", "markup"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "turn": {"type": "integer", "minimum": 0},
                 "markup": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
             },
@@ -997,6 +1020,15 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     recent = args.get("recentTurns", RECENT_TURNS)
     fingerprint = store.fingerprint(state)
 
+    # Resolved here, ABOVE the lore block, because lore now respects it too: a
+    # delta read (a baseline the narrator could only still name if its context
+    # survived) means the continuous session already holds the world's standing
+    # setting, so `always` lore rides only on a FULL read — the same rule the
+    # recent months, restraint reading and table of contents already follow.
+    since = str(args.get("since") or "")
+    baseline = store.baseline_for(run_id, since) if since else None
+    full_read = baseline is None
+
     out: dict[str, Any] = {
         "runId": run_id,
         "turn": int(state.get("turn") or 0),
@@ -1038,7 +1070,7 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                             "text": e.text,
                         }
                         for e in entries
-                        if e.always or any(k.lower() in hay for k in e.keys)
+                        if (e.always and full_read) or any(k.lower() in hay for k in e.keys)
                     ]
                     if matched:
                         out["lore"] = matched
@@ -1079,8 +1111,6 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             graph, [str(e) for e in wanted_events]
         )
 
-    since = str(args.get("since") or "")
-    baseline = store.baseline_for(run_id, since) if since else None
     if baseline is not None:
         delta = store.diff(baseline, state)
         out["changed"] = delta["changed"]
@@ -1284,10 +1314,23 @@ def _dismiss_scene(args: dict[str, Any]) -> dict[str, Any]:
     return {"dismissed": args["sceneId"]}
 
 
-def _set_backdrop(args: dict[str, Any]) -> dict[str, Any]:
-    turn = _backdrop_turn(args["runId"])
+def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
+    """Record the narrator's brief; the backend spawns the illustrator to draw it.
+
+    Bound to the turn the narrator is writing (the in-flight page), so the art the
+    illustrator commits lands on the right page even though it arrives a beat later.
+    """
+    run_id = args["runId"]
+    turn = _backdrop_turn(run_id)
+    _store().request_backdrop(run_id, turn=turn, brief=args["brief"])
+    return {"backdrop": "queued", "turn": turn}
+
+
+def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
+    """The illustrator's commit: validate the SVG and hang it on ``turn``."""
+    turn = int(args["turn"])
     version = _backdrop_store(args["runId"]).set(args["markup"], args.get("buttons"), turn)
-    return {"backdrop": "set", "version": version, "turn": turn}
+    return {"backdrop": "committed", "version": version, "turn": turn}
 
 
 def _clear_backdrop(args: dict[str, Any]) -> dict[str, Any]:
@@ -1372,7 +1415,8 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_update_scene": _update_scene,
     "endless_await_scene": _await_scene,
     "endless_dismiss_scene": _dismiss_scene,
-    "endless_set_backdrop": _set_backdrop,
+    "endless_paint_backdrop": _paint_backdrop,
+    "endless_commit_backdrop": _commit_backdrop,
     "endless_clear_backdrop": _clear_backdrop,
     "endless_export_world": _export_world,
     "endless_read_draft": _read_draft,
@@ -1387,6 +1431,41 @@ def list_tools() -> list[dict[str, Any]]:
     return _TOOLS
 
 
+#: A backslash that does NOT begin a valid JSON escape (``\" \\ \/ \b \f \n \r \t
+#: \uXXXX``). A narrator that hand-writes a JSON string for ``state``/``memory``
+#: often leaves a lone backslash (a Windows path, a LaTeX-ish token, an escaped
+#: quote it forgot to double), which makes the whole string un-parseable and wastes
+#: the turn. Doubling exactly those backslashes repairs the common case without
+#: touching a real escape.
+_BAD_JSON_ESCAPE = re.compile(r'\\(?!["\\/bfnrtu])')
+
+
+def _repair_json_escapes(raw: str) -> str:
+    return _BAD_JSON_ESCAPE.sub(r"\\\\", raw)
+
+
+def _lenient_json_object(raw: str) -> dict[str, Any] | None:
+    """Parse *raw* as a JSON object, repairing a malformed escape once if needed.
+
+    A narrator sometimes double-encodes ``state``/``memory`` as a JSON STRING, and
+    that string sometimes carries a malformed escape (a lone backslash). Both are
+    recoverable server-side rather than worth a refused, wasted turn: try a plain
+    parse, then a parse with stray backslashes doubled. Returns the object, or
+    ``None`` when it is not a recoverable JSON object.
+    """
+    text = raw.strip()
+    if not text:
+        return None
+    for attempt in (text, _repair_json_escapes(text)):
+        try:
+            value = json.loads(attempt)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
 def call_tool(name: str, args: dict[str, Any]) -> str:
     """Validate, dispatch, and answer as JSON text.
 
@@ -1395,23 +1474,25 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
     field is something it can fix on the next attempt.
     """
     try:
-        # Memory is enrichment, never a reason to fail a turn — even at the schema
-        # layer. A narrator that double-encodes the block sends `memory` as a JSON
-        # STRING; recover it to an object. A string that is not a JSON object is
-        # dropped so the turn still commits (the handler then records no structured
-        # memory), rather than the whole call being refused on a type mismatch.
-        if name == "endless_advance_turn" and isinstance(args.get("memory"), str):
-            raw = args["memory"].strip()
-            parsed: Any = None
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                except Exception:  # noqa: BLE001
-                    parsed = None
-            if isinstance(parsed, dict):
-                args["memory"] = parsed
-            else:
-                args.pop("memory", None)
+        # A narrator that double-encodes an object sends it as a JSON STRING, and
+        # that string sometimes carries a malformed escape — both would otherwise
+        # refuse the whole turn. Recover server-side instead of wasting a round.
+        #
+        # `state` is REQUIRED, so it is recovered (parse, then parse-with-repair)
+        # and left as-is only when unrecoverable — the schema then still gives the
+        # narrator the clear "got str" message. `memory` is enrichment, so an
+        # unrecoverable block is DROPPED and the turn still commits.
+        if name == "endless_advance_turn":
+            if isinstance(args.get("state"), str):
+                recovered = _lenient_json_object(args["state"])
+                if recovered is not None:
+                    args["state"] = recovered
+            if isinstance(args.get("memory"), str):
+                recovered = _lenient_json_object(args["memory"])
+                if recovered is not None:
+                    args["memory"] = recovered
+                else:
+                    args.pop("memory", None)
         _validate(name, args)
     except ToolInputError as exc:
         return json.dumps(

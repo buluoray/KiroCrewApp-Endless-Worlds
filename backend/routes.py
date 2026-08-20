@@ -10,6 +10,7 @@ catch-all ``/api/apps/{app_name}/{path:.*}`` shadows it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -173,6 +174,54 @@ from world import CONTRACT  # noqa: E402
 #: Bumped independently of app.json; identifies the route contract the UI expects.
 ROUTE_CONTRACT = 11
 
+logger = logging.getLogger(__name__)
+
+
+async def _paint_backdrop_if_requested(
+    ctx: AppContext, store: RunStore, run_id: str, model: str
+) -> None:
+    """Fire-and-forget the illustrator for a backdrop the narrator asked for.
+
+    The narrator calls ``endless_paint_backdrop`` (which records only a short brief)
+    BEFORE it commits, so the 24k SVG is never authored in — nor slows — its own
+    session. Here, once the turn has committed, we hand that brief to a throwaway
+    illustrator subagent through the host's sanctioned ``ctx.spawn`` (gated by
+    ``permissions.spawn``): it draws the SVG and commits it directly via
+    ``endless_commit_backdrop``, and never reports back. The play page's per-page
+    poll + double-buffer pick the art up when it lands, a beat later.
+
+    Best-effort throughout: the turn already committed and a backdrop is optional,
+    so nothing here may raise. The request is cleared BEFORE dispatch so a failed
+    illustrator is not re-spawned on the next commit — a re-brief is the narrator's
+    to make, not ours to retry.
+    """
+    request = store.read_backdrop_request(run_id)
+    if not request:
+        return
+    spawn = getattr(ctx, "spawn", None)
+    turn = int(request.get("turn") or 0)
+    brief = str(request.get("brief") or "")
+    store.clear_backdrop_request(run_id)
+    if spawn is None:
+        logger.info(
+            "endless-worlds: ctx.spawn unavailable (permissions.spawn?); "
+            "skipped backdrop for run %s turn %s",
+            run_id, turn,
+        )
+        return
+    task = (
+        "Paint the backdrop for one page of a life, then commit it with "
+        "endless_commit_backdrop using EXACTLY this runId and turn.\n"
+        f"runId: {run_id}\nturn: {turn}\n\nBrief:\n{brief}"
+    )
+    try:
+        await spawn.run(task, agent="endless-illustrator", silent=True, model=model)
+    except Exception as exc:  # noqa: BLE001 — art is optional; the turn is committed
+        logger.warning(
+            "endless-worlds: illustrator spawn failed for run %s turn %s: %s",
+            run_id, turn, exc,
+        )
+
 #: Seeds ship in the install tree, one level up from backend/.
 _SEEDS_DIR = _HERE.parent / "seeds"
 
@@ -292,12 +341,15 @@ async def put_settings(request: web.Request, ctx: AppContext) -> web.Response:
         return web.json_response({"error": "expected an object"}, status=400)
     model = body.get("model") if isinstance(body.get("model"), str) else ""
     effort = body.get("reasoningEffort") if isinstance(body.get("reasoningEffort"), str) else ""
+    painter = body.get("painterModel") if isinstance(body.get("painterModel"), str) else ""
     if effort not in REASONING_EFFORTS:
         return web.json_response(
             {"field": "reasoningEffort", "expected": "a known effort level or empty"},
             status=400,
         )
-    saved = write_settings(ctx.data_dir, model=model, reasoning_effort=effort)
+    saved = write_settings(
+        ctx.data_dir, model=model, reasoning_effort=effort, painter_model=painter
+    )
     return web.json_response(saved)
 
 
@@ -910,6 +962,11 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         reasoning_effort=_cfg["reasoningEffort"],
     )
 
+    # A backdrop the narrator briefed this turn is painted off the critical path by
+    # a throwaway illustrator, so the art never entered the narrator's own session.
+    if outcome.advanced:
+        await _paint_backdrop_if_requested(ctx, store, run_id, _cfg.get("painterModel") or "")
+
     return web.json_response({
         "advanced": outcome.advanced,
         "turn": outcome.turn,
@@ -1130,6 +1187,8 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         reasoning_effort=_cfg["reasoningEffort"],
         deadline_secs=OPENING_DEADLINE_SECS,
     )
+    if outcome.advanced:
+        await _paint_backdrop_if_requested(ctx, store, run_id, _cfg.get("painterModel") or "")
     return web.json_response({
         "advanced": outcome.advanced,
         "turn": outcome.turn,
