@@ -202,6 +202,16 @@ def _store(ctx: AppContext) -> RunStore:
     return RunStore(ctx.storage, ctx.data_dir)
 
 
+def _gateway_state(request: web.Request) -> Any:
+    """The gateway state object, or None outside a full gateway (tests, tools).
+
+    Callers hand it to ``generating()`` for the slot-liveness check; None simply
+    degrades that check to the age-only judgement, so nothing here may raise.
+    """
+    app = getattr(request, "app", None)
+    return app.get("state") if app is not None else None
+
+
 def _load_run_state(
     store: RunStore, run_id: str
 ) -> tuple[dict[str, Any] | None, web.Response | None]:
@@ -347,7 +357,9 @@ async def get_world(request: web.Request, ctx: AppContext) -> web.Response:
     return web.json_response(detail)
 
 
-def lives_claiming(store: RunStore, world_id: str) -> list[dict[str, Any]]:
+def lives_claiming(
+    store: RunStore, world_id: str, gateway_state: Any = None
+) -> list[dict[str, Any]]:
     """Every life that belongs to this world, and what it would cost to lose it.
 
     A life names its world in TWO places — its own state and its index row — and
@@ -386,21 +398,23 @@ def lives_claiming(store: RunStore, world_id: str) -> list[dict[str, Any]]:
         life["subtitle"] = life_subtitle(state)
         life["ended"] = bool(state.get("ended"))
         try:
-            life["generating"] = generating(store, run_id) is not None
+            life["generating"] = generating(store, run_id, gateway_state) is not None
         except Exception:  # noqa: BLE001
             life["generating"] = False
         out.append(life)
     return out
 
 
-def _deletion_facts(ctx: AppContext, world_id: str) -> dict[str, Any]:
+def _deletion_facts(
+    ctx: AppContext, world_id: str, gateway_state: Any = None
+) -> dict[str, Any]:
     """What the confirmation must be able to say, gathered once.
 
     The dialog is not allowed to guess any of this. A confirmation that does not
     name the number of lives it ends is a confirmation of the wrong question.
     """
     library = _library(ctx)
-    lives = lives_claiming(_store(ctx), world_id)
+    lives = lives_claiming(_store(ctx), world_id, gateway_state)
     title = world_id
     try:
         title = library.read(world_id).template.title
@@ -425,7 +439,7 @@ async def world_deletion(request: web.Request, ctx: AppContext) -> web.Response:
         return _unauthorized()
     world_id = request.match_info.get("world_id", "")
     try:
-        return web.json_response(_deletion_facts(ctx, world_id))
+        return web.json_response(_deletion_facts(ctx, world_id, _gateway_state(request)))
     except LibraryError as exc:
         return web.json_response({"error": str(exc)}, status=400)
 
@@ -468,7 +482,7 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
 
     library = _library(ctx)
     try:
-        facts = _deletion_facts(ctx, world_id)
+        facts = _deletion_facts(ctx, world_id, _gateway_state(request))
     except LibraryError as exc:
         return web.json_response({"error": str(exc)}, status=400)
 
@@ -582,7 +596,9 @@ async def restore_world(request: web.Request, ctx: AppContext) -> web.Response:
     return web.json_response({"worldId": world_id, "restored": True})
 
 
-def _life_deletion_facts(ctx: AppContext, run_id: str) -> dict[str, Any]:
+def _life_deletion_facts(
+    ctx: AppContext, run_id: str, gateway_state: Any = None
+) -> dict[str, Any]:
     """What ending ONE life would cost, gathered once.
 
     An unreadable life still answers here. It is the one that most needs to be
@@ -605,7 +621,7 @@ def _life_deletion_facts(ctx: AppContext, run_id: str) -> dict[str, Any]:
     facts["ended"] = bool(state.get("ended"))
     facts["worldId"] = state.get("worldId") or facts.get("worldId", "")
     try:
-        facts["generating"] = generating(store, run_id) is not None
+        facts["generating"] = generating(store, run_id, gateway_state) is not None
     except Exception:  # noqa: BLE001
         facts["generating"] = False
     return facts
@@ -619,7 +635,7 @@ async def life_deletion(request: web.Request, ctx: AppContext) -> web.Response:
     store = _store(ctx)
     if not any(r.get("runId") == run_id for r in store.read_index()):
         return web.json_response({"error": "no such life"}, status=404)
-    return web.json_response(_life_deletion_facts(ctx, run_id))
+    return web.json_response(_life_deletion_facts(ctx, run_id, _gateway_state(request)))
 
 
 async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
@@ -656,7 +672,7 @@ async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
     if not any(r.get("runId") == run_id for r in store.read_index()):
         return web.json_response({"error": "no such life"}, status=404)
 
-    facts = _life_deletion_facts(ctx, run_id)
+    facts = _life_deletion_facts(ctx, run_id, _gateway_state(request))
 
     if body.get("confirm") != run_id:
         return web.json_response(
@@ -1153,7 +1169,7 @@ async def list_runs(request: web.Request, ctx: AppContext) -> web.Response:
         rid = row.get("runId")
         if isinstance(rid, str) and rid:
             try:
-                row["generating"] = generating(store, rid) is not None
+                row["generating"] = generating(store, rid, _gateway_state(request)) is not None
             except Exception:  # noqa: BLE001 — a broken row must not blank the shelf
                 row["generating"] = False
             # The life's backdrop version, so the shelf card can show the same
@@ -1230,7 +1246,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     view["language"] = pack.template.language
     # What a returning player is owed: leaving the page while a turn was being
     # written used to look identical to never having asked for it.
-    view["generating"] = generating(store, run_id)
+    view["generating"] = generating(store, run_id, _gateway_state(request))
     # The current background, if the narrator has set one. The frontend loads the
     # compiled HTML into a scriptless, behind-text sandbox frame; `version` is the
     # cache-buster so a replaced background actually swaps.

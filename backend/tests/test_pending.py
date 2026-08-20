@@ -109,8 +109,13 @@ def _silent(calls: list):
 
 
 async def _advance(store, run_id, dispatch, **kw):
+    # A caller passing `state` models one LIVE gateway across several requests —
+    # the narrator slot from the first call still exists on the second. A fresh
+    # FakeState per call now models a gateway RESTART: the slot is gone, which
+    # advance_turn treats as proof the writer died (fresh_slot recovery).
+    state_obj = kw.pop("state", None) or FakeState()
     return await advance_turn(
-        state_obj=FakeState(),
+        state_obj=state_obj,
         store=store,
         run_id=run_id,
         rulebook="r",
@@ -210,10 +215,11 @@ def test_asking_twice_while_in_flight_does_not_dispatch_twice(store, run):
     """The bug under the wart. Two narrations of one month, racing for one commit,
     is the failure a progress spinner would have hidden."""
     calls: list[str] = []
-    asyncio.run(_advance(store, run, _silent(calls)))
+    gateway = FakeState()  # ONE live gateway across both requests
+    asyncio.run(_advance(store, run, _silent(calls), state=gateway))
     assert len(calls) == 1
 
-    second = asyncio.run(_advance(store, run, _silent(calls)))
+    second = asyncio.run(_advance(store, run, _silent(calls), state=gateway))
 
     assert len(calls) == 1, f"the narrator was asked {len(calls)} times for one turn"
     assert second.advanced is False
@@ -232,7 +238,8 @@ def test_a_returning_request_attaches_to_the_first_narrators_turn(store, run):
     later".
     """
     calls: list[str] = []
-    asyncio.run(_advance(store, run, _silent(calls)))
+    gateway = FakeState()  # ONE live gateway across both requests
+    asyncio.run(_advance(store, run, _silent(calls), state=gateway))
     assert len(calls) == 1, "the first request must have asked"
 
     async def race():
@@ -243,7 +250,7 @@ def test_a_returning_request_attaches_to_the_first_narrators_turn(store, run):
             store.append_turn(run, {"turn": 1, "prose": "the snow stopped"})
 
         out, _ = await asyncio.gather(
-            _advance(store, run, _silent(calls), deadline_secs=3.0),
+            _advance(store, run, _silent(calls), deadline_secs=3.0, state=gateway),
             the_first_narrator_finishes(),
         )
         return out
@@ -292,6 +299,43 @@ def test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous(stor
         f"got {out.prose!r} — a poll in the counter/chronicle gap returned the "
         "previous month's text as this month's"
     )
+
+
+def test_a_dead_writers_record_is_recovered_without_waiting_out_the_age_bound(store, run):
+    """A gateway restart takes every narrator session with it. The retry that
+    follows creates a FRESH slot — proof the recorded writer is gone — and must
+    re-dispatch immediately instead of wedging the life for PENDING_STALE_SECS."""
+    calls: list[str] = []
+    asyncio.run(_advance(store, run, _silent(calls)))  # writer dies with its gateway
+    assert len(calls) == 1
+    assert store.read_pending(run) is not None, "the record the crash leaves behind"
+
+    # A NEW FakeState models the restarted gateway: the slot must be re-created.
+    retried = asyncio.run(_advance(store, run, _silent(calls)))
+
+    assert len(calls) == 2, "the retry must re-dispatch, not attach to a corpse"
+    assert retried.reason != "already", "nothing was committed; this is a fresh ask"
+
+
+def test_generating_reports_nothing_when_the_recorded_slot_is_gone(store, run):
+    """The read path: a pending record whose slot no longer exists must not show
+    'a month is being written' (and block deletion) for the full age bound."""
+    calls: list[str] = []
+    live_gateway = FakeState()
+    asyncio.run(_advance(store, run, _silent(calls), state=live_gateway))
+    assert generating(store, run, live_gateway) is not None, "writer alive: report it"
+
+    restarted_gateway = FakeState()  # no slots survive a restart
+    assert generating(store, run, restarted_gateway) is None
+
+    # Read-only: the record itself is left for the advance path to clear.
+    assert store.read_pending(run) is not None
+
+
+def test_generating_without_a_state_object_keeps_the_age_only_judgement(store, run):
+    calls: list[str] = []
+    asyncio.run(_advance(store, run, _silent(calls)))
+    assert generating(store, run) is not None
 
 
 def test_a_stale_record_does_not_wedge_the_life_forever(store, run):

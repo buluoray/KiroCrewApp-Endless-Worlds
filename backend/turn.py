@@ -290,6 +290,17 @@ async def advance_turn(
     # died between the mark and the commit leaves one behind forever, and a life
     # wedged permanently is worse than a duplicate prompt.
     live = _in_flight(store, run_id, wanted)
+    if live is not None and fresh_slot:
+        # The record's writer cannot exist. An in-flight narrator keeps its
+        # session busy, and the gateway's idle sweep never resets a busy session
+        # (reset(skip_if_busy=True) in the gateway's idle sweep) — so a slot
+        # that had to be re-created by THIS call proves the writer died between
+        # the mark and the commit (gateway restart, session reset). Waiting out
+        # PENDING_STALE_SECS here would wedge the life for up to 15 minutes with
+        # every button disabled; slot ABSENCE is the one liveness signal that is
+        # conclusive, unlike presence (see _in_flight's rationale).
+        store.clear_pending(run_id)
+        live = None
     if live is not None:
         prose = await _await_commit(store, run_id, wanted, deadline_secs)
         if prose is None:
@@ -389,18 +400,32 @@ def _in_flight(store: RunStore, run_id: str, wanted: int) -> dict[str, Any] | No
     return pending
 
 
-def generating(store: RunStore, run_id: str) -> dict[str, Any] | None:
+def generating(
+    store: RunStore, run_id: str, state_obj: Any = None
+) -> dict[str, Any] | None:
     """What a returning player should be told, or ``None`` if nothing is in flight.
 
     Read by the run and play views so that coming back to a life mid-generation
     shows the month being written instead of an empty page — the symptom that
     started this: leave while the world is being made, come back, and it is gone.
+
+    ``state_obj`` (the gateway state, when the caller has it) adds the one
+    conclusive liveness check: an in-flight narrator keeps its session busy and
+    the idle sweep never resets a busy session, so a pending record whose slot no
+    longer exists has no writer. Without this, a narrator that died with the
+    gateway shows "a month is being written" — and blocks deletion — for the
+    full ``PENDING_STALE_SECS``. Read-only: the record is left for the advance
+    path to clear, so this stays safe to call from list loops.
     """
     state = store.read_state(run_id)
     wanted = int(state.get("turn") or 0) + 1
     live = _in_flight(store, run_id, wanted)
     if live is None:
         return None
+    if state_obj is not None and hasattr(state_obj, "get_slot"):
+        slot_key = str(live.get("slot") or "")
+        if slot_key and state_obj.get_slot(slot_key) is None:
+            return None
     # A coarse stage the UI can show while the narrator works. The one real signal
     # a turn emits mid-flight is `readAt`: the moment the narrator called
     # endless_read_runtime, i.e. it has this life's state in hand and has moved on

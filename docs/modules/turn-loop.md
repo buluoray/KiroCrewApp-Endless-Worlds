@@ -98,6 +98,23 @@ turn 200 as at turn 1.
   only a prose hole. Pinned (mutation-verified) by
   `test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous`.
 
+- **A dead writer's record is recovered without waiting out the age bound.** The
+  age test in `_in_flight` exists because slot *presence* proves nothing — a slot
+  outlives the turn it was asked for. Slot *absence* is the opposite: an
+  in-flight narrator keeps its session busy and the gateway's idle sweep never
+  resets a busy session (`reset(skip_if_busy=True)`), so a slot that
+  `ensure_narrator_slot_ex` had to re-create (`fresh_slot`) proves the recorded
+  writer died between the mark and the commit. `advance_turn` then clears the
+  record and re-dispatches instead of wedging the life for `PENDING_STALE_SECS`;
+  `generating(store, run_id, state_obj)` applies the same judgement read-only
+  (the record is left for the advance path), so the play view and the deletion
+  guards stop reporting a corpse as "a month is being written". Both enforcement
+  points are pinned and independently mutation-verified:
+  `test_a_dead_writers_record_is_recovered_without_waiting_out_the_age_bound` and
+  `test_generating_reports_nothing_when_the_recorded_slot_is_gone`
+  (+ `test_generating_without_a_state_object_keeps_the_age_only_judgement` for
+  callers with no gateway state).
+
 - **The pending record is written before the narrator is dispatched.** The
   ordering closes the window between speaking to the narrator and the commit: a
   request that dies in that gap would otherwise be indistinguishable from one
