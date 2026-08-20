@@ -17,7 +17,6 @@ to run before that pack fails mid-play.
 |---|---|
 | `world.py` | pack file format — `read_world`/`serialize_world` round-trip, CONTRACT gate, `is_stale` provenance, widget-spec upsert, `install_seed`, `summarize` |
 | `template.py` | header schema — `Template`, `_parse_panels`/`_parse_opening`/`_parse_endings`/`_parse_milestones`/`_parse_lore`/`_parse_systems`/`_parse_roles`/`_parse_handoff`, `_require_version`/`_require_id`, and the `Condition` interpreter |
-| `systems.py` | the systems engine — `apply_systems` writes derived state at commit off the narrator's `gains` and the prior state |
 | `chapters.py` | prose partition — `bodies`, `brief`, `read_chapter`, `contents`, `opened_since` |
 | `data/worlds/<worldId>.md` | an installed pack; `<worldId>.<lang>.md` is an optional language variant |
 | `seeds/<name>.md` | hand-authored seed packs, normalized into `data/worlds` on install |
@@ -150,7 +149,8 @@ systems, roles, hand_to_agent, milestones`.
   `test_template.test_systems_parse_and_validate_structure`,
   `test_template.test_an_unknown_system_kind_is_refused`,
   `test_template.test_an_unlock_without_a_condition_is_refused`, and
-  `test_template.test_absent_systems_is_not_an_error`.
+  `test_template.test_absent_systems_is_not_an_error`. Runtime transitions,
+  ownership, and extension workflows live in [systems.md](systems.md).
 
 - **Roles are open-vocabulary archetypes; only the slug id is validated.**
   `_parse_roles` takes `id` (a slug) + free-form `name`/`summary`/`grants`; `grants`

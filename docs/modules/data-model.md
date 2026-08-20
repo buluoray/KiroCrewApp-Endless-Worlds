@@ -75,7 +75,8 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   could echo or invent one), a system-owned field is the app's regardless of what
   the narrator wrote — the same ownership `state.milestones` has, extended to any
   `state.…` path a system declares. The pass is best-effort: a world with no systems
-  is a no-op, and one bad system never blocks the turn. Load-bearing because it is
+  is a no-op, and one bad system never blocks the turn. Per-kind transitions and
+  extension workflows live in [systems.md](systems.md). Load-bearing because it is
   what stops a narrator from inflating a level, a purse, or an unlock. Enforced by
   `mcp_server._advance_turn` + `systems.apply_systems`; pinned by
   `test_systems.test_accrual_adds_matched_gains_and_derives_the_tier`,
