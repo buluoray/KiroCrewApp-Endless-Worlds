@@ -253,7 +253,11 @@ sees is produced locally from a closed, code-owned vocabulary.
   first submits the complete desktop/mobile set as an unpublished draft. The server
   validates every SVG, rejects off-box file/data/network references before
   rendering, and creates bounded PNG previews outside the public
-  `BackdropStore`. The illustrator reads every preview together as images, judges
+  `BackdropStore`. The whole renderer chain runs in a separate killable process
+  bounded by `RENDER_TIMEOUT_SECS`, so a pathological draft (deep filter stacks
+  can make cairo rasterization spin) times out instead of wedging the MCP server;
+  the parent trusts only its own PNG signature and dimension check, never the
+  child's exit status. The illustrator reads every preview together as images, judges
   the coordinated set, and may revise the SVGs at most once before publishing the
   final set with the returned `draftId`. Draft submission neither clears the waiting
   request nor makes art visible to live play, history, or shelf surfaces; only the

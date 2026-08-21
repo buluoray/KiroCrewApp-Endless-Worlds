@@ -1616,9 +1616,10 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     )
     try:
         drafts.discard(draft_id, turn)
-    except OSError:
-        # The final is already atomically published. Stale private thumbnails are
-        # cleanup debt, never a reason to report that publication failed.
+    except (BackdropError, OSError):
+        # The final is already atomically published. A stale or concurrently
+        # replaced draft record and leftover private thumbnails are cleanup debt,
+        # never a reason to report that publication failed.
         pass
     try:
         store = _store()

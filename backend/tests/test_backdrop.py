@@ -154,6 +154,23 @@ def test_invalid_draft_is_rejected_before_any_preview_or_publication(tmp_path):
     assert BackdropStore(tmp_path, "run-abc").current() is None
 
 
+def test_a_wedged_render_child_times_out_instead_of_hanging(tmp_path, monkeypatch):
+    """A pathological SVG can spin cairo indefinitely; the render child must be
+    killed at RENDER_TIMEOUT_SECS rather than wedging the MCP server process."""
+    import backdrop as backdrop_mod
+
+    wedge = tmp_path / "wedge.sh"
+    wedge.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+    wedge.chmod(0o755)
+    monkeypatch.setattr(backdrop_mod.sys, "executable", str(wedge))
+    monkeypatch.setattr(backdrop_mod, "RENDER_TIMEOUT_SECS", 1)
+
+    with pytest.raises(BackdropError) as err:
+        backdrop_mod._render_svg_thumbnail(OK_SVG, tmp_path / "out.png", 40, 30)
+    assert "timed out" in str(err.value)
+    assert not (tmp_path / "out.png").exists()
+
+
 # -- the draft/final MCP tools -------------------------------------------
 
 

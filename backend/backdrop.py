@@ -37,6 +37,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -255,59 +256,112 @@ def _render_with_librsvg(svg: str, target: Path, width: int, height: int) -> Non
         gobject.g_object_unref(handle)
 
 
-def _render_svg_thumbnail(svg: str, target: Path, width: int, height: int) -> None:
-    """Render a compiled SVG to a small PNG without allowing network/file input.
+#: Wall-clock bound on ONE thumbnail render, whichever backend serves it. The
+#: render runs in a killable child process because a pathological (never
+#: malicious — already compile-gated) SVG can make cairo rasterization spin
+#: arbitrarily long, and an in-process C call cannot be interrupted.
+RENDER_TIMEOUT_SECS = 20
+
+
+def _render_thumbnail_backends(svg: str, tmp: Path, width: int, height: int) -> list[str]:
+    """Try each local renderer in turn; return the per-backend error trail.
 
     CairoSVG and ``rsvg-convert`` are optional compatibility paths; the app's Linux
     runtime normally reaches librsvg directly through ``ctypes`` and needs no Python
     package. Every backend receives only the already-compiled, off-box-reference-free
-    SVG. The PNG signature and dimensions are checked before the draft can be read.
+    SVG. Runs inside the render child process, never in the gateway process.
+    """
+    errors: list[str] = []
+    try:
+        import cairosvg  # type: ignore[import-not-found]  # optional runtime
+
+        cairosvg.svg2png(
+            bytestring=svg.encode("utf-8"),
+            write_to=str(tmp),
+            output_width=width,
+            output_height=height,
+            unsafe=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — try the next local renderer
+        errors.append(f"CairoSVG:{type(exc).__name__}")
+        tmp.unlink(missing_ok=True)
+
+    converter = shutil.which("rsvg-convert")
+    if not tmp.is_file() and converter:
+        try:
+            subprocess.run(
+                [
+                    converter,
+                    "--width", str(width),
+                    "--height", str(height),
+                    "--output", str(tmp),
+                ],
+                input=svg.encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=True,
+                timeout=RENDER_TIMEOUT_SECS,
+            )
+        except Exception as exc:  # noqa: BLE001 — try direct librsvg
+            errors.append(f"rsvg-convert:{type(exc).__name__}")
+            tmp.unlink(missing_ok=True)
+
+    if not tmp.is_file():
+        try:
+            _render_with_librsvg(svg, tmp, width, height)
+        except Exception as exc:  # noqa: BLE001 — normalized by the caller
+            errors.append(f"librsvg:{type(exc).__name__}")
+            tmp.unlink(missing_ok=True)
+    return errors
+
+
+def _render_thumbnail_child(argv: list[str]) -> int:
+    """The render child's entry point: SVG on stdin, PNG at the target path.
+
+    Exit status is advisory only — the parent trusts the PNG signature check,
+    never the child's word.
+    """
+    width, height, target = int(argv[0]), int(argv[1]), Path(argv[2])
+    svg = sys.stdin.read()
+    errors = _render_thumbnail_backends(svg, target, width, height)
+    if not target.is_file():
+        print(", ".join(errors) or "no renderer produced a PNG", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _render_svg_thumbnail(svg: str, target: Path, width: int, height: int) -> None:
+    """Render a compiled SVG to a small PNG without allowing network/file input.
+
+    The renderer chain runs in a separate Python process bounded by
+    ``RENDER_TIMEOUT_SECS``, so a render that wedges (deep filter stacks can make
+    cairo spin) is killed instead of hanging the MCP server. The PNG signature and
+    dimensions are checked here, in the parent, before the draft can be read.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".png.tmp")
-    errors: list[str] = []
+    detail = ""
 
     try:
         try:
-            import cairosvg  # type: ignore[import-not-found]  # optional runtime
-
-            cairosvg.svg2png(
-                bytestring=svg.encode("utf-8"),
-                write_to=str(tmp),
-                output_width=width,
-                output_height=height,
-                unsafe=False,
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--render-thumbnail", str(width), str(height), str(tmp),
+                ],
+                input=svg.encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=RENDER_TIMEOUT_SECS,
             )
-        except Exception as exc:  # noqa: BLE001 — try the next local renderer
-            errors.append(f"CairoSVG:{type(exc).__name__}")
-            tmp.unlink(missing_ok=True)
-
-        converter = shutil.which("rsvg-convert")
-        if not tmp.is_file() and converter:
-            try:
-                subprocess.run(
-                    [
-                        converter,
-                        "--width", str(width),
-                        "--height", str(height),
-                        "--output", str(tmp),
-                    ],
-                    input=svg.encode("utf-8"),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    check=True,
-                    timeout=20,
-                )
-            except Exception as exc:  # noqa: BLE001 — try direct librsvg
-                errors.append(f"rsvg-convert:{type(exc).__name__}")
-                tmp.unlink(missing_ok=True)
-
-        if not tmp.is_file():
-            try:
-                _render_with_librsvg(svg, tmp, width, height)
-            except Exception as exc:  # noqa: BLE001 — normalized below
-                errors.append(f"librsvg:{type(exc).__name__}")
-                tmp.unlink(missing_ok=True)
+            detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        except subprocess.TimeoutExpired:
+            raise BackdropError(
+                f"backdrop preview rendering timed out after {RENDER_TIMEOUT_SECS}s"
+            ) from None
+        except OSError as exc:
+            detail = f"render child failed to start: {type(exc).__name__}"
 
         try:
             header = tmp.read_bytes()[:24]
@@ -319,8 +373,10 @@ def _render_svg_thumbnail(svg: str, target: Path, width: int, height: int) -> No
             or int.from_bytes(header[16:20], "big") != width
             or int.from_bytes(header[20:24], "big") != height
         ):
-            detail = ", ".join(errors) or "no renderer produced a PNG"
-            raise BackdropError(f"safe backdrop preview rendering is unavailable ({detail})")
+            raise BackdropError(
+                "safe backdrop preview rendering is unavailable "
+                f"({detail or 'no renderer produced a PNG'})"
+            )
         os.replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
@@ -602,3 +658,9 @@ class BackdropStore:
             history.append(tomb)
         self._save(history)
 
+
+
+if __name__ == "__main__":  # the render child — see _render_svg_thumbnail
+    if len(sys.argv) == 5 and sys.argv[1] == "--render-thumbnail":
+        raise SystemExit(_render_thumbnail_child(sys.argv[2:]))
+    raise SystemExit("backdrop.py is a module; only --render-thumbnail is runnable")
