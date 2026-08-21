@@ -24,6 +24,17 @@ turn 200 as at turn 1.
 
 ## Load-bearing contracts
 
+- **Turn start never reuses a slot from another app installation.** Before prompt
+  composition, `advance_turn()` compares the generation persisted in `RunStore`
+  with the currently loaded app. A missing legacy marker or mismatch validates and
+  releases only the app-owned, memory-sealed slot, purges its persisted conversation,
+  and creates a replacement; the existing fresh-slot path clears a stale pending
+  writer and re-sends the rulebook. The generation marker is written only after the
+  replacement exists, so a failed replacement is retried safely. The life remains
+  at the same turn with the same state, rollback, chronicle, worlds, and shelf row.
+  This is deterministic update/reinstall invalidation, separate from the behavioural
+  timeout self-heal below.
+
 
 - **A narrator that never touched the world is not ours — the slot self-heals.**
   A slot created while agent registration was broken binds a fallback agent, and

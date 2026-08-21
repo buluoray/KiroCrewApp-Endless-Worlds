@@ -234,10 +234,12 @@ def test_delete_removes_state_index_row_and_chronicle(
     run_id = store.create_run(_state(1), {"templateId": "t"})
     store.commit_state(run_id, _state(2))
     store.append_turn(run_id, {"turn": 1})
+    store.mark_narrator_generation(run_id, "install-a")
 
     store.delete_run(run_id)
 
     assert store.read_index() == []
+    assert store.narrator_generation(run_id) == ""
     assert not (tmp_path / "runs" / run_id).exists()
     with pytest.raises(StoreError):
         store.read_state(run_id)

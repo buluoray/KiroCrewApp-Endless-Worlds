@@ -225,6 +225,30 @@ class RunStore:
             pending["lastTool"] = str(tool)
             self._kv.set(self._pending_key(run_id), pending)
 
+    # -- narrator installation generation ---------------------------------
+    #
+    # This is deliberately bookkeeping, not world state: updating the app may
+    # replace the narrator conversation, but must not alter the life, rollback,
+    # chronicle, worlds, or shelf rows.
+
+    @staticmethod
+    def _narrator_generation_key(run_id: str) -> str:
+        return f"narrator-generation-{run_id}"
+
+    def narrator_generation(self, run_id: str) -> str:
+        """The app installation generation that owns this life's conversation."""
+        _check_run_id(run_id)
+        raw = self._kv.get(self._narrator_generation_key(run_id))
+        return str(raw.get("generation") or "") if isinstance(raw, dict) else ""
+
+    def mark_narrator_generation(self, run_id: str, generation: str) -> None:
+        """Record a generation only after its replacement slot was created."""
+        _check_run_id(run_id)
+        self._kv.set(
+            self._narrator_generation_key(run_id),
+            {"generation": str(generation), "at": time.time()},
+        )
+
     # -- the world's law, delivered once -----------------------------------
     #
     # The narrator's session is ONE conversation that spans every turn of a life:
@@ -514,6 +538,7 @@ class RunStore:
         _check_run_id(run_id)
         self._kv.delete(self._state_key(run_id))
         self._kv.delete(self._prev_key(run_id))
+        self._kv.delete(self._narrator_generation_key(run_id))
         self._kv.delete(self._brief_key(run_id))
         self._kv.delete(self._pending_key(run_id))
         self._kv.delete(self._backdrop_request_key(run_id))

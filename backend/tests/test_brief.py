@@ -30,6 +30,7 @@ import pytest
 _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
+import narrator  # noqa: E402
 from narrator import (  # noqa: E402
     APP_NAME,
     MEMORY_MODE,
@@ -53,6 +54,7 @@ class FakeSlot:
 class FakeState:
     def __init__(self):
         self.slots = {}
+        self._slots = self.slots
 
     def get_slot(self, key):
         return self.slots.get(key)
@@ -184,6 +186,36 @@ def test_a_replaced_conversation_gets_the_rulebook_again(store, run):
         "a narrator with a fresh conversation was asked to continue a life whose "
         "rules it had never been told"
     )
+
+
+def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monkeypatch):
+    purged: list[str] = []
+
+    async def record_purge(_state, run_id):
+        purged.append(run_id)
+        return True
+
+    state_obj = FakeState()
+    sent: list[str] = []
+    _advance(state_obj, store, run, _prompts(sent))
+    old_slot = state_obj.slots[narrator.narrator_slot_key(run)]
+
+    saved = {**store.read_state(run), "turn": 1, "kept": "the life survives"}
+    store.commit_state(run, saved)
+    store.append_turn(run, {"turn": 1, "prose": "the first month remains"})
+    before_chronicle = store.read_chronicle(run)
+
+    monkeypatch.setattr(narrator, "purge_narrator_session", record_purge)
+    monkeypatch.setattr(narrator, "APP_INSTALL_GENERATION", "updated-install")
+    _advance(state_obj, store, run, _prompts(sent))
+
+    new_slot = state_obj.slots[narrator.narrator_slot_key(run)]
+    assert new_slot is not old_slot, "the pre-update conversation was reused"
+    assert purged == [run], "the pre-update persisted conversation was not purged"
+    assert store.narrator_generation(run) == "updated-install"
+    assert RULEBOOK in sent[1], "the new conversation was not re-briefed"
+    assert store.read_state(run) == saved, "slot replacement changed the save"
+    assert store.read_chronicle(run) == before_chronicle
 
 
 def test_a_marker_naming_another_slot_does_not_count(store, run):
