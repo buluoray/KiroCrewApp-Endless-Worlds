@@ -437,12 +437,20 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         'one `<g id="etr-underlay"/>` '
         "in EACH SVG",
         "never draw the underlay yourself",
+        "The first trace centres both variants",
+        "`desktopFocalX`/`desktopFocalY`",
+        "`mobileFocalX`/`mobileFocalY`",
+        "chosen independently",
+        "`0` is left/top, `1` is right/bottom",
+        "add NO overlay marks",
+        "restraint is a finished decision",
         "three to six decisive spatial facts",
-        "every overlay mark traceable to one of them",
+        "draw only the sparse marks traceable to them",
         "Organic "
         "forms (trees, fog, water, foliage) stay in the underlay",
         "`underlay: base`",
-        "retried once with different keywords",
+        "at most ONE trace retry total",
+        "never do both",
         "one large macro-form",
         "arch-like span",
         "Localized light, shadow, and tonal gradients may organize that form",
@@ -509,6 +517,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "HYBRID is second",
         "STORY IMAGE is the exception",
         "If uncertain, choose PATTERN",
+        "Then draw a sparse overlay ON the traced structure",
     ):
         assert rejected not in prompt, f"illustrator prompt retained: {rejected!r}"
 

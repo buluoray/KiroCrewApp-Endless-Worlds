@@ -293,6 +293,27 @@ def test_store_keeps_a_mobile_variant_with_the_desktop_backdrop(tmp_path):
     assert store.current()["mobile"] is None
 
 
+def test_store_keeps_sanitized_source_provenance_with_the_backdrop(tmp_path):
+    store = BackdropStore(tmp_path, "run-abc")
+    store.set(
+        _svg("#111"),
+        source={
+            "title": "x" * 600,
+            "pageUrl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
+            "license": "CC0",
+            "ignored": "not persisted",
+        },
+    )
+
+    source = store.current()["source"]
+    assert source == {
+        "title": "x" * 500,
+        "pageUrl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
+        "license": "CC0",
+    }
+    assert store._load()[-1]["source"] == source
+
+
 def test_store_rejects_bad_mobile_atomically(tmp_path):
     store = BackdropStore(tmp_path, "run-abc")
     with pytest.raises(BackdropError):

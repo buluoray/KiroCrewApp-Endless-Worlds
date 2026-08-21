@@ -544,8 +544,7 @@ class BackdropStore:
 
     @staticmethod
     def _view(entry: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Shape an entry as ``{markup, mobile, version, buttons}``, or ``None``
-        for a tombstone (empty markup) or a missing entry."""
+        """Shape a public backdrop entry, or ``None`` for a tombstone/missing row."""
         if not entry:
             return None
         markup = entry.get("markup")
@@ -554,11 +553,21 @@ class BackdropStore:
             return None
         mobile = entry.get("mobile")
         buttons = entry.get("buttons")
+        raw_source = entry.get("source")
+        source = None
+        if isinstance(raw_source, dict):
+            candidate = {
+                key: str(raw_source.get(key) or "")
+                for key in ("title", "pageUrl", "license")
+            }
+            if candidate["pageUrl"] and candidate["license"]:
+                source = candidate
         return {
             "markup": markup,
             "mobile": mobile if isinstance(mobile, str) and mobile.strip() else None,
             "version": version,
             "buttons": buttons if isinstance(buttons, str) and buttons.strip() else None,
+            "source": source,
         }
 
     def current(self) -> dict[str, Any] | None:
@@ -604,7 +613,7 @@ class BackdropStore:
 
     def set(
         self, markup: str, buttons: str | None = None, turn: int = 0,
-        mobile: str | None = None,
+        mobile: str | None = None, source: dict[str, str] | None = None,
     ) -> int:
         """Validate and append coordinated desktop/mobile backgrounds (and the
         optional common button motif),
@@ -629,6 +638,14 @@ class BackdropStore:
             if isinstance(mobile, str) and mobile.strip()
             else None
         )
+        clean_source = None
+        if isinstance(source, dict):
+            candidate = {
+                key: str(source.get(key) or "")[:500]
+                for key in ("title", "pageUrl", "license")
+            }
+            if candidate["pageUrl"] and candidate["license"]:
+                clean_source = candidate
         history = self._load()
         version = (max(int(e.get("version") or 0) for e in history) + 1) if history else 1
         entry: dict[str, Any] = {"turn": int(turn), "markup": clean_markup, "version": version}
@@ -636,6 +653,8 @@ class BackdropStore:
             entry["mobile"] = clean_mobile
         if clean_buttons:
             entry["buttons"] = clean_buttons
+        if clean_source:
+            entry["source"] = clean_source
         if history and int(history[-1].get("turn") or 0) == int(turn):
             history[-1] = entry  # a second set on the same page replaces it
         else:

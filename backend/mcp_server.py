@@ -26,6 +26,7 @@ data dir would be one more absolute path to keep in sync.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -85,7 +86,7 @@ from backdrop import (  # noqa: E402
 )
 from phototrace import (  # noqa: E402
     TraceStore,
-    build_underlay_fragment,
+    build_underlay_fragment_bounded,
     compose_with_underlay,
     fetch_photo,
     procedural_base_fragment,
@@ -454,10 +455,13 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_trace_reference",
         "description": (
-            "SCENE lane only: fetch a free-licensed reference photograph and trace "
-            "it into palette-disciplined desktop+mobile underlay fragments, stored "
-            "server-side. Pass `query` (concrete English keywords for a place or "
-            "structure, e.g. 'stone bridge river mist'); omit it, or accept the "
+            "SCENE lane only: fetch an attribution-free CC0/public-domain "
+            "reference photograph and trace it into palette-disciplined "
+            "desktop+mobile underlay fragments, stored server-side. Pass `query` "
+            "(concrete English keywords for a place or structure, e.g. 'stone "
+            "bridge river mist'); after reading the first previews, optional "
+            "desktop/mobile focal X/Y values independently move each crop from 0 "
+            "(left/top) to 1 (right/bottom). Omit the query, or accept the "
             "automatic fallback when no usable photo exists, to get a quiet "
             "procedural tonal base instead. Returns preview PNG paths to READ and "
             "judge, never the fragment itself. To use the stored underlay, place "
@@ -474,6 +478,10 @@ _TOOLS: list[dict[str, Any]] = [
                 "turn": {"type": "integer", "minimum": 0},
                 "query": {"type": "string", "maxLength": 200},
                 "opacity": {"type": "number", "minimum": 0.2, "maximum": 0.8},
+                "desktopFocalX": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "desktopFocalY": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "mobileFocalX": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "mobileFocalY": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "ramp": {
                     "type": "array", "minItems": 3, "maxItems": 8,
                     "items": {"type": "string", "pattern": "^#?[0-9a-fA-F]{6}$"},
@@ -745,6 +753,20 @@ def _check(schema: dict[str, Any], value: Any, path: str) -> None:
         # commit turn 1 for a narrator that meant something else entirely.
         if isinstance(value, bool) or not isinstance(value, int):
             raise ToolInputError(path, f"an integer, got {type(value).__name__}")
+        low, high = schema.get("minimum"), schema.get("maximum")
+        if low is not None and value < low:
+            raise ToolInputError(path, f"at least {low}, got {value}")
+        if high is not None and value > high:
+            raise ToolInputError(path, f"at most {high}, got {value}")
+        return
+
+    if kind == "number":
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise ToolInputError(path, f"a finite number, got {type(value).__name__}")
         low, high = schema.get("minimum"), schema.get("maximum")
         if low is not None and value < low:
             raise ToolInputError(path, f"at least {low}, got {value}")
@@ -1722,9 +1744,17 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     # 0.65, not 0.5: the fragment sits over a dark sky, so opacity is a
     # brightness dial for the whole composition — at 0.5 every traced tone is
     # pulled halfway to near-black and pages read darker than intended.
-    opacity = float(args.get("opacity") or 0.65)
+    opacity = float(args.get("opacity", 0.65))
     ramp = args.get("ramp")
     query = (args.get("query") or "").strip()
+    desktop_focal = (
+        float(args.get("desktopFocalX", 0.5)),
+        float(args.get("desktopFocalY", 0.5)),
+    )
+    mobile_focal = (
+        float(args.get("mobileFocalX", 0.5)),
+        float(args.get("mobileFocalY", 0.5)),
+    )
 
     source: dict[str, str] | None = None
     kind = "base"
@@ -1733,11 +1763,13 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         for candidate in search_reference(query):
             try:
                 photo = fetch_photo(candidate["url"])
-                desktop = build_underlay_fragment(
-                    photo, view=(800, 600), ramp=ramp, opacity=opacity
+                desktop = build_underlay_fragment_bounded(
+                    photo, view=(800, 600), ramp=ramp, opacity=opacity,
+                    focal=desktop_focal,
                 )
-                mobile = build_underlay_fragment(
-                    photo, view=(450, 900), ramp=ramp, opacity=opacity
+                mobile = build_underlay_fragment_bounded(
+                    photo, view=(450, 900), ramp=ramp, opacity=opacity,
+                    focal=mobile_focal,
                 )
             except BackdropError:
                 continue
@@ -1768,9 +1800,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         "source": source,
         "previews": previews,
         "next": (
-            "read the previews; if the reference serves the scene, put one "
-            '<g id="etr-underlay"/> in each SVG and draw your overlay; '
-            "otherwise call again with a different query"
+            "read both previews; if one crop loses the structure, spend the one "
+            "allowed retry on that variant's focal controls; then put one "
+            "<g id=\"etr-underlay\"/> in each SVG. Add overlay marks only when "
+            "they materially clarify architecture or light"
         ),
     }
 
@@ -1803,9 +1836,14 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     draft_id = args["draftId"]
     drafts = _backdrop_draft_store(run_id)
     drafts.require(draft_id, turn)
+    trace = _trace_store(run_id).load(turn)
+    source = trace.get("source") if isinstance(trace, dict) else None
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
-    version = _backdrop_store(run_id).set(markup, args.get("buttons"), turn, mobile)
+    version = _backdrop_store(run_id).set(
+        markup, args.get("buttons"), turn, mobile,
+        source=source if isinstance(source, dict) else None,
+    )
     try:
         drafts.discard(draft_id, turn)
         _trace_store(run_id).clear()

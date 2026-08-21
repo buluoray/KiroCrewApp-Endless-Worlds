@@ -142,22 +142,36 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
 
 - **The SCENE lane's underlay never enters the model's context.** For pages that
-  need a concrete place, `endless_trace_reference` fetches a free-licensed
-  Wikimedia Commons photo (license short-name must read as CC/CC0/public
-  domain), cover-crops to each view's exact aspect, lifts midtones adaptively
-  when the median luminance is dark (night photos otherwise band into the
-  darkest stop and trace to nothing), posterizes onto the world's dark-gold
-  ramp, and traces with vtracer. The resulting fragments (tens of KB) are
-  stored in `TraceStore` keyed to the run and turn; the Illustrator receives
-  only raster previews and places one `<g id="etr-underlay"/>` per SVG, which
-  the server splices at draft AND commit time (`compose_with_underlay`). A
-  placeholder with no stored trace is refused, a document without a placeholder
-  is untouched (the pattern lane pays nothing), and the trace is cleared after
-  publication. When no usable reference exists the tool degrades to a
-  procedural tonal base so briefs like an invented interior still get a
-  foundation. The composed-document ceiling is `MAX_BACKDROP_BYTES` (1MB);
-  hand-drawn tool inputs stay schema-capped at 24KB. Pinned by
-  `backend/tests/test_phototrace.py`.
+  need a concrete place, `endless_trace_reference` searches Wikimedia Commons and
+  accepts only JPEG/PNG/WebP photos marked CC0 or public domain. CC BY, BY-SA, NC,
+  and ND sources are excluded, so publication cannot silently lose attribution or
+  share-alike obligations. Fetches require HTTPS and an exact
+  `commons.wikimedia.org` or `upload.wikimedia.org` host; credentials in URLs,
+  off-host redirects, and an off-host final response URL are refused. The selected
+  source's title, Commons page URL, and license are copied into the same durable
+  `BackdropStore` history entry as the final SVG before the private trace is
+  cleared, preserving provenance without requiring player-facing attribution UI.
+
+  The same photo is cover-cropped separately for desktop and mobile. The first
+  attempt uses `(0.5, 0.5)` for both; if a preview clips decisive structure, the
+  illustrator may spend its single retry on independent `desktopFocalX/Y` and
+  `mobileFocalX/Y` controls (`0` is left/top, `1` is right/bottom). Pillow checks
+  the actual decoded format, per-axis dimensions, and total pixels before full
+  conversion. Pillow/vtracer work runs in a killable child process bounded by
+  `TRACE_TIMEOUT_SECS`; the parent also caps input/output bytes and validates the
+  returned fragment through `compile_backdrop` before trusting it.
+
+  The resulting fragments are stored in `TraceStore` keyed to the run and turn;
+  the Illustrator receives only raster previews and places one
+  `<g id="etr-underlay"/>` per SVG, which the server splices at draft AND commit
+  time (`compose_with_underlay`). If the underlay already carries the composition,
+  the overlay may contain zero marks; sparse architecture/light marks are added
+  only when they materially clarify the scene. A placeholder with no stored trace
+  is refused, a document without a placeholder is untouched (the pattern lane pays
+  nothing), and the private trace is cleared after publication. When no usable
+  reference exists the tool degrades to a procedural tonal base. The
+  composed-document ceiling is `MAX_BACKDROP_BYTES` (1MB); hand-drawn tool inputs
+  stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py`.
 
 - **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
   successful commit, not on dispatch, so a dropped request or gateway restart can

@@ -167,6 +167,21 @@ def test_true_is_not_accepted_as_a_turn_number():
     assert out["ok"] is False and out["field"] == "arguments.turn"
 
 
+@pytest.mark.parametrize(
+    ("extra", "field"),
+    [
+        ({"opacity": "0.5"}, "arguments.opacity"),
+        ({"desktopFocalX": True}, "arguments.desktopFocalX"),
+        ({"mobileFocalY": float("nan")}, "arguments.mobileFocalY"),
+        ({"desktopFocalX": 1.01}, "arguments.desktopFocalX"),
+    ],
+)
+def test_trace_numbers_must_be_finite_numeric_and_in_range(extra, field):
+    out = call("endless_trace_reference", runId="r", turn=1, **extra)
+    assert out["ok"] is False
+    assert out["field"] == field
+
+
 # -- turns ----------------------------------------------------------------
 
 
