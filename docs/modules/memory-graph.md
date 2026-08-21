@@ -58,6 +58,9 @@ meaning half (keepsakes, story cards, star lenses) is in
   memory. Nothing is auto-created and nothing is back-filled from prose
   (`test_unknown_participant_is_dropped_but_the_event_survives`), an entity kind never
   changes without an explicit merge (`test_an_entity_kind_conflict_drops_only_that_entity`),
+  an unrecognized kind is KEPT and bucketed as the generic `object` rather than dropped
+  (`test_an_unknown_kind_is_kept_as_object_not_dropped`,
+  `test_an_unknown_kind_on_a_known_entity_adopts_the_established_kind`),
   same-name-different-id is never auto-merged (`test_same_name_different_id_is_never_merged`),
   a duplicate event key keeps the first (`test_duplicate_event_key_drops_the_second_keeps_the_first`),
   and a `place` must resolve to a `place` (`test_a_non_place_place_is_dropped_but_the_event_survives`).
