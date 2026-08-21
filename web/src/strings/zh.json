@@ -1,6 +1,7 @@
 {
   "app.title": "无限世界",
   "app.tagline": "走进 AI 创造的世界，经历独一无二的一生。",
+  "app.version": "v{version}",
   "app.language": "界面语言",
   "create.title": "创建一个世界",
   "create.subtitle": "粘贴设定 / 规则书，或只写一个点子（一本小说、一句 premise），它会研究并整理成可玩的世界",

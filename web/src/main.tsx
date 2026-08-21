@@ -20,6 +20,10 @@ import styles from './styles.css?raw'
 import { asLang, LanguageContext, setCurrentLanguage, t, type Lang } from './strings'
 import { Glyph, PanelBox } from './ui'
 
+/** The app version, replaced at build time from app.json (see web/vite.config.ts),
+ *  shown in the shelf footer. A build-time constant keeps it from drifting. */
+declare const __APP_VERSION__: string
+
 /** Where the player was, so leaving the page does not throw them back to the
  *  shelf. Prefixed because this app mounts inside the dashboard's own document
  *  and shares its localStorage. */
@@ -839,6 +843,9 @@ export default function EndlessWorlds() {
           >
             {body}
           </div>
+          {view === 'library' && !hideBody ? (
+            <div className="ew-version">{t('app.version', { version: __APP_VERSION__ })}</div>
+          ) : null}
           {/* A system region tab (phone): the story column is hidden and this
               region's panels stand alone. Its mounted scenes render below, outside
               the shell, filtered to the same region. */}

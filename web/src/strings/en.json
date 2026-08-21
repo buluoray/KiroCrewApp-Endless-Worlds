@@ -1,6 +1,7 @@
 {
   "app.title": "Endless Worlds",
   "app.tagline": "Live a whole life — in a world written by AI, different every time.",
+  "app.version": "v{version}",
   "app.language": "Interface language",
   "create.title": "Create a world",
   "create.subtitle": "Paste a setting or rulebook — or just an idea (a novel's name, a premise) — and it researches and shapes it into a playable world",

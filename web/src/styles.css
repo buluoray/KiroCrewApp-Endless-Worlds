@@ -334,6 +334,12 @@
   color: var(--muted, #9c96a8); font-size: 13px; line-height: 1.6; margin: 4px 2px 18px;
 }
 
+/* The version footer at the bottom of the shelf: quiet, centered, out of the way. */
+.ew-version {
+  color: var(--muted, #9c96a8); opacity: .55; font-size: 11px;
+  text-align: center; letter-spacing: .04em; padding: 20px 0 10px;
+}
+
 /* Continue: the most recent life, made a gold hero rather than one row among many.
    Styles the LifeRow card inside the wrapper, so LifeRow itself stays generic. */
 .ew-cont-wrap .ew-card {
