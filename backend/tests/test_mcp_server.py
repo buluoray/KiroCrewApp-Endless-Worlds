@@ -783,6 +783,43 @@ def test_a_living_turn_left_with_no_usable_choice_is_still_refused(app):
                state={"worldId": "w", "alive": True}, choices=[{"id": "x"}])
     assert out["committed"] is False
     assert out["reason"] == "choices-required"
+    # The refusal must name the TRUE failure — entries were sent but unusable —
+    # and spell out the accepted shape, or the narrator retries the same call
+    # forever (observed live: six identical retries on `text` captions).
+    assert "none had a usable caption" in out["detail"]
+    assert "`label`" in out["detail"]
+
+
+def test_a_double_encoded_choices_array_is_recovered_not_refused(app):
+    """A narrator that JSON-encodes the choices array into a string must not
+    lose the whole turn: the same courtesy state/memory already get."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"},
+               choices='[{"id": "flee", "label": "逃跑"}, {"label": "反击"}]')
+    assert out["ok"] is True and out["committed"] is True
+    committed = store.read_chronicle(run)[-1]["choices"]
+    assert [c["label"] for c in committed] == ["逃跑", "反击"]
+
+
+def test_choice_captions_are_salvaged_from_common_alias_keys(app):
+    """Observed live: a narrator sent `text` captions and every entry was silently
+    dropped, turning into a choices-required refusal for a field it DID send.
+    The caption is the content; the key spelling is not."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"},
+               choices=[{"text": "逃跑"},
+                        {"title": "反击", "id": "fight"},
+                        "大声呼救",
+                        {"junk": 9}])
+    assert out["ok"] is True and out["committed"] is True
+    committed = store.read_chronicle(run)[-1]["choices"]
+    assert [c["label"] for c in committed] == ["逃跑", "反击", "大声呼救"]
+    assert committed[1]["id"] == "fight"
+    assert all(c.get("id") for c in committed)
 
 
 def test_events_are_coerced_to_bounded_strings(app):

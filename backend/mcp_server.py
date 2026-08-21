@@ -132,7 +132,9 @@ _TOOLS: list[dict[str, Any]] = [
         "description": (
             "Commit one turn: the prose the player reads, the state that follows, "
             "and the choices offered. THE ONLY call that changes a life. A living "
-            "turn MUST include `choices`; omit them only on a terminal turn, marked "
+            "turn MUST include `choices` — each an object whose `label` is the "
+            "button text the player reads (optional: `id`, `fateful`, `art`); omit "
+            "them only on a terminal turn, marked "
             "`ending: true` or via state that fires a world ending. Declare "
             "state in full — a field you leave out reads to the player as a fact "
             "that vanished; the exceptions are `digest` and `relations`, which merge "
@@ -789,6 +791,14 @@ def _backdrop_turn(run_id: str) -> int:
 #: model noise and is stripped rather than stored.
 _CHOICE_KEYS = ("id", "label", "fateful", "art")
 
+#: Key names a narrator plausibly uses for a choice's visible text. `label` is
+#: canonical; the rest are salvaged onto it. A model that invents a key here is
+#: describing the same thing — a button caption — and dropping the entry over
+#: the spelling turns into a "choices-required" refusal that names a field the
+#: narrator DID send, which it cannot debug from its side (observed live: six
+#: identical retries, each cleaned to an empty list).
+_CHOICE_LABEL_ALIASES = ("label", "text", "title", "caption", "name")
+
 #: The only keys a stored gain carries (the anti-halo `source` is optional).
 _GAIN_KEYS = ("field", "amount", "source")
 
@@ -808,10 +818,21 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
     """
     out: list[Any] = []
     for i, c in enumerate(choices):
+        # A bare string IS a caption: a narrator that sends ["逃跑", "反击"] has
+        # answered the question the schema asks, just not in the dict shape.
+        if isinstance(c, str) and c.strip():
+            c = {"label": c}
         if not isinstance(c, dict):
             continue
-        label = c.get("label")
-        if not (isinstance(label, str) and label.strip()):
+        label = next(
+            (
+                c[k]
+                for k in _CHOICE_LABEL_ALIASES
+                if isinstance(c.get(k), str) and c[k].strip()
+            ),
+            None,
+        )
+        if label is None:
             continue
         clean = {k: v for k, v in c.items() if k in _CHOICE_KEYS}
         clean["label"] = label[:200]
@@ -1165,16 +1186,31 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
             e.when is not None and e.when.evaluate(state) for e in pack.template.endings
         )
         if args.get("ending") is not True and not fired:
-            return {
-                "committed": False,
-                "turn": committed,
-                "reason": "choices-required",
-                "detail": (
+            sent = args.get("choices")
+            # Name the TRUE failure. "No choices" when the narrator sent some is
+            # undebuggable from its side — it retries the same call forever
+            # (observed live). Distinguish absent from sent-but-unusable, and spell
+            # out the exact accepted shape.
+            if isinstance(sent, list) and sent:
+                detail = (
+                    f"You sent {len(sent)} choices but none had a usable caption, so "
+                    "all were dropped. Each choice must be an object with a "
+                    "non-empty string `label` (optional: `id`, `fateful`, `art`), "
+                    'e.g. {"id": "flee", "label": "逃跑"}. Resend the WHOLE call '
+                    "with choices in that shape."
+                )
+            else:
+                detail = (
                     "This turn has no `choices`, so the player would have nothing to "
                     "do. Resend the WHOLE call with `choices`. If the life or world "
                     "has ended, pass `ending: true` (or declare state that fires a "
                     "world ending) — only a terminal turn may omit choices."
-                ),
+                )
+            return {
+                "committed": False,
+                "turn": committed,
+                "reason": "choices-required",
+                "detail": detail,
             }
     store.commit_state(run_id, state)
     # What the player asked for, recovered from the in-flight record the app wrote
@@ -1910,6 +1946,21 @@ def _lenient_json_object(raw: str) -> dict[str, Any] | None:
     return None
 
 
+def _lenient_json_array(raw: str) -> list[Any] | None:
+    """The array twin of :func:`_lenient_json_object`, for ``choices``."""
+    text = raw.strip()
+    if not text:
+        return None
+    for attempt in (text, _repair_json_escapes(text)):
+        try:
+            value = json.loads(attempt)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(value, list):
+            return value
+    return None
+
+
 def call_tool(name: str, args: dict[str, Any]) -> str:
     """Validate, dispatch, and answer as JSON text.
 
@@ -1947,6 +1998,14 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
                     args["memory"] = recovered
                 else:
                     args.pop("memory", None)
+            # `choices` gets the same courtesy: a double-encoded array would fail
+            # the schema ("got str"), and player-facing choices are the one field
+            # whose loss refuses the whole turn at the choices-required gate — the
+            # narrator then sees a refusal for a field it sent (observed live).
+            if isinstance(args.get("choices"), str):
+                recovered_list = _lenient_json_array(args["choices"])
+                if recovered_list is not None:
+                    args["choices"] = recovered_list
             # A stray top-level key (a model typo, a field from a different tool) is
             # DROPPED-and-warned rather than letting `additionalProperties: False`
             # refuse the whole turn. The prose/choices/state the narrator DID send
