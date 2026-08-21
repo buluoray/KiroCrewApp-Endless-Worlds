@@ -1419,3 +1419,90 @@
       0 0 12px 1px color-mix(in srgb, var(--accent, #7c3aed) 18%, transparent);
   }
 }
+
+
+/* ── Choice-button runtime effects (narrator-declared, code-rendered) ──────
+   The narrator names one of shimmer|aura|embers|ripple on a choice; the tint
+   arrives as --fx-tint on the button (falls back to the theme accent). These
+   live HERE, not in narrator SVG, because the play page is dashboard DOM —
+   model bytes never carry style or script into it. Embers' canvas is mounted
+   by ChoiceEffect (effects.tsx); the rest are pure CSS. */
+
+.ew-fx { position: relative; overflow: hidden; isolation: isolate; }
+
+/* shimmer 流光: one specular band sweeping the button on a long period.
+   ::after so it never fights the ::before some themes use. */
+.ew-fx-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: -40% -60%;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 42%,
+    color-mix(in srgb, var(--fx-tint, var(--accent, #c9a227)) 34%, transparent) 50%,
+    transparent 58%
+  );
+  transform: translateX(-70%);
+  animation: ew-fx-shimmer 4.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes ew-fx-shimmer {
+  0%   { transform: translateX(-70%); }
+  55%  { transform: translateX(70%); }
+  100% { transform: translateX(70%); }
+}
+
+/* aura 弥散: a breathing diffuse glow hugging the border, never the label. */
+.ew-fx-aura {
+  animation: ew-fx-aura 3.6s ease-in-out infinite;
+}
+@keyframes ew-fx-aura {
+  0%, 100% {
+    box-shadow:
+      0 0 6px 0 color-mix(in srgb, var(--fx-tint, var(--accent, #c9a227)) 24%, transparent),
+      inset 0 0 10px 0 color-mix(in srgb, var(--fx-tint, var(--accent, #c9a227)) 10%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 18px 2px color-mix(in srgb, var(--fx-tint, var(--accent, #c9a227)) 42%, transparent),
+      inset 0 0 16px 0 color-mix(in srgb, var(--fx-tint, var(--accent, #c9a227)) 18%, transparent);
+  }
+}
+
+/* ripple 涟漪: two expanding rings born at the center, staggered half a period. */
+.ew-fx-ripple::before,
+.ew-fx-ripple::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--fx-tint, var(--accent, #c9a227)) 55%, transparent);
+  pointer-events: none;
+  animation: ew-fx-ripple 3.8s ease-out infinite;
+}
+.ew-fx-ripple::after { animation-delay: 1.9s; }
+@keyframes ew-fx-ripple {
+  0%   { transform: scale(1); opacity: 0.7; }
+  85%  { transform: scale(16); opacity: 0; }
+  100% { transform: scale(16); opacity: 0; }
+}
+
+/* embers 粒子: the canvas ChoiceEffect mounts; drawing happens in JS. */
+.ew-fx-embers-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ew-fx-shimmer::after { animation: none; opacity: 0; }
+  .ew-fx-aura { animation: none; }
+  .ew-fx-ripple::before, .ew-fx-ripple::after { animation: none; opacity: 0; }
+  /* embers: ChoiceEffect checks the same query and mounts no canvas at all. */
+}

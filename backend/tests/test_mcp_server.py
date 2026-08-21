@@ -790,6 +790,28 @@ def test_a_living_turn_left_with_no_usable_choice_is_still_refused(app):
     assert "`label`" in out["detail"]
 
 
+def test_choice_effects_are_vocabulary_gated_and_tints_validated(app):
+    """The narrator declares an effect NAME; only the app's vocabulary passes.
+    An invented effect or a non-hex tint degrades to static styling — never a
+    refused turn, and never a model-authored value reaching the DOM as code."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"},
+               choices=[
+                   {"label": "接过王剑", "fateful": True,
+                    "effect": "embers", "tint": "#c9a227"},
+                   {"label": "退后一步", "effect": "sparkle-explosion"},
+                   {"label": "沉默", "effect": "aura", "tint": "red"},
+               ])
+    assert out["ok"] is True and out["committed"] is True
+    committed = store.read_chronicle(run)[-1]["choices"]
+    assert committed[0]["effect"] == "embers" and committed[0]["tint"] == "#c9a227"
+    assert "effect" not in committed[1], "an invented effect name is dropped"
+    assert committed[2]["effect"] == "aura"
+    assert "tint" not in committed[2], "a non-hex tint is dropped"
+
+
 def test_a_double_encoded_choices_array_is_recovered_not_refused(app):
     """A narrator that JSON-encodes the choices array into a string must not
     lose the whole turn: the same courtesy state/memory already get."""

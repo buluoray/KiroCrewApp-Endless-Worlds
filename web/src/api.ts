@@ -111,6 +111,12 @@ export interface Choice {
    *  image behind the button label — the story agent's own special pattern for a
    *  fateful choice. */
   art?: string
+  /** A runtime effect the narrator DECLARED from the server-validated
+   *  vocabulary; the app's own CSS/canvas renders it (`ChoiceEffect`). Model
+   *  bytes never carry code — the play page is not an iframe. */
+  effect?: 'shimmer' | 'aura' | 'embers' | 'ripple'
+  /** Optional #rrggbb accent for the effect, validated server-side. */
+  tint?: string
 }
 
 export interface OpeningReveal {

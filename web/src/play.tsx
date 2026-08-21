@@ -20,6 +20,7 @@ const ACT = 'act'
 const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
+import { ChoiceEffect, effectClass } from './effects'
 import { History, LifeSummary } from './history'
 import { LegacyPicker } from './legacy'
 import { StarMap } from './memory'
@@ -748,10 +749,15 @@ export function PlayPage({
                     'ew-choice'
                     + (c.fateful || c.art ? ' ew-choice-fateful' : '')
                     + (c.art ? ' ew-choice-arted' : '')
+                    + effectClass(c.effect)
                     + (armed ? ' ew-choice-armed' : '')
                     + (writing ? ' ew-choice-waiting' : '')
                     + (dimmed ? ' ew-choice-dimmed' : '')
                   }
+                  // The narrator's declared tint drives every effect's color
+                  // through one custom property; absent, the CSS falls back to
+                  // the theme accent.
+                  style={c.tint ? ({ '--fx-tint': c.tint } as React.CSSProperties) : undefined}
                   type="button"
                   // A choice stays tappable while another is armed: changing your
                   // mind must not require a cancel first.
@@ -786,6 +792,7 @@ export function PlayPage({
                     />
                   ) : null}
                   <span className="ew-choice-label">{c.label}</span>
+                  <ChoiceEffect effect={c.effect} tint={c.tint} />
                   {/* Server-confirmed writing shows the real per-tool-call
                       progress inside the chosen option; the sub-second window
                       before the pending record lands keeps the light spinner. */}
