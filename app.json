@@ -1,10 +1,16 @@
 {
   "name": "endless-worlds",
   "displayName": "Endless Worlds",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Live an entire life inside an AI-simulated world that remembers what you did. Choose a path or write your own action; other people pursue their own goals, consequences can return years later, and every turn can reshape your relationships, status, and fate. Begin in the Age of Sword and Flame, explore other world packs, or turn a one-line idea or pasted setting into a playable world of your own.",
   "author": "rayrayxu",
-  "tags": ["game", "simulation", "interactive-fiction", "role-playing", "worldbuilding"],
+  "tags": [
+    "game",
+    "simulation",
+    "interactive-fiction",
+    "role-playing",
+    "worldbuilding"
+  ],
   "highlights": [
     "Live a complete life turn by turn, with persistent state and consequences that can resurface years later",
     "Choose from first-person actions or write anything you want — the narrator adapts without forcing a fixed plot",
@@ -29,11 +35,17 @@
       "routes": "backend.routes:register_routes"
     }
   },
-  "agents": ["agents/narrator.json", "agents/worldsmith.json", "agents/illustrator.json"],
+  "agents": [
+    "agents/narrator.json",
+    "agents/worldsmith.json",
+    "agents/illustrator.json"
+  ],
   "mcpServers": {
     "endless-mcp": {
       "command": "python3",
-      "args": ["backend/mcp_server.py"],
+      "args": [
+        "backend/mcp_server.py"
+      ],
       "env": {
         "PYTHONPATH": "backend"
       },
