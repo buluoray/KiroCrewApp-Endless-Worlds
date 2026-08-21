@@ -1946,6 +1946,21 @@ def _lenient_json_object(raw: str) -> dict[str, Any] | None:
     return None
 
 
+def _lenient_json_array(raw: str) -> list[Any] | None:
+    """The array twin of :func:`_lenient_json_object`, for ``choices``."""
+    text = raw.strip()
+    if not text:
+        return None
+    for attempt in (text, _repair_json_escapes(text)):
+        try:
+            value = json.loads(attempt)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(value, list):
+            return value
+    return None
+
+
 def call_tool(name: str, args: dict[str, Any]) -> str:
     """Validate, dispatch, and answer as JSON text.
 
@@ -1983,6 +1998,14 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
                     args["memory"] = recovered
                 else:
                     args.pop("memory", None)
+            # `choices` gets the same courtesy: a double-encoded array would fail
+            # the schema ("got str"), and player-facing choices are the one field
+            # whose loss refuses the whole turn at the choices-required gate — the
+            # narrator then sees a refusal for a field it sent (observed live).
+            if isinstance(args.get("choices"), str):
+                recovered_list = _lenient_json_array(args["choices"])
+                if recovered_list is not None:
+                    args["choices"] = recovered_list
             # A stray top-level key (a model typo, a field from a different tool) is
             # DROPPED-and-warned rather than letting `additionalProperties: False`
             # refuse the whole turn. The prose/choices/state the narrator DID send

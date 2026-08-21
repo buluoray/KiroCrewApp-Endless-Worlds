@@ -790,6 +790,19 @@ def test_a_living_turn_left_with_no_usable_choice_is_still_refused(app):
     assert "`label`" in out["detail"]
 
 
+def test_a_double_encoded_choices_array_is_recovered_not_refused(app):
+    """A narrator that JSON-encodes the choices array into a string must not
+    lose the whole turn: the same courtesy state/memory already get."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
+               state={"worldId": "w"},
+               choices='[{"id": "flee", "label": "逃跑"}, {"label": "反击"}]')
+    assert out["ok"] is True and out["committed"] is True
+    committed = store.read_chronicle(run)[-1]["choices"]
+    assert [c["label"] for c in committed] == ["逃跑", "反击"]
+
+
 def test_choice_captions_are_salvaged_from_common_alias_keys(app):
     """Observed live: a narrator sent `text` captions and every entry was silently
     dropped, turning into a choices-required refusal for a field it DID send.
