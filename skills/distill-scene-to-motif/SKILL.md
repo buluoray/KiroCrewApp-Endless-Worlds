@@ -83,11 +83,3 @@ soft gold ellipses echoing the pools' diagonal drift; two irregular vertical
 ink marks, unequal in height and lean; one fine line broken into three
 segments. Fourteen marks total, every one traceable, and the corridor is
 unmistakable — without a single column, capital, or face drawn.
-
-## Provenance
-
-This methodology is written from scratch for this project. The observe →
-discard → rebuild framing was inspired by ideas explored in
-[ZzzLc0405/photo-abstract-editorial](https://github.com/ZzzLc0405/photo-abstract-editorial)
-(all rights reserved upstream; no text is reproduced here), recontextualized
-from photo-editorial diptychs to this project's SVG backdrop medium.
