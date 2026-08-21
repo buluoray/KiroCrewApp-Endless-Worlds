@@ -24,7 +24,11 @@ The load-bearing decisions, stated once:
 
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ── vocabulary (design §4.1, §4.2, §5.4) ────────────────────────────────
 
@@ -40,16 +44,75 @@ KINDS = ("character", "place", "group", "object", "thread")
 #: never reach a player API, the star map, or a story card.
 DISCLOSURES = ("known", "rumoured", "foreshadowed", "hidden")
 
+#: An event the narrator wrote into the memory block without a recognizable
+#: secrecy label is part of the story it just told. Secrecy is the thing that
+#: must be legible — ``_DISCLOSURE_WORDS`` below catches every way a narrator
+#: spells it — so an unreadable label falls back here rather than silently
+#: hiding a memory the player lived through.
+DEFAULT_DISCLOSURE = "known"
+
 IMPORTANCE = ("minor", "notable", "major")
 DEFAULT_IMPORTANCE = "notable"
 
 #: What an event may do to a thread.
 THREAD_EFFECTS = ("opened", "advanced", "resolved")
 
+#: An unreadable effect still touched the thread; it just cannot claim to have
+#: opened or closed it.
+DEFAULT_THREAD_EFFECT = "advanced"
+
 #: How an event changes a relation. The relation *type* (trust, debt, fealty…)
 #: is the world's own word and is a free string; the change verb is closed so
 #: the projection stays computable.
 RELATION_CHANGES = ("increase", "decrease", "set", "cleared")
+
+#: An unreadable change verb states the relation rather than moving it, which is
+#: the one reading that cannot invent a direction the narrator did not write.
+DEFAULT_RELATION_CHANGE = "set"
+
+#: Every way a narrator spells a member of a closed vocabulary, mapped to the
+#: canonical word. Substring-matched (design §5.3 repair), so "rumored",
+#: "Rumours" and "widely rumoured" all land on ``rumoured``. This is what keeps
+#: the vocabularies closed for every consumer WITHOUT costing the narrator a
+#: memory over a synonym: repair first, fall back to the DEFAULT_* above.
+_DISCLOSURE_WORDS: tuple[tuple[str, str], ...] = (
+    ("foreshadow", "foreshadowed"), ("portent", "foreshadowed"),
+    ("omen", "foreshadowed"), ("hint", "foreshadowed"), ("presage", "foreshadowed"),
+    ("rumour", "rumoured"), ("rumor", "rumoured"), ("hearsay", "rumoured"),
+    ("gossip", "rumoured"), ("whisper", "rumoured"),
+    ("hidden", "hidden"), ("secret", "hidden"), ("conceal", "hidden"),
+    ("private", "hidden"), ("unseen", "hidden"), ("unknown", "hidden"),
+    ("undisclosed", "hidden"), ("covert", "hidden"),
+    ("known", "known"), ("public", "known"), ("open", "known"),
+    ("witness", "known"), ("seen", "known"), ("told", "known"),
+)
+_IMPORTANCE_WORDS: tuple[tuple[str, str], ...] = (
+    ("major", "major"), ("critical", "major"), ("pivotal", "major"),
+    ("huge", "major"), ("大", "major"),
+    ("minor", "minor"), ("small", "minor"), ("trivial", "minor"),
+    ("slight", "minor"), ("小", "minor"),
+    ("notable", "notable"), ("normal", "notable"), ("medium", "notable"),
+    ("moderate", "notable"), ("中", "notable"),
+)
+_THREAD_EFFECT_WORDS: tuple[tuple[str, str], ...] = (
+    ("open", "opened"), ("start", "opened"), ("begin", "opened"),
+    ("create", "opened"), ("new", "opened"),
+    ("resolv", "resolved"), ("close", "resolved"), ("finish", "resolved"),
+    ("complete", "resolved"), ("settle", "resolved"), ("ended", "resolved"),
+    ("advance", "advanced"), ("progress", "advanced"), ("continue", "advanced"),
+    ("deepen", "advanced"), ("touch", "advanced"),
+)
+_RELATION_CHANGE_WORDS: tuple[tuple[str, str], ...] = (
+    ("increas", "increase"), ("rais", "increase"), ("rise", "increase"),
+    ("grow", "increase"), ("gain", "increase"), ("improve", "increase"),
+    ("strengthen", "increase"), ("deepen", "increase"), ("warm", "increase"),
+    ("decreas", "decrease"), ("lower", "decrease"), ("fall", "decrease"),
+    ("drop", "decrease"), ("lose", "decrease"), ("loss", "decrease"),
+    ("weaken", "decrease"), ("worsen", "decrease"), ("cool", "decrease"),
+    ("clear", "cleared"), ("sever", "cleared"), ("break", "cleared"),
+    ("broke", "cleared"), ("remove", "cleared"), ("cut", "cleared"),
+    ("set", "set"), ("establish", "set"), ("becom", "set"),
+)
 
 #: The player is an entity every life has without declaring it.
 PLAYER = "player"
@@ -69,12 +132,30 @@ DORMANT_AFTER_TURNS = 8
 
 
 def event_id(turn: int, key: str) -> str:
-    """The canonical, run-scoped name of an event: ``event:12:saved-elin``.
+    """The canonical, run-scoped name of an event: ``event-12-saved-elin``.
 
     Minted by the server from ``(turn, key)`` — never taken from the narrator —
     which is why a key only needs to be unique within its own turn.
+
+    The shape is a plain slug on purpose. This id is the one internal identifier
+    the narrator is SHOWN (in ``memoryCandidates``, and back in a turn's own
+    ``echoes``), and a narrator writes in the shapes it is shown: while this read
+    ``event:12:saved-elin``, the narrator mirrored the colon into its own entity
+    ids (``character:lin-shuang``) and every one of them failed the id rule. So
+    nothing the narrator can see carries a separator it must not use.
     """
-    return f"event:{int(turn)}:{key}"
+    return f"event-{int(turn)}-{key}"
+
+
+#: An id minted by :func:`event_id`, told apart from an entity id by its shape.
+#: Used where a reference may be either an event key from this turn or a canonical
+#: id from an earlier one.
+_EVENT_ID = re.compile(r"^event-\d+-")
+
+
+def is_event_id(value: str) -> bool:
+    """Whether ``value`` has the shape :func:`event_id` mints."""
+    return bool(_EVENT_ID.match(value))
 
 
 # ── the index — derived, disposable, rebuildable (design §6.1) ──────────
@@ -165,7 +246,12 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
                     tid, {"opened": 0, "resolved": 0, "lastTouched": 0}
                 )
                 effect = str(th.get("effect") or "")
-                if effect == "opened" and not rec["opened"]:
+                # The FIRST record of a thread opens it, whatever the effect says.
+                # A narrator that advances a thread it never explicitly opened has
+                # still told us the thread exists; leaving `opened` at 0 would keep
+                # it out of every open-threads reading (recall, legacy, story cards)
+                # and lose it silently.
+                if not rec["opened"]:
                     rec["opened"] = turn
                 if effect == "resolved":
                     rec["resolved"] = turn
@@ -177,7 +263,7 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
             reason = str(rel.get("reasonEvent") or "")
             # A this-turn key resolves to its canonical id; a canonical id is
             # kept as-is. Validation guaranteed one of the two holds.
-            if reason and not reason.startswith("event:"):
+            if reason and not is_event_id(reason):
                 reason = event_id(turn, reason)
             relations.append({
                 "turn": turn,
@@ -236,7 +322,10 @@ def project_relations(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
-# ── validation (design §5.3) ────────────────────────────────────────────
+# ── repair, then validate (design §5.3) ─────────────────────────────────
+
+
+_WHITESPACE = re.compile(r"\s+")
 
 
 def _id_ok(value: str) -> bool:
@@ -246,77 +335,203 @@ def _id_ok(value: str) -> bool:
     return bool(value) and ":" not in value and not any(c.isspace() for c in value)
 
 
+def repair_id(value: Any) -> str:
+    """The usable id inside whatever the narrator wrote, or ``''``.
+
+    A narrator writes in the shapes it is shown, and it used to be shown
+    colon-namespaced canonical event ids — so it wrote ``character:lin-shuang``
+    and ``group: darkflame court`` and the old validator dropped every one of
+    them. :func:`event_id` no longer mints a colon anywhere, but the habit
+    outlives the prompt: a colon here is a namespace the narrator added, and the
+    id it namespaces is the last segment; whitespace is a slug that was never
+    slugified. Repair both instead of losing the memory:
+
+    >>> repair_id("character:lin-shuang")
+    'lin-shuang'
+    >>> repair_id("event:6:slept-through-collapse")
+    'slept-through-collapse'
+    >>> repair_id("  darkflame court ")
+    'darkflame-court'
+
+    Case is left alone on purpose: an id is an identity, and lowercasing one
+    would stop a re-mention from matching the entity it re-mentions.
+    """
+    raw = str(value or "").strip()
+    if ":" in raw:
+        segments = [seg.strip() for seg in raw.split(":") if seg.strip()]
+        raw = segments[-1] if segments else ""
+    return _WHITESPACE.sub("-", raw).strip("-")
+
+
+#: A kind word a narrator prefixed onto an id (``character-lin-shuang``) — the
+#: same namespacing instinct as the colon, in a shape that is a legal slug and so
+#: cannot be spotted by the id rule. Stripped only when what remains is an id the
+#: graph already knows, since ``place-of-bones`` may well be an id in its own right.
+_KIND_PREFIX = re.compile(
+    r"^(?:character|place|group|object|thread|event|person|people|npc|faction|"
+    r"item|location|region|concept)[-_]"
+)
+
+
+def _repair_ref(value: Any, is_known: Any) -> str:
+    """``repair_id``, but preferring a reading the graph already knows.
+
+    Stripping the namespace is the right default, yet ``fire:court`` may well be
+    an id that was always spelled ``fire-court``. Every reading is tried and the
+    first the graph already knows wins, so a repair reconnects a reference to the
+    entity it meant instead of minting a near-duplicate beside it. A reading that
+    resolves nothing is never preferred over the id as written.
+    """
+    raw = str(value or "").strip()
+    candidates: list[str] = []
+    for candidate in (repair_id(raw), _WHITESPACE.sub("-", raw.replace(":", "-")).strip("-")):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in list(candidates):
+        stripped = _KIND_PREFIX.sub("", candidate, count=1)
+        if stripped and stripped != candidate and stripped not in candidates:
+            candidates.append(stripped)  # never candidates[0]: known-only, never fallback
+    for candidate in candidates:
+        if is_known(candidate):
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _repair_word(value: Any, words: tuple[tuple[str, str], ...], default: str) -> str:
+    """The canonical member of a closed vocabulary a narrator's word means.
+
+    Longest-hint-first substring matching, so "widely rumoured" resolves and a
+    hint that is a substring of another word cannot steal the match. Returns
+    ``default`` for a word carrying no recognizable hint.
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    best = ""
+    chosen = default
+    for hint, canonical in words:
+        if hint in text and len(hint) > len(best):
+            best, chosen = hint, canonical
+    return chosen if best else default
+
+
+def _lead(text: str, limit: int = 48) -> str:
+    """A title-length lead cut from a longer line, at a clause boundary if there
+    is one inside the budget. Used to give a titleless event the title its own
+    summary already contains, rather than dropping the event over a missing
+    field the narrator wrote the content for."""
+    line = _WHITESPACE.sub(" ", str(text or "").strip())
+    if len(line) <= limit:
+        return line
+    head = line[:limit]
+    for sep in ("。", "！", "？", "；", "，", "、", ". ", ", ", "; ", " — ", " "):
+        cut = head.rfind(sep)
+        if cut >= limit // 3:
+            return head[:cut].rstrip(" ,;—、，。") + "…"
+    return head.rstrip() + "…"
+
+
 def sanitize_memory(
     memory: dict[str, Any], index: dict[str, Any], *, turn: int
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    """Salvage a ``memory`` block instead of rejecting it whole (design §5.3).
+    """REPAIR a ``memory`` block, and drop only what cannot be repaired (§5.3).
 
-    The block is enrichment, not the story, so a single bad reference must never
-    cost the real memory around it. Returns a CLEAN block carrying only the parts
-    that pass, plus ``dropped`` — one entry per thing removed, each naming the
-    exact field path and a narrator-facing ``detail`` — so the caller commits
-    what survived and warns about the rest. Granularity, in check order:
+    The block is enrichment, not the story, so a slip in it must never cost the
+    real memory around it — and the slips a narrator actually makes are almost
+    all spelling, not meaning. So the order here is repair first, drop last:
 
-    * an entity with a malformed id, a duplicate in-block id, or a kind that
-      conflicts with a known one is dropped; an unrecognized kind is KEPT and
-      bucketed as the generic ``object`` (never ``thread``); the survivors
-      become resolvable references;
-    * a structurally broken event (malformed/duplicate/replayed key, missing
-      title or summary, unknown disclosure) is dropped whole — nothing anchors
-      it — while an otherwise-good event is KEPT and loses only the individual
-      references that do not resolve (an unknown participant, a non-place
-      ``place``, an unknown importance, a dangling echo/corrects);
-    * a THREAD is its own namespace, not an entity: ``opened`` DECLARES the
-      thread (opening one is what creates it, so it never needs a prior entity),
-      and only ``advanced``/``resolved`` on a thread never opened is dropped;
-    * a relation is a single edge, so a bad endpoint/type/change/reasonEvent
-      drops that one relation and never the events.
+    * a **malformed id or reference** (a colon namespace, an unslugified space)
+      is repaired, preferring the reading the graph already knows, so the
+      declaration lands on the entity it meant. Only an id with nothing usable
+      left is dropped;
+    * a **closed vocabulary** (kind, disclosure, importance, thread effect,
+      relation change) accepts the narrator's synonym and maps it to the
+      canonical member; an unrecognizable word falls back to that vocabulary's
+      documented default. Every consumer still sees only the closed set;
+    * a **missing title or summary** is taken from whichever of the two the
+      narrator did write. An event is dropped only when it has neither, because
+      then there is genuinely nothing to record;
+    * a **colliding event key** (used twice this turn, or already recorded for
+      this turn) is suffixed rather than dropped — a key only needs to be unique
+      inside its own turn, and both events happened;
+    * a **thread advanced or resolved without ever being opened** is kept and
+      opens on that first touch: the narrator told us the thread exists, which
+      is what opening one means;
+    * a **relation whose reasonEvent names nothing** keeps the relation and
+      loses only the reason, since the reason was always optional.
 
-    Nothing is auto-invented (an unknown participant is dropped, not created) and
-    nothing is back-filled from prose; a block whose parts all fail returns an
-    empty clean block, which the caller records as no memory.
+    What is still DROPPED, because repairing it would mean inventing a fact:
+    a reference to an entity that was never declared (participant, place,
+    relation endpoint), an echo or correction naming an event that does not
+    exist, a relation with no type, and anything whose id repairs to nothing.
+    Nothing is ever back-filled from prose.
+
+    Returns the CLEAN block (repairs applied) plus ``dropped`` — one entry per
+    thing genuinely removed, each naming the exact field path — which the caller
+    surfaces as a non-blocking warning. Repairs are logged, not warned: they cost
+    the narrator nothing to know about and the id shapes it is shown are what
+    provoked most of them.
     """
     dropped: list[dict[str, str]] = []
 
     def drop(field: str, expected: str, detail: str) -> None:
         dropped.append({"field": field, "expected": expected, "detail": detail})
 
-    # -- entities: keep the well-formed, non-conflicting ones -----------------
+    def repaired(field: str, detail: str) -> None:
+        logger.info("memory repaired at %s: %s", field, detail)
+
+    # -- entities: repair the id, adopt the established kind, merge re-declarations
     declared: dict[str, str] = {}  # id -> kind, from the KEPT entities of this block
     kept_entities: list[dict[str, Any]] = []
+    at_id: dict[str, int] = {}  # id -> its slot in kept_entities, for merging
     for i, ent in enumerate(memory.get("entities") or []):
         path = f"memory.entities[{i}]"
-        eid = str(ent.get("id") or "")
-        kind = str(ent.get("kind") or "")
-        if not _id_ok(eid):
+        raw_id = str(ent.get("id") or "")
+        # Always through the repair: a well-formed id can still be a namespaced one
+        # ("character-lin-shuang"), which only the graph's own knowledge can spot.
+        eid = _repair_ref(raw_id, lambda c: c in declared or c in index["entities"])
+        if not eid:
             drop(f"{path}.id", "a non-empty id without ':' or spaces",
-                 f"Dropped a malformed entity id at {path}.")
+                 f"Dropped an entity at {path}: its id has nothing usable in it.")
             continue
-        if kind not in KINDS:
-            # Fail-soft: a narrator-invented kind (e.g. "concept") must not cost
-            # the whole entity. Adopt the established kind when this id is already
-            # known (a re-mention with a stray label just refreshes it); otherwise
-            # bucket it as the neutral generic "object" — never "thread", which is
-            # a separate namespace with its own effects. Downstream code and the
-            # recall rules therefore still only ever see the closed KINDS set.
-            prior = index["entities"].get(eid)
-            coerced = prior["kind"] if prior is not None else "object"
-            drop(f"{path}.kind", f"one of {', '.join(KINDS)}",
-                 f"Kept entity {eid!r} but treated unknown kind {kind!r} as {coerced!r}.")
-            kind = coerced
-        if eid in declared:
-            drop(f"{path}.id", f"declared twice this turn: {eid}",
-                 f"Dropped the duplicate declaration of {eid!r}; the first was kept.")
-            continue
+        if eid != raw_id:
+            repaired(f"{path}.id", f"read {raw_id!r} as {eid!r}")
+
+        kind = str(ent.get("kind") or "")
         known = index["entities"].get(eid)
-        if known is not None and known["kind"] != kind:
-            drop(f"{path}.kind",
-                 f"{eid} is already a {known['kind']}; a kind never changes without a merge",
-                 f"Dropped entity {eid!r}: it is already a {known['kind']}, and a kind never "
-                 "changes without an explicit merge.")
+        established = declared.get(eid) or (known["kind"] if known is not None else "")
+        if kind not in KINDS or (established and kind != established):
+            # Fail-soft: a narrator-invented kind ("concept") or a stray label on a
+            # known entity must not cost the entity. An id that already has a kind
+            # keeps it — a kind never changes without an explicit merge — and a new
+            # id is bucketed as the neutral generic "object", never "thread", which
+            # is a separate namespace with its own effects. Downstream code and the
+            # recall rules therefore still only ever see the closed KINDS set.
+            coerced = established or "object"
+            if kind != coerced:
+                repaired(f"{path}.kind", f"read kind {kind!r} as {coerced!r} for {eid!r}")
+            kind = coerced
+
+        slot = at_id.get(eid)
+        if slot is not None:
+            # Declared twice in one block: the second declaration is enrichment, not
+            # a collision — merge it forward instead of throwing the writing away.
+            prior = kept_entities[slot]
+            aliases = list(prior.get("aliases") or [])
+            for alias in ent.get("aliases") or []:
+                if str(alias) not in aliases:
+                    aliases.append(str(alias))
+            merged = {**prior, **{k: v for k, v in ent.items() if v}, "id": eid,
+                      "kind": prior["kind"]}
+            if aliases:
+                merged["aliases"] = aliases
+            kept_entities[slot] = merged
+            repaired(f"{path}.id", f"merged the second declaration of {eid!r}")
             continue
+
         declared[eid] = kind
-        kept_entities.append({**ent, "kind": kind})
+        at_id[eid] = len(kept_entities)
+        kept_entities.append({**ent, "id": eid, "kind": kind})
 
     def resolve(ref: str) -> str:
         """The kind of a resolvable entity reference, or '' if unknown."""
@@ -327,131 +542,200 @@ def sanitize_memory(
         known = index["entities"].get(ref)
         return known["kind"] if known is not None else ""
 
-    known_threads = index.get("threads") or {}
-    opened_threads: set[str] = set()  # threads opened earlier in THIS block
+    def resolve_repaired(raw: Any, path: str, what: str) -> str:
+        """A reference, repaired if it does not resolve as written."""
+        ref = str(raw or "")
+        if resolve(ref):
+            return ref
+        fixed = _repair_ref(ref, lambda c: bool(resolve(c)))
+        if fixed and fixed != ref and resolve(fixed):
+            repaired(path, f"read {what} {ref!r} as {fixed!r}")
+            return fixed
+        return ref
 
-    # -- events: drop the unusable whole; salvage every event that can stand ---
+    known_threads = index.get("threads") or {}
+    opened_threads: set[str] = set()  # threads this block declares or touches first
+
+    #: A past event's own key → its canonical id, so a narrator that names an old
+    #: event by bare key (the form it wrote) still reaches the event it means.
+    by_key: dict[str, str] = {}
+    for cid, rec in index["events"].items():
+        by_key[str(rec.get("key") or "")] = cid
+
+    def resolve_event(raw: Any) -> str:
+        """The canonical id of an existing event, from a canonical id or a bare
+        key, or '' if it names none."""
+        ref = str(raw or "").strip()
+        if not ref:
+            return ""
+        if ref in index["events"]:
+            return ref
+        return by_key.get(ref, "") or by_key.get(repair_id(ref), "")
+
+    # -- events: repair what is fixable; drop only what has no content at all ---
     kept_keys: set[str] = set()
+    renamed_keys: dict[str, str] = {}
     kept_events: list[dict[str, Any]] = []
     for i, ev in enumerate(memory.get("events") or []):
         path = f"memory.events[{i}]"
-        key = str(ev.get("key") or "")
-        if not _id_ok(key):
-            drop(f"{path}.key", "a non-empty key without ':' or spaces",
-                 f"Dropped the event at {path}: its key is malformed, so nothing can anchor it.")
-            continue
-        if key in kept_keys:
-            drop(f"{path}.key", f"used twice this turn: {key}",
-                 f"Dropped the event at {path}: key {key!r} was already used this turn.")
-            continue
-        if event_id(turn, key) in index["events"]:
-            # A replayed key for a turn that already recorded it — events are
-            # append-only, the one collision idempotence does not absorb upstream.
-            drop(f"{path}.key", f"already recorded for turn {turn}",
-                 f"Dropped the event at {path}: {key!r} is already recorded for this turn.")
-            continue
-        if not str(ev.get("title") or "").strip():
+
+        # Title and summary hold each other up: either one can name the event.
+        title = str(ev.get("title") or "").strip()
+        summary = str(ev.get("summary") or "").strip()
+        if not title and not summary:
             drop(f"{path}.title", "a short title",
-                 f"Dropped the event at {path}: an event needs a title.")
+                 f"Dropped the event at {path}: it has neither a title nor a summary, "
+                 "so there is nothing to record.")
             continue
-        if not str(ev.get("summary") or "").strip():
-            drop(f"{path}.summary", "a one-line summary",
-                 f"Dropped the event at {path}: an event needs a one-line summary.")
-            continue
-        if str(ev.get("disclosure") or "") not in DISCLOSURES:
-            drop(f"{path}.disclosure", f"one of {', '.join(DISCLOSURES)}",
-                 f"Dropped the event at {path}: "
-                 f"{ev.get('disclosure')!r} is not a known disclosure.")
-            continue
+        if not title:
+            title = _lead(summary)
+            repaired(f"{path}.title", f"took the title {title!r} from the summary")
+        if not summary:
+            summary = title
+            repaired(f"{path}.summary", "took the summary from the title")
+
+        raw_key = str(ev.get("key") or "")
+        key = raw_key if _id_ok(raw_key) else (repair_id(raw_key) or repair_id(title))
+        if is_event_id(key):
+            # The narrator wrote the CANONICAL id where a key belongs — mirroring
+            # what it is shown again. The key is the tail; keeping the prefix would
+            # mint `event-1-event-1-met-hui-ya`.
+            key = _EVENT_ID.sub("", key, count=1)
+        if not key:
+            key = f"unnamed-{i + 1}"
+        if key != raw_key:
+            repaired(f"{path}.key", f"read {raw_key!r} as {key!r}")
+        # A key only has to be unique inside its own turn, so a collision is
+        # answered by a free neighbour rather than by losing the event.
+        base, n = key, 2
+        while key in kept_keys or event_id(turn, key) in index["events"]:
+            key, n = f"{base}-{n}", n + 1
+        if key != base:
+            renamed_keys[base] = key
+            repaired(f"{path}.key", f"{base!r} was taken this turn, recorded as {key!r}")
 
         clean_ev = dict(ev)
+        clean_ev["key"] = key
+        clean_ev["title"] = title
+        clean_ev["summary"] = summary
+
+        disclosure = str(ev.get("disclosure") or "")
+        if disclosure not in DISCLOSURES:
+            fixed = _repair_word(disclosure, _DISCLOSURE_WORDS, DEFAULT_DISCLOSURE)
+            repaired(f"{path}.disclosure", f"read {disclosure!r} as {fixed!r}")
+            disclosure = fixed
+        clean_ev["disclosure"] = disclosure
 
         importance = ev.get("importance")
         if importance is not None and importance not in IMPORTANCE:
-            clean_ev.pop("importance", None)
-            drop(f"{path}.importance", f"one of {', '.join(IMPORTANCE)}",
-                 f"Kept the event at {path} but dropped its unknown importance {importance!r}.")
+            fixed = _repair_word(importance, _IMPORTANCE_WORDS, DEFAULT_IMPORTANCE)
+            repaired(f"{path}.importance", f"read {importance!r} as {fixed!r}")
+            clean_ev["importance"] = fixed
 
         good_parts: list[Any] = []
         for j, part in enumerate(ev.get("participants") or []):
-            if resolve(str(part)):
-                good_parts.append(part)
+            ppath = f"{path}.participants[{j}]"
+            ref = resolve_repaired(part, ppath, "participant")
+            if resolve(ref):
+                good_parts.append(ref)
             else:
-                drop(f"{path}.participants[{j}]",
-                     f"a known entity or one declared this turn, got {part!r}",
+                drop(ppath,
+                     f"a known entity or one declared this turn, got {str(part)!r}",
                      f"Kept the event at {path} but dropped its unknown participant "
                      f"{str(part)!r}; re-declare that entity to record it.")
         if "participants" in clean_ev:
             clean_ev["participants"] = good_parts
 
-        place = str(ev.get("place") or "")
-        if place:
+        raw_place = str(ev.get("place") or "")
+        if raw_place:
+            place = resolve_repaired(raw_place, f"{path}.place", "place")
             pkind = resolve(place)
-            if pkind != "place":
+            if pkind == "place":
+                clean_ev["place"] = place
+            else:
                 clean_ev.pop("place", None)
                 reason = (f"{place} is a {pkind}, not a place" if pkind
-                          else f"a known place, got {place!r}")
+                          else f"a known place, got {raw_place!r}")
                 drop(f"{path}.place", reason,
                      f"Kept the event at {path} but dropped its place ({reason}).")
 
         good_threads: list[Any] = []
         for j, th in enumerate(ev.get("threads") or []):
-            tid = str(th.get("id") or "")
-            effect = str(th.get("effect") or "")
             tpath = f"{path}.threads[{j}]"
+            raw_tid = str(th.get("id") or "")
+            tid = raw_tid
             if not _id_ok(tid):
-                drop(f"{tpath}.id", "a non-empty id without ':' or spaces",
-                     f"Kept the event at {path} but dropped a malformed thread id.")
-                continue
+                tid = _repair_ref(
+                    raw_tid, lambda c: c in known_threads or c in opened_threads
+                )
+                if not tid:
+                    drop(f"{tpath}.id", "a non-empty id without ':' or spaces",
+                         f"Kept the event at {path} but dropped a thread whose id has "
+                         "nothing usable in it.")
+                    continue
+                repaired(f"{tpath}.id", f"read {raw_tid!r} as {tid!r}")
+
+            effect = str(th.get("effect") or "")
             if effect not in THREAD_EFFECTS:
-                drop(f"{tpath}.effect", f"one of {', '.join(THREAD_EFFECTS)}",
-                     f"Kept the event at {path} but dropped thread {tid!r}: unknown effect "
-                     f"{effect!r}.")
-                continue
-            if effect == "opened":
-                # Opening a thread is what creates it; it needs no prior existence.
-                opened_threads.add(tid)
-                good_threads.append(th)
-            elif tid in known_threads or tid in opened_threads:
-                good_threads.append(th)
-            else:
-                drop(f"{tpath}.id", f"a thread opened before or this turn, got {tid!r}",
-                     f"Kept the event at {path} but dropped thread {tid!r}: it was never "
-                     "opened. Open it with effect 'opened' before advancing or resolving it.")
+                fixed = _repair_word(effect, _THREAD_EFFECT_WORDS, DEFAULT_THREAD_EFFECT)
+                repaired(f"{tpath}.effect", f"read {effect!r} as {fixed!r}")
+                effect = fixed
+            if effect != "opened" and tid not in known_threads and tid not in opened_threads:
+                # Naming a thread is what brings it into the graph; build_index opens
+                # it on this first touch, so an "advanced" thread nobody opened is a
+                # thread opening here, not an inconsistency to throw away.
+                repaired(f"{tpath}.id", f"thread {tid!r} opens on this first mention")
+            opened_threads.add(tid)
+            good_threads.append({**th, "id": tid, "effect": effect})
         if "threads" in clean_ev:
             clean_ev["threads"] = good_threads
 
         good_echoes: list[Any] = []
         for j, target in enumerate(ev.get("echoes") or []):
-            if str(target) in index["events"]:
-                good_echoes.append(target)
+            cid = resolve_event(target)
+            if cid:
+                if cid != str(target):
+                    repaired(f"{path}.echoes[{j}]", f"read {str(target)!r} as {cid!r}")
+                good_echoes.append(cid)
             else:
                 drop(f"{path}.echoes[{j}]",
                      "the canonical id of an event that exists in this life "
-                     f"(like event:3:some-key), got {target!r}",
+                     f"(like event-3-some-key), got {target!r}",
                      f"Kept the event at {path} but dropped an echo to {str(target)!r}, which "
                      "names no event in this life.")
         if "echoes" in clean_ev:
             clean_ev["echoes"] = good_echoes
 
-        corrects = str(ev.get("corrects") or "")
-        if corrects and corrects not in index["events"]:
-            clean_ev.pop("corrects", None)
-            drop(f"{path}.corrects",
-                 f"the canonical id of an event that exists in this life, got {corrects!r}",
-                 f"Kept the event at {path} but dropped a correction of {corrects!r}, which "
-                 "names no event in this life.")
+        raw_corrects = str(ev.get("corrects") or "")
+        if raw_corrects:
+            cid = resolve_event(raw_corrects)
+            if cid:
+                if cid != raw_corrects:
+                    repaired(f"{path}.corrects", f"read {raw_corrects!r} as {cid!r}")
+                clean_ev["corrects"] = cid
+            else:
+                clean_ev.pop("corrects", None)
+                drop(f"{path}.corrects",
+                     f"the canonical id of an event that exists in this life, got "
+                     f"{raw_corrects!r}",
+                     f"Kept the event at {path} but dropped a correction of "
+                     f"{raw_corrects!r}, which names no event in this life.")
 
         kept_keys.add(key)
         kept_events.append(clean_ev)
 
-    # -- relations: a single bad edge drops only itself -----------------------
+    # -- relations: repair the verb and the reason; drop only an unnamed edge ---
     kept_relations: list[dict[str, Any]] = []
     for i, rel in enumerate(memory.get("relations") or []):
         path = f"memory.relations[{i}]"
-        bad_end = next(
-            (end for end in ("from", "to") if not resolve(str(rel.get(end) or ""))), None
-        )
+        clean_rel = dict(rel)
+        bad_end = None
+        for end in ("from", "to"):
+            ref = resolve_repaired(rel.get(end), f"{path}.{end}", end)
+            if not resolve(ref):
+                bad_end = end
+                break
+            clean_rel[end] = ref
         if bad_end is not None:
             ref = str(rel.get(bad_end) or "")
             drop(f"{path}.{bad_end}",
@@ -460,21 +744,35 @@ def sanitize_memory(
             continue
         if not str(rel.get("type") or "").strip():
             drop(f"{path}.type", "the relation's name, in the world's own word",
-                 f"Dropped the relation at {path}: it has no type.")
+                 f"Dropped the relation at {path}: it has no type, so there is no edge "
+                 "to record.")
             continue
-        if str(rel.get("change") or "") not in RELATION_CHANGES:
-            drop(f"{path}.change", f"one of {', '.join(RELATION_CHANGES)}",
-                 f"Dropped the relation at {path}: {rel.get('change')!r} is not a known change.")
-            continue
-        reason = str(rel.get("reasonEvent") or "")
-        if reason and reason not in kept_keys and reason not in index["events"]:
-            drop(f"{path}.reasonEvent",
-                 "an event key declared this turn, or the canonical id of an existing event, "
-                 f"got {reason!r}",
-                 f"Dropped the relation at {path}: its reasonEvent {reason!r} names no event "
-                 "kept this turn or in this life.")
-            continue
-        kept_relations.append(rel)
+        change = str(rel.get("change") or "")
+        if change not in RELATION_CHANGES:
+            fixed = _repair_word(change, _RELATION_CHANGE_WORDS, DEFAULT_RELATION_CHANGE)
+            repaired(f"{path}.change", f"read {change!r} as {fixed!r}")
+            clean_rel["change"] = fixed
+        raw_reason = str(rel.get("reasonEvent") or "")
+        if raw_reason:
+            reason = renamed_keys.get(raw_reason, raw_reason)
+            if reason not in kept_keys:
+                # Not a key from this turn — then it must name an existing event, by
+                # canonical id or by the bare key the narrator wrote it under.
+                reason = resolve_event(reason)
+            if reason:
+                if reason != raw_reason:
+                    repaired(f"{path}.reasonEvent", f"read {raw_reason!r} as {reason!r}")
+                clean_rel["reasonEvent"] = reason
+            else:
+                # The reason was always optional, so a dangling one costs the reason,
+                # never the relation the narrator actually declared.
+                clean_rel.pop("reasonEvent", None)
+                drop(f"{path}.reasonEvent",
+                     "an event key declared this turn, or the canonical id of an existing "
+                     f"event, got {raw_reason!r}",
+                     f"Kept the relation at {path} but dropped its reasonEvent "
+                     f"{raw_reason!r}, which names no event kept this turn or in this life.")
+        kept_relations.append(clean_rel)
 
     clean: dict[str, Any] = {}
     if kept_entities:

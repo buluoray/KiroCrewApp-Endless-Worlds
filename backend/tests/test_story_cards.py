@@ -51,7 +51,7 @@ def life_chronicle():
                 {"key": "repaid", "title": "艾琳还了人情", "summary": "她记得那一天。",
                  "participants": ["player", "elin"],
                  "threads": [{"id": "debt", "effect": "resolved"}],
-                 "echoes": ["event:1:saved"], "disclosure": "known"},
+                 "echoes": ["event-1-saved"], "disclosure": "known"},
             ],
         }),
         turn_entry(9, {
@@ -69,7 +69,7 @@ def keepsake(cites, kp_id="k1", title="石桥下的那一天", thought="一切�
             "excerpt": ""}
 
 
-def make_card(cites=("event:1:saved", "event:5:repaid"), *, ended_turn=0):
+def make_card(cites=("event-1-saved", "event-5-repaid"), *, ended_turn=0):
     index = mg.build_index(life_chronicle())
     return sc.build_draft(index, keepsake(list(cites)), ended_turn=ended_turn,
                           language="zh")
@@ -85,7 +85,7 @@ def all_exports(card):
 
 def test_the_card_holds_exactly_the_cited_events_and_their_entities():
     card = make_card()
-    assert [e["id"] for e in card["events"]] == ["event:1:saved", "event:5:repaid"]
+    assert [e["id"] for e in card["events"]] == ["event-1-saved", "event-5-repaid"]
     assert {e["id"] for e in card["entities"]} == {"elin", "bridge", "debt"}
     # The uninvolved ending event never entered, and neither did anything hidden.
     for text in all_exports(card).values():
@@ -95,25 +95,25 @@ def test_the_card_holds_exactly_the_cited_events_and_their_entities():
 def test_a_hidden_event_cannot_be_cited_into_a_card():
     index = mg.build_index(life_chronicle())
     with pytest.raises(sc.StoryCardError):
-        sc.build_draft(index, keepsake(["event:1:watcher"]))
+        sc.build_draft(index, keepsake(["event-1-watcher"]))
 
 
 def test_edits_can_narrow_but_never_add():
     card = make_card()
     with pytest.raises(sc.StoryCardError):
-        sc.apply_edits(card, {"events": {"event:9:ending": True}})
+        sc.apply_edits(card, {"events": {"event-9-ending": True}})
     with pytest.raises(sc.StoryCardError):
         sc.apply_edits(card, {"entities": {"stranger": {"included": True}}})
     with pytest.raises(sc.StoryCardError):
-        sc.apply_edits(card, {"order": ["event:1:saved"]})  # dropping via order
+        sc.apply_edits(card, {"order": ["event-1-saved"]})  # dropping via order
 
 
 def test_reorder_keeps_turn_numbers_untouched():
     card = make_card()
-    sc.apply_edits(card, {"order": ["event:5:repaid", "event:1:saved"]})
+    sc.apply_edits(card, {"order": ["event-5-repaid", "event-1-saved"]})
     by_id = {e["id"]: e["turn"] for e in card["events"]}
-    assert by_id == {"event:1:saved": 1, "event:5:repaid": 5}
-    assert [e["id"] for e in card["events"]] == ["event:5:repaid", "event:1:saved"]
+    assert by_id == {"event-1-saved": 1, "event-5-repaid": 5}
+    assert [e["id"] for e in card["events"]] == ["event-5-repaid", "event-1-saved"]
 
 
 # ── §12.3: removing a node removes its edges everywhere ──────────────────
@@ -131,10 +131,10 @@ def test_excluding_an_entity_takes_its_edges_with_it():
 
 def test_excluding_an_event_takes_its_edges_and_text():
     card = make_card()
-    sc.apply_edits(card, {"events": {"event:5:repaid": False}})
+    sc.apply_edits(card, {"events": {"event-5-repaid": False}})
     view = sc.resolve(card)
     ids = {e["id"] for e in view["events"]}
-    assert ids == {"event:1:saved"}
+    assert ids == {"event-1-saved"}
     assert not any("repaid" in e["from"] or "repaid" in e["to"] for e in view["edges"])
     for text in all_exports(card).values():
         assert "还了人情" not in text
@@ -170,7 +170,7 @@ def test_anonymisation_reaches_summaries_and_titles_written_by_the_narrator():
 
 
 def test_ending_content_is_filtered_until_spoilers_are_shown():
-    card = make_card(("event:1:saved", "event:9:ending"), ended_turn=9)
+    card = make_card(("event-1-saved", "event-9-ending"), ended_turn=9)
     for text in all_exports(card).values():
         assert "落幕" not in text and "最后一程" not in text
     sc.apply_edits(card, {"showSpoilers": True})
@@ -187,7 +187,12 @@ def test_exports_carry_no_network_no_script_no_run_or_event_ids():
         assert "<script" not in text.lower(), f"script in {fmt}"
         assert "token" not in text.lower(), f"token in {fmt}"
         assert run_id not in text
-        assert "event:" not in text, f"internal event id leaked into {fmt}"
+        # The canonical event id is a plain slug now (`event-1-saved`), so this
+        # guard must match THAT shape — asserting the retired `event:` spelling
+        # would pass on any export and catch nothing.
+        assert not re.search(r"event-\d+-", text), (
+            f"internal event id leaked into {fmt}"
+        )
         # The one URL an SVG needs is its xmlns namespace; nothing else may
         # reference the network.
         urls = re.findall(r"https?://[^\s\"'<>]+", text)
@@ -210,7 +215,7 @@ def test_the_export_is_a_pure_function_of_the_draft():
 
 def test_an_excerpt_keepsake_replaces_that_turns_summary():
     index = mg.build_index(life_chronicle())
-    kp = keepsake(["event:1:saved"])
+    kp = keepsake(["event-1-saved"])
     kp["kind"] = "excerpt"
     kp["excerpt"] = "洪水漫过桥面时，你伸出了手。"
     kp["turn"] = 1

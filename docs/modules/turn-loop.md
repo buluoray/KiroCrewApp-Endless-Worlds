@@ -19,7 +19,7 @@ turn 200 as at turn 1.
 | `backend/opening.py` | `compose_opening_prompt()` — the opening turn's prompt, passed to the same `advance_turn()` via `prompt_override` so the wait and idempotence are not forked |
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
 | `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
-| `backend/memory_graph.py` | salvages the structured `memory` block — a bad piece is dropped and warned, the rest recorded, never blocking the commit |
+| `backend/memory_graph.py` | repairs the structured `memory` block — a mis-spelled id/vocabulary/key is fixed, only an unrepairable piece is dropped and warned, never blocking the commit |
 | `content/{en,zh}.json` | every line the prompt is built from (`turn.ask`, `turn.action.*`, `shape.*`, `opening.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
 
 ## Load-bearing contracts
@@ -175,16 +175,24 @@ turn 200 as at turn 1.
   closed `disclosure`), relations, and `echoes` naming a prior event's canonical
   id — and it is the *declaration*, not the prose, that makes the world's memory of
   an event real. Memory is validated but NON-BLOCKING at BOTH layers. At the schema
-  layer (`call_tool`), a `memory` sent as a JSON **string** — the double-encoding a
-  narrator sometimes emits — is recovered to an object, and an unrecoverable string
-  is dropped, rather than the whole call being refused on a type mismatch. At the
-  semantic layer (`_advance_turn`), `sanitize_memory` SALVAGES the block: a bad piece
-  is dropped and surfaced as a non-blocking `panel: "memory"` warning while the rest
-  of the block — and the prose, choices, and state — still commit, the same
-  "enrichment never blocks a committed turn" contract milestones and systems already
-  have. Facts are never back-filled from prose. Enforced by `mcp_server.call_tool` +
-  `_advance_turn` + `memory_graph`; pinned by
+  layer (`call_tool` → `_check`), a `memory` sent as a JSON **string** — the
+  double-encoding a narrator sometimes emits — is recovered to an object, an
+  unrecoverable string is dropped, and a **`null` on an optional field is treated as
+  absent** (`"place": null`) while a `null` ENTRY in a list is dropped as a hole —
+  rather than the whole call being refused on a type mismatch. `null` on a REQUIRED
+  field is still refused: committing a blank page is worse than refusing the call. At
+  the semantic layer (`_advance_turn`), `sanitize_memory` REPAIRS the block — a
+  namespaced id, a vocabulary synonym, a reused key, a title written only into the
+  summary — and drops only what it would have to invent to keep, surfacing that as a
+  non-blocking `panel: "memory"` warning while the rest of the block — and the prose,
+  choices, and state — still commit, the same "enrichment never blocks a committed
+  turn" contract milestones and systems already have. Facts are never back-filled
+  from prose. Enforced by `mcp_server.call_tool` + `_check` + `_advance_turn` +
+  `memory_graph`; pinned by
   `test_a_bad_reference_is_salvaged_and_the_turn_keeps_the_event`,
+  `test_a_null_optional_field_is_absent_not_a_type_error`,
+  `test_a_null_entry_in_a_list_is_a_hole_not_a_refusal`,
+  `test_a_null_REQUIRED_field_is_still_refused`,
   `test_memory_sent_as_a_json_string_is_recovered`,
   `test_memory_sent_as_a_non_json_string_is_dropped_not_fatal`,
   `test_the_design_example_survives_whole`,

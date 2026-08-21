@@ -57,7 +57,7 @@ def life_chronicle():
                 {"key": "repaid", "title": "艾琳还了人情", "summary": "s",
                  "participants": ["player", "elin"],
                  "threads": [{"id": "debt", "effect": "resolved"}],
-                 "echoes": ["event:1:saved"], "disclosure": "known"},
+                 "echoes": ["event-1-saved"], "disclosure": "known"},
             ],
         }, prose="多年后，她记得那一天。"),
     ]
@@ -69,8 +69,8 @@ def life_chronicle():
 def test_hidden_events_never_enter_the_star_payload():
     payload = mg.star_payload(mg.build_index(life_chronicle()))
     ids = {n["id"] for n in payload["nodes"]}
-    assert "event:1:saved" in ids and "event:1:repaid" not in ids
-    assert "event:5:repaid" in ids
+    assert "event-1-saved" in ids and "event-1-repaid" not in ids
+    assert "event-5-repaid" in ids
     assert not any("watcher" in i for i in ids), "hidden event leaked (§12.3)"
     blob = json.dumps(payload, ensure_ascii=False)
     assert "暗处" not in blob, "hidden content leaked through an edge or relation"
@@ -89,16 +89,16 @@ def test_the_payload_is_layout_agnostic_and_stable():
 def test_echo_edges_and_thread_effects_ship():
     payload = mg.star_payload(mg.build_index(life_chronicle()))
     kinds = {(e["type"], e["from"], e["to"]) for e in payload["edges"]}
-    assert ("echoes", "event:5:repaid", "event:1:saved") in kinds
-    assert ("opened", "event:1:saved", "debt") in kinds
-    assert ("resolved", "event:5:repaid", "debt") in kinds
+    assert ("echoes", "event-5-repaid", "event-1-saved") in kinds
+    assert ("opened", "event-1-saved", "debt") in kinds
+    assert ("resolved", "event-5-repaid", "debt") in kinds
 
 
 def test_relations_carry_their_visible_evidence_only():
     payload = mg.star_payload(mg.build_index(life_chronicle()))
     (rel,) = payload["relations"]
     assert rel["from"] == "elin" and rel["to"] == "player"
-    assert rel["sources"] == ["event:1:saved"], "§4.3: the reading opens into its causes"
+    assert rel["sources"] == ["event-1-saved"], "§4.3: the reading opens into its causes"
 
 
 def test_a_minor_unechoed_event_stays_out_of_the_sparse_view():
@@ -107,7 +107,7 @@ def test_a_minor_unechoed_event_stays_out_of_the_sparse_view():
                     "importance": "minor", "disclosure": "known"}],
     })]
     payload = mg.star_payload(mg.build_index(chronicle))
-    assert "event:6:meal" not in {n["id"] for n in payload["nodes"]}
+    assert "event-6-meal" not in {n["id"] for n in payload["nodes"]}
 
 
 def test_a_keepsake_pulls_its_cited_event_into_the_view():
@@ -115,9 +115,9 @@ def test_a_keepsake_pulls_its_cited_event_into_the_view():
         "events": [{"key": "meal", "title": "一顿饭", "summary": "s",
                     "importance": "minor", "disclosure": "known"}],
     })]
-    keepsake = {"cites": ["event:6:meal"], "entities": []}
+    keepsake = {"cites": ["event-6-meal"], "entities": []}
     payload = mg.star_payload(mg.build_index(chronicle), [keepsake])
-    assert "event:6:meal" in {n["id"] for n in payload["nodes"]}
+    assert "event-6-meal" in {n["id"] for n in payload["nodes"]}
 
 
 # ── keepsake store (§8.2, §12.1) ─────────────────────────────────────────
@@ -129,7 +129,7 @@ def kp_store(tmp_path):
 
 
 def test_create_rename_thought_delete_roundtrip(kp_store):
-    kp = kp_store.create(kind="event", title="那一天", cites=["event:1:saved"])
+    kp = kp_store.create(kind="event", title="那一天", cites=["event-1-saved"])
     assert kp_store.get(kp["id"])["title"] == "那一天"
     kp_store.update(kp["id"], {"title": "石桥下", "thought": "一切由此开始"})
     got = kp_store.get(kp["id"])
@@ -139,9 +139,9 @@ def test_create_rename_thought_delete_roundtrip(kp_store):
 
 
 def test_the_cited_path_is_immutable(kp_store):
-    kp = kp_store.create(kind="event", title="t", cites=["event:1:saved"])
-    kp_store.update(kp["id"], {"cites": ["event:9:other"], "title": "t2"})
-    assert kp_store.get(kp["id"])["cites"] == ["event:1:saved"]
+    kp = kp_store.create(kind="event", title="t", cites=["event-1-saved"])
+    kp_store.update(kp["id"], {"cites": ["event-9-other"], "title": "t2"})
+    assert kp_store.get(kp["id"])["cites"] == ["event-1-saved"]
 
 
 def test_an_excerpt_keeps_its_content_hash(kp_store):
@@ -163,7 +163,7 @@ def test_refusals_name_the_field(kp_store):
 
 
 def test_a_corrupt_file_loses_the_meaning_layer_never_crashes(kp_store, tmp_path):
-    kp_store.create(kind="event", title="t", cites=["event:1:saved"])
+    kp_store.create(kind="event", title="t", cites=["event-1-saved"])
     (tmp_path / "runs" / ("a" * 32) / "keepsakes.json").write_text("{not json")
     assert kp_store.list() == []
 
@@ -172,7 +172,7 @@ def test_keepsakes_live_inside_the_run_dir_so_deletion_leaves_no_residue(tmp_pat
     """§12.1 / Phase 0 bar: a life's keepsakes die with the run directory —
     the same rm-tree ``delete_run`` already performs."""
     store = KeepsakeStore(tmp_path, "b" * 32)
-    store.create(kind="event", title="t", cites=["event:1:x"])
+    store.create(kind="event", title="t", cites=["event-1-x"])
     run_dir = tmp_path / "runs" / ("b" * 32)
     assert (run_dir / "keepsakes.json").is_file()
     assert run_dir.resolve().is_relative_to(tmp_path.resolve())
