@@ -408,7 +408,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "share the same palette",
         "compose each frame independently",
         "must not be a crop, stretch, or scaled copy",
-        "low luminance",
+        "scale, tonal placement, and contrast",
         "complete tall composition",
         "passing both `markup` and `mobile` in the same call",
         "PLAYER CHOICE",
@@ -426,6 +426,8 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "this choice; never re-route it",
         "If no lane line is present, work in the pattern lane",
         "In the PATTERN lane",
+        "in "
+        "either lane",
         "Pattern does not mean uniform wallpaper or tiling the whole frame",
         "the pattern lane never explains the plot",
         "In the SCENE lane",

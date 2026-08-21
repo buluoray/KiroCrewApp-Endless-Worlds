@@ -48,7 +48,7 @@ def _wrap(fragment: str, w: int = 800, h: int = 600) -> str:
 
 def test_underlay_fragment_is_a_compilable_group_without_the_canvas_blob():
     fragment = build_underlay_fragment(_photo_bytes(bright=True), view=(800, 600))
-    assert fragment.startswith('<g opacity="0.50">') and "<svg" not in fragment
+    assert fragment.startswith('<g opacity="0.65">') and "<svg" not in fragment
     assert fragment.count("<path ") >= 1
     compile_backdrop(_wrap(fragment))  # composes into a valid, safe backdrop
 

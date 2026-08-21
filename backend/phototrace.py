@@ -145,7 +145,7 @@ def _parse_ramp(ramp: list[str] | None) -> tuple[tuple[int, int, int], ...]:
 
 def build_underlay_fragment(
     photo: bytes, *, view: tuple[int, int], ramp: list[str] | None = None,
-    opacity: float = 0.5,
+    opacity: float = 0.65,
 ) -> str:
     """Trace one photo into a ``<g>`` fragment sized exactly to ``view``.
 
@@ -194,7 +194,7 @@ def build_underlay_fragment(
 
 
 def procedural_base_fragment(
-    *, view: tuple[int, int], ramp: list[str] | None = None, opacity: float = 0.5,
+    *, view: tuple[int, int], ramp: list[str] | None = None, opacity: float = 0.65,
 ) -> str:
     """A quiet tonal base for scenes with no photographic reference.
 

@@ -1644,7 +1644,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     request = _store().read_backdrop_request(run_id)
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
-    opacity = float(args.get("opacity") or 0.5)
+    # 0.65, not 0.5: the fragment sits over a dark sky, so opacity is a
+    # brightness dial for the whole composition — at 0.5 every traced tone is
+    # pulled halfway to near-black and pages read darker than intended.
+    opacity = float(args.get("opacity") or 0.65)
     ramp = args.get("ramp")
     query = (args.get("query") or "").strip()
 
