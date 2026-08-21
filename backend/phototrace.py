@@ -63,6 +63,10 @@ _FREE_LICENSE_RE = re.compile(
     r"(?:^|\W)cc(?:0|[- ]|$)|creative commons|public domain|(?:^|\W)pd(?:\W|$)",
     re.IGNORECASE,
 )
+#: Only real photographic raster formats. A bare image/ prefix admits djvu and
+#: tiff page scans — a live query for a night street returned a 1918 novel's
+#: cover scan, which traced into legible title lettering.
+_PHOTO_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
 _MAX_PHOTO_BYTES = 12_000_000
 
 #: Injectable fetcher so tests never touch the network: (url) -> bytes.
@@ -99,7 +103,7 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
         info = (page.get("imageinfo") or [{}])[0]
         meta = info.get("extmetadata") or {}
         license_name = str((meta.get("LicenseShortName") or {}).get("value", ""))
-        if not info.get("mime", "").startswith("image/"):
+        if info.get("mime", "") not in _PHOTO_MIMES:
             continue
         if not _FREE_LICENSE_RE.search(license_name):
             continue

@@ -104,6 +104,13 @@ def test_search_reference_keeps_only_free_licensed_bitmaps(monkeypatch):
     )
     rows = search_reference("castle")
     assert [r["title"] for r in rows] == ["File:Free.jpg"]
+    # A free-licensed djvu book scan is still not a photograph: a night-street
+    # query once traced a 1918 novel's cover lettering into the underlay.
+    payload["query"]["pages"]["3"] = {"title": "File:Scan.djvu", "imageinfo": [{
+        "mime": "image/vnd.djvu", "thumburl": "https://x/scan.jpg",
+        "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
+    }]}
+    assert [r["title"] for r in search_reference("castle")] == ["File:Free.jpg"]
     assert rows[0]["license"] == "CC BY-SA 4.0"
 
 
