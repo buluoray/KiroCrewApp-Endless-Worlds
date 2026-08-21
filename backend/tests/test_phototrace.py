@@ -183,6 +183,23 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
     assert TraceStore(data, run_id).load(1) is None, "trace cleared after publication"
 
 
+def test_trace_tool_passes_a_custom_ramp_through_to_the_base(data, monkeypatch):
+    """A world/mood palette reaches the fragment; color is not welded to nocturne."""
+    monkeypatch.setattr(
+        phototrace, "_FETCH", lambda url: json.dumps({"query": {"pages": {}}}).encode()
+    )
+    run_id = "e" * 32
+    _request_backdrop(data, run_id, 4)
+    out = _call(
+        "endless_trace_reference", runId=run_id, turn=4,
+        query="nothing findable", ramp=["#0a0d14", "#182030", "#2c3c55", "#9db4d4"],
+    )
+    assert out["ok"] is True and out["underlay"] == "base"
+    stored = TraceStore(data, run_id).load(4)
+    assert "rgb(157,180,212)" in stored["desktop"], "warm stop must come from the ramp"
+    assert "201,162,39" not in stored["desktop"], "nocturne gold must not leak in"
+
+
 def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, monkeypatch):
     monkeypatch.setattr(
         phototrace, "_FETCH", lambda url: json.dumps({"query": {"pages": {}}}).encode()

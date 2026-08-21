@@ -131,6 +131,16 @@ sees is produced locally from a closed, code-owned vocabulary.
   double-buffers image decoding, so publication and viewport changes never flash a
   blank background.
 
+- **The lane is the storyteller's decision, executed — never re-routed — by the
+  illustrator.** The narrator's brief opens with `LANE: pattern` (the default:
+  atmosphere from a repeated mark grammar, no story nouns) or `LANE: scene`
+  (a concrete place or major irreversible event whose real structure matters),
+  plus `REFERENCE:` keywords and an optional `PALETTE:` hex ramp for scene
+  briefs. The illustrator prompt forbids re-routing and treats a missing lane
+  line as pattern; the old self-routed HYBRID/STORY-IMAGE gate is retired.
+  Pinned by the lane pins in
+  `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
+
 - **The SCENE lane's underlay never enters the model's context.** For pages that
   need a concrete place, `endless_trace_reference` fetches a free-licensed
   Wikimedia Commons photo (license short-name must read as CC/CC0/public

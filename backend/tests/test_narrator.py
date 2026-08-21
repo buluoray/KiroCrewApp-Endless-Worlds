@@ -419,30 +419,36 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "one motion verb or none",
         "Work with SVG's strengths",
         "pattern-first and architecture-first",
-        "silently choose exactly one lane",
-        "PATTERN is the default",
+        "first "
+        "line declares the lane",
+        "`LANE: pattern` or `LANE: scene`",
+        "The storyteller already made "
+        "this choice; never re-route it",
+        "If no lane line is present, work in the pattern lane",
+        "In the PATTERN lane",
         "Pattern does not mean uniform wallpaper or tiling the whole frame",
-        "Repeated units may accumulate, align, bend, thin, interrupt, or fade",
+        "the pattern lane never explains the plot",
+        "In the SCENE lane",
+        "call endless_trace_reference",
+        "REFERENCE keywords",
+        "its hex stops as `ramp`",
+        'one `<g id="etr-underlay"/>` '
+        "in EACH SVG",
+        "never draw the underlay yourself",
+        "three to six decisive spatial facts",
+        "every overlay mark traceable to one of them",
+        "Organic "
+        "forms (trees, fog, water, foliage) stay in the underlay",
+        "`underlay: base`",
+        "retried once with different keywords",
         "one large macro-form",
         "arch-like span",
         "Localized light, shadow, and tonal gradients may organize that form",
         "brightest region may sit near an edge or the top",
-        "Pattern may fill the frame, occupy one region, or leave substantial negative space",
-        "Do not add a separate literal story noun",
-        "HYBRID is second",
-        "pattern-dominant composition with exactly one small",
-        "STORY IMAGE is the exception",
-        "ART BRIEF explicitly asks for a recognizable dominant image",
-        "If uncertain, choose PATTERN",
-        "just because the task names plot nouns",
-        "major irreversible event",
-        "cohere into the dominant silhouette",
         "need not encode the irreversible event",
-        "without repeating uniformly everywhere",
         "direction, interruption, density, light, and negative space",
         "without forcing narrative symbolism",
         "Straight lines, grids, tiles, windows",
-        "one consequential object",
         "Prefer environment and evidence",
         "large anatomically detailed people or animals",
         "small, distant, cropped, shadowed",
@@ -474,10 +480,11 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "built-in `read` tool"
     ) < prompt.index("endless_commit_backdrop once")
 
+    trace_tool = OWN_SERVER_REF + "/endless_trace_reference"
     draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
     commit_tool = OWN_SERVER_REF + "/endless_commit_backdrop"
-    assert illustrator_agent["tools"] == [draft_tool, commit_tool, "read"]
-    assert illustrator_agent["allowedTools"] == [draft_tool, commit_tool, "read"]
+    assert illustrator_agent["tools"] == [trace_tool, draft_tool, commit_tool, "read"]
+    assert illustrator_agent["allowedTools"] == [trace_tool, draft_tool, commit_tool, "read"]
     assert illustrator_agent["toolsSettings"]["read"]["allowedPaths"] == [
         "**/runs/*/backdrop-previews/backdrop-preview-*.png"
     ]
@@ -496,6 +503,10 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "make a fully ornamental field with no recognizable story noun",
         "fully ornamental, world-specific repeating pattern",
         "Pattern-first may mean pattern-only",
+        "silently choose exactly one lane",
+        "HYBRID is second",
+        "STORY IMAGE is the exception",
+        "If uncertain, choose PATTERN",
     ):
         assert rejected not in prompt, f"illustrator prompt retained: {rejected!r}"
 
@@ -509,6 +520,10 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     assert fallback in narrator_agent["tools"]
     assert fallback in narrator_agent["allowedTools"]
     assert "Never call endless_commit_fallback_backdrop during a normal turn" in narrator
+    # The lane decision lives with the storyteller: the brief's first line
+    # declares it, and scene briefs carry the photo-search keywords.
+    for lane_pin in ("LANE: pattern", "LANE: scene", "REFERENCE:", "PALETTE:"):
+        assert lane_pin in narrator, f"narrator brief guidance missing: {lane_pin!r}"
     assert "endless_set_backdrop" not in narrator
     for recipe in (
         "viewBox='0 0 800 600'", "viewBox='0 0 450 900'",

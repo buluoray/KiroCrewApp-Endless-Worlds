@@ -467,6 +467,10 @@ _TOOLS: list[dict[str, Any]] = [
                 "turn": {"type": "integer", "minimum": 0},
                 "query": {"type": "string", "maxLength": 200},
                 "opacity": {"type": "number", "minimum": 0.2, "maximum": 0.8},
+                "ramp": {
+                    "type": "array", "minItems": 3, "maxItems": 8,
+                    "items": {"type": "string", "pattern": "^#?[0-9a-fA-F]{6}$"},
+                },
             },
         },
     },
@@ -1641,6 +1645,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
     opacity = float(args.get("opacity") or 0.5)
+    ramp = args.get("ramp")
     query = (args.get("query") or "").strip()
 
     source: dict[str, str] | None = None
@@ -1650,16 +1655,20 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         for candidate in search_reference(query):
             try:
                 photo = fetch_photo(candidate["url"])
-                desktop = build_underlay_fragment(photo, view=(800, 600), opacity=opacity)
-                mobile = build_underlay_fragment(photo, view=(450, 900), opacity=opacity)
+                desktop = build_underlay_fragment(
+                    photo, view=(800, 600), ramp=ramp, opacity=opacity
+                )
+                mobile = build_underlay_fragment(
+                    photo, view=(450, 900), ramp=ramp, opacity=opacity
+                )
             except BackdropError:
                 continue
             source = {k: candidate[k] for k in ("title", "pageUrl", "license")}
             kind = "reference"
             break
     if desktop is None or mobile is None:
-        desktop = procedural_base_fragment(view=(800, 600), opacity=opacity)
-        mobile = procedural_base_fragment(view=(450, 900), opacity=opacity)
+        desktop = procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity)
+        mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
 
     store = _trace_store(run_id)
     fragment_id = store.save(turn=turn, desktop=desktop, mobile=mobile, source=source)
