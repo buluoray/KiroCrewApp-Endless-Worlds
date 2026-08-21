@@ -497,7 +497,9 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         'one `<g id="etr-underlay"/>` '
         "in EACH SVG",
         "never draw the underlay yourself",
-        "The first trace centres both variants",
+        "returns several traced CANDIDATES",
+        "call endless_select_reference with the `index`",
+        "The traces centre both variants",
         "`desktopFocalX`/`desktopFocalY`",
         "`mobileFocalX`/`mobileFocalY`",
         "chosen independently",
@@ -553,10 +555,15 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     ) < prompt.index("Commit only that second `draftId`")
 
     trace_tool = OWN_SERVER_REF + "/endless_trace_reference"
+    select_tool = OWN_SERVER_REF + "/endless_select_reference"
     draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
     commit_tool = OWN_SERVER_REF + "/endless_commit_backdrop"
-    assert illustrator_agent["tools"] == [trace_tool, draft_tool, commit_tool, "read"]
-    assert illustrator_agent["allowedTools"] == [trace_tool, draft_tool, commit_tool, "read"]
+    assert illustrator_agent["tools"] == [
+        trace_tool, select_tool, draft_tool, commit_tool, "read"
+    ]
+    assert illustrator_agent["allowedTools"] == [
+        trace_tool, select_tool, draft_tool, commit_tool, "read"
+    ]
     assert illustrator_agent["toolsSettings"]["read"]["allowedPaths"] == [
         "**/runs/*/backdrop-previews/backdrop-preview-*.png"
     ]

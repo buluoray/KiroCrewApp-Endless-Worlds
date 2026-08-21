@@ -1,5 +1,11 @@
 import { defineConfig } from 'vite'
 
+import manifest from '../app.json'
+
+// Single source of truth: the version shown in the app footer is read from the
+// manifest at build time, so a bump in app.json cannot drift from the UI.
+const APP_VERSION: string = manifest.version
+
 /**
  * Builds the app's UI into a single ES module the dashboard loads directly.
  *
@@ -27,6 +33,9 @@ const HOST_PROVIDED = [
 ]
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   build: {
     // Straight into the directory the manifest's `ui.entry` names, so a build is
     // the only step between source and what the dashboard serves.

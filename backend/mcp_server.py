@@ -86,12 +86,14 @@ from backdrop import (  # noqa: E402
     compile_backdrop,
 )
 from phototrace import (  # noqa: E402
+    TRACE_CANDIDATE_COUNT,
+    CandidateStore,
     TraceStore,
     build_underlay_fragment_bounded,
     compose_with_underlay,
     fetch_photo,
     procedural_base_fragment,
-    search_reference,
+    search_candidates,
 )
 from chapters import (  # noqa: E402
     ChapterError,
@@ -515,19 +517,20 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_trace_reference",
         "description": (
-            "SCENE lane only: fetch an attribution-free CC0/public-domain "
-            "reference photograph and trace it into palette-disciplined "
-            "desktop+mobile underlay fragments, stored server-side. Pass `query` "
-            "(concrete English keywords for a place or structure, e.g. 'stone "
-            "bridge river mist'); after reading the first previews, optional "
-            "desktop/mobile focal X/Y values independently move each crop from 0 "
-            "(left/top) to 1 (right/bottom). Omit the query, or accept the "
-            "automatic fallback when no usable photo exists, to get a quiet "
-            "procedural tonal base instead. Returns preview PNG paths to READ and "
-            "judge, never the fragment itself. To use the stored underlay, place "
-            "exactly one `<g id=\"etr-underlay\"/>` in each SVG where the underlay "
-            "belongs (above your sky, below every mark); the server splices it in "
-            "at draft and commit time."
+            "SCENE lane only: search attribution-free (CC0/public-domain) reference "
+            "images and trace the top few into palette-disciplined desktop+mobile "
+            "underlay candidates, stored server-side. `source` picks the lane: "
+            "'photo' (default) searches Openverse — a CC aggregator spanning "
+            "Wikimedia Commons, Flickr and museums, far larger than Commons alone — "
+            "then Commons; 'art' searches the Met (public-domain artworks) then the "
+            "Smithsonian. Pass `query` (concrete English keywords for a place or "
+            "structure, e.g. 'stone bridge river mist'); optional desktop/mobile "
+            "focal X/Y move each crop from 0 (left/top) to 1 (right/bottom). Returns "
+            "a `candidates` list, each with its own preview PNG paths (fragments "
+            "never enter your context) — READ every candidate's previews, then call "
+            "endless_select_reference with the best `index`. When no usable photo "
+            "exists the tool instead returns a single procedural tonal base "
+            "(`underlay: base`) that is already active, with nothing to select."
         ),
         "inputSchema": {
             "type": "object",
@@ -537,6 +540,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
                 "query": {"type": "string", "maxLength": 200},
+                "source": {"type": "string", "enum": ["photo", "art"]},
                 "opacity": {"type": "number", "minimum": 0.2, "maximum": 0.8},
                 "desktopFocalX": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "desktopFocalY": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -546,6 +550,28 @@ _TOOLS: list[dict[str, Any]] = [
                     "type": "array", "minItems": 3, "maxItems": 8,
                     "items": {"type": "string", "pattern": "^#?[0-9a-fA-F]{6}$"},
                 },
+            },
+        },
+    },
+    {
+        "name": "endless_select_reference",
+        "description": (
+            "SCENE lane only: after reading the candidate previews from "
+            "endless_trace_reference, choose the one whose real structure and light "
+            "best fit the brief by passing its `index`. The chosen reference becomes "
+            "the page's active underlay; the others are discarded. Only call this "
+            "when endless_trace_reference returned `candidates` — a procedural "
+            "`base` result is already active and needs no selection. After "
+            "selecting, place exactly one `<g id=\"etr-underlay\"/>` in each SVG."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "turn", "index"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "turn": {"type": "integer", "minimum": 0},
+                "index": {"type": "integer", "minimum": 0},
             },
         },
     },
@@ -1820,6 +1846,29 @@ def _trace_store(run_id: str) -> TraceStore:
     return TraceStore(_DATA, run_id)
 
 
+def _candidate_store(run_id: str) -> CandidateStore:
+    """Server-side traced reference candidates awaiting the Illustrator's pick."""
+    return CandidateStore(_DATA, run_id)
+
+
+def _render_trace_previews(run_id: str, tag: str, desktop: str, mobile: str) -> dict[str, str]:
+    """Render safe desktop+mobile PNG thumbnails for one underlay; return their paths."""
+    from backdrop import _render_svg_thumbnail
+
+    preview_dir = _DATA / "runs" / run_id / "backdrop-previews"
+    previews: dict[str, str] = {}
+    for label, fragment in (("desktop", desktop), ("mobile", mobile)):
+        vw, vh, w, h = (800, 600, 400, 300) if label == "desktop" else (450, 900, 150, 300)
+        doc = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vw} {vh}">'
+            f'<rect width="{vw}" height="{vh}" fill="#0b0e17"/>{fragment}</svg>'
+        )
+        path = preview_dir / f"backdrop-preview-trace-{tag}-{label}.png"
+        _render_svg_thumbnail(doc, path, w, h)
+        previews[label] = str(path.resolve())
+    return previews
+
+
 def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
     """Splice a stored underlay, failing closed when a traced scene omits it."""
     trace = _trace_store(run_id).load(turn)
@@ -1832,9 +1881,15 @@ def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
 
 
 def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
-    """Build (or fall back to) a scene underlay and stash it server-side."""
-    from backdrop import _render_svg_thumbnail
+    """Trace the top reference candidates for the Illustrator to choose among.
 
+    The *photo* lane (default) searches Openverse then Wikimedia Commons; the *art*
+    lane searches the Met then the (key-gated) Smithsonian. Up to
+    TRACE_CANDIDATE_COUNT references are traced and stashed server-side; the
+    Illustrator reads the per-candidate previews and calls endless_select_reference
+    to pick the most fitting one. When no photo matches, a single procedural tonal
+    base is set active directly — there is nothing to choose.
+    """
     run_id = args["runId"]
     turn = int(args["turn"])
     request = _store().read_backdrop_request(run_id)
@@ -1846,6 +1901,9 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     opacity = float(args.get("opacity", 0.65))
     ramp = args.get("ramp")
     query = (args.get("query") or "").strip()
+    lane = str(args.get("source", "photo"))
+    if lane not in {"photo", "art"}:
+        raise BackdropError("a trace source must be 'photo' or 'art'")
     desktop_focal = (
         float(args.get("desktopFocalX", 0.5)),
         float(args.get("desktopFocalY", 0.5)),
@@ -1855,11 +1913,9 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         float(args.get("mobileFocalY", 0.5)),
     )
 
-    source: dict[str, str] | None = None
-    kind = "base"
-    desktop = mobile = None
+    traced: list[dict[str, Any]] = []
     if query:
-        for candidate in search_reference(query):
+        for candidate in search_candidates(query, lane):
             try:
                 photo = fetch_photo(candidate["url"])
                 desktop = build_underlay_fragment_bounded(
@@ -1872,40 +1928,91 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
                 )
             except BackdropError:
                 continue
-            source = {k: candidate[k] for k in ("title", "pageUrl", "license")}
-            kind = "reference"
-            break
-    if desktop is None or mobile is None:
-        desktop = procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity)
-        mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
+            traced.append({
+                "desktop": desktop, "mobile": mobile,
+                "source": {k: candidate[k] for k in ("title", "pageUrl", "license")},
+            })
+            if len(traced) >= TRACE_CANDIDATE_COUNT:
+                break
 
-    store = _trace_store(run_id)
-    fragment_id = store.save(
-        turn=turn, desktop=desktop, mobile=mobile, source=source,
-        kind=kind, query=query,
+    if traced:
+        # Offer the choice: stash candidates and clear any stale active underlay so a
+        # leftover from an earlier trace cannot be spliced before the Illustrator picks.
+        _candidate_store(run_id).save(turn=turn, query=query, candidates=traced)
+        _trace_store(run_id).clear()
+        options = [
+            {
+                "index": i,
+                "source": cand["source"],
+                "previews": _render_trace_previews(
+                    run_id, f"cand{turn}-{i}", cand["desktop"], cand["mobile"]
+                ),
+            }
+            for i, cand in enumerate(traced)
+        ]
+        return {
+            "underlay": "reference",
+            "candidateCount": len(options),
+            "candidates": options,
+            "turn": turn,
+            "next": (
+                "read every candidate's desktop AND mobile previews together, then "
+                "call endless_select_reference with the `index` whose real structure "
+                "and light best fit the brief. Draw only after selecting."
+            ),
+        }
+
+    # No usable reference: a single procedural base is the underlay, nothing to pick.
+    desktop = procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity)
+    mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
+    _candidate_store(run_id).clear()
+    fragment_id = _trace_store(run_id).save(
+        turn=turn, desktop=desktop, mobile=mobile, source=None, kind="base", query=query,
     )
-    preview_dir = _DATA / "runs" / run_id / "backdrop-previews"
-    previews: dict[str, str] = {}
-    for label, fragment, w, h in (("desktop", desktop, 400, 300), ("mobile", mobile, 150, 300)):
-        vw, vh = (800, 600) if label == "desktop" else (450, 900)
-        doc = (
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vw} {vh}">'
-            f'<rect width="{vw}" height="{vh}" fill="#0b0e17"/>{fragment}</svg>'
-        )
-        path = preview_dir / f"backdrop-preview-trace-{fragment_id}-{label}.png"
-        _render_svg_thumbnail(doc, path, w, h)
-        previews[label] = str(path.resolve())
+    previews = _render_trace_previews(run_id, fragment_id, desktop, mobile)
     return {
-        "underlay": kind,
+        "underlay": "base",
         "fragmentId": fragment_id,
         "turn": turn,
-        "source": source,
+        "source": None,
         "previews": previews,
         "next": (
-            "read both previews; if one crop loses the structure, spend the one "
-            "allowed retry on that variant's focal controls; then put one "
-            "<g id=\"etr-underlay\"/> in each SVG. Add overlay marks only when "
-            "they materially clarify architecture or light"
+            "no photographic reference matched, so a quiet procedural tonal base is "
+            "ready. Put one <g id=\"etr-underlay\"/> in each SVG and compose the scene "
+            "over it yourself."
+        ),
+    }
+
+
+def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
+    """Promote one traced candidate to the active underlay after the Illustrator's review."""
+    run_id = args["runId"]
+    turn = int(args["turn"])
+    index = int(args["index"])
+    candidates = _candidate_store(run_id).load(turn)
+    if not candidates:
+        raise BackdropError(
+            "no reference candidates are waiting for this page; call "
+            "endless_trace_reference first"
+        )
+    options = candidates.get("candidates") or []
+    if not 0 <= index < len(options):
+        raise BackdropError(f"pick an index between 0 and {len(options) - 1}")
+    chosen = options[index]
+    fragment_id = _trace_store(run_id).save(
+        turn=turn, desktop=chosen["desktop"], mobile=chosen["mobile"],
+        source=chosen.get("source"), kind="reference",
+        query=str(candidates.get("query") or ""),
+    )
+    _candidate_store(run_id).clear()
+    return {
+        "selected": index,
+        "fragmentId": fragment_id,
+        "source": chosen.get("source"),
+        "next": (
+            "the chosen reference is now the page's underlay. Put exactly one "
+            "<g id=\"etr-underlay\"/> in each SVG (above your sky, below every mark); "
+            "the server splices it in at draft and commit."
         ),
     }
 
@@ -2086,6 +2193,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_dismiss_scene": _dismiss_scene,
     "endless_paint_backdrop": _paint_backdrop,
     "endless_trace_reference": _trace_reference,
+    "endless_select_reference": _select_reference,
     "endless_submit_backdrop_draft": _submit_backdrop_draft,
     "endless_commit_backdrop": _commit_backdrop,
     "endless_commit_fallback_backdrop": _commit_fallback_backdrop,
