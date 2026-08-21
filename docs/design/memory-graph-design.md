@@ -188,7 +188,7 @@ The Narrator must not declare these fields; they are all written by the server:
 
 - `runId`
 - `turn`
-- the canonical event ID, e.g. `event:12:saved-elin`
+- the canonical event ID, e.g. `event-12-saved-elin`
 - creation time
 - source tool and schema version
 - the final ruling on player visibility

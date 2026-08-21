@@ -92,7 +92,7 @@ directory, so deleting a life leaves no residue.
 
 - **Exports carry no network, no script, no run id, no internal id, and are
   byte-deterministic.** The rendered artifacts contain no `<script>`, no `token`,
-  no run id, and no `event:` ids; the only permitted URL is the SVG `xmlns`.
+  no run id, and no `event-<turn>-` ids; the only permitted URL is the SVG `xmlns`.
   Pinned by `test_exports_carry_no_network_no_script_no_run_or_event_ids`. The
   export filename derives from the card id alone (never title, never run id), and
   `StoryCardStore` validates card ids as `[0-9a-f]{12}` so a traversal id

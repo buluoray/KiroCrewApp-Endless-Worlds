@@ -37,39 +37,87 @@ meaning half (keepsakes, story cards, star lenses) is in
   thing a reader infers, which is what makes every fact traceable.
 
 - **Canonical event ids are server-minted.** `event_id(turn, key)` mints
-  `event:<turn>:<key>`; the narrator supplies only `key`, unique within its turn.
+  `event-<turn>-<key>`; the narrator supplies only `key`, unique within its turn.
+  The shape is a plain SLUG, not the `event:<turn>:<key>` it once was, because this
+  is the one internal id the narrator is SHOWN (`memoryCandidates`, its own
+  `echoes`) and a narrator writes in the shapes it is shown — the colon came back
+  as `character:lin-shuang` in its entity ids and failed the id rule every time.
+  Nothing the narrator can see now carries a separator it must not use
+  (`test_the_canonical_id_shape_is_a_slug_the_narrator_can_safely_mirror`), and
+  the same id written where a `key` belongs is unwrapped rather than nested
+  (`test_a_canonical_id_written_where_a_key_belongs_is_unwrapped`).
   Because the id encodes the turn, a `key` collision within one turn is the only
-  uniqueness the caller must guarantee (`test_duplicate_event_key_in_one_turn_is_refused`),
-  and ids from another run cannot be forged.
+  uniqueness the caller has to resolve — and it resolves it by suffixing rather than
+  refusing (`test_a_reused_event_key_is_suffixed_so_both_events_survive`), so both
+  events survive. Ids from another run cannot be forged.
 
-- **Granular salvage — a bad piece is dropped, never the whole block, and the turn
-  is never blocked.** `sanitize_memory(memory, index, *, turn)` returns a CLEAN block
-  carrying only the parts that pass, plus a `dropped` list — one entry per removed
-  thing, each with an exact `field` path (e.g. `memory.events[0].echoes[1]`), an
-  `expected`, and a narrator-facing `detail`. A structurally broken event (malformed
-  or duplicate or replayed key, missing title/summary, unknown disclosure) is dropped
-  whole, but an otherwise-good event is KEPT and loses only the individual references
-  that do not resolve — an unknown participant, a non-place `place`, an unknown
-  importance, a dangling `echoes`/`corrects` — so a real memory is never lost to one
-  bad tag. A relation is a single edge, so a bad endpoint/type/change/`reasonEvent`
-  drops that one relation and never the events. The caller
-  (`mcp_server._advance_turn`) commits what survived and surfaces each drop as a
-  non-blocking `panel: "memory"` warning; a block whose parts all fail records no
-  memory. Nothing is auto-created and nothing is back-filled from prose
-  (`test_unknown_participant_is_dropped_but_the_event_survives`), an entity kind never
-  changes without an explicit merge (`test_an_entity_kind_conflict_drops_only_that_entity`),
-  an unrecognized kind is KEPT and bucketed as the generic `object` rather than dropped
-  (`test_an_unknown_kind_is_kept_as_object_not_dropped`,
-  `test_an_unknown_kind_on_a_known_entity_adopts_the_established_kind`),
-  same-name-different-id is never auto-merged (`test_same_name_different_id_is_never_merged`),
-  a duplicate event key keeps the first (`test_duplicate_event_key_drops_the_second_keeps_the_first`),
-  and a `place` must resolve to a `place` (`test_a_non_place_place_is_dropped_but_the_event_survives`).
-- **A thread is its own namespace, not an entity — `opened` declares it.** Threads
+- **Repair first, drop last — the block is fixed, not refused, and the turn is never
+  blocked.** `sanitize_memory(memory, index, *, turn)` returns a CLEAN block with the
+  narrator's slips REPAIRED, plus a `dropped` list — one entry per thing genuinely
+  removed, each with an exact `field` path (e.g. `memory.events[0].participants[0]`),
+  an `expected`, and a narrator-facing `detail`. The slips a narrator actually makes
+  are spelling, not meaning, so each is repaired in place:
+  - a **malformed id or reference** — a colon namespace (`character:lin-shuang`), an
+    unslugified space (`darkflame court`) — is repaired by `repair_id` /
+    `_repair_ref`, which prefer the reading the graph already knows so a reference
+    lands on the entity it meant instead of minting a near-duplicate beside it
+    (`test_a_namespaced_entity_id_is_repaired_not_dropped`,
+    `test_a_repaired_reference_lands_on_the_entity_it_meant`). The colon shape is not
+    the narrator's invention: `read_runtime` shows it canonical event ids, and it
+    mirrors them. Only an id with nothing usable left is dropped
+    (`test_an_id_with_nothing_usable_left_is_still_dropped`). The same instinct in a
+    shape the id rule cannot see — `character-lin-shuang`, a legal slug — is unwrapped
+    ONLY when what remains is an id the graph already knows, since `place-of-bones` is
+    an id in its own right
+    (`test_a_kind_prefixed_id_is_only_unwrapped_when_it_lands_on_a_known_entity`);
+  - a **closed vocabulary** (kind, disclosure, importance, thread effect, relation
+    change) accepts a synonym and maps it to the canonical member via `_repair_word`
+    (longest-hint-first substring match), falling back to that vocabulary's
+    documented `DEFAULT_*`; every consumer therefore still sees only the closed set
+    (`test_a_narrators_word_for_a_disclosure_is_read_not_refused`,
+    `test_a_narrators_word_for_a_relation_change_is_read_not_refused`,
+    `test_an_unknown_kind_is_kept_as_object_not_dropped`,
+    `test_an_unknown_kind_on_a_known_entity_adopts_the_established_kind`). A kind
+    still never changes without an explicit merge — the re-mention is recorded at the
+    established kind (`test_an_entity_kind_conflict_keeps_the_established_kind`);
+  - a **missing title or summary** is taken from whichever of the two was written
+    (`_lead` cuts a title-length lead at a clause boundary), and a missing key is
+    derived from the title, since a key only has to be unique inside its own turn
+    (`test_a_titleless_event_takes_its_title_from_its_summary`,
+    `test_a_summaryless_event_takes_its_summary_from_its_title`,
+    `test_an_event_named_only_by_its_summary_still_gets_a_key`). An event is dropped
+    only when it has neither title nor summary
+    (`test_an_event_with_neither_title_nor_summary_is_dropped`);
+  - a **colliding event key** (used twice this turn, or already recorded for this
+    turn) is suffixed `-2`, `-3`, … so both events survive and history is still
+    append-only (`test_a_reused_event_key_is_suffixed_so_both_events_survive`,
+    `test_a_key_already_recorded_for_this_turn_is_suffixed_not_dropped`);
+  - an **old event named by its bare key** resolves to its canonical id in `echoes`,
+    `corrects` and `reasonEvent` (`test_a_bare_event_key_in_an_echo_resolves_to_its_canonical_id`);
+  - a **relation whose `reasonEvent` names nothing** keeps the relation and loses only
+    the reason, which was always optional
+    (`test_a_dangling_reason_costs_the_reason_not_the_relation`).
+
+  What is still DROPPED is exactly what repairing would have to INVENT: a reference to
+  an entity never declared (participant, `place`, relation endpoint), an `echoes` /
+  `corrects` naming an event that does not exist, a relation with no type, and anything
+  whose id repairs to nothing. Nothing is auto-created and nothing is back-filled from
+  prose (`test_unknown_participant_is_dropped_but_the_event_survives`,
+  `test_same_name_different_id_is_never_merged`,
+  `test_a_non_place_place_is_dropped_but_the_event_survives`). Repairs are LOGGED
+  (`logger.info`), never warned: the narrator cannot act on them and the shapes it is
+  shown are what provoked most of them. The caller (`mcp_server._advance_turn`) commits
+  the repaired block and surfaces only the genuine drops as non-blocking
+  `panel: "memory"` warnings; a block whose parts all fail records no memory.
+- **A thread is its own namespace, not an entity — naming it opens it.** Threads
   are tracked in `index["threads"]` (opened/resolved/lastTouched), built from events
   and independent of `entities`. So opening a thread needs no prior `kind:thread`
   entity: an event's `threads` entry with effect `opened` DECLARES it
-  (`test_opening_a_thread_needs_no_prior_entity`), and only `advanced`/`resolved` on a
-  thread never opened is dropped (`test_advancing_a_never_opened_thread_is_dropped_but_the_event_survives`,
+  (`test_opening_a_thread_needs_no_prior_entity`), and `advanced`/`resolved` on a
+  thread never opened is kept and opens it on that first touch — `build_index` sets
+  `opened` on the first record whatever its effect, so the thread reads as open
+  afterwards rather than being invisible to every open-threads reading
+  (`test_advancing_a_never_opened_thread_opens_it_on_that_first_mention`,
   `test_resolving_a_previously_opened_thread_is_kept`). At the tool surface a bad
   reference is salvaged and the event still recorded
   (`test_a_bad_reference_is_salvaged_and_the_turn_keeps_the_event`), and a `memory`
@@ -78,8 +126,10 @@ meaning half (keepsakes, story cards, star lenses) is in
   `test_memory_sent_as_a_non_json_string_is_dropped_not_fatal`).
 
 - **Append-only and `(runId, turn)` idempotent — a retry never duplicates.**
-  Replaying a key for a turn already recorded is refused (`already recorded for
-  turn N`); at the tool surface a retried turn returns `committed:false` and the
+  History is never rewritten: a key already recorded for this turn does not
+  overwrite that event, it steps aside to a free suffix
+  (`test_a_key_already_recorded_for_this_turn_is_suffixed_not_dropped`). Turn-level
+  idempotence is upstream — at the tool surface a retried turn returns `committed:false` and the
   rebuilt index still holds exactly one event and one relation. Pinned by
   `test_a_retried_turn_never_duplicates_nodes_or_edges`.
 
@@ -119,7 +169,7 @@ meaning half (keepsakes, story cards, star lenses) is in
 - **Life isolation via non-resolving cross-life ids.** An echo target must be a
   canonical id of an event *in this life*, which makes referencing another run
   structurally impossible (another run's ids do not resolve): pinned by
-  `test_echo_target_must_be_a_real_event_of_this_life`. Recall is per-run at the
+  `test_a_dangling_echo_is_dropped_but_the_event_survives`. Recall is per-run at the
   tool surface too — a second run sharing the store returns no `memoryCandidates`
   (`test_read_runtime_returns_candidates_from_this_life_only`). Follow-up reads
   are bounded: `event_neighbourhood(index, ids)` resolves only the named events

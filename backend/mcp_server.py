@@ -150,10 +150,11 @@ _TOOLS: list[dict[str, Any]] = [
             "`echoes` — that is the only thing that makes the world's memory of it "
             "real. To open a NEW thread, list it under an event's `threads` with "
             "effect \"opened\" — that declares it, no separate entity needed; only "
-            "`advanced`/`resolved` need a thread opened before. Memory is salvaged, "
-            "not rejected: an unresolved reference is dropped and warned while the "
-            "event around it is still recorded. Facts are never extracted from your "
-            "prose."
+            "`advanced`/`resolved` need a thread opened before. Memory is REPAIRED, "
+            "not rejected: a namespaced id, a synonym for a closed vocabulary, a "
+            "reused key or a missing title are all read and fixed server-side, and "
+            "only a reference to something never declared is dropped and warned. "
+            "Facts are never extracted from your prose."
         ),
         "inputSchema": {
             "type": "object",
@@ -189,9 +190,11 @@ _TOOLS: list[dict[str, Any]] = [
                                 "properties": {
                                     "id": {"type": "string", "maxLength": 64},
                                     # Relaxed from an enum to a bounded string:
-                                    # sanitize_memory validates the kind against
-                                    # KINDS and DROPS an entity with an unknown one,
-                                    # so a mangled value never refuses the turn. The
+                                    # sanitize_memory reads the kind against KINDS
+                                    # and COERCES an unknown one (to the entity's
+                                    # established kind, else the generic "object"),
+                                    # so a mangled value never refuses the turn nor
+                                    # costs the entity. The
                                     # `additionalProperties: False` here is KEPT on
                                     # purpose — it is the security guard that stops a
                                     # narrator declaring the app-only `inheritsFrom`
@@ -675,12 +678,23 @@ def _validate(name: str, args: Any, *, path: str = "") -> None:
 
 
 def _check(schema: dict[str, Any], value: Any, path: str) -> None:
+    """Check one node, and STRIP a null-valued optional field on the way past.
+
+    A narrator with nothing for an optional field writes ``"place": null`` as
+    readily as it omits the key, and the two are the same statement — so treating
+    the first as a type error refused whole turns (prose, choices and state
+    included) over a field that was saying "nothing here". Absent is what it
+    means, so absent is what it becomes, in place, before any type check. A
+    REQUIRED field is untouched: ``prose: null`` is a real failure and must still
+    refuse the call rather than commit a blank page.
+    """
     kind = schema.get("type")
 
     if kind == "object":
         if not isinstance(value, dict):
             raise ToolInputError(path, f"an object, got {type(value).__name__}")
-        for field in schema.get("required", []):
+        required = schema.get("required", [])
+        for field in required:
             if field not in value:
                 raise ToolInputError(f"{path}.{field}", "required, and absent")
         props = schema.get("properties", {})
@@ -689,8 +703,12 @@ def _check(schema: dict[str, Any], value: Any, path: str) -> None:
                 if key not in props:
                     raise ToolInputError(f"{path}.{key}", "not a field of this call")
         for key, sub in props.items():
-            if key in value:
-                _check(sub, value[key], f"{path}.{key}")
+            if key not in value:
+                continue
+            if value[key] is None and key not in required:
+                del value[key]  # a null optional field is an absent one
+                continue
+            _check(sub, value[key], f"{path}.{key}")
         return
 
     if kind == "array":
@@ -701,6 +719,9 @@ def _check(schema: dict[str, Any], value: Any, path: str) -> None:
             raise ToolInputError(path, f"at most {cap} entries, got {len(value)}")
         item = schema.get("items")
         if item:
+            # A null ENTRY is not a statement about a field, it is a hole in a list
+            # the narrator built — drop it rather than refuse the turn over it.
+            value[:] = [entry for entry in value if entry is not None]
             for i, entry in enumerate(value):
                 _check(item, entry, f"{path}[{i}]")
         return
@@ -1124,14 +1145,15 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
             }
 
     # The world's memory is enrichment, not the story (like milestones and systems):
-    # it is SALVAGED, never rejected whole. sanitize_memory returns the block with only
-    # its valid parts kept — a structurally broken event is dropped, but an otherwise
-    # good event keeps its title/summary and loses only the references that do not
-    # resolve — so a stray slip (a space in a CJK id, one unopened thread tag) never
-    # costs the real memory around it, let alone the prose and choices already written.
-    # Each dropped piece is surfaced as a non-blocking warning so the narrator can
-    # re-declare it later. Facts are never back-filled from prose, so a block whose
-    # parts all fail simply records no structured memory.
+    # it is REPAIRED, never rejected whole. sanitize_memory fixes what the narrator
+    # merely mis-spelled — a colon-namespaced id (the shape read_runtime itself shows
+    # it), an unslugified space, a synonym for a closed vocabulary, a key already used
+    # this turn, a title it wrote only into the summary — and drops only what would
+    # have to be INVENTED to keep: a reference to an entity never declared. So a
+    # stray slip never costs the real memory around it, let alone the prose and
+    # choices already written. Repairs are logged, not warned; only genuine drops
+    # reach the narrator, so it can re-declare them later. Facts are never
+    # back-filled from prose, so a block whose parts all fail records no memory.
     memory = args.get("memory")
     memory_drops: list[dict[str, Any]] = []
     if memory is not None:

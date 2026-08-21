@@ -135,20 +135,20 @@ def test_one_life_from_birth_to_inheritance(world):
     # ── Act III · 回响 ──────────────────────────────────────────────────
     runtime = call("endless_read_runtime", runId=run)
     candidate_ids = {c["id"] for c in runtime.get("memoryCandidates") or []}
-    assert "event:1:saved" in candidate_ids, "the open thread was not recalled"
+    assert "event-1-saved" in candidate_ids, "the open thread was not recalled"
 
     narrate(run, 4, "多年后，她记得那一天。", {"alive": True, "age": 19}, memory={
         "events": [
             {"key": "repaid", "title": "艾琳还了人情", "summary": "她记得石桥下的那一天。",
              "participants": ["player", "elin"],
              "threads": [{"id": "debt", "effect": "resolved"}],
-             "echoes": ["event:1:saved"], "disclosure": "known"},
+             "echoes": ["event-1-saved"], "disclosure": "known"},
         ],
     })
     view = build_play_view(pack.template, store.read_state(run),
                            chronicle=store.read_chronicle(run))
     (marker,) = view["echoes"]
-    assert marker["sourceTurn"] == 1 and marker["currentId"] == "event:4:repaid"
+    assert marker["sourceTurn"] == 1 and marker["currentId"] == "event-4-repaid"
 
     # ── Act IV · 收藏与星图 ─────────────────────────────────────────────
     status, kp = handle(
@@ -164,7 +164,7 @@ def test_one_life_from_birth_to_inheritance(world):
     )
     assert status == 200
     node_ids = {n["id"] for n in star["nodes"]}
-    assert {"event:1:saved", "event:4:repaid", "elin", "bridge", "debt"} <= node_ids
+    assert {"event-1-saved", "event-4-repaid", "elin", "bridge", "debt"} <= node_ids
     assert len(star["keepsakes"]) == 1
     assert any(e["type"] == "echoes" for e in star["edges"])
 
@@ -245,4 +245,4 @@ def test_one_life_from_birth_to_inheritance(world):
     )
     assert status == 200
     heir_nodes = {n["id"] for n in heir_star["nodes"]}
-    assert "elin" in heir_nodes and "event:0:legacy-bridge" in heir_nodes
+    assert "elin" in heir_nodes and "event-0-legacy-bridge" in heir_nodes

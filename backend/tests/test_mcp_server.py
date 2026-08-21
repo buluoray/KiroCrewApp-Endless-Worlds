@@ -625,21 +625,99 @@ def test_a_run_prefixed_id_reaches_the_handler_instead_of_being_refused(app):
     assert prefixed == bare, "a run-prefixed id must resolve the same run as the bare id"
 
 
-def test_a_memory_event_missing_a_field_is_salvaged_not_schema_refused(app):
-    """Memory never blocks the turn at the SCHEMA layer either: an event missing
-    title passes the structure-only schema and is dropped by sanitize_memory, so the
-    prose/state/choices still commit with a warning — the whole call is not refused."""
+def test_a_memory_event_missing_a_field_is_repaired_not_dropped(app):
+    """Memory blocks the turn at neither layer AND loses nothing repairable: an event
+    missing its title passes the structure-only schema, then takes its title from the
+    summary the narrator did write, so it is recorded with no warning at all."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
     out = call("endless_advance_turn", runId=run, turn=1, prose="p",
                choices=[{"id": "go", "label": "go"}], state={"alive": True},
                memory={"events": [{"key": "k", "summary": "s", "disclosure": "known"}]})
-    assert out.get("committed") is True, "the turn commits despite the titleless event"
-    assert out.get("ok") is not False, "the call is not schema-refused"
+    assert out.get("committed") is True and out.get("ok") is not False
     (entry,) = store.read_chronicle(run)
-    assert "memory" not in entry, "the titleless event was dropped, nothing recorded"
-    fields = {w["field"] for w in out.get("warnings") or [] if w.get("panel") == "memory"}
-    assert "memory.events[0].title" in fields, "the drop is surfaced as a warning"
+    (ev,) = entry["memory"]["events"]
+    assert ev["title"] == "s", "the summary named the event"
+    assert not [w for w in out.get("warnings") or [] if w.get("panel") == "memory"]
+
+
+def test_a_null_optional_field_is_absent_not_a_type_error(app):
+    """The live report: `memory.events[0].place: null` was refused at the SCHEMA
+    layer with `a string, got NoneType` and applied:false — the whole turn, prose and
+    choices included, lost to a field that was saying "nothing here". A null optional
+    field now means what omitting it means."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
+               choices=[{"id": "go", "label": "go"}], state={"alive": True},
+               memory={"events": [{"key": "k", "title": "t", "summary": "s",
+                                   "place": None, "importance": None,
+                                   "participants": None, "disclosure": "known"}]})
+    assert out.get("ok") is not False, f"the turn was refused: {out}"
+    assert out.get("committed") is True
+    (entry,) = store.read_chronicle(run)
+    (ev,) = entry["memory"]["events"]
+    assert "place" not in ev and ev["title"] == "t"
+    assert not [w for w in out.get("warnings") or [] if w.get("panel") == "memory"]
+
+
+def test_a_null_entry_in_a_list_is_a_hole_not_a_refusal(app):
+    """A null ENTRY is a gap in a list the narrator built. Drop the hole, keep the
+    list — refusing would cost the turn over nothing at all."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
+               choices=[{"id": "go", "label": "go"}], state={"alive": True},
+               memory={"entities": [None,
+                                    {"id": "elin", "kind": "character", "name": "Elin"}]})
+    assert out.get("ok") is not False and out.get("committed") is True
+    (entry,) = store.read_chronicle(run)
+    assert [e["id"] for e in entry["memory"]["entities"]] == ["elin"]
+
+
+def test_a_null_REQUIRED_field_is_still_refused(app):
+    """The line the repair does not cross: `prose: null` is a real failure, and
+    committing a blank page would be worse than refusing the call."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_advance_turn", runId=run, turn=1, prose=None,
+               choices=[{"id": "go", "label": "go"}], state={"alive": True})
+    assert out.get("ok") is False and out.get("applied") is False
+    assert out.get("field") == "arguments.prose"
+
+
+def test_the_reported_warning_batch_now_repairs_to_zero_warnings(app):
+    """The live report, verbatim: five colon-namespaced entity ids and one titleless
+    event produced six warnings and lost all six pieces. The same block now commits
+    whole with no memory warning."""
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    memory = {
+        "entities": [
+            {"id": "character:lin-shuang", "kind": "character", "name": "林霜"},
+            {"id": "character:hui-ya", "kind": "character", "name": "灰鸦"},
+            {"id": "group:darkflame-court", "kind": "group", "name": "黑焰廷"},
+            {"id": "place:old stone bridge", "kind": "place", "name": "老石桥"},
+            {"id": "concept:resonant-notation", "kind": "concept", "name": "共鸣符记法"},
+        ],
+        "events": [{"key": "event:1:met-hui-ya", "summary": "他在桥上遇见灰鸦。",
+                    "participants": ["character:hui-ya"], "place": "place:old stone bridge",
+                    "disclosure": "known"}],
+    }
+    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
+               choices=[{"id": "go", "label": "go"}], state={"alive": True},
+               memory=memory)
+    assert out.get("committed") is True
+    assert not [w for w in out.get("warnings") or [] if w.get("panel") == "memory"], (
+        "every piece of the reported batch is repairable"
+    )
+    (entry,) = store.read_chronicle(run)
+    assert [e["id"] for e in entry["memory"]["entities"]] == [
+        "lin-shuang", "hui-ya", "darkflame-court", "old-stone-bridge", "resonant-notation",
+    ]
+    (ev,) = entry["memory"]["events"]
+    assert ev["key"] == "met-hui-ya" and ev["title"] == "他在桥上遇见灰鸦。"
+    assert ev["participants"] == ["hui-ya"] and ev["place"] == "old-stone-bridge"
 
 
 def test_milestones_are_reached_once_and_then_permanent(app):

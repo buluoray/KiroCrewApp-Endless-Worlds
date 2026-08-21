@@ -158,7 +158,7 @@ def test_the_bridge_record_rebuilds_into_a_working_graph():
     record = bridge(["elin", "sword"])
     index = mg.build_index([record])
     assert index["entities"]["elin"]["inheritsFrom"]["runId"] == SOURCE_RUN
-    bridge_id = f"event:0:{lg.BRIDGE_KEY}"
+    bridge_id = f"event-0-{lg.BRIDGE_KEY}"
     assert bridge_id in index["events"]
     (slot,) = mg.project_relations(index).values()
     assert slot["changes"][0]["reasonEvent"] == bridge_id
