@@ -42,8 +42,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-#: A background is decoration, not a document. Past this it is not a mood.
-MAX_BACKDROP_BYTES = 24_000
+#: A background is decoration, not a document — but a SCENE-lane background
+#: carries a server-composed traced underlay (tens of KB of paths), so the
+#: composed-document ceiling is generous. The Illustrator's own hand-drawn
+#: input is separately capped at 24KB by the tool input schemas.
+MAX_BACKDROP_BYTES = 1_000_000
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _SVG_NS = 'xmlns="http://www.w3.org/2000/svg"'

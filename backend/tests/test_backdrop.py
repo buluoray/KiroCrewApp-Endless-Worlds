@@ -77,10 +77,15 @@ def test_compile_refuses_script_handlers_foreignobject_external_and_non_svg(bad)
 
 
 def test_compile_refuses_the_empty_and_the_oversized():
+    from backdrop import MAX_BACKDROP_BYTES
+
     with pytest.raises(BackdropError):
         compile_backdrop("   ")
     with pytest.raises(BackdropError):
-        compile_backdrop('<svg xmlns="http://www.w3.org/2000/svg"><!--' + "x" * 25_000 + "--></svg>")
+        compile_backdrop(
+            '<svg xmlns="http://www.w3.org/2000/svg"><!--'
+            + "x" * (MAX_BACKDROP_BYTES + 1_000) + "--></svg>"
+        )
 
 
 def test_ordinary_attributes_are_not_mistaken_for_handlers():

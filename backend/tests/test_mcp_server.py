@@ -55,7 +55,8 @@ def test_the_surface_is_exactly_the_declared_tools():
     assert {t["name"] for t in srv.list_tools()} == {
         "endless_advance_turn", "endless_read_runtime", "endless_mount_scene",
         "endless_update_scene", "endless_await_scene", "endless_dismiss_scene",
-        "endless_paint_backdrop", "endless_submit_backdrop_draft",
+        "endless_paint_backdrop", "endless_trace_reference",
+        "endless_submit_backdrop_draft",
         "endless_commit_backdrop",
         "endless_commit_fallback_backdrop", "endless_clear_backdrop",
         "endless_export_world",
