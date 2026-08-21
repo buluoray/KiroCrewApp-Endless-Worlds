@@ -157,6 +157,41 @@ def test_store_rejects_bad_buttons_motif(tmp_path):
     assert store.current() is None
 
 
+def test_store_keeps_a_mobile_variant_with_the_desktop_backdrop(tmp_path):
+    store = BackdropStore(tmp_path, "run-abc")
+    version = store.set(_svg("#111"), turn=3, mobile=_svg("#abc"))
+    cur = store.current()
+    assert cur["version"] == version
+    assert "#111" in cur["markup"] and "#abc" in cur["mobile"]
+    # Variants travel together: replacing without mobile drops the old portrait.
+    store.set(_svg("#222"), turn=3)
+    assert store.current()["mobile"] is None
+
+
+def test_store_rejects_bad_mobile_atomically(tmp_path):
+    store = BackdropStore(tmp_path, "run-abc")
+    with pytest.raises(BackdropError):
+        store.set(_svg("#111"), mobile="<div>x</div>")
+    assert store.current() is None, "desktop must not persist when mobile is invalid"
+
+
+def test_commit_backdrop_tool_stores_both_variants_in_one_version(data):
+    out = _call(
+        "endless_commit_backdrop", runId="run-x", turn=1,
+        markup=_svg("#111"), mobile=_svg("#abc"),
+    )
+    cur = BackdropStore(data, "run-x").current()
+    assert out["ok"] is True and cur["version"] == out["version"]
+    assert "#111" in cur["markup"] and "#abc" in cur["mobile"]
+
+    refused = _call(
+        "endless_commit_backdrop", runId="run-y", turn=1,
+        markup=_svg("#222"), mobile="<div>x</div>",
+    )
+    assert refused["ok"] is False
+    assert BackdropStore(data, "run-y").current() is None
+
+
 # -- well-formedness: a malformed SVG renders as a broken image, so refuse it ---
 
 
@@ -246,8 +281,10 @@ def test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate(data)
 
     runs.update_backdrop_request(run_id, fallbackAllowed=True)
     accepted = _call(
-        "endless_commit_fallback_backdrop", runId=run_id, turn=1, markup=_svg("#222")
+        "endless_commit_fallback_backdrop", runId=run_id, turn=1,
+        markup=_svg("#222"), mobile=_svg("#abc"),
     )
     assert accepted["ok"] is True
-    assert "#222" in BackdropStore(data, run_id).exact(1)["markup"]
+    committed = BackdropStore(data, run_id).exact(1)
+    assert "#222" in committed["markup"] and "#abc" in committed["mobile"]
     assert runs.read_backdrop_request(run_id) is None

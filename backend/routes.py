@@ -1561,7 +1561,11 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     except BackdropError:
         backdrop = None
     view["backdrop"] = (
-        {"version": backdrop["version"], "buttons": bool(backdrop.get("buttons"))}
+        {
+            "version": backdrop["version"],
+            "buttons": bool(backdrop.get("buttons")),
+            "mobile": bool(backdrop.get("mobile")),
+        }
         if backdrop
         else None
     )
@@ -1662,10 +1666,17 @@ async def get_backdrop(request: web.Request, ctx: AppContext) -> web.Response:
     if current is None:
         return web.json_response({"error": "no backdrop"}, status=404)
 
-    # ``?part=buttons`` serves the common choice-button motif; default is the
-    # full-page backdrop. Both are stored together and versioned together.
+    # ``?part=buttons`` serves the orientation-agnostic choice-button motif. For
+    # the full-page image, ``?variant=mobile`` selects the coordinated portrait
+    # composition and falls back to desktop for legacy single-image entries.
     part = request.query.get("part")
-    source = current.get("buttons") if part == "buttons" else current.get("markup")
+    variant = request.query.get("variant")
+    if part == "buttons":
+        source = current.get("buttons")
+    elif variant == "mobile":
+        source = current.get("mobile") or current.get("markup")
+    else:
+        source = current.get("markup")
     if not source:
         return web.json_response({"error": "not set"}, status=404)
 
@@ -1831,9 +1842,16 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
     # the history restores the scene each page had rather than only the latest.
     bstore = BackdropStore(ctx.data_dir, run_id)
 
-    def _bd(turn: int) -> dict[str, int] | None:
-        v = bstore.version_at(turn)
-        return {"version": v} if v else None
+    def _bd(turn: int) -> dict[str, Any] | None:
+        backdrop = bstore.at(turn)
+        return (
+            {
+                "version": backdrop["version"],
+                "mobile": bool(backdrop.get("mobile")),
+            }
+            if backdrop
+            else None
+        )
 
     return web.json_response({
         "runId": run_id,

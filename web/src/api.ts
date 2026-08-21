@@ -311,7 +311,7 @@ export interface PlayView {
   scenes: SceneRow[]
   /** The narrator-set background for this life, or null. `buttons` is true when a
    *  common choice-button motif was set with it (loaded via ?part=buttons). */
-  backdrop: { version: number; buttons?: boolean } | null
+  backdrop: { version: number; buttons?: boolean; mobile?: boolean } | null
 }
 
 export interface OpeningGroup {
@@ -430,7 +430,7 @@ export interface PastTurn {
   gains: Array<{ field: string; amount: string; source: string }>
   /** The backdrop that was effective on this page, so re-reading it restores the
    *  scene it had. Null when the page had no background. */
-  backdrop?: { version: number } | null
+  backdrop?: { version: number; mobile?: boolean } | null
 }
 
 export interface Chronicle {

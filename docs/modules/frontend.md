@@ -59,6 +59,18 @@ guarantee.
   `test_rail.py::test_the_rail_is_absent_at_phone_widths` and
   `test_the_rail_only_appears_above_the_desktop_breakpoint`.
 
+- **Full-screen backdrops switch composition at the same 1100px boundary.** Live
+  and chronicle payloads carry only whether a portrait variant exists; `Backdrop`
+  owns one `matchMedia('(max-width: 1100px)')` subscription and appends
+  `variant=mobile` only when both the flag and narrow environment are true. A resize
+  therefore changes the requested SVG while the existing preload/double-buffer path
+  holds the painted frame until its replacement decodes. `main.tsx`, `play.tsx`, and
+  the full-screen memory overlays propagate the flag; shelf/history thumbnails remain
+  desktop so their established landscape cards do not change. The server's metadata
+  and fallback halves are pinned by
+  `test_live_and_chronicle_metadata_report_mobile_availability` and
+  `test_backdrop_route_selects_variants_and_preserves_legacy_fallback`.
+
 - **The tab bar is portaled to `document.body`; the rail opens in flow.**
   `WorldTabBar` is portaled onto `document.body` so it escapes transformed
   ancestors — an iOS WKWebView pins a plain `fixed` bar to the content box rather

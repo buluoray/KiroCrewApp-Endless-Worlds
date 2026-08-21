@@ -15,7 +15,7 @@ sees is produced locally from a closed, code-owned vocabulary.
 |---|---|
 | `backend/widget.py` | the scene compiler — `compile_scene` turns a spec into HTML; `ELEMENT_KINDS`, the geometry renderers (`_render_links`, grid/tree branches in `_element`), the CSP + constant `SCENE_SCRIPT`, `_esc`, `resolve_bind`, and the `compile_cached`/`spec_digest` cache under the run |
 | `backend/scenes.py` | `SceneLedger` — per-run mount table (`mount`/`update`/`dismiss`/`mounted`), the answer channel (`answer`, `record_answer`), and `_reject_markup` |
-| `backend/backdrop.py` | `compile_backdrop` (the one SVG validation funnel) + `BackdropStore` (per-turn, per-page background and its button motif) |
+| `backend/backdrop.py` | `compile_backdrop` (the one SVG validation funnel) + `BackdropStore` (per-turn desktop/mobile backgrounds and button motif) |
 | `backend/mcp_server.py` | the narrator-facing tools (`_mount_scene`, backdrop set/clear) that feed specs into the compiler and ledger |
 | `web/src/scene.tsx` | the single root-level iframe that renders the mounted scene (pinned by `backend/tests/test_scene_slot.py`) |
 | `backend/tests/test_widget.py` | compiler contracts — kinds, geometry, escaping, CSP, bounds, cache |
@@ -125,9 +125,11 @@ sees is produced locally from a closed, code-owned vocabulary.
   is refused. `BackdropStore.exact(turn)` distinguishes art created for this page
   from an older backdrop that merely remains effective through `at(turn)`. Only the
   exact commit clears the brief; the next poll then reveals prose, state, choices,
-  button motif, and backdrop together. The live page still pins both image URLs to
-  `?turn=` and double-buffers image decoding, so publication never flashes a blank
-  background.
+  button motif, and the coordinated desktop/mobile backdrop set together. Both SVGs
+  are validated before the single history entry is written, so one invalid variant
+  publishes neither. The live page pins its selected image URL to `?turn=` and
+  double-buffers image decoding, so publication and viewport changes never flash a
+  blank background.
 
 - **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
   successful commit, not on dispatch, so a dropped request or gateway restart can
@@ -200,8 +202,10 @@ sees is produced locally from a closed, code-owned vocabulary.
   > source, every denylist gap below becomes reachable.
 
 - **All storage funnels through one validation gate.** `compile_backdrop(svg)` raises
-  `BackdropError` on anything unsafe, and `BackdropStore.set` validates before it
-  writes a byte (`test_store_rejects_bad_markup_at_set_time_and_stores_nothing`). The
+  `BackdropError` on anything unsafe, and `BackdropStore.set` validates desktop,
+  optional mobile, and optional button SVGs before it writes a byte
+  (`test_store_rejects_bad_markup_at_set_time_and_stores_nothing`,
+  `test_store_rejects_bad_mobile_atomically`). The
   gate refuses scripts, event handlers (`_HANDLER_RE`), `<foreignObject>`, external
   references (`_EXTERNAL_REF_RE`, including protocol-relative), and non-SVG input, and
   it is told, not silently stripped
@@ -219,23 +223,28 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_an_xlink_attr_without_its_namespace_is_repaired_not_broken`, and
   `test_a_malformed_svg_is_refused_so_it_never_ships_as_a_broken_image` pin the order.
 
-- **The button motif travels with the backdrop.** `BackdropStore` keeps a companion
-  button-motif SVG alongside the background, validated the same way, so a page's
-  buttons always match its scene; replacing the backdrop without a new motif drops the
-  old one (`test_store_keeps_a_common_buttons_motif_with_the_backdrop`,
-  `test_store_rejects_bad_buttons_motif`). The backdrop is bound to the turn and
-  restored per page (`test_backdrop_is_bound_to_the_turn_and_restores_per_page`); a
-  corrupt store file reads as no background, never an error
+- **The coordinated variants and button motif travel as one entry.** `BackdropStore`
+  keeps required desktop `markup`, optional portrait `mobile`, and optional button
+  motif under one turn/version. Replacing an entry without either optional SVG drops
+  the old one; no variant can drift to a different turn
+  (`test_store_keeps_a_mobile_variant_with_the_desktop_backdrop`,
+  `test_store_keeps_a_common_buttons_motif_with_the_backdrop`). The HTTP route serves
+  desktop by default, selects mobile with `?variant=mobile`, and falls back to desktop
+  for legacy entries; `part=buttons` remains orientation-independent and takes
+  precedence (`test_backdrop_route_selects_variants_and_preserves_legacy_fallback`).
+  The set is bound to the turn and restored per page
+  (`test_backdrop_is_bound_to_the_turn_and_restores_per_page`); a corrupt store file
+  reads as no background, never an error
   (`test_store_treats_a_corrupt_file_as_no_background`).
 
 - **Backdrop guidance is an art brief, not a rendering recipe.** The packaged
-  narrator begins with the turn's irreversible change, chooses one visual thesis
-  and dominant image, and treats gradients, patterns, grain, vignettes, filters,
-  and motion as optional media rather than required layers. A new backdrop differs
-  from the previous two in composition, palette logic, filter stack, and motion
-  language; a motif may recur when its meaning changes, because semantic recurrence
-  is continuity rather than wallpaper. Reading calm comes from composition and
-  contrast instead of making every layer uniformly faint, and motion embodies at
-  most one scene verb with stillness around it. Enforced by the `prompt` in
-  `agents/narrator.json`; pinned by
+  illustrator receives only the page inputs and commits one coordinated set: desktop
+  `markup` at 800×600 and portrait `mobile` at 450×900. Both share a palette, visual
+  thesis, pattern grammar, and optional motion verb, but each frame is composed
+  independently; mobile is never a crop or scaled desktop copy. PATTERN is the
+  default lane, HYBRID allows one cropped environmental trace, and STORY IMAGE is an
+  explicit exception. Calm reading fields come from low luminance, scale, and
+  contrast; portrait art avoids full borders, left/right pair dependence, and bright
+  central motifs. Both variants are passed in the same commit. Enforced by the
+  `prompt` in `agents/illustrator.json`; pinned by
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.

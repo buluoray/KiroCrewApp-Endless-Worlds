@@ -21,9 +21,12 @@ sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import routes as routes_mod  # noqa: E402
+from backdrop import BackdropStore  # noqa: E402
 from scenes import SceneLedger  # noqa: E402
 from store import RunStore  # noqa: E402
-from test_delete_world import FakeCtx, FakeRequest, body_of, call  # noqa: E402
+from test_delete_world import (  # noqa: E402
+    FakeCtx, FakeRequest, body_of, call, world_file,
+)
 
 GHOST = "0" * 32
 
@@ -123,3 +126,81 @@ def test_scene_document_is_response_sandboxed_even_when_navigated_directly(app):
     assert res.headers["Referrer-Policy"] == "no-referrer"
     assert res.headers["X-Content-Type-Options"] == "nosniff"
     assert res.headers["X-Frame-Options"] == "SAMEORIGIN"
+
+
+def _svg(color: str) -> str:
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        f'<rect fill="{color}" width="10" height="10"/></svg>'
+    )
+
+
+def test_backdrop_route_selects_variants_and_preserves_legacy_fallback(app):
+    run_id = app["store"].create_run(
+        {"turn": 5, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 5},
+    )
+    backdrops = BackdropStore(app["data"], run_id)
+    backdrops.set(
+        _svg("#111"), buttons=_svg("#fed"), turn=1, mobile=_svg("#abc")
+    )
+    backdrops.set(_svg("#222"), turn=5, mobile=_svg("#def"))
+    match = {"run_id": run_id}
+
+    desktop = call(routes_mod.get_backdrop, app["ctx"], match=match)
+    mobile = call(
+        routes_mod.get_backdrop, app["ctx"], match=match,
+        query={"variant": "mobile"},
+    )
+    historical = call(
+        routes_mod.get_backdrop, app["ctx"], match=match,
+        query={"turn": "3", "variant": "mobile"},
+    )
+    buttons = call(
+        routes_mod.get_backdrop, app["ctx"], match=match,
+        query={"turn": "1", "variant": "mobile", "part": "buttons"},
+    )
+
+    assert desktop.status == mobile.status == historical.status == buttons.status == 200
+    assert "#222" in desktop.text and "#def" in mobile.text
+    assert "#abc" in historical.text
+    assert "#fed" in buttons.text, "part=buttons must take precedence over variant"
+
+    legacy_id = app["store"].create_run(
+        {"turn": 1, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Legacy", "turn": 1},
+    )
+    BackdropStore(app["data"], legacy_id).set(_svg("#333"), turn=1)
+    legacy_mobile = call(
+        routes_mod.get_backdrop, app["ctx"], match={"run_id": legacy_id},
+        query={"variant": "mobile"},
+    )
+    assert legacy_mobile.status == 200 and "#333" in legacy_mobile.text
+
+
+def test_live_and_chronicle_metadata_report_mobile_availability(app):
+    worlds = app["data"] / "worlds"
+    worlds.mkdir()
+    (worlds / "test-world.md").write_text(world_file(), encoding="utf-8")
+    run_id = app["store"].create_run(
+        {
+            "turn": 5, "worldId": "test-world", "style": "standard",
+            "status": {"age": "five"},
+        },
+        {"worldId": "test-world", "title": "Test World", "turn": 5},
+    )
+    app["store"].append_turn(run_id, {"turn": 1, "prose": "portrait page"})
+    app["store"].append_turn(run_id, {"turn": 5, "prose": "desktop page"})
+    backdrops = BackdropStore(app["data"], run_id)
+    backdrops.set(_svg("#111"), turn=1, mobile=_svg("#abc"))
+    backdrops.set(_svg("#222"), turn=5)
+
+    live = body_of(call(routes_mod.get_run, app["ctx"], match={"run_id": run_id}))
+    history = body_of(
+        call(routes_mod.get_chronicle, app["ctx"], match={"run_id": run_id})
+    )
+    by_turn = {row["turn"]: row for row in history["turns"]}
+
+    assert live["backdrop"]["mobile"] is False
+    assert by_turn[1]["backdrop"]["mobile"] is True
+    assert by_turn[5]["backdrop"]["mobile"] is False

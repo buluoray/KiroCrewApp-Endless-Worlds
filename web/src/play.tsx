@@ -155,7 +155,7 @@ export function PlayPage({
   /** The world image behind the whole app, reported upward because it is rendered
    *  at the ROOT rather than in this column — on a desktop it spans the page, not
    *  just the story. */
-  onBackdrop: (backdrop: { version: number; turn?: number } | null) => void
+  onBackdrop: (backdrop: { version: number; turn?: number; mobile?: boolean } | null) => void
   onReplay: (worldId: string) => void
   onReplaySame: (fromRunId: string) => void
   /** Enter another life by id — how a legacy heir is stepped into (§9). */
@@ -356,10 +356,14 @@ export function PlayPage({
       // the NEXT page's backdrop mid-generation (tagged with the pending turn),
       // and an un-pinned request would repaint the page still being read. With
       // `?turn=` the new art appears exactly when the new page does.
-      onBackdrop(v.backdrop ? { version: v.backdrop.version, turn: latest } : null)
+      onBackdrop(v.backdrop ? {
+        version: v.backdrop.version, turn: latest, mobile: v.backdrop.mobile,
+      } : null)
     } else {
       const past = chron.find((c) => c.turn === shown)?.backdrop
-      onBackdrop(past ? { version: past.version, turn: shown } : (v.backdrop ?? null))
+      onBackdrop(past ? {
+        version: past.version, turn: shown, mobile: past.mobile,
+      } : (v.backdrop ?? null))
     }
   }, [v, viewTurn, chron, onBackdrop])
 

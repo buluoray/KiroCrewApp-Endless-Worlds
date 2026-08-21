@@ -92,6 +92,16 @@ processes self-locate the same data dir so routes and tools see one set of files
   `test_route_errors.py` (ghost life polls as 404 everywhere, damaged life as
   422, malformed id as 4xx).
 
+- **Backdrop variants share one endpoint and preserve old lives.**
+  `GET /runs/{run_id}/backdrop` serves desktop by default; `variant=mobile`
+  selects the coordinated portrait SVG when present and otherwise returns desktop,
+  while `part=buttons` takes precedence. `turn=N` applies before variant selection,
+  so chronicle pages receive the portrait committed for that historical page. Live
+  and chronicle JSON expose only `mobile: bool`, never duplicate SVG bytes. Enforced
+  by `routes.get_backdrop`, `get_run`, and `get_chronicle`; pinned by
+  `test_backdrop_route_selects_variants_and_preserves_legacy_fallback` and
+  `test_live_and_chronicle_metadata_report_mobile_availability`.
+
 - **A scene document stays sandboxed even outside its iframe.** `get_scene` serves
   compiler-owned HTML with a response-level CSP `sandbox allow-scripts allow-forms`
   plus same-origin-only `frame-ancestors`, in addition to the document's CSP-first
@@ -196,7 +206,7 @@ processes self-locate the same data dir so routes and tools see one set of files
   `test_a_replayed_turn_changes_nothing`, and
   `test_a_commit_keeps_the_keys_the_narrator_never_declares`.
 
-- **The tool surface (~11 tools), by facing.** One-line purpose each:
+- **The tool surface, by facing.** One-line purpose each:
 
   | Tool | Facing | Purpose |
   |---|---|---|
@@ -206,7 +216,9 @@ processes self-locate the same data dir so routes and tools see one set of files
   | `endless_update_scene` | narrator | change a mounted scene without remounting (a remount reloads its iframe) |
   | `endless_await_scene` | narrator | return the player's scene answer if present; never blocks |
   | `endless_dismiss_scene` | narrator | remove a scene |
-  | `endless_set_backdrop` | narrator | set an inert background SVG (+ optional button motif), script/handler-free |
+  | `endless_paint_backdrop` | narrator | persist a short page-art brief and dispatch the illustrator without waiting |
+  | `endless_commit_backdrop` | illustrator | atomically commit required desktop `markup`, optional coordinated portrait `mobile`, and optional button motif |
+  | `endless_commit_fallback_backdrop` | narrator recovery | commit the same set only after the persisted same-page fallback gate opens |
   | `endless_clear_backdrop` | narrator | clear the backdrop (idempotent) |
   | `endless_export_world` | narrator | serialize a whole world to one portable file |
   | `endless_read_draft` | worldsmith | return the pasted `rawText` + the authoritative compiler `brief` |

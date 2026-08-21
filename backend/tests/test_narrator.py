@@ -398,14 +398,64 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     prompt = json.loads(ILLUSTRATOR_JSON.read_text(encoding="utf-8"))["prompt"]
 
     for required in (
-        "not a checklist of SVG effects",
-        "one dominant image",
+        "senior game environment artist",
+        "ONE coordinated backdrop set",
+        "desktop raw SVG as `markup`",
+        "mobile raw SVG as `mobile`",
+        "viewBox='0 0 800 600'",
+        "viewBox='0 0 450 900'",
+        "share the same palette",
+        "compose each frame independently",
+        "must not be a crop, stretch, or scaled copy",
+        "low luminance",
+        "complete tall composition",
+        "passing both `markup` and `mobile` in the same call",
+        "PLAYER CHOICE",
+        "PAGE PROSE",
+        "ART BRIEF",
+        "ONE visual thesis",
         "SMALL palette",
-        "one motion verb, or none",
-        "do not reuse the same composition family",
+        "one motion verb or none",
+        "Work with SVG's strengths",
+        "pattern-first and architecture-first",
+        "silently choose exactly one lane",
+        "PATTERN is the default",
+        "no recognizable story noun",
+        "HYBRID is second",
+        "pattern-dominant field with exactly one small",
+        "STORY IMAGE is the exception",
+        "ART BRIEF explicitly asks for a recognizable dominant image",
+        "If uncertain, choose PATTERN",
+        "just because the task names plot nouns",
+        "major irreversible event",
+        "fully ornamental, world-specific repeating pattern",
+        "beautiful wallpaper",
+        "need not encode the irreversible event",
+        "Pattern-first may mean pattern-only",
+        "without forcing narrative symbolism",
+        "Straight lines, grids, tiles, windows",
+        "one consequential object",
+        "Prefer environment and evidence",
+        "large anatomically detailed people or animals",
+        "small, distant, cropped, shadowed",
+        "Never wrap either SVG in a Markdown code fence",
         "SMIL only",
     ):
         assert required in prompt, f"illustrator prompt missing: {required!r}"
+
+    for rejected in (
+        "paths, gradients, masks, clipping, patterns, filters, texture",
+        "semantic `<g>` groups",
+        "recognizable silhouette",
+        "Bézier curves and arcs",
+        "spotlight the hero",
+        "faux-photorealism",
+        "meaning instead of becoming generic wallpaper",
+        "First look for repeated rhythm, architecture, interiors",
+        "with a clear routing order",
+        "Route in this order: pure pattern",
+    ):
+        assert rejected not in prompt, f"illustrator prompt retained: {rejected!r}"
 
     # The narrator delegates during every normal turn. Direct SVG exists only as a
     # separately gated recovery capability after two worker failures; keeping the
@@ -418,7 +468,10 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     assert fallback in narrator_agent["allowedTools"]
     assert "Never call endless_commit_fallback_backdrop during a normal turn" in narrator
     assert "endless_set_backdrop" not in narrator
-    for recipe in ("viewBox='0 0 800 600'", "feTurbulence", "<animateTransform>"):
+    for recipe in (
+        "viewBox='0 0 800 600'", "viewBox='0 0 450 900'",
+        "feTurbulence", "<animateTransform>",
+    ):
         assert recipe not in narrator, f"narrator still carries SVG recipe: {recipe!r}"
 
 

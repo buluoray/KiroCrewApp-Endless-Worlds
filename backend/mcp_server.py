@@ -435,11 +435,12 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "endless_commit_backdrop",
         "description": (
             "Hang a finished backdrop behind a page. This is the ILLUSTRATOR's "
-            "commit — `markup` is a single self-contained SVG image, and `turn` is "
-            "the page it belongs to (given to you in your task). Optionally also pass "
-            "`buttons`: a second SVG, the common motif shown behind the ordinary "
-            "choice buttons this scene. Refused if either is not an <svg> document or "
-            "carries script, an event handler, <foreignObject>, or an external link."
+            "commit — `markup` is the desktop self-contained SVG image, and `turn` "
+            "is the page it belongs to (given to you in your task). Optionally pass "
+            "`mobile`, a coordinated portrait composition, and `buttons`, the common "
+            "motif shown behind ordinary choice buttons. Refused if any supplied image "
+            "is not an <svg> document or carries script, an event handler, "
+            "<foreignObject>, or an external link."
         ),
         "inputSchema": {
             "type": "object",
@@ -449,6 +450,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
                 "markup": {"type": "string", "maxLength": 24000},
+                "mobile": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
             },
         },
@@ -458,9 +460,10 @@ _TOOLS: list[dict[str, Any]] = [
         "description": (
             "Emergency page-art recovery for the NARRATOR only. Use this solely "
             "when an internal recovery prompt says illustrator attempts failed. "
-            "Commit one safe self-contained SVG for the exact runId and turn in "
-            "that prompt. The server refuses this tool unless that page's persisted "
-            "fallback gate is open."
+            "Commit one safe backdrop set for the exact runId and turn in that "
+            "prompt: required desktop `markup`, plus optional coordinated portrait "
+            "`mobile` and choice motif `buttons`. The server refuses this tool unless "
+            "that page's persisted fallback gate is open."
         ),
         "inputSchema": {
             "type": "object",
@@ -470,6 +473,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
                 "markup": {"type": "string", "maxLength": 24000},
+                "mobile": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
             },
         },
@@ -1552,7 +1556,9 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     """The illustrator's commit: validate the SVG and publish its waiting page."""
     run_id = args["runId"]
     turn = int(args["turn"])
-    version = _backdrop_store(run_id).set(args["markup"], args.get("buttons"), turn)
+    version = _backdrop_store(run_id).set(
+        args["markup"], args.get("buttons"), turn, args.get("mobile")
+    )
     try:
         store = _store()
         request = store.read_backdrop_request(run_id)
@@ -1581,7 +1587,9 @@ def _commit_fallback_backdrop(args: dict[str, Any]) -> dict[str, Any]:
             "direct narrator backdrop commit is available only for the page "
             "whose illustrator recovery failed"
         )
-    version = _backdrop_store(run_id).set(args["markup"], args.get("buttons"), turn)
+    version = _backdrop_store(run_id).set(
+        args["markup"], args.get("buttons"), turn, args.get("mobile")
+    )
     store.clear_backdrop_request(run_id)
     return {"backdrop": "committed", "version": version, "turn": turn}
 

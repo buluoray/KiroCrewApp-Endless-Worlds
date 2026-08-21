@@ -147,7 +147,7 @@ class BackdropStore:
 
     def _load(self) -> list[dict[str, Any]]:
         """The backdrop history, oldest-first. Each entry is
-        ``{turn, markup, buttons?, version}``; an entry with empty ``markup`` is a
+        ``{turn, markup, mobile?, buttons?, version}``; an entry with empty ``markup`` is a
         tombstone (the narrator cleared the background at that turn). Migrates the
         old single-object format to a one-entry history, and treats a corrupt file
         as no history rather than an error that would break the play view."""
@@ -179,23 +179,25 @@ class BackdropStore:
 
     @staticmethod
     def _view(entry: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Shape an entry as ``{markup, version, buttons}``, or ``None`` for a
-        tombstone (empty markup) or a missing entry."""
+        """Shape an entry as ``{markup, mobile, version, buttons}``, or ``None``
+        for a tombstone (empty markup) or a missing entry."""
         if not entry:
             return None
         markup = entry.get("markup")
         version = entry.get("version")
         if not isinstance(markup, str) or not markup.strip() or not isinstance(version, int):
             return None
+        mobile = entry.get("mobile")
         buttons = entry.get("buttons")
         return {
             "markup": markup,
+            "mobile": mobile if isinstance(mobile, str) and mobile.strip() else None,
             "version": version,
             "buttons": buttons if isinstance(buttons, str) and buttons.strip() else None,
         }
 
     def current(self) -> dict[str, Any] | None:
-        """The LATEST background as ``{markup, buttons, version}``, or ``None`` when
+        """The LATEST background as ``{markup, mobile, buttons, version}``, or ``None`` when
         unset/cleared/unreadable. This is what the home shelf and the live play page
         want — the most recent scene."""
         history = self._load()
@@ -235,8 +237,12 @@ class BackdropStore:
         view = self.at(turn)
         return int(view["version"]) if view else 0
 
-    def set(self, markup: str, buttons: str | None = None, turn: int = 0) -> int:
-        """Validate and append a background (and its optional common button motif),
+    def set(
+        self, markup: str, buttons: str | None = None, turn: int = 0,
+        mobile: str | None = None,
+    ) -> int:
+        """Validate and append coordinated desktop/mobile backgrounds (and the
+        optional common button motif),
         stamped with the ``turn`` it belongs to, returning the version.
 
         Bound to the page: re-reading turn N restores the background set at N (or the
@@ -244,7 +250,8 @@ class BackdropStore:
         rather than stacking two. Both SVGs are validated here so the narrator is
         refused at the call it made, not later at render — a rejected background never
         becomes stored — and the button motif travels WITH the backdrop, so a page's
-        buttons always match its scene.
+        buttons always match its scene. The mobile variant is validated and stored
+        atomically with desktop; legacy single-image entries simply expose no mobile.
         """
         clean_markup = compile_backdrop(markup)  # raises BackdropError on bad input
         clean_buttons = (
@@ -252,9 +259,16 @@ class BackdropStore:
             if isinstance(buttons, str) and buttons.strip()
             else None
         )
+        clean_mobile = (
+            compile_backdrop(mobile)
+            if isinstance(mobile, str) and mobile.strip()
+            else None
+        )
         history = self._load()
         version = (max(int(e.get("version") or 0) for e in history) + 1) if history else 1
         entry: dict[str, Any] = {"turn": int(turn), "markup": clean_markup, "version": version}
+        if clean_mobile:
+            entry["mobile"] = clean_mobile
         if clean_buttons:
             entry["buttons"] = clean_buttons
         if history and int(history[-1].get("turn") or 0) == int(turn):
