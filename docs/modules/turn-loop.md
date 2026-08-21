@@ -221,6 +221,14 @@ turn 200 as at turn 1.
   synthetic turn with no world is left alone. Enforced by `_advance_turn`; pinned by
   `test_a_living_turn_with_no_choices_is_refused` and
   `test_a_declared_ending_lets_a_turn_omit_choices`.
+  The refusal also teaches the case the gate is hardest on: a character who cannot
+  deliberately act (a newborn, an infant, someone asleep or bound) still gets
+  choices — what the life leans into, in the player's own voice — because being
+  unable to act is not an ending. Without that sentence a live narrator stalled on
+  turn 1 reasoning about whether a newborn may be offered choices at all, instead of
+  resending the call; the same rule is in the narrator's own prompt so the common
+  case never reaches the gate. Pinned by the `"newborn"` detail assert in
+  `test_a_living_turn_with_no_choices_is_refused`.
  `_clean_choices` salvages before it judges: a caption under a
   plausible alias key (`text`, `title`, `caption`, `name`) is folded onto
   `label`, and a bare string entry IS a caption — the content decides, not the

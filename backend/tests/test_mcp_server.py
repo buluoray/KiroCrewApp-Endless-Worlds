@@ -614,11 +614,18 @@ def test_omitting_a_merge_key_carries_the_whole_block_forward(app):
 
 
 def test_a_run_prefix_the_narrator_adds_is_stripped_from_the_run_id():
-    """The addressing hands the run id over bare, but the narrator sometimes
-    prepends run-/run_ (the slot-key shape); a real id is 32 hex and never starts
-    with run, so the prefix is stripped rather than rejected as malformed."""
+    """The addressing hands the run id over bare, but the narrator decorates it
+    anyway; a stored id is 32 lowercase hex and nothing else, so the embedded bare id
+    is the one it meant — whatever spelling the decoration took."""
     hexid = "a" * 32
-    for bad in (f"run-{hexid}", f"run_{hexid}"):
+    for bad in (
+        f"run-{hexid}",
+        f"run_{hexid}",
+        f"run-id-{hexid}",  # observed live: wedged the mandatory first read
+        f"runId-{hexid}",
+        f'"{hexid}"',
+        f"run id: {hexid}",
+    ):
         args = {"runId": bad}
         srv._normalize_run_id_arg(args)
         assert args["runId"] == hexid, f"{bad} should normalize to the bare id"
@@ -627,6 +634,20 @@ def test_a_run_prefix_the_narrator_adds_is_stripped_from_the_run_id():
         args = {"runId": keep}
         srv._normalize_run_id_arg(args)
         assert args["runId"] == keep
+
+
+def test_two_candidate_ids_in_one_arg_are_left_to_fail_loudly():
+    """Repair is only safe while the id is unambiguous: two bare ids in one string
+    give no way to tell which life to write, and guessing is worse than refusing."""
+    args = {"runId": f"run-{'a' * 32}-{'b' * 32}"}
+    srv._normalize_run_id_arg(args)
+    assert args["runId"] == f"run-{'a' * 32}-{'b' * 32}", "ambiguous input is untouched"
+    # A longer hex run is not a bare id with decoration either — truncating it would
+    # silently address some other run.
+    long_hex = "c" * 40
+    args = {"runId": long_hex}
+    srv._normalize_run_id_arg(args)
+    assert args["runId"] == long_hex
 
 
 def test_a_run_prefixed_id_reaches_the_handler_instead_of_being_refused(app):

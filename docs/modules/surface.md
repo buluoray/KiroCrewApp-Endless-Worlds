@@ -197,6 +197,22 @@ processes self-locate the same data dir so routes and tools see one set of files
   `test_an_unknown_tool_is_refused_by_name`; every bad field named by
   `test_every_bad_field_is_named`.
 
+- **The run id is repaired at the boundary, not defended at the store.** A stored id
+  is `uuid4().hex` — 32 lowercase hex and nothing else — so any decoration a narrator
+  adds (`run-<id>`, `run_<id>`, `run-id-<id>`, quotes, whitespace, a case mangle) is
+  recovered by `_normalize_run_id_arg` before validation or lookup, and the single
+  embedded bare id is taken as the id it meant. This is repaired as a CLASS rather
+  than a list of known prefixes because the narrator cannot debug the failure from
+  its side: the addressing already told it the id it holds is correct, so a
+  `malformed run id` refusal on the mandatory first read wedges the life with no way
+  forward. Ambiguity is still refused — two bare ids in one argument, or a longer hex
+  run, are left untouched, since addressing the wrong life is worse than failing.
+  `store._check_run_id` stays strict on purpose: ids are minted, never taken from a
+  request. Pinned by
+  `test_a_run_prefix_the_narrator_adds_is_stripped_from_the_run_id`,
+  `test_two_candidate_ids_in_one_arg_are_left_to_fail_loudly`, and end to end by
+  `test_a_run_prefixed_id_reaches_the_handler_instead_of_being_refused`.
+
 - **The turn number is stamped by the server.** `endless_advance_turn` stamps the
   turn from the server's own record, not from anything in the declared state, and
   is idempotent per `(runId, turn)` (a replay changes nothing). App-owned
