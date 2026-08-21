@@ -61,6 +61,10 @@ before publishing. Any one of these satisfies it, checked in this order:
   `dnf install librsvg2` on Fedora/AL2023, `brew install librsvg` on macOS),
   reached directly through `ctypes` with no Python package.
 
+The SCENE lane additionally needs the `vtracer` and `pillow` Python packages
+(`pip install vtracer pillow`) to trace reference photos into underlays; the
+pattern lane works without them.
+
 Without a renderer, illustrator draft submission fails and page art falls back
 to the narrator's emergency path; the story itself is unaffected.
 

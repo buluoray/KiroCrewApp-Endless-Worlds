@@ -131,6 +131,24 @@ sees is produced locally from a closed, code-owned vocabulary.
   double-buffers image decoding, so publication and viewport changes never flash a
   blank background.
 
+- **The SCENE lane's underlay never enters the model's context.** For pages that
+  need a concrete place, `endless_trace_reference` fetches a free-licensed
+  Wikimedia Commons photo (license short-name must read as CC/CC0/public
+  domain), cover-crops to each view's exact aspect, lifts midtones adaptively
+  when the median luminance is dark (night photos otherwise band into the
+  darkest stop and trace to nothing), posterizes onto the world's dark-gold
+  ramp, and traces with vtracer. The resulting fragments (tens of KB) are
+  stored in `TraceStore` keyed to the run and turn; the Illustrator receives
+  only raster previews and places one `<g id="etr-underlay"/>` per SVG, which
+  the server splices at draft AND commit time (`compose_with_underlay`). A
+  placeholder with no stored trace is refused, a document without a placeholder
+  is untouched (the pattern lane pays nothing), and the trace is cleared after
+  publication. When no usable reference exists the tool degrades to a
+  procedural tonal base so briefs like an invented interior still get a
+  foundation. The composed-document ceiling is `MAX_BACKDROP_BYTES` (1MB);
+  hand-drawn tool inputs stay schema-capped at 24KB. Pinned by
+  `backend/tests/test_phototrace.py`.
+
 - **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
   successful commit, not on dispatch, so a dropped request or gateway restart can
   resume recovery. The backend tries two fresh illustrators; if both finish without
