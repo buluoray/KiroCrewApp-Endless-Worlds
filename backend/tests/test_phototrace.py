@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E40
 from phototrace import (  # noqa: E402
     TraceStore,
     build_underlay_fragment,
+    build_underlay_fragment_bounded,
     compose_with_underlay,
     procedural_base_fragment,
     search_reference,
@@ -87,31 +89,182 @@ def test_trace_store_binds_fragments_to_the_turn(tmp_path):
     assert store.load(4) is None
 
 
-def test_search_reference_keeps_only_free_licensed_bitmaps(monkeypatch):
+def test_search_reference_keeps_only_attribution_free_bitmaps(monkeypatch):
     payload = {"query": {"pages": {
-        "1": {"title": "File:Free.jpg", "imageinfo": [{
-            "mime": "image/jpeg", "thumburl": "https://x/free.jpg",
-            "descriptionurl": "https://commons/x",
+        "1": {"title": "File:BySa.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/by-sa.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:BySa.jpg",
             "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}},
         }]},
-        "2": {"title": "File:Owned.jpg", "imageinfo": [{
-            "mime": "image/jpeg", "thumburl": "https://x/owned.jpg",
+        "2": {"title": "File:CC0.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/cc0.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:CC0.jpg",
+            "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+        }]},
+        "3": {"title": "File:PublicDomain.png", "imageinfo": [{
+            "mime": "image/png",
+            "thumburl": "https://upload.wikimedia.org/public-domain.png",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:PublicDomain.png",
+            "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
+        }]},
+        "4": {"title": "File:Owned.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/owned.jpg",
             "extmetadata": {"LicenseShortName": {"value": "All rights reserved"}},
+        }]},
+        # Attribution-free does not make a book scan a photograph.
+        "5": {"title": "File:Scan.djvu", "imageinfo": [{
+            "mime": "image/vnd.djvu",
+            "thumburl": "https://upload.wikimedia.org/scan.jpg",
+            "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
         }]},
     }}}
     monkeypatch.setattr(
         phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8")
     )
+
     rows = search_reference("castle")
-    assert [r["title"] for r in rows] == ["File:Free.jpg"]
-    # A free-licensed djvu book scan is still not a photograph: a night-street
-    # query once traced a 1918 novel's cover lettering into the underlay.
-    payload["query"]["pages"]["3"] = {"title": "File:Scan.djvu", "imageinfo": [{
-        "mime": "image/vnd.djvu", "thumburl": "https://x/scan.jpg",
-        "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
-    }]}
-    assert [r["title"] for r in search_reference("castle")] == ["File:Free.jpg"]
-    assert rows[0]["license"] == "CC BY-SA 4.0"
+
+    assert [r["title"] for r in rows] == ["File:CC0.jpg", "File:PublicDomain.png"]
+    assert [r["license"] for r in rows] == ["CC0", "Public domain"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://upload.wikimedia.org/photo.jpg",
+        "https://example.com/photo.jpg",
+        "https://upload.wikimedia.org.evil.example/photo.jpg",
+        "https://user@upload.wikimedia.org/photo.jpg",
+    ],
+)
+def test_photo_fetch_refuses_urls_outside_the_wikimedia_https_boundary(url, monkeypatch):
+    monkeypatch.setattr(phototrace, "_FETCH", lambda candidate: b"")
+    with pytest.raises(BackdropError, match="only from Wikimedia"):
+        phototrace._http_get(url)
+
+
+def test_redirect_to_a_non_wikimedia_host_is_refused_before_following():
+    handler = phototrace._WikimediaRedirectHandler()
+    with pytest.raises(BackdropError, match="only from Wikimedia"):
+        handler.redirect_request(
+            None, None, 302, "Found", {}, "https://example.com/redirected.jpg"
+        )
+
+
+def test_unsupported_actual_image_format_is_refused_before_tracing():
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (20, 20), "white").save(buf, format="GIF")
+    with pytest.raises(BackdropError, match="supported photograph"):
+        build_underlay_fragment(buf.getvalue(), view=(20, 20))
+
+
+@pytest.mark.parametrize(
+    "size",
+    [(phototrace.MAX_PHOTO_DIMENSION + 1, 1), (5_000, 5_000)],
+)
+def test_excessive_image_dimensions_are_refused_before_decode(monkeypatch, size):
+    from PIL import Image
+
+    class OversizedImage:
+        format = "PNG"
+
+        def __init__(self):
+            self.size = size
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def convert(self, mode):  # pragma: no cover - the guard must run first
+            raise AssertionError("oversized pixels were decoded")
+
+    monkeypatch.setattr(Image, "open", lambda source: OversizedImage())
+    with pytest.raises(BackdropError, match="dimensions are too large"):
+        build_underlay_fragment(b"not-decoded", view=(20, 20))
+
+
+@pytest.mark.parametrize("focal", [(-0.01, 0.5), (1.01, 0.5), (0.5, -0.01), (0.5, 1.01)])
+def test_invalid_focal_points_are_refused(focal):
+    with pytest.raises(BackdropError, match="between 0 and 1"):
+        build_underlay_fragment(_photo_bytes(bright=True), view=(200, 200), focal=focal)
+
+
+def test_each_variant_uses_its_own_focal_point(monkeypatch):
+    from PIL import ImageOps
+
+    original_fit = ImageOps.fit
+    seen: list[tuple[float, float]] = []
+
+    def capture_fit(image, size, *args, **kwargs):
+        seen.append(kwargs["centering"])
+        return original_fit(image, size, *args, **kwargs)
+
+    monkeypatch.setattr(ImageOps, "fit", capture_fit)
+    left = build_underlay_fragment(
+        _photo_bytes(bright=True), view=(200, 200), focal=(0.0, 0.25)
+    )
+    right = build_underlay_fragment(
+        _photo_bytes(bright=True), view=(200, 200), focal=(1.0, 0.75)
+    )
+
+    assert seen == [(0.0, 0.25), (1.0, 0.75)]
+    assert left != right, "different focal framing must change an asymmetric trace"
+
+
+def test_bounded_worker_returns_a_valid_fragment():
+    fragment = build_underlay_fragment_bounded(
+        _photo_bytes(bright=True), view=(200, 150), focal=(0.25, 0.75)
+    )
+    assert fragment.startswith('<g opacity="0.65">')
+    compile_backdrop(_wrap(fragment, 200, 150))
+
+
+def test_bounded_worker_timeout_is_a_clear_error(monkeypatch):
+    def time_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(phototrace.subprocess, "run", time_out)
+    monkeypatch.setattr(phototrace, "TRACE_TIMEOUT_SECS", 1)
+    with pytest.raises(BackdropError, match="timed out after 1s"):
+        build_underlay_fragment_bounded(_photo_bytes(bright=True), view=(20, 20))
+
+
+def test_bounded_worker_refuses_missing_output(monkeypatch):
+    monkeypatch.setattr(
+        phototrace.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stderr=b""),
+    )
+    with pytest.raises(BackdropError, match="no fragment produced"):
+        build_underlay_fragment_bounded(_photo_bytes(bright=True), view=(20, 20))
+
+
+def test_bounded_worker_refuses_malformed_output(monkeypatch):
+    def write_malformed(command, **kwargs):
+        Path(command[-1]).write_text("<script/>", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stderr=b"")
+
+    monkeypatch.setattr(phototrace.subprocess, "run", write_malformed)
+    with pytest.raises(BackdropError, match="script"):
+        build_underlay_fragment_bounded(_photo_bytes(bright=True), view=(20, 20))
+
+
+def test_bounded_worker_rejects_oversized_input_before_writing_or_spawning(monkeypatch):
+    monkeypatch.setattr(phototrace, "_MAX_PHOTO_BYTES", 3)
+
+    def must_not_spawn(*args, **kwargs):  # pragma: no cover - guard must run first
+        raise AssertionError("worker spawned for oversized input")
+
+    monkeypatch.setattr(phototrace.subprocess, "run", must_not_spawn)
+    with pytest.raises(BackdropError, match="too large to trace"):
+        build_underlay_fragment_bounded(b"four", view=(20, 20))
 
 
 # -- the MCP tool + composition through draft/commit ------------------------
@@ -144,8 +297,9 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
             return json.dumps({"query": {"pages": {"1": {
                 "title": "File:Bridge.jpg",
                 "imageinfo": [{
-                    "mime": "image/jpeg", "thumburl": "https://x/b.jpg",
-                    "descriptionurl": "https://commons/b",
+                    "mime": "image/jpeg",
+                    "thumburl": "https://upload.wikimedia.org/b.jpg",
+                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
                     "extmetadata": {"LicenseShortName": {"value": "CC0"}},
                 }],
             }}}}).encode("utf-8")
@@ -180,7 +334,52 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
     assert 'id="etr-underlay"' not in committed["markup"]
     assert committed["markup"].count("<path ") > 1, "underlay paths were spliced in"
     assert 'id="etr-underlay"' not in committed["mobile"]
+    assert committed["source"] == {
+        "title": "File:Bridge.jpg",
+        "pageUrl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
+        "license": "CC0",
+    }
     assert TraceStore(data, run_id).load(1) is None, "trace cleared after publication"
+
+
+def test_trace_tool_passes_independent_focal_points_to_the_worker(data, monkeypatch):
+    payload = {"query": {"pages": {"1": {
+        "title": "File:Bridge.jpg",
+        "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/bridge.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
+            "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+        }],
+    }}}}
+
+    def fake_fetch(url: str) -> bytes:
+        return json.dumps(payload).encode("utf-8") if "api.php" in url else b"photo"
+
+    seen: list[tuple[tuple[int, int], tuple[float, float]]] = []
+
+    def fake_worker(photo, *, view, ramp, opacity, focal):
+        seen.append((view, focal))
+        return procedural_base_fragment(view=view, ramp=ramp, opacity=opacity)
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake_fetch)
+    monkeypatch.setattr(srv, "build_underlay_fragment_bounded", fake_worker)
+    run_id = "f" * 32
+    _request_backdrop(data, run_id, 5)
+
+    out = _call(
+        "endless_trace_reference",
+        runId=run_id,
+        turn=5,
+        query="stone bridge",
+        desktopFocalX=0.1,
+        desktopFocalY=0.2,
+        mobileFocalX=0.8,
+        mobileFocalY=0.9,
+    )
+
+    assert out["ok"] is True and out["underlay"] == "reference"
+    assert seen == [((800, 600), (0.1, 0.2)), ((450, 900), (0.8, 0.9))]
 
 
 def test_trace_tool_passes_a_custom_ramp_through_to_the_base(data, monkeypatch):

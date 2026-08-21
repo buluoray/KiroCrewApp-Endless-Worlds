@@ -1,6 +1,6 @@
 """Photo-reference underlays for scene backdrops.
 
-The SCENE lane's foundation: a free-licensed reference photograph is traced into
+The SCENE lane's foundation: an attribution-free reference photograph is traced into
 a palette-disciplined SVG fragment that the Illustrator composes UNDER its own
 crisp line work. The photo supplies what a model cannot draw freehand — real
 perspective, light distribution, and mass — while the world palette supplies
@@ -14,8 +14,8 @@ in its SVG and the server splices the stored fragment in at draft/commit time
 (:func:`compose_with_underlay`).
 
 Reference photos come only from Wikimedia Commons and are kept only when their
-license reads as free (CC or public domain). When no usable reference exists —
-the brief describes something no photo archive holds — the pipeline still earns
+license is CC0 or public domain. When no usable reference exists — the brief
+describes something no photo archive holds — the pipeline still earns
 its keep by producing a procedural tonal base (:func:`procedural_base_fragment`)
 for the Illustrator to paint over.
 """
@@ -28,13 +28,15 @@ import logging
 import os
 import re
 import secrets
+import subprocess
+import sys
 import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from backdrop import BackdropError, _ID_RE
+from backdrop import BackdropError, _ID_RE, compile_backdrop
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,16 @@ NOCTURNE_RAMP: tuple[tuple[int, int, int], ...] = (
 #: Illustrator's own hand-drawn input stays under the tool schema's 24KB.
 MAX_TRACE_FRAGMENT_BYTES = 400_000
 
+#: Pillow/vtracer execute in a killable child. One variant must finish within this
+#: wall-clock bound so malformed or pathological photos cannot wedge the MCP loop.
+TRACE_TIMEOUT_SECS = 30
+
+#: Commons thumbnails are requested at 1200px. These broader hard ceilings catch a
+#: forged response or decompression bomb before Pillow decodes its pixel payload.
+MAX_PHOTO_PIXELS = 20_000_000
+MAX_PHOTO_DIMENSION = 8_000
+_ALLOWED_FETCH_HOSTS = frozenset({"commons.wikimedia.org", "upload.wikimedia.org"})
+
 #: Below this median luminance a photo's pixels crowd the darkest bands and the
 #: traced layer vanishes against a dark page; lift midtones first.
 _DARK_MEDIAN = 90
@@ -56,37 +68,60 @@ _DARK_GAMMA = 0.55
 _PLACEHOLDER_RE = re.compile(r'<g\s+id="etr-underlay"\s*(?:/>|>\s*</g>)')
 
 _COMMONS_API = "https://commons.wikimedia.org/w/api.php"
-#: Accepts CC family (including CC0 — no word boundary exists between "cc" and
-#: "0", so a plain \bcc\b wrongly rejects the freest license), Creative Commons
-#: spelled out, and public-domain markers.
-_FREE_LICENSE_RE = re.compile(
-    r"(?:^|\W)cc(?:0|[- ]|$)|creative commons|public domain|(?:^|\W)pd(?:\W|$)",
+#: Only attribution-free material enters a backdrop. CC BY/SA would require a
+#: persistent player-visible credit and may impose share-alike terms on the
+#: composed artwork; keeping only CC0/public-domain avoids silently losing those
+#: obligations when the private trace record is cleared.
+_REUSABLE_LICENSE_RE = re.compile(
+    r"(?:^|\W)cc0(?:\W|$)|public domain|(?:^|\W)pd(?:\W|$)",
     re.IGNORECASE,
 )
 #: Only real photographic raster formats. A bare image/ prefix admits djvu and
 #: tiff page scans — a live query for a night street returned a 1918 novel's
 #: cover scan, which traced into legible title lettering.
 _PHOTO_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
+_PIL_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 _MAX_PHOTO_BYTES = 12_000_000
 
 #: Injectable fetcher so tests never touch the network: (url) -> bytes.
 _FETCH: Callable[[str], bytes] | None = None
 
 
+def _require_wikimedia_url(url: str) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in _ALLOWED_FETCH_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise BackdropError("reference photos may be fetched only from Wikimedia")
+    return url
+
+
+class _WikimediaRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        _require_wikimedia_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _http_get(url: str) -> bytes:
+    _require_wikimedia_url(url)
     if _FETCH is not None:
         return _FETCH(url)
     req = urllib.request.Request(url, headers={"User-Agent": "endless-worlds-backdrop/1.0"})
-    with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310 — https Commons only
+    opener = urllib.request.build_opener(_WikimediaRedirectHandler())
+    with opener.open(req, timeout=20) as resp:  # noqa: S310 — allowlisted HTTPS only
+        _require_wikimedia_url(resp.geturl())
         return resp.read(_MAX_PHOTO_BYTES + 1)
 
 
 def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
-    """Free-licensed Commons candidates for a keyword query, best-first.
+    """Attribution-free Commons candidates for a keyword query, best-first.
 
-    Only bitmap files whose license short-name reads as CC or public domain are
-    returned; everything else is dropped so an unusable license can never reach
-    the composed backdrop.
+    Only bitmap files whose license short-name reads as CC0 or public domain are
+    returned; everything else is dropped so attribution/share-alike obligations
+    can never be silently lost from the composed backdrop.
     """
     params = urllib.parse.urlencode({
         "action": "query", "format": "json",
@@ -105,7 +140,7 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
         license_name = str((meta.get("LicenseShortName") or {}).get("value", ""))
         if info.get("mime", "") not in _PHOTO_MIMES:
             continue
-        if not _FREE_LICENSE_RE.search(license_name):
+        if not _REUSABLE_LICENSE_RE.search(license_name):
             continue
         url = info.get("thumburl") or info.get("url")
         if not url:
@@ -145,22 +180,38 @@ def _parse_ramp(ramp: list[str] | None) -> tuple[tuple[int, int, int], ...]:
 
 def build_underlay_fragment(
     photo: bytes, *, view: tuple[int, int], ramp: list[str] | None = None,
-    opacity: float = 0.65,
+    opacity: float = 0.65, focal: tuple[float, float] = (0.5, 0.5),
 ) -> str:
     """Trace one photo into a ``<g>`` fragment sized exactly to ``view``.
 
-    Cover-crops to the view's aspect first, so the fragment needs no scale
-    transform and its coordinates line up 1:1 with the Illustrator's overlay.
-    The full-canvas background blob vtracer emits is dropped — the page's own
-    sky sits beneath.
+    Cover-crops to the view's aspect first, using that variant's own focal point,
+    so desktop and mobile can frame the same source independently. The fragment
+    needs no scale transform and its coordinates line up 1:1 with the
+    Illustrator's overlay. The full-canvas background blob vtracer emits is
+    dropped — the page's own sky sits beneath.
     """
     from PIL import Image, ImageFilter, ImageOps  # local: pattern lane needs no PIL
 
     import vtracer  # local: pattern lane needs no vtracer
 
     stops = _parse_ramp(ramp)
-    img = Image.open(io.BytesIO(photo)).convert("RGB")
-    img = ImageOps.fit(img, view, method=Image.LANCZOS)
+    fx, fy = float(focal[0]), float(focal[1])
+    if not 0.0 <= fx <= 1.0 or not 0.0 <= fy <= 1.0:
+        raise BackdropError("a trace focal point must stay between 0 and 1")
+    with Image.open(io.BytesIO(photo)) as opened:
+        if opened.format not in _PIL_FORMATS:
+            raise BackdropError("the reference bytes are not a supported photograph")
+        width, height = opened.size
+        if (
+            width <= 0
+            or height <= 0
+            or width > MAX_PHOTO_DIMENSION
+            or height > MAX_PHOTO_DIMENSION
+            or width * height > MAX_PHOTO_PIXELS
+        ):
+            raise BackdropError("the reference photo dimensions are too large to trace")
+        img = opened.convert("RGB")
+    img = ImageOps.fit(img, view, method=Image.LANCZOS, centering=(fx, fy))
     g = ImageOps.autocontrast(img.convert("L")).filter(ImageFilter.GaussianBlur(1.6))
     median = sorted(g.getdata())[view[0] * view[1] // 2]
     if median < _DARK_MEDIAN:
@@ -191,6 +242,85 @@ def build_underlay_fragment(
     if len(body) > MAX_TRACE_FRAGMENT_BYTES:
         raise BackdropError("the traced reference is too heavy; try a simpler photo")
     return f'<g opacity="{opacity:.2f}">\n{body}\n</g>'
+
+
+def _trace_fragment_child(job_path: Path, output_path: Path) -> int:
+    """Child entry point: decode/trace one variant and write only its SVG group."""
+    try:
+        job = json.loads(job_path.read_text(encoding="utf-8"))
+        fragment = build_underlay_fragment(
+            Path(job["photoPath"]).read_bytes(),
+            view=(int(job["width"]), int(job["height"])),
+            ramp=job.get("ramp"),
+            opacity=float(job["opacity"]),
+            focal=(float(job["focalX"]), float(job["focalY"])),
+        )
+        tmp = output_path.with_suffix(".tmp")
+        tmp.write_text(fragment, encoding="utf-8")
+        os.replace(tmp, output_path)
+        return 0
+    except Exception as exc:  # noqa: BLE001 — parent normalizes child failure
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+
+def build_underlay_fragment_bounded(
+    photo: bytes, *, view: tuple[int, int], ramp: list[str] | None = None,
+    opacity: float = 0.65, focal: tuple[float, float] = (0.5, 0.5),
+) -> str:
+    """Trace one variant in a killable child and validate its bounded output."""
+    if len(photo) > _MAX_PHOTO_BYTES:
+        raise BackdropError("the reference photo is too large to trace")
+    with tempfile.TemporaryDirectory(prefix="etr-parent-") as tmp_dir:
+        root = Path(tmp_dir)
+        photo_path = root / "photo.bin"
+        job_path = root / "job.json"
+        output_path = root / "fragment.svg"
+        photo_path.write_bytes(photo)
+        job_path.write_text(json.dumps({
+            "photoPath": str(photo_path),
+            "width": int(view[0]),
+            "height": int(view[1]),
+            "ramp": ramp,
+            "opacity": float(opacity),
+            "focalX": float(focal[0]),
+            "focalY": float(focal[1]),
+        }), encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--trace-fragment",
+                    str(job_path),
+                    str(output_path),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=TRACE_TIMEOUT_SECS,
+            )
+        except subprocess.TimeoutExpired:
+            raise BackdropError(
+                f"reference tracing timed out after {TRACE_TIMEOUT_SECS}s"
+            ) from None
+        except OSError as exc:
+            raise BackdropError(
+                f"reference trace worker could not start ({type(exc).__name__})"
+            ) from None
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        if proc.returncode != 0 or not output_path.is_file():
+            raise BackdropError(
+                f"reference trace worker failed ({detail or 'no fragment produced'})"
+            )
+        if output_path.stat().st_size > MAX_TRACE_FRAGMENT_BYTES:
+            raise BackdropError("the traced reference is too heavy; try a simpler photo")
+        fragment = output_path.read_text(encoding="utf-8")
+        width, height = view
+        compile_backdrop(
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {width} {height}">{fragment}</svg>'
+        )
+        return fragment
 
 
 def procedural_base_fragment(
@@ -280,3 +410,9 @@ class TraceStore:
 
     def clear(self) -> None:
         self._path.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 4 and sys.argv[1] == "--trace-fragment":
+        raise SystemExit(_trace_fragment_child(Path(sys.argv[2]), Path(sys.argv[3])))
+    raise SystemExit("phototrace.py is a module; only --trace-fragment is runnable")
