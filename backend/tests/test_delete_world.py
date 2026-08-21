@@ -503,6 +503,14 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(
 
     assert len(spawn.calls) == 2
     assert all(call[1] == "endless-illustrator" for call in spawn.calls)
+    for task, _agent, _silent, _model in spawn.calls:
+        assert "In LANE: scene, first call endless_trace_reference" in task
+        assert "in LANE: motif, draw directly without tracing" in task
+        assert task.index("endless_trace_reference") < task.index(
+            "endless_submit_backdrop_draft"
+        )
+        assert "First call endless_submit_backdrop_draft" not in task
+        assert "draw directly from the brief" not in task
     assert len(prompts) == 1
     assert "do NOT narrate" in prompts[0]
     assert "endless_commit_fallback_backdrop" in prompts[0]

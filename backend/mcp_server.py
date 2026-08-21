@@ -1726,10 +1726,14 @@ def _trace_store(run_id: str) -> TraceStore:
 
 
 def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
-    """Splice the stored underlay into an ``etr-underlay`` placeholder, if any."""
+    """Splice a stored underlay, failing closed when a traced scene omits it."""
     trace = _trace_store(run_id).load(turn)
-    fragment = trace.get(variant) if isinstance(trace, dict) else None
-    return compose_with_underlay(svg, fragment if isinstance(fragment, str) else None)
+    if isinstance(trace, dict):
+        fragment = trace.get(variant)
+        if not isinstance(fragment, str) or not fragment:
+            raise BackdropError(f"the stored trace has no {variant} underlay")
+        return compose_with_underlay(svg, fragment, require_placeholder=True)
+    return compose_with_underlay(svg, None)
 
 
 def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
@@ -1781,7 +1785,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
 
     store = _trace_store(run_id)
-    fragment_id = store.save(turn=turn, desktop=desktop, mobile=mobile, source=source)
+    fragment_id = store.save(
+        turn=turn, desktop=desktop, mobile=mobile, source=source,
+        kind=kind, query=query,
+    )
     preview_dir = _DATA / "runs" / run_id / "backdrop-previews"
     previews: dict[str, str] = {}
     for label, fragment, w, h in (("desktop", desktop, 400, 300), ("mobile", mobile, 150, 300)):
@@ -1809,7 +1816,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
-    """Validate an Illustrator first draft and return safe raster preview paths."""
+    """Validate one Illustrator draft and return safe raster preview paths."""
     run_id = args["runId"]
     turn = int(args["turn"])
     request = _store().read_backdrop_request(run_id)
@@ -1825,7 +1832,7 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
         "draftId": draft["draftId"],
         "turn": turn,
         "previews": draft["previews"],
-        "next": "read every preview PNG together in Image mode, then publish once",
+        "next": "read every preview together, then follow the lane's review-pass contract",
     }
 
 
@@ -1838,11 +1845,24 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     drafts.require(draft_id, turn)
     trace = _trace_store(run_id).load(turn)
     source = trace.get("source") if isinstance(trace, dict) else None
+    trace_audit = None
+    if isinstance(trace, dict):
+        kind = trace.get("kind")
+        if kind not in {"reference", "base"}:
+            kind = "reference" if isinstance(source, dict) else "base"
+        trace_audit = {
+            "pipeline": "trace",
+            "underlay": kind,
+            "fragmentId": str(trace.get("fragmentId") or ""),
+            "query": str(trace.get("query") or ""),
+            "used": True,
+        }
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     version = _backdrop_store(run_id).set(
         markup, args.get("buttons"), turn, mobile,
         source=source if isinstance(source, dict) else None,
+        trace=trace_audit,
     )
     try:
         drafts.discard(draft_id, turn)

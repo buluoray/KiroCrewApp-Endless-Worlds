@@ -65,7 +65,9 @@ _ALLOWED_FETCH_HOSTS = frozenset({"commons.wikimedia.org", "upload.wikimedia.org
 _DARK_MEDIAN = 90
 _DARK_GAMMA = 0.55
 
-_PLACEHOLDER_RE = re.compile(r'<g\s+id="etr-underlay"\s*(?:/>|>\s*</g>)')
+_PLACEHOLDER_RE = re.compile(
+    r"<g\s+id=(?P<quote>[\"'])etr-underlay(?P=quote)\s*(?:/>|>\s*</g>)"
+)
 
 _COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 #: Only attribution-free material enters a backdrop. CC BY/SA would require a
@@ -190,9 +192,9 @@ def build_underlay_fragment(
     Illustrator's overlay. The full-canvas background blob vtracer emits is
     dropped — the page's own sky sits beneath.
     """
-    from PIL import Image, ImageFilter, ImageOps  # local: pattern lane needs no PIL
+    from PIL import Image, ImageFilter, ImageOps  # local: motif lane needs no PIL
 
-    import vtracer  # local: pattern lane needs no vtracer
+    import vtracer  # local: motif lane needs no vtracer
 
     stops = _parse_ramp(ramp)
     fx, fy = float(focal[0]), float(focal[1])
@@ -351,24 +353,37 @@ def procedural_base_fragment(
     return f'<g opacity="{opacity:.2f}">\n' + "\n".join(rects) + pools + "\n</g>"
 
 
-def compose_with_underlay(svg: str, fragment: str | None) -> str:
+def compose_with_underlay(
+    svg: str, fragment: str | None, *, require_placeholder: bool = False
+) -> str:
     """Splice the stored underlay into the Illustrator's placeholder.
 
     The placeholder marks WHERE in the paint order the underlay belongs (above
     the sky, below every mark). A placeholder with no stored fragment is a hard
-    error — silently dropping it would publish art missing its foundation. A
-    document without a placeholder passes through untouched, so the pattern
-    lane never pays for this feature.
+    error — silently dropping it would publish art missing its foundation. Motif
+    SVGs pass through only when no trace requires composition; once the SCENE lane
+    has created a trace, each variant must carry exactly one placeholder.
     """
-    has_placeholder = _PLACEHOLDER_RE.search(svg) is not None
-    if not has_placeholder:
+    count = len(_PLACEHOLDER_RE.findall(svg))
+    if count == 0:
+        if require_placeholder:
+            raise BackdropError(
+                "a traced scene needs exactly one etr-underlay placeholder in each SVG"
+            )
         return svg
+    if count != 1:
+        raise BackdropError(
+            "a traced scene needs exactly one etr-underlay placeholder in each SVG"
+        )
     if not fragment:
         raise BackdropError(
             "this SVG carries an etr-underlay placeholder but no traced reference "
             "is stored for this page; call endless_trace_reference first"
         )
-    return _PLACEHOLDER_RE.sub(lambda _: fragment, svg, count=1)
+    composed = _PLACEHOLDER_RE.sub(lambda _: fragment, svg, count=1)
+    if "etr-underlay" in composed:
+        raise BackdropError("the etr-underlay placeholder was not fully composed")
+    return composed
 
 
 class TraceStore:
@@ -385,14 +400,18 @@ class TraceStore:
         self._path = data_dir / "runs" / run_id / "trace-underlay.json"
 
     def save(
-        self, *, turn: int, desktop: str, mobile: str, source: dict[str, str] | None,
+        self, *, turn: int, desktop: str, mobile: str,
+        source: dict[str, str] | None, kind: str, query: str,
     ) -> str:
+        if kind not in {"reference", "base"}:
+            raise BackdropError("a trace underlay kind must be reference or base")
         fragment_id = secrets.token_hex(8)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps({
             "fragmentId": fragment_id, "turn": int(turn),
             "desktop": desktop, "mobile": mobile, "source": source or None,
+            "kind": kind, "query": str(query)[:500],
         }, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self._path)
         return fragment_id

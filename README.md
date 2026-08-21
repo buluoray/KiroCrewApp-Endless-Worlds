@@ -63,7 +63,7 @@ before publishing. Any one of these satisfies it, checked in this order:
 
 The SCENE lane additionally needs the `vtracer` and `pillow` Python packages
 (`pip install vtracer pillow`) to trace reference photos into underlays; the
-pattern lane works without them. Photo decoding and tracing run per variant in a
+motif lane works without them. Photo decoding and tracing run per variant in a
 killable child process with a wall-clock timeout, input/output byte ceilings, and
 format/dimension/pixel guards. References are fetched only over HTTPS from
 Wikimedia Commons hosts, redirects cannot leave that allowlist, and only CC0 or

@@ -1,85 +1,93 @@
 ---
 name: distill-scene-to-motif
-description: Turn a concrete scene (a page's events, a reference image, a described place) into a sparse abstract SVG motif by extracting spatial facts and rebuilding them with a disciplined mark vocabulary, instead of illustrating the scene literally.
-version: 1.0.0
-tags: [skill, endless-worlds, backdrop, illustration, composition]
+description: Derive a distinctive abstract SVG motif from a page's dramatic meaning, world identity, and emotional atmosphere without prescribing a visual recipe or illustrating the prose literally.
+version: 3.0.0
+tags: [skill, endless-worlds, backdrop, illustration, composition, motif]
 ---
 
-# Distill a scene to a motif
+# Derive an authored visual motif
 
-## When to use
+## Purpose
 
-Use this skill when backdrop art must *evoke* a specific scene without drawing
-it literally: the HYBRID lane's single environmental trace, a STORY IMAGE page
-where a full illustration would overreach the vector medium, or any time a
-reference (a photo-trace underlay, a described location, the page's events)
-tempts you to reproduce objects instead of composing. Pure-pattern pages that
-need no scene reference do not need this skill.
+Use this skill for the MOTIF lane, where the backdrop should make an invisible
+force, perception, emotion, atmosphere, or irreversible change felt without
+turning the prose into a literal scene. It may also guide the sparse abstract
+marks added over a SCENE underlay.
 
-The core claim: a scene's identity lives in its **spatial relationships**, not
-its surfaces. A handful of correctly observed relationships, rebuilt with few
-marks, reads as *that* scene on the second glance while standing as a clean
-abstract composition on the first. Reproducing contours produces the cheap
-silhouette collage this project's art direction explicitly rejects.
+A motif is not a category of shapes. It is an artistic interpretation: a visual
+idea whose composition, material character, rhythm, color, and restraint belong
+to this page and this world. The same description should be capable of producing
+many valid motifs; if the instructions imply one obvious drawing, they are too
+prescriptive.
 
-## The loop
+## Read for meaning, not nouns
 
-Work through four moves, in order, before drawing anything:
+Take PLAYER CHOICE, PAGE PROSE, world identity, and ART BRIEF together. Identify:
 
-1. **Observe.** Name three to six spatial facts about the scene. Draw them from
-   this vocabulary: relative mass and scale; structural axes (a floor line, a
-   horizon, a wall's vertical); direction of motion or light; rhythm and its
-   intervals (an arcade, a queue, ripples); occlusion order (what sits in front
-   of what); tonal hierarchy (what is darkest, what carries the light); and the
-   shape of the empty space between things.
-2. **Discard.** Drop surface texture, interior detail, perspective correctness,
-   and everything that merely identifies an object rather than placing it.
-   A window's carved tracery is surface; the *taper and interval* of a row of
-   windows is structure.
-3. **Rebuild.** Reconstruct only the kept facts with the fewest marks that
-   preserve their relationships — scale ratios, spacing, overlap, asymmetry,
-   and where the weight sits. The motif must survive as one coherent group;
-   scattering marks across the frame to "fill" it destroys the observation.
-4. **Verify traceability.** Point at every mark and name the fact it encodes.
-   A mark you cannot trace to an observation is decoration; delete it.
+- the invisible dramatic fact that remains after the page;
+- its emotional temperature and contradiction;
+- the world's material and cultural character;
+- the intended relationship between tension and quiet;
+- how this page must differ from the recent visual history.
 
-## Mark discipline
+Do not translate those notes directly into objects. They are pressures on the
+art, not a parts list.
 
-- **One primary mark family**, at most two supporting families. Families that
-  work well in this project's medium: tapered blocks (architecture, masses),
-  fine broken lines (axes, edges), soft ellipses (light pools, water, canopies),
-  short irregular vertical strokes (figures, reeds, crowds).
-- **Figures are never anatomy.** A person is one continuous, slightly irregular
-  tapered mark — head, shoulders and body fused. Two figures differ in height,
-  width, and lean, not in drawn features. No circles for heads, ever.
-- **A landmark keeps one to three identity cues** — the eave line, the taper,
-  the arch profile — and loses every other detail.
-- **Repetition is observed, not mechanical.** Vary interval, scale, and opacity
-  the way the real rhythm varies; a perfectly even repeat reads as an icon set,
-  not a place.
+## Develop concepts before marks
 
-## Palette and calm
+Silently develop at least three substantially different visual concepts. They
+must differ in metaphor and composition, not merely palette or ornament. Reject:
 
-- Extract colors from the scene (or the world's declared palette family),
-  desaturated: one dominant, one dark structural, one light neutral, at most
-  two small accents that genuinely exist in the scene.
-- Atmosphere comes from spacing, scale contrast, and asymmetry — never from
-  added grain, glow, vignettes, or texture noise. This is the same calm-field
-  rule the backdrop prompt already enforces; the motif must keep the reading
-  field quiet wherever prose sits.
-- Leave most of the field empty. The motif typically claims a third of the
-  composition's width or less; generous negative space is what lets few marks
-  carry a whole scene.
+- a literal summary of the prose;
+- the first obvious emblem or symbol;
+- a familiar stock effect that could accompany any fantasy or dramatic page;
+- a rearrangement of the previous backdrops;
+- a technically attractive treatment with no world-specific reason to exist.
 
-## Worked example
+Choose the concept with the strongest world-specific metaphor, compositional
+tension, and emotional afterimage. Do not expose the candidates or explain the
+selection in the final response; resolve the decision in the artwork.
 
-A sunlit cloister corridor, two visitors walking away. Facts kept: (1) an
-arcade of backlit pointed openings receding left-to-right; (2) one warm light
-pool on the floor per bay, drifting diagonally; (3) two small figures against
-large architecture; (4) one floor axis separating wall from pavement.
+## Compose with artistic intent
 
-Rebuild: four tapered arch blocks stepping down in height and opacity; three
-soft gold ellipses echoing the pools' diagonal drift; two irregular vertical
-ink marks, unequal in height and lean; one fine line broken into three
-segments. Fourteen marks total, every one traceable, and the corridor is
-unmistakable — without a single column, capital, or face drawn.
+Every formal choice must support the selected concept. Shape language, scale,
+asymmetry, rhythm, interruption, layering, edge behavior, negative space,
+luminance, color relationships, apparent material, and motion are expressive
+variables, not requirements. No technique is privileged and none is mandatory.
+
+The composition should feel intentional at first glance and reveal a second
+reading without becoming busy. Protect the prose field through hierarchy and
+spatial judgment rather than reducing the whole image to faint decoration.
+Desktop and mobile carry the same visual idea but are independently composed for
+their aspect ratios.
+
+Motion, when earned, is one restrained system that deepens the still image's
+meaning. It must never be used to rescue a weak composition.
+
+## Cliche check
+
+Before submitting, ask:
+
+1. Could this image fit an unrelated page after only changing its colors?
+2. Does it read as an icon, diagram, UI ornament, screensaver, stock particle
+   effect, or decorative filler?
+3. Did a convenient SVG technique choose the concept instead of the story?
+4. Is the most interesting decision hidden behind generic polish?
+5. Are desktop and mobile genuinely composed, or merely rearranged?
+
+If any answer exposes a generic solution, return to concept development rather
+than adding more effects.
+
+## Visual review
+
+Judge the rendered desktop and mobile previews together. Look for a clear but
+non-literal thesis, world specificity, compositional tension, controlled visual
+hierarchy, meaningful quiet, and an absence of default decoration.
+
+For MOTIF, the first render is diagnostic rather than publishable. Name the
+single weakest or most generic artistic decision, then make one structural
+revision to the concept's composition, hierarchy, material character, rhythm, or
+negative space. A palette adjustment or extra effect alone is not a second pass.
+Render the revised desktop/mobile set, inspect both replacement previews together,
+and publish only that reviewed revision. SCENE may retain a strong first render,
+but any revision must also be rendered and inspected before publication.

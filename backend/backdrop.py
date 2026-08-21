@@ -77,6 +77,29 @@ class BackdropError(ValueError):
     fix the one thing, rather than guessing."""
 
 
+def _clean_trace_audit(raw: Any) -> dict[str, Any] | None:
+    """Keep only a conclusive receipt that a trace underlay was composed."""
+    if not isinstance(raw, dict):
+        return None
+    pipeline = str(raw.get("pipeline") or "")
+    underlay = str(raw.get("underlay") or "")
+    fragment_id = str(raw.get("fragmentId") or "")
+    if (
+        pipeline != "trace"
+        or underlay not in {"reference", "base"}
+        or re.fullmatch(r"[0-9a-f]{16}", fragment_id) is None
+        or raw.get("used") is not True
+    ):
+        return None
+    return {
+        "pipeline": "trace",
+        "underlay": underlay,
+        "fragmentId": fragment_id,
+        "query": str(raw.get("query") or "")[:500],
+        "used": True,
+    }
+
+
 def compile_backdrop(svg: str) -> str:
     """Validate narrator SVG and return it ready to serve as an image.
 
@@ -390,9 +413,9 @@ class BackdropDraftStore:
 
     Drafts live beside but never inside ``backdrop.json``. Runtime routes read only
     :class:`BackdropStore`, so a draft cannot leak into live play, chronicle history,
-    or shelf thumbnails. A newer recovery attempt replaces the stale draft. The
-    opaque id binds the eventual final commit to the exact preview the Illustrator
-    was asked to inspect.
+    or shelf thumbnails. A reviewed revision or newer recovery attempt replaces the
+    stale draft. The opaque id binds the eventual final commit to the latest preview
+    the Illustrator was asked to inspect.
     """
 
     def __init__(self, data_dir: Path, run_id: str) -> None:
@@ -512,10 +535,11 @@ class BackdropStore:
 
     def _load(self) -> list[dict[str, Any]]:
         """The backdrop history, oldest-first. Each entry is
-        ``{turn, markup, mobile?, buttons?, version}``; an entry with empty ``markup`` is a
-        tombstone (the narrator cleared the background at that turn). Migrates the
-        old single-object format to a one-entry history, and treats a corrupt file
-        as no history rather than an error that would break the play view."""
+        ``{turn, markup, mobile?, buttons?, version, source?, trace?}``; an entry with
+        empty ``markup`` is a tombstone (the narrator cleared the background at that
+        turn). Migrates the old single-object format to a one-entry history, and
+        treats a corrupt file as no history rather than an error that would break
+        the play view."""
         if not self._path.is_file():
             return []
         try:
@@ -562,12 +586,14 @@ class BackdropStore:
             }
             if candidate["pageUrl"] and candidate["license"]:
                 source = candidate
+        trace = _clean_trace_audit(entry.get("trace"))
         return {
             "markup": markup,
             "mobile": mobile if isinstance(mobile, str) and mobile.strip() else None,
             "version": version,
             "buttons": buttons if isinstance(buttons, str) and buttons.strip() else None,
             "source": source,
+            "trace": trace,
         }
 
     def current(self) -> dict[str, Any] | None:
@@ -614,6 +640,7 @@ class BackdropStore:
     def set(
         self, markup: str, buttons: str | None = None, turn: int = 0,
         mobile: str | None = None, source: dict[str, str] | None = None,
+        trace: dict[str, Any] | None = None,
     ) -> int:
         """Validate and append coordinated desktop/mobile backgrounds (and the
         optional common button motif),
@@ -646,6 +673,7 @@ class BackdropStore:
             }
             if candidate["pageUrl"] and candidate["license"]:
                 clean_source = candidate
+        clean_trace = _clean_trace_audit(trace)
         history = self._load()
         version = (max(int(e.get("version") or 0) for e in history) + 1) if history else 1
         entry: dict[str, Any] = {"turn": int(turn), "markup": clean_markup, "version": version}
@@ -655,6 +683,8 @@ class BackdropStore:
             entry["buttons"] = clean_buttons
         if clean_source:
             entry["source"] = clean_source
+        if clean_trace:
+            entry["trace"] = clean_trace
         if history and int(history[-1].get("turn") or 0) == int(turn):
             history[-1] = entry  # a second set on the same page replaces it
         else:

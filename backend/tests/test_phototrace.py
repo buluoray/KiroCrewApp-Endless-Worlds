@@ -71,19 +71,40 @@ def test_procedural_base_is_valid_for_both_views_and_custom_ramps():
         procedural_base_fragment(view=(800, 600), ramp=["#nothex1"])
 
 
-def test_compose_replaces_placeholder_and_fails_loud_without_a_fragment():
-    svg = '<svg xmlns="x"><rect/><g id="etr-underlay"/><path d="M0 0h1"/></svg>'
-    out = compose_with_underlay(svg, '<g opacity="0.50"><path d="M1 1h2"/></g>')
-    assert 'id="etr-underlay"' not in out and 'M1 1h2' in out
-    assert compose_with_underlay("<svg><rect/></svg>", None) == "<svg><rect/></svg>"
-    with pytest.raises(BackdropError):
-        compose_with_underlay(svg, None)
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_compose_replaces_both_placeholder_quote_styles(quote):
+    svg = (
+        f'<svg xmlns="x"><rect/><g id={quote}etr-underlay{quote}/>'
+        '<path d="M0 0h1"/></svg>'
+    )
+    out = compose_with_underlay(
+        svg, '<g opacity="0.50"><path d="M1 1h2"/></g>',
+        require_placeholder=True,
+    )
+    assert "etr-underlay" not in out and "M1 1h2" in out
 
 
-def test_trace_store_binds_fragments_to_the_turn(tmp_path):
+def test_compose_fails_closed_for_missing_duplicate_or_unbacked_placeholders():
+    plain = "<svg><rect/></svg>"
+    marker = '<g id="etr-underlay"/>'
+    assert compose_with_underlay(plain, None) == plain
+    with pytest.raises(BackdropError, match="exactly one"):
+        compose_with_underlay(plain, "<g/>", require_placeholder=True)
+    with pytest.raises(BackdropError, match="exactly one"):
+        compose_with_underlay(f"<svg>{marker}{marker}</svg>", "<g/>")
+    with pytest.raises(BackdropError, match="endless_trace_reference"):
+        compose_with_underlay(f"<svg>{marker}</svg>", None)
+
+
+def test_trace_store_binds_fragments_and_audit_to_the_turn(tmp_path):
     store = TraceStore(tmp_path, "run-abc")
-    store.save(turn=4, desktop="<g/>", mobile="<g/>", source=None)
-    assert store.load(4)["desktop"] == "<g/>"
+    store.save(
+        turn=4, desktop="<g/>", mobile="<g/>", source=None,
+        kind="base", query="unfindable castle",
+    )
+    stored = store.load(4)
+    assert stored["desktop"] == "<g/>"
+    assert stored["kind"] == "base" and stored["query"] == "unfindable castle"
     assert store.load(5) is None, "a stale trace must never reach another page"
     store.clear()
     assert store.load(4) is None
@@ -317,7 +338,7 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
 
     overlay = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">'
-        '<rect width="{w}" height="{h}" fill="#0b0e17"/><g id="etr-underlay"/>'
+        '<rect width="{w}" height="{h}" fill="#0b0e17"/><g id=\'etr-underlay\'/>'
         '<path d="M10 10 h40" stroke="#c9a227" fill="none"/></svg>'
     )
     draft = _call(
@@ -339,7 +360,66 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
         "pageUrl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
         "license": "CC0",
     }
+    assert committed["trace"] == {
+        "pipeline": "trace",
+        "underlay": "reference",
+        "fragmentId": out["fragmentId"],
+        "query": "stone bridge",
+        "used": True,
+    }
     assert TraceStore(data, run_id).load(1) is None, "trace cleared after publication"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_underlay"),
+    [
+        (None, "base"),
+        ({
+            "title": "Legacy reference",
+            "pageUrl": "https://commons.wikimedia.org/wiki/File:Legacy.jpg",
+            "license": "CC0",
+        }, "reference"),
+    ],
+)
+def test_legacy_inflight_trace_gets_a_durable_receipt(
+    data, source, expected_underlay
+):
+    run_id = "f" * 32
+    turn = 6
+    _request_backdrop(data, run_id, turn)
+    trace_path = data / "runs" / run_id / "trace-underlay.json"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    fragment = '<g opacity="0.50"><rect width="10" height="10" fill="#334455"/></g>'
+    trace_path.write_text(json.dumps({
+        "fragmentId": "0123456789abcdef",
+        "turn": turn,
+        "desktop": fragment,
+        "mobile": fragment,
+        "source": source,
+    }), encoding="utf-8")
+    scene = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        '<rect width="10" height="10" fill="#111111"/>'
+        '<g id="etr-underlay"/></svg>'
+    )
+
+    draft = _call(
+        "endless_submit_backdrop_draft", runId=run_id, turn=turn,
+        markup=scene, mobile=scene,
+    )
+    final = _call(
+        "endless_commit_backdrop", runId=run_id, turn=turn,
+        draftId=draft["draftId"], markup=scene, mobile=scene,
+    )
+
+    assert final["ok"] is True
+    assert BackdropStore(data, run_id).current()["trace"] == {
+        "pipeline": "trace",
+        "underlay": expected_underlay,
+        "fragmentId": "0123456789abcdef",
+        "query": "",
+        "used": True,
+    }
 
 
 def test_trace_tool_passes_independent_focal_points_to_the_worker(data, monkeypatch):
@@ -407,6 +487,34 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
     _request_backdrop(data, run_id, 2)
     out = _call("endless_trace_reference", runId=run_id, turn=2, query="zombie at the door")
     assert out["ok"] is True and out["underlay"] == "base" and out["source"] is None
+
+    plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+    missing = _call(
+        "endless_submit_backdrop_draft", runId=run_id, turn=2,
+        markup=plain, mobile=plain,
+    )
+    assert missing["ok"] is False and "exactly one etr-underlay" in missing["error"]
+
+    scene = plain.replace("</svg>", "<g id='etr-underlay'/></svg>")
+    draft = _call(
+        "endless_submit_backdrop_draft", runId=run_id, turn=2,
+        markup=scene, mobile=scene,
+    )
+    final = _call(
+        "endless_commit_backdrop", runId=run_id, turn=2,
+        draftId=draft["draftId"], markup=scene, mobile=scene,
+    )
+    assert final["ok"] is True
+    committed = BackdropStore(data, run_id).current()
+    assert "etr-underlay" not in committed["markup"]
+    assert committed["source"] is None
+    assert committed["trace"] == {
+        "pipeline": "trace",
+        "underlay": "base",
+        "fragmentId": out["fragmentId"],
+        "query": "zombie at the door",
+        "used": True,
+    }
 
 
 def test_a_placeholder_without_a_stored_trace_is_refused_at_draft_time(data):

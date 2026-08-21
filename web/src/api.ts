@@ -260,6 +260,14 @@ export interface CardPreview {
   edges: StarEdge[]
 }
 
+export interface TraceAudit {
+  pipeline: 'trace'
+  underlay: 'reference' | 'base'
+  fragmentId: string
+  query: string
+  used: true
+}
+
 export interface PlayView {
   runId: string
   worldId: string
@@ -316,8 +324,14 @@ export interface PlayView {
   panels: PanelView[]
   scenes: SceneRow[]
   /** The narrator-set background for this life, or null. `buttons` is true when a
-   *  common choice-button motif was set with it (loaded via ?part=buttons). */
-  backdrop: { version: number; buttons?: boolean; mobile?: boolean } | null
+   *  common choice-button motif was set with it (loaded via ?part=buttons). The
+   *  trace receipt proves whether a SCENE underlay was actually composed. */
+  backdrop: {
+    version: number
+    buttons?: boolean
+    mobile?: boolean
+    trace?: TraceAudit | null
+  } | null
 }
 
 export interface OpeningGroup {
@@ -436,7 +450,7 @@ export interface PastTurn {
   gains: Array<{ field: string; amount: string; source: string }>
   /** The backdrop that was effective on this page, so re-reading it restores the
    *  scene it had. Null when the page had no background. */
-  backdrop?: { version: number; mobile?: boolean } | null
+  backdrop?: { version: number; mobile?: boolean; trace?: TraceAudit | null } | null
 }
 
 export interface Chronicle {
