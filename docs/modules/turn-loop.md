@@ -183,7 +183,16 @@ turn 200 as at turn 1.
   synthetic turn with no world is left alone. Enforced by `_advance_turn`; pinned by
   `test_a_living_turn_with_no_choices_is_refused` and
   `test_a_declared_ending_lets_a_turn_omit_choices`.
-
+ `_clean_choices` salvages before it judges: a caption under a
+  plausible alias key (`text`, `title`, `caption`, `name`) is folded onto
+  `label`, and a bare string entry IS a caption — the content decides, not the
+  key spelling (a live narrator sent `text` captions and looped six identical
+  retries on a refusal naming a field it had sent). When entries were sent but
+  all cleaned away, the refusal says so and spells the accepted shape instead
+  of claiming no choices arrived. Pinned by
+  `test_choice_captions_are_salvaged_from_common_alias_keys` and the truthful
+  detail assert in
+  `test_a_living_turn_left_with_no_usable_choice_is_still_refused`.
 - **The opening turn reuses the same loop.** `compose_opening_prompt()` builds a
   different prompt but hands it to the same `advance_turn()` via `prompt_override`,
   so the deadline and the idempotence live in one place and cannot drift apart. The
