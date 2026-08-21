@@ -19,12 +19,17 @@ import mcp_server as srv  # noqa: E402
 import phototrace  # noqa: E402
 from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
 from phototrace import (  # noqa: E402
+    CandidateStore,
     TraceStore,
     build_underlay_fragment,
     build_underlay_fragment_bounded,
     compose_with_underlay,
     procedural_base_fragment,
+    search_candidates,
+    search_met,
+    search_openverse,
     search_reference,
+    search_smithsonian,
 )
 
 
@@ -152,6 +157,118 @@ def test_search_reference_keeps_only_attribution_free_bitmaps(monkeypatch):
     assert [r["license"] for r in rows] == ["CC0", "Public domain"]
 
 
+def test_search_openverse_keeps_cc0_pdm_via_the_thumbnail_proxy(monkeypatch):
+    payload = {"results": [
+        {"title": "A", "license": "cc0", "license_version": "1.0",
+         "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
+         "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A"},
+        {"title": "B", "license": "pdm", "license_version": "1.0",
+         "thumbnail": "https://api.openverse.org/v1/images/b/thumb/",
+         "foreign_landing_url": "https://flickr.com/b"},
+        {"title": "ByDrop", "license": "by", "license_version": "4.0",
+         "thumbnail": "https://api.openverse.org/v1/images/c/thumb/", "foreign_landing_url": "x"},
+        # A CC0 item whose thumbnail is a raw CDN, not the Openverse proxy: dropped
+        # so image bytes never come off an un-allowlisted host.
+        {"title": "OffHost", "license": "cc0", "license_version": "1.0",
+         "thumbnail": "https://live.staticflickr.com/x/raw.jpg", "foreign_landing_url": "x"},
+    ]}
+    monkeypatch.setattr(phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8"))
+    rows = search_openverse("bridge")
+    assert [r["title"] for r in rows] == ["A", "B"]
+    assert [r["license"] for r in rows] == ["CC0", "Public domain"]
+    assert all(r["url"].startswith("https://api.openverse.org/") for r in rows)
+
+
+def test_search_met_keeps_only_public_domain_objects_with_an_image(monkeypatch):
+    def fake(url):
+        if "/search?" in url:
+            return json.dumps({"total": 3, "objectIDs": [1, 2, 3]}).encode("utf-8")
+        if url.endswith("/objects/1"):
+            return json.dumps({"isPublicDomain": True, "title": "PD art",
+                "primaryImageSmall": "https://images.metmuseum.org/1.jpg",
+                "objectURL": "https://www.metmuseum.org/1"}).encode("utf-8")
+        if url.endswith("/objects/2"):
+            return json.dumps({"isPublicDomain": False, "title": "Owned",
+                "primaryImageSmall": "https://images.metmuseum.org/2.jpg"}).encode("utf-8")
+        if url.endswith("/objects/3"):
+            return json.dumps({"isPublicDomain": True, "title": "No image",
+                "primaryImageSmall": ""}).encode("utf-8")
+        raise AssertionError(url)
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows = search_met("castle")
+    assert [r["title"] for r in rows] == ["PD art"]
+    assert rows[0]["url"] == "https://images.metmuseum.org/1.jpg"
+    assert rows[0]["license"] == "Public domain"
+
+
+def test_search_smithsonian_is_inert_without_an_api_key(monkeypatch):
+    monkeypatch.delenv("SI_API_KEY", raising=False)
+    called = {"hit": False}
+
+    def fake(url):  # pragma: no cover - must never run without a key
+        called["hit"] = True
+        return b"{}"
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    assert search_smithsonian("anything") == []
+    assert called["hit"] is False
+
+
+def test_search_smithsonian_keeps_cc0_items_with_an_image(monkeypatch):
+    monkeypatch.setenv("SI_API_KEY", "k")
+    payload = {"response": {"rows": [
+        {"title": "CC0 thing", "content": {"descriptiveNonRepeating": {
+            "record_link": "https://www.si.edu/object/x",
+            "metadata_usage": {"access": "CC0"},
+            "online_media": {"media": [
+                {"type": "Images", "content": "https://ids.si.edu/ids/deliveryService?id=x"}
+            ]},
+        }}},
+        {"title": "Restricted", "content": {"descriptiveNonRepeating": {
+            "metadata_usage": {"access": "Usage conditions apply"},
+            "online_media": {"media": [{"type": "Images", "content": "https://ids.si.edu/y"}]},
+        }}},
+    ]}}
+    monkeypatch.setattr(phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8"))
+    rows = search_smithsonian("bird")
+    assert [r["title"] for r in rows] == ["CC0 thing"]
+    assert rows[0]["license"] == "CC0"
+    assert rows[0]["url"].startswith("https://ids.si.edu/")
+
+
+def test_search_candidates_photo_lane_lists_openverse_before_commons(monkeypatch):
+    def fake(url):
+        if "openverse.org/v1/images/?" in url:
+            return json.dumps({"results": [{"title": "OV", "license": "cc0",
+                "thumbnail": "https://api.openverse.org/v1/images/z/thumb/",
+                "foreign_landing_url": "x"}]}).encode("utf-8")
+        if "api.php" in url:
+            return json.dumps({"query": {"pages": {"1": {"title": "File:C.jpg",
+                "imageinfo": [{"mime": "image/jpeg",
+                    "thumburl": "https://upload.wikimedia.org/c.jpg",
+                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:C.jpg",
+                    "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]}}}}).encode("utf-8")
+        raise AssertionError(url)
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows = search_candidates("village", "photo")
+    assert [r["title"] for r in rows] == ["OV", "File:C.jpg"]
+
+
+def test_search_candidates_art_lane_uses_the_met(monkeypatch):
+    def fake(url):
+        if "metmuseum.org" in url and "/search?" in url:
+            return json.dumps({"objectIDs": [7]}).encode("utf-8")
+        if url.endswith("/objects/7"):
+            return json.dumps({"isPublicDomain": True, "title": "Met art",
+                "primaryImageSmall": "https://images.metmuseum.org/7.jpg",
+                "objectURL": "https://www.metmuseum.org/7"}).encode("utf-8")
+        raise AssertionError(url)
+    monkeypatch.delenv("SI_API_KEY", raising=False)
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows = search_candidates("angel", "art")
+    assert [r["title"] for r in rows] == ["Met art"]
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -161,15 +278,15 @@ def test_search_reference_keeps_only_attribution_free_bitmaps(monkeypatch):
         "https://user@upload.wikimedia.org/photo.jpg",
     ],
 )
-def test_photo_fetch_refuses_urls_outside_the_wikimedia_https_boundary(url, monkeypatch):
+def test_photo_fetch_refuses_urls_outside_the_allowed_https_boundary(url, monkeypatch):
     monkeypatch.setattr(phototrace, "_FETCH", lambda candidate: b"")
-    with pytest.raises(BackdropError, match="only from Wikimedia"):
+    with pytest.raises(BackdropError, match="allowed archive"):
         phototrace._http_get(url)
 
 
-def test_redirect_to_a_non_wikimedia_host_is_refused_before_following():
-    handler = phototrace._WikimediaRedirectHandler()
-    with pytest.raises(BackdropError, match="only from Wikimedia"):
+def test_redirect_to_a_disallowed_host_is_refused_before_following():
+    handler = phototrace._AllowedHostRedirectHandler()
+    with pytest.raises(BackdropError, match="allowed archive"):
         handler.redirect_request(
             None, None, 302, "Found", {}, "https://example.com/redirected.jpg"
         )
@@ -332,9 +449,14 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
 
     out = _call("endless_trace_reference", runId=run_id, turn=1, query="stone bridge")
     assert out["ok"] is True and out["underlay"] == "reference"
-    assert out["source"]["title"] == "File:Bridge.jpg"
-    for path in out["previews"].values():
-        assert Path(path).is_file(), "previews must be readable before drawing"
+    assert out["candidateCount"] == 1
+    assert out["candidates"][0]["source"]["title"] == "File:Bridge.jpg"
+    for path in out["candidates"][0]["previews"].values():
+        assert Path(path).is_file(), "previews must be readable before choosing"
+
+    picked = _call("endless_select_reference", runId=run_id, turn=1, index=0)
+    assert picked["ok"] is True and picked["source"]["title"] == "File:Bridge.jpg"
+    assert CandidateStore(data, run_id).load(1) is None, "candidates cleared after a pick"
 
     overlay = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">'
@@ -363,7 +485,7 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
     assert committed["trace"] == {
         "pipeline": "trace",
         "underlay": "reference",
-        "fragmentId": out["fragmentId"],
+        "fragmentId": picked["fragmentId"],
         "query": "stone bridge",
         "used": True,
     }
@@ -528,3 +650,79 @@ def test_a_placeholder_without_a_stored_trace_is_refused_at_draft_time(data):
         "endless_submit_backdrop_draft", runId=run_id, turn=3, markup=svg, mobile=svg,
     )
     assert out["ok"] is False and "endless_trace_reference" in out["error"]
+
+
+def test_trace_offers_multiple_candidates_and_select_promotes_the_chosen(data, monkeypatch):
+    photo = _photo_bytes(bright=True)
+
+    def fake_fetch(url: str) -> bytes:
+        if "openverse.org/v1/images/?" in url:
+            return json.dumps({"results": [
+                {"title": "Bridge A", "license": "cc0", "license_version": "1.0",
+                 "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
+                 "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A"},
+                {"title": "Bridge B", "license": "pdm", "license_version": "1.0",
+                 "thumbnail": "https://api.openverse.org/v1/images/b/thumb/",
+                 "foreign_landing_url": "https://www.flickr.com/b"},
+            ]}).encode("utf-8")
+        return photo  # thumbnail proxy bytes; commons api.php parse-fails to []
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake_fetch)
+    run_id = "a" * 32
+    _request_backdrop(data, run_id, 1)
+
+    out = _call("endless_trace_reference", runId=run_id, turn=1, query="stone bridge")
+    assert out["ok"] is True and out["underlay"] == "reference"
+    assert out["candidateCount"] == 2
+    assert [c["source"]["title"] for c in out["candidates"]] == ["Bridge A", "Bridge B"]
+
+    bad = _call("endless_select_reference", runId=run_id, turn=1, index=9)
+    assert bad["ok"] is False and "between 0 and 1" in bad["error"]
+
+    picked = _call("endless_select_reference", runId=run_id, turn=1, index=1)
+    assert picked["ok"] is True and picked["source"]["title"] == "Bridge B"
+
+    overlay = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">'
+        '<rect width="{w}" height="{h}" fill="#0b0e17"/><g id=\'etr-underlay\'/></svg>'
+    )
+    draft = _call(
+        "endless_submit_backdrop_draft", runId=run_id, turn=1,
+        markup=overlay.format(w=800, h=600), mobile=overlay.format(w=450, h=900),
+    )
+    final = _call(
+        "endless_commit_backdrop", runId=run_id, turn=1, draftId=draft["draftId"],
+        markup=overlay.format(w=800, h=600), mobile=overlay.format(w=450, h=900),
+    )
+    assert final["ok"] is True
+    committed = BackdropStore(data, run_id).current()
+    assert committed["source"]["title"] == "Bridge B", "the SELECTED candidate is the underlay"
+    assert committed["trace"]["underlay"] == "reference"
+
+
+def test_select_reference_is_refused_when_no_candidates_are_waiting(data):
+    run_id = "d" * 32
+    _request_backdrop(data, run_id, 1)
+    out = _call("endless_select_reference", runId=run_id, turn=1, index=0)
+    assert out["ok"] is False and "endless_trace_reference" in out["error"]
+
+
+def test_trace_art_lane_routes_to_the_met(data, monkeypatch):
+    photo = _photo_bytes(bright=True)
+
+    def fake_fetch(url: str) -> bytes:
+        if "metmuseum.org" in url and "/search?" in url:
+            return json.dumps({"objectIDs": [7]}).encode("utf-8")
+        if url.endswith("/objects/7"):
+            return json.dumps({"isPublicDomain": True, "title": "PD Painting",
+                "primaryImageSmall": "https://images.metmuseum.org/7.jpg",
+                "objectURL": "https://www.metmuseum.org/7"}).encode("utf-8")
+        return photo
+
+    monkeypatch.delenv("SI_API_KEY", raising=False)
+    monkeypatch.setattr(phototrace, "_FETCH", fake_fetch)
+    run_id = "e" * 32
+    _request_backdrop(data, run_id, 3)
+    out = _call("endless_trace_reference", runId=run_id, turn=3, query="angel", source="art")
+    assert out["ok"] is True and out["underlay"] == "reference"
+    assert out["candidates"][0]["source"]["title"] == "PD Painting"

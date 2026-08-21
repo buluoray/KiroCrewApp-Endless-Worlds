@@ -146,15 +146,25 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
 
 - **The SCENE lane's underlay never enters the model's context.** For pages that
-  need a concrete place, `endless_trace_reference` searches Wikimedia Commons and
-  accepts only JPEG/PNG/WebP photos marked CC0 or public domain. CC BY, BY-SA, NC,
-  and ND sources are excluded, so publication cannot silently lose attribution or
-  share-alike obligations. Fetches require HTTPS and an exact
-  `commons.wikimedia.org` or `upload.wikimedia.org` host; credentials in URLs,
-  off-host redirects, and an off-host final response URL are refused. The selected
-  source's title, Commons page URL, and license are copied into the same durable
-  `BackdropStore` history entry as the final SVG before the private trace is
-  cleared, preserving provenance without requiring player-facing attribution UI.
+  need a concrete place, `endless_trace_reference` searches attribution-free
+  archives by lane. The default `photo` lane queries **Openverse** — a
+  Creative-Commons aggregator spanning Wikimedia Commons, Flickr and museum feeds,
+  filtered server-side to CC0 + Public Domain Mark, a far larger usable pool than
+  Commons alone — and falls back to **Wikimedia Commons**. The `art` lane queries
+  the **Met** (public-domain artworks) and then the **Smithsonian** (only when an
+  `SI_API_KEY` is set; inert otherwise). Every candidate is kept only when its
+  license reads as CC0 or public domain; CC BY, BY-SA, NC, and ND sources are
+  excluded, so publication cannot silently lose attribution or share-alike
+  obligations. Fetches require HTTPS and an exact host from a fixed allowlist
+  (`_ALLOWED_FETCH_HOSTS`: Commons plus `api.openverse.org`,
+  `collectionapi.metmuseum.org` / `images.metmuseum.org`, and `api.si.edu` /
+  `ids.si.edu`); credentials in URLs, off-host redirects, and an off-host final
+  response URL are refused. Image bytes are pulled only through vetted proxy/host
+  endpoints — Openverse hands back a thumbnail on its OWN host even when the
+  original lives on a third-party CDN — so the SSRF surface stays the allowlist.
+  The selected source's title, page URL, and license are copied into the same
+  durable `BackdropStore` history entry as the final SVG before the private trace
+  is cleared, preserving provenance without requiring player-facing attribution UI.
 
   The same photo is cover-cropped separately for desktop and mobile. The first
   attempt uses `(0.5, 0.5)` for both; if a preview clips decisive structure, the
@@ -165,8 +175,17 @@ sees is produced locally from a closed, code-owned vocabulary.
   `TRACE_TIMEOUT_SECS`; the parent also caps input/output bytes and validates the
   returned fragment through `compile_backdrop` before trusting it.
 
-  The resulting fragments are stored in `TraceStore` keyed to the run and turn;
-  the Illustrator receives only raster previews and places one
+  The resulting fragments are the Illustrator's to choose among. Up to
+  `TRACE_CANDIDATE_COUNT` (3) references are traced and stashed in `CandidateStore`
+  (keyed to run + turn); `endless_trace_reference` returns one raster preview set
+  per candidate and sets NO active underlay. The Illustrator reads every
+  candidate's previews and calls `endless_select_reference` with the chosen
+  `index`, which promotes that candidate into the active `TraceStore` underlay and
+  clears the rest — so the curation of which reference best fits the brief is the
+  drawing agent's, not a blind "first that traced". When no usable reference exists
+  the tool skips the choice and sets a single procedural tonal base active
+  directly. The active fragments live in `TraceStore` keyed to the run and turn;
+  the Illustrator places one
   `<g id="etr-underlay"/>` per SVG (single or double XML quotes are accepted),
   which the server splices at draft AND commit time (`compose_with_underlay`). Once
   a trace exists, each variant must contain exactly one recognized placeholder;

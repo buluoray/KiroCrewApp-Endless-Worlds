@@ -13,11 +13,15 @@ to the model. The Illustrator places one ``<g id="etr-underlay"/>`` placeholder
 in its SVG and the server splices the stored fragment in at draft/commit time
 (:func:`compose_with_underlay`).
 
-Reference photos come only from Wikimedia Commons and are kept only when their
-license is CC0 or public domain. When no usable reference exists — the brief
-describes something no photo archive holds — the pipeline still earns
-its keep by producing a procedural tonal base (:func:`procedural_base_fragment`)
-for the Illustrator to paint over.
+Reference images come from attribution-free archives only. The default *photo*
+lane searches Openverse (a CC aggregator spanning Wikimedia Commons, Flickr and
+more, filtered to CC0 + Public Domain Mark) and falls back to Wikimedia Commons;
+the *art* lane draws public-domain artworks from the Met (and, when an
+``SI_API_KEY`` is set, the Smithsonian). Every candidate is kept only when its
+license reads as CC0 or public domain. When no usable reference exists — the
+brief describes something no archive holds — the pipeline still earns its keep by
+producing a procedural tonal base (:func:`procedural_base_fragment`) for the
+Illustrator to paint over.
 """
 
 from __future__ import annotations
@@ -54,11 +58,26 @@ MAX_TRACE_FRAGMENT_BYTES = 400_000
 #: wall-clock bound so malformed or pathological photos cannot wedge the MCP loop.
 TRACE_TIMEOUT_SECS = 30
 
+#: How many traceable references the Illustrator is offered to choose among. Each
+#: costs two bounded traces (desktop + mobile), so this is a small number: enough
+#: for a real pick, bounded so a broad query cannot fan out into many trace jobs.
+TRACE_CANDIDATE_COUNT = 3
+
 #: Commons thumbnails are requested at 1200px. These broader hard ceilings catch a
 #: forged response or decompression bomb before Pillow decodes its pixel payload.
 MAX_PHOTO_PIXELS = 20_000_000
 MAX_PHOTO_DIMENSION = 8_000
-_ALLOWED_FETCH_HOSTS = frozenset({"commons.wikimedia.org", "upload.wikimedia.org"})
+#: Every host from which reference bytes (or a search response) may be fetched.
+#: Image bytes are pulled only through vetted proxy/host endpoints, never from a
+#: raw third-party CDN: Openverse hands back a thumbnail on its OWN host
+#: (api.openverse.org) even when the original lives on Flickr, and the Met serves
+#: images from images.metmuseum.org — so the SSRF surface stays this fixed set.
+_ALLOWED_FETCH_HOSTS = frozenset({
+    "commons.wikimedia.org", "upload.wikimedia.org",        # Wikimedia Commons
+    "api.openverse.org",                                    # Openverse search + thumbnail proxy
+    "collectionapi.metmuseum.org", "images.metmuseum.org",  # Met Museum API + image bytes
+    "api.si.edu", "ids.si.edu",                             # Smithsonian Open Access API + bytes
+})
 
 #: Below this median luminance a photo's pixels crowd the darkest bands and the
 #: traced layer vanishes against a dark page; lift midtones first.
@@ -89,7 +108,7 @@ _MAX_PHOTO_BYTES = 12_000_000
 _FETCH: Callable[[str], bytes] | None = None
 
 
-def _require_wikimedia_url(url: str) -> str:
+def _require_allowed_url(url: str) -> str:
     parsed = urllib.parse.urlsplit(url)
     if (
         parsed.scheme != "https"
@@ -97,24 +116,24 @@ def _require_wikimedia_url(url: str) -> str:
         or parsed.username is not None
         or parsed.password is not None
     ):
-        raise BackdropError("reference photos may be fetched only from Wikimedia")
+        raise BackdropError("reference images may be fetched only from an allowed archive")
     return url
 
 
-class _WikimediaRedirectHandler(urllib.request.HTTPRedirectHandler):
+class _AllowedHostRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-        _require_wikimedia_url(newurl)
+        _require_allowed_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _http_get(url: str) -> bytes:
-    _require_wikimedia_url(url)
+    _require_allowed_url(url)
     if _FETCH is not None:
         return _FETCH(url)
     req = urllib.request.Request(url, headers={"User-Agent": "endless-worlds-backdrop/1.0"})
-    opener = urllib.request.build_opener(_WikimediaRedirectHandler())
+    opener = urllib.request.build_opener(_AllowedHostRedirectHandler())
     with opener.open(req, timeout=20) as resp:  # noqa: S310 — allowlisted HTTPS only
-        _require_wikimedia_url(resp.geturl())
+        _require_allowed_url(resp.geturl())
         return resp.read(_MAX_PHOTO_BYTES + 1)
 
 
@@ -156,6 +175,160 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
         if len(rows) >= limit:
             break
     return rows
+
+
+_OPENVERSE_API = "https://api.openverse.org/v1/images/"
+_MET_SEARCH = "https://collectionapi.metmuseum.org/public/collection/v1/search"
+_MET_OBJECT = "https://collectionapi.metmuseum.org/public/collection/v1/objects/"
+_SI_SEARCH = "https://api.si.edu/openaccess/api/v1.0/search"
+
+
+def search_openverse(query: str, limit: int = 5) -> list[dict[str, str]]:
+    """Attribution-free candidates from Openverse — the primary *photo* source.
+
+    Openverse aggregates Wikimedia Commons, Flickr and museum feeds and filters
+    server-side to CC0 + Public Domain Mark, so its usable pool dwarfs a
+    Commons-only search. The fetchable ``url`` is Openverse's OWN thumbnail proxy
+    (``api.openverse.org``), the single host we allowlist for it — image bytes
+    never come from an un-vetted third-party CDN even when the original does.
+    """
+    params = urllib.parse.urlencode({
+        "q": query, "license": "cc0,pdm", "page_size": max(1, limit), "mature": "false",
+    })
+    try:
+        data = json.loads(_http_get(f"{_OPENVERSE_API}?{params}").decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — the caller degrades to the next source
+        logger.warning("openverse search failed: %s", exc)
+        return []
+    rows: list[dict[str, str]] = []
+    for r in data.get("results") or []:
+        lic = str(r.get("license", "")).lower()
+        thumb = str(r.get("thumbnail") or "")
+        if lic not in {"cc0", "pdm"} or not thumb:
+            continue
+        try:
+            _require_allowed_url(thumb)  # never fetch bytes off a raw CDN
+        except BackdropError:
+            continue
+        rows.append({
+            "title": str(r.get("title") or r.get("id") or ""),
+            "url": thumb,
+            "pageUrl": str(r.get("foreign_landing_url", "")),
+            "license": "CC0" if lic == "cc0" else "Public domain",
+        })
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def search_met(query: str, limit: int = 5, probe: int = 12) -> list[dict[str, str]]:
+    """Public-domain artworks from the Met — the *art* motif lane, not scene photos.
+
+    Two-step (search ids, then per-object detail); only objects flagged
+    ``isPublicDomain`` with an image are kept, and bytes come from
+    ``images.metmuseum.org``. ``probe`` bounds how many objects are inspected so a
+    broad query cannot fan out into an unbounded number of detail requests.
+    """
+    params = urllib.parse.urlencode({"q": query, "hasImages": "true"})
+    try:
+        data = json.loads(_http_get(f"{_MET_SEARCH}?{params}").decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — the caller degrades to the next source
+        logger.warning("met search failed: %s", exc)
+        return []
+    rows: list[dict[str, str]] = []
+    for oid in (data.get("objectIDs") or [])[:probe]:
+        try:
+            obj = json.loads(_http_get(f"{_MET_OBJECT}{int(oid)}").decode("utf-8"))
+        except Exception:  # noqa: BLE001 — skip one unreadable object, keep going
+            continue
+        img = str(obj.get("primaryImageSmall") or "")
+        if not obj.get("isPublicDomain") or not img:
+            continue
+        try:
+            _require_allowed_url(img)
+        except BackdropError:
+            continue
+        rows.append({
+            "title": str(obj.get("title", "")),
+            "url": img,
+            "pageUrl": str(obj.get("objectURL", "")),
+            "license": "Public domain",
+        })
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def search_smithsonian(query: str, limit: int = 5) -> list[dict[str, str]]:
+    """CC0 items from Smithsonian Open Access — an optional *art* lane source.
+
+    Requires an ``SI_API_KEY`` (a free api.data.gov key); without it this source
+    is inert so the art lane still works from the Met alone. NOTE: the response
+    shape below is per the documented v1.0 Open Access API and is exercised only
+    against a faked payload — it is not verified against the live service in CI.
+    Only items whose usage flag is CC0 with an image on ``ids.si.edu`` are kept.
+    """
+    key = os.environ.get("SI_API_KEY")
+    if not key:
+        return []
+    params = urllib.parse.urlencode({
+        "q": f"{query} AND online_media_type:Images", "rows": max(1, limit),
+        "api_key": key,
+    })
+    try:
+        data = json.loads(_http_get(f"{_SI_SEARCH}?{params}").decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — the caller degrades gracefully
+        logger.warning("smithsonian search failed: %s", exc)
+        return []
+    rows: list[dict[str, str]] = []
+    for row in ((data.get("response") or {}).get("rows") or []):
+        dnr = ((row.get("content") or {}).get("descriptiveNonRepeating")) or {}
+        usage = str(((dnr.get("metadata_usage") or {}).get("access")) or "")
+        if usage.upper() != "CC0":
+            continue
+        img = ""
+        for m in ((dnr.get("online_media") or {}).get("media") or []):
+            if str(m.get("type")) == "Images" and m.get("content"):
+                img = str(m["content"])
+                break
+        if not img:
+            continue
+        try:
+            _require_allowed_url(img)
+        except BackdropError:
+            continue
+        rows.append({
+            "title": str(row.get("title", "")),
+            "url": img,
+            "pageUrl": str(dnr.get("record_link", "")),
+            "license": "CC0",
+        })
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def search_candidates(query: str, lane: str = "photo", limit: int = 5) -> list[dict[str, str]]:
+    """Ordered, deduplicated candidates for a lane; the caller stops at the first
+    that traces cleanly.
+
+    ``photo`` (default): environmental scene references — Openverse first (the
+    largest CC0/PDM pool), Wikimedia Commons as a fallback. ``art``: public-domain
+    artworks as motif references — the Met, then the (key-gated) Smithsonian.
+    """
+    sources = (
+        (search_met, search_smithsonian) if lane == "art"
+        else (search_openverse, search_reference)
+    )
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for src in sources:
+        for cand in src(query, limit):
+            if cand["url"] in seen:
+                continue
+            seen.add(cand["url"])
+            out.append(cand)
+    return out
 
 
 def fetch_photo(url: str) -> bytes:
@@ -415,6 +588,44 @@ class TraceStore:
         }, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self._path)
         return fragment_id
+
+    def load(self, turn: int) -> dict[str, Any] | None:
+        if not self._path.is_file():
+            return None
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or int(data.get("turn", -1)) != int(turn):
+            return None
+        return data
+
+    def clear(self) -> None:
+        self._path.unlink(missing_ok=True)
+
+
+class CandidateStore:
+    """Traced reference candidates awaiting the Illustrator's pick, server-side only.
+
+    ``endless_trace_reference`` traces the top few references and stashes them here
+    (fragments never enter the model's context); ``endless_select_reference`` then
+    promotes the chosen one into the active :class:`TraceStore` underlay. Bound to a
+    run + turn exactly like :class:`TraceStore`, so a stale candidate set from an
+    earlier page can never be selected onto a later one.
+    """
+
+    def __init__(self, data_dir: Path, run_id: str) -> None:
+        if not isinstance(run_id, str) or not _ID_RE.match(run_id):
+            raise BackdropError(f"not a run id: {run_id!r}")
+        self._path = data_dir / "runs" / run_id / "trace-candidates.json"
+
+    def save(self, *, turn: int, query: str, candidates: list[dict[str, Any]]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({
+            "turn": int(turn), "query": str(query)[:500], "candidates": candidates,
+        }, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self._path)
 
     def load(self, turn: int) -> dict[str, Any] | None:
         if not self._path.is_file():
