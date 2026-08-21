@@ -30,6 +30,7 @@ import math
 import os
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -125,7 +126,21 @@ class ToolInputError(ValueError):
 
 # ── the declared surface ────────────────────────────────────────────────
 
-_RUN_ID = {"type": "string", "pattern": "run-id", "maxLength": 48}
+#: The id of the life every call addresses. Published as the pattern the store
+#: ACTUALLY enforces (``store._RUN_ID_RE``), because a narrator reads this schema as
+#: the shape it must produce: the previous value was the sentinel string "run-id",
+#: which as a regex reads "must contain run-id" — and a narrator duly sent
+#: "run-id-<32 hex>", which the store then refused as malformed. A schema that
+#: describes a shape the store rejects is an instruction to fail.
+_RUN_ID = {
+    "type": "string",
+    "pattern": "^[0-9a-f]{32}$",
+    "maxLength": 32,
+    "description": (
+        "The run id EXACTLY as the message addressed to you gives it — 32 lowercase "
+        "hex characters, copied verbatim. Do not prefix, wrap, quote or re-case it."
+    ),
+}
 
 _TOOLS: list[dict[str, Any]] = [
     {
@@ -165,7 +180,17 @@ _TOOLS: list[dict[str, Any]] = [
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 1},
                 "prose": {"type": "string", "maxLength": 20000},
-                "state": {"type": "object"},
+                "state": {
+                    "type": "object",
+                    "description": (
+                        "The panels this world declares, as endless_read_runtime hands "
+                        "them to you — the field ids come from the world, not from "
+                        "here. Declare it IN FULL: a field you leave out reads to the "
+                        "player as a fact that vanished. `digest` and `relations` are "
+                        "the exceptions and merge forward, so there you declare only "
+                        "what changed (a null value retires one entry)."
+                    ),
+                },
                 # Terminal marker. A living turn MUST include `choices`; only a
                 # terminal turn may omit them, and it says so with `ending: true`
                 # (or by declaring state that fires a declared world ending).
@@ -281,19 +306,54 @@ _TOOLS: list[dict[str, Any]] = [
                 # Enrichment (the anti-halo notable-events log): relaxed to a
                 # bare array so a mangled entry never refuses the turn. Coerced to
                 # at most 12 strings of 200 chars each at commit.
-                "events": {"type": "array"},
+                #
+                # The three salvaged arrays below carry their shape as a
+                # `description` rather than an enforced `items` schema, and that is
+                # the point: `items` would make a shape MISTAKE refuse the whole
+                # turn, which is exactly what the salvage exists to prevent (a bare
+                # string choice and a `text` caption are both understood). A
+                # description tells the narrator the shape without arming a refusal.
+                "events": {
+                    "type": "array",
+                    "description": (
+                        "Up to 12 short strings, one per notable thing that happened "
+                        "this turn (not the whole prose — the line a later turn would "
+                        "need to know it happened)."
+                    ),
+                },
                 # Enrichment (per-turn gains the systems engine reads): relaxed to
                 # a bare array; `_clean_gains` drops any entry with no string
                 # `field`, strips unknown keys, and caps the list at 12, warning on
                 # each drop instead of refusing the turn.
-                "gains": {"type": "array"},
+                "gains": {
+                    "type": "array",
+                    "description": (
+                        "Up to 12 objects, each naming what this turn credited: "
+                        '`field` (required, the state field that grew), `amount`, and '
+                        "`source` (where it came from — how the anti-halo reading is "
+                        "made measurable). An entry naming no `field` is dropped."
+                    ),
+                },
                 # Player-facing, but SALVAGED rather than schema-refused:
                 # `_clean_choices` is the gate. It drops entries with no usable
                 # `label`, synthesizes a missing id, strips unknown keys, caps the
                 # list at 8, and drops invalid/over-size `art`. The
                 # choices-required gate still fires on the CLEANED result, so a
                 # living turn left with no usable choice is still refused.
-                "choices": {"type": "array"},
+                "choices": {
+                    "type": "array",
+                    "description": (
+                        "Up to 8 objects, one per button the player can press: "
+                        "`label` (REQUIRED — the text they read; `text`/`title`/"
+                        "`caption`/`name` are accepted and folded onto it, and a bare "
+                        "string entry is read as a label), `id` (optional, "
+                        "synthesized when absent), `fateful` (bool), `art` (a small "
+                        "self-contained SVG), `effect` (one of shimmer, aura, embers, "
+                        "ripple) and `tint` (#rrggbb). An entry with no usable label "
+                        "is dropped, and a living turn left with none is refused — so "
+                        "the label is the one part that must be right."
+                    ),
+                },
             },
         },
     },
@@ -644,7 +704,13 @@ STATE_WRITERS = frozenset({"endless_advance_turn"})
 
 # ── validation ───────────────────────────────────────────────────────────
 
-_RUN_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
+
+@lru_cache(maxsize=64)
+def _pattern(rule: str) -> re.Pattern[str]:
+    """Compile a published ``pattern`` once. Cached because the schemas are fixed
+    and every call re-walks them."""
+    return re.compile(rule)
+
 
 #: A stored run id is a bare uuid4 hex (store._RUN_ID_RE). The addressing hands it
 #: over bare, but a narrator decorates it anyway — observed live as "run-<id>",
@@ -747,6 +813,11 @@ def _check(schema: dict[str, Any], value: Any, path: str) -> None:
             value[:] = [entry for entry in value if entry is not None]
             for i, entry in enumerate(value):
                 _check(item, entry, f"{path}[{i}]")
+        # After the null holes are gone, so the count judged is the count that
+        # would be applied rather than the one that arrived.
+        floor = schema.get("minItems")
+        if floor is not None and len(value) < floor:
+            raise ToolInputError(path, f"at least {floor} entries, got {len(value)}")
         return
 
     if kind == "string":
@@ -755,12 +826,15 @@ def _check(schema: dict[str, Any], value: Any, path: str) -> None:
         cap = schema.get("maxLength")
         if cap is not None and len(value) > cap:
             raise ToolInputError(path, f"at most {cap} characters, got {len(value)}")
+        floor = schema.get("minLength")
+        if floor is not None and len(value) < floor:
+            raise ToolInputError(path, f"at least {floor} characters, got {len(value)}")
         allowed = schema.get("enum")
         if allowed is not None and value not in allowed:
             raise ToolInputError(path, f"one of {', '.join(allowed)}, got {value!r}")
-        if schema.get("pattern") == "run-id":
-            if not value or set(value) - _RUN_ID_CHARS or value[0] == "-":
-                raise ToolInputError(path, "a run id (lowercase, digits, hyphens)")
+        rule = schema.get("pattern")
+        if rule is not None and not _pattern(rule).search(value):
+            raise ToolInputError(path, f"a string matching {rule}")
         return
 
     if kind == "integer":
