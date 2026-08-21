@@ -83,6 +83,14 @@ from backdrop import (  # noqa: E402
     BackdropStore,
     compile_backdrop,
 )
+from phototrace import (  # noqa: E402
+    TraceStore,
+    build_underlay_fragment,
+    compose_with_underlay,
+    fetch_photo,
+    procedural_base_fragment,
+    search_reference,
+)
 from chapters import (  # noqa: E402
     ChapterError,
     brief,
@@ -433,6 +441,36 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "runId": _RUN_ID,
                 "brief": {"type": "string", "maxLength": 2000},
+            },
+        },
+    },
+    {
+        "name": "endless_trace_reference",
+        "description": (
+            "SCENE lane only: fetch a free-licensed reference photograph and trace "
+            "it into palette-disciplined desktop+mobile underlay fragments, stored "
+            "server-side. Pass `query` (concrete English keywords for a place or "
+            "structure, e.g. 'stone bridge river mist'); omit it, or accept the "
+            "automatic fallback when no usable photo exists, to get a quiet "
+            "procedural tonal base instead. Returns preview PNG paths to READ and "
+            "judge, never the fragment itself. To use the stored underlay, place "
+            "exactly one `<g id=\"etr-underlay\"/>` in each SVG where the underlay "
+            "belongs (above your sky, below every mark); the server splices it in "
+            "at draft and commit time."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "turn"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "turn": {"type": "integer", "minimum": 0},
+                "query": {"type": "string", "maxLength": 200},
+                "opacity": {"type": "number", "minimum": 0.2, "maximum": 0.8},
+                "ramp": {
+                    "type": "array", "minItems": 3, "maxItems": 8,
+                    "items": {"type": "string", "pattern": "^#?[0-9a-fA-F]{6}$"},
+                },
             },
         },
     },
@@ -1585,6 +1623,83 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     return {"backdrop": "queued", "turn": turn}
 
 
+def _trace_store(run_id: str) -> TraceStore:
+    """Server-side traced underlays; fragments never enter the model's context."""
+    return TraceStore(_DATA, run_id)
+
+
+def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
+    """Splice the stored underlay into an ``etr-underlay`` placeholder, if any."""
+    trace = _trace_store(run_id).load(turn)
+    fragment = trace.get(variant) if isinstance(trace, dict) else None
+    return compose_with_underlay(svg, fragment if isinstance(fragment, str) else None)
+
+
+def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
+    """Build (or fall back to) a scene underlay and stash it server-side."""
+    from backdrop import _render_svg_thumbnail
+
+    run_id = args["runId"]
+    turn = int(args["turn"])
+    request = _store().read_backdrop_request(run_id)
+    if not request or int(request.get("turn") or 0) != turn:
+        raise BackdropError("no backdrop is waiting for this run and turn")
+    # 0.65, not 0.5: the fragment sits over a dark sky, so opacity is a
+    # brightness dial for the whole composition — at 0.5 every traced tone is
+    # pulled halfway to near-black and pages read darker than intended.
+    opacity = float(args.get("opacity") or 0.65)
+    ramp = args.get("ramp")
+    query = (args.get("query") or "").strip()
+
+    source: dict[str, str] | None = None
+    kind = "base"
+    desktop = mobile = None
+    if query:
+        for candidate in search_reference(query):
+            try:
+                photo = fetch_photo(candidate["url"])
+                desktop = build_underlay_fragment(
+                    photo, view=(800, 600), ramp=ramp, opacity=opacity
+                )
+                mobile = build_underlay_fragment(
+                    photo, view=(450, 900), ramp=ramp, opacity=opacity
+                )
+            except BackdropError:
+                continue
+            source = {k: candidate[k] for k in ("title", "pageUrl", "license")}
+            kind = "reference"
+            break
+    if desktop is None or mobile is None:
+        desktop = procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity)
+        mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
+
+    store = _trace_store(run_id)
+    fragment_id = store.save(turn=turn, desktop=desktop, mobile=mobile, source=source)
+    preview_dir = _DATA / "runs" / run_id / "backdrop-previews"
+    previews: dict[str, str] = {}
+    for label, fragment, w, h in (("desktop", desktop, 400, 300), ("mobile", mobile, 150, 300)):
+        vw, vh = (800, 600) if label == "desktop" else (450, 900)
+        doc = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vw} {vh}">'
+            f'<rect width="{vw}" height="{vh}" fill="#0b0e17"/>{fragment}</svg>'
+        )
+        path = preview_dir / f"backdrop-preview-trace-{fragment_id}-{label}.png"
+        _render_svg_thumbnail(doc, path, w, h)
+        previews[label] = str(path.resolve())
+    return {
+        "underlay": kind,
+        "fragmentId": fragment_id,
+        "turn": turn,
+        "source": source,
+        "previews": previews,
+        "next": (
+            "read the previews; if the reference serves the scene, put one "
+            '<g id="etr-underlay"/> in each SVG and draw your overlay; '
+            "otherwise call again with a different query"
+        ),
+    }
+
+
 def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     """Validate an Illustrator first draft and return safe raster preview paths."""
     run_id = args["runId"]
@@ -1592,8 +1707,10 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     request = _store().read_backdrop_request(run_id)
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
+    markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
+    mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     draft = _backdrop_draft_store(run_id).submit(
-        args["markup"], args["mobile"], turn=turn, buttons=args.get("buttons")
+        markup, mobile, turn=turn, buttons=args.get("buttons")
     )
     return {
         "backdrop": "drafted",
@@ -1611,11 +1728,12 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     draft_id = args["draftId"]
     drafts = _backdrop_draft_store(run_id)
     drafts.require(draft_id, turn)
-    version = _backdrop_store(run_id).set(
-        args["markup"], args.get("buttons"), turn, args["mobile"]
-    )
+    markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
+    mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
+    version = _backdrop_store(run_id).set(markup, args.get("buttons"), turn, mobile)
     try:
         drafts.discard(draft_id, turn)
+        _trace_store(run_id).clear()
     except (BackdropError, OSError):
         # The final is already atomically published. A stale or concurrently
         # replaced draft record and leftover private thumbnails are cleanup debt,
@@ -1739,6 +1857,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_await_scene": _await_scene,
     "endless_dismiss_scene": _dismiss_scene,
     "endless_paint_backdrop": _paint_backdrop,
+    "endless_trace_reference": _trace_reference,
     "endless_submit_backdrop_draft": _submit_backdrop_draft,
     "endless_commit_backdrop": _commit_backdrop,
     "endless_commit_fallback_backdrop": _commit_fallback_backdrop,

@@ -217,6 +217,7 @@ processes self-locate the same data dir so routes and tools see one set of files
   | `endless_await_scene` | narrator | return the player's scene answer if present; never blocks |
   | `endless_dismiss_scene` | narrator | remove a scene |
   | `endless_paint_backdrop` | narrator | persist a short page-art brief and dispatch the illustrator without waiting |
+  | `endless_trace_reference` | illustrator | trace a free-licensed reference photo (or a procedural tonal base) into server-side underlay fragments spliced in at the `etr-underlay` placeholder |
   | `endless_submit_backdrop_draft` | illustrator | validate the desktop/mobile draft set and return private PNG preview paths plus an opaque `draftId` |
   | `endless_commit_backdrop` | illustrator | after visual review, atomically publish the final set (required desktop `markup` + `mobile`, optional button motif) bound to the reviewed `draftId` |
   | `endless_commit_fallback_backdrop` | narrator recovery | commit the same set only after the persisted same-page fallback gate opens |

@@ -32,7 +32,7 @@ jobs:
           # importable. It is not published to PyPI, so install it from its
           # public source; this also pulls the runtime deps the backend imports
           # (aiohttp, etc.). pytest itself is the only extra.
-          pip install pytest
+          pip install pytest pillow vtracer
           pip install "git+https://github.com/kirodotdev/KiroCrew.git"
 
       - name: Run full backend test suite
