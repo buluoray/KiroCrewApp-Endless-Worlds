@@ -128,6 +128,30 @@ def test_an_entity_kind_conflict_drops_only_that_entity():
     assert "entities" not in clean, "the conflicting entity is not recorded"
 
 
+def test_an_unknown_kind_is_kept_as_object_not_dropped():
+    """The screenshot report: kind 'concept' is a narrator-invented category, so it
+    must not cost the whole entity. It is KEPT, bucketed as the generic 'object', and
+    only a warning is raised — recall rules still see nothing outside KINDS."""
+    memory = {"entities": [{"id": "resonant-notation", "kind": "concept",
+                            "name": "共鸣符记法", "summary": "s"}]}
+    clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=2)
+    assert [d["field"] for d in dropped] == ["memory.entities[0].kind"]
+    (ent,) = clean["entities"]
+    assert ent["id"] == "resonant-notation" and ent["kind"] == "object", (
+        "the entity survives, bucketed as the generic kind"
+    )
+
+
+def test_an_unknown_kind_on_a_known_entity_adopts_the_established_kind():
+    """A re-mention of an existing character carrying a stray kind label refreshes it
+    at its established kind rather than flipping it to 'object' or dropping it."""
+    index = mg.build_index([turn_entry(1, bridge_memory())])  # elin is a character
+    memory = {"entities": [{"id": "elin", "kind": "concept", "name": "艾琳"}]}
+    clean, dropped = mg.sanitize_memory(memory, index, turn=2)
+    (ent,) = clean["entities"]
+    assert ent["kind"] == "character", "adopts the established kind, never lost"
+
+
 def test_an_unknown_disclosure_drops_the_whole_event():
     """A structurally broken event has nothing to anchor it, so it is dropped whole
     (not salvaged like a bad reference)."""

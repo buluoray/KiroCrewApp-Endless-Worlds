@@ -28,9 +28,12 @@ from typing import Any
 
 # ── vocabulary (design §4.1, §4.2, §5.4) ────────────────────────────────
 
-#: The five generic entity kinds. Deliberately closed: a world's own vocabulary
-#: goes in names and aliases, never in new kinds the recall rules cannot reason
-#: about.
+#: The five generic entity kinds. A world's own vocabulary goes in names and
+#: aliases, not in new kinds the recall rules cannot reason about — so an entity
+#: whose declared kind is outside this set is not rejected but bucketed as the
+#: generic ``object`` (see ``sanitize_memory``), keeping the memory while every
+#: consumer still only ever sees this closed set. ``thread`` is never a coercion
+#: target: it is a separate namespace with its own effects.
 KINDS = ("character", "place", "group", "object", "thread")
 
 #: Who may see an event. ``hidden`` exists for world continuity only and must
@@ -254,8 +257,9 @@ def sanitize_memory(
     exact field path and a narrator-facing ``detail`` — so the caller commits
     what survived and warns about the rest. Granularity, in check order:
 
-    * an entity with a malformed id, an unknown kind, a duplicate in-block id, or
-      a kind that conflicts with a known one is dropped; the rest are kept and
+    * an entity with a malformed id, a duplicate in-block id, or a kind that
+      conflicts with a known one is dropped; an unrecognized kind is KEPT and
+      bucketed as the generic ``object`` (never ``thread``); the survivors
       become resolvable references;
     * a structurally broken event (malformed/duplicate/replayed key, missing
       title or summary, unknown disclosure) is dropped whole — nothing anchors
@@ -289,9 +293,17 @@ def sanitize_memory(
                  f"Dropped a malformed entity id at {path}.")
             continue
         if kind not in KINDS:
+            # Fail-soft: a narrator-invented kind (e.g. "concept") must not cost
+            # the whole entity. Adopt the established kind when this id is already
+            # known (a re-mention with a stray label just refreshes it); otherwise
+            # bucket it as the neutral generic "object" — never "thread", which is
+            # a separate namespace with its own effects. Downstream code and the
+            # recall rules therefore still only ever see the closed KINDS set.
+            prior = index["entities"].get(eid)
+            coerced = prior["kind"] if prior is not None else "object"
             drop(f"{path}.kind", f"one of {', '.join(KINDS)}",
-                 f"Dropped entity {eid!r}: {kind!r} is not a known kind.")
-            continue
+                 f"Kept entity {eid!r} but treated unknown kind {kind!r} as {coerced!r}.")
+            kind = coerced
         if eid in declared:
             drop(f"{path}.id", f"declared twice this turn: {eid}",
                  f"Dropped the duplicate declaration of {eid!r}; the first was kept.")
@@ -304,7 +316,7 @@ def sanitize_memory(
                  "changes without an explicit merge.")
             continue
         declared[eid] = kind
-        kept_entities.append(ent)
+        kept_entities.append({**ent, "kind": kind})
 
     def resolve(ref: str) -> str:
         """The kind of a resolvable entity reference, or '' if unknown."""
