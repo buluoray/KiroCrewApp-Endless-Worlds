@@ -303,6 +303,14 @@ def test_store_keeps_sanitized_source_provenance_with_the_backdrop(tmp_path):
             "license": "CC0",
             "ignored": "not persisted",
         },
+        trace={
+            "pipeline": "trace",
+            "underlay": "reference",
+            "fragmentId": "a" * 16,
+            "query": "bridge " * 100,
+            "used": True,
+            "ignored": "not persisted",
+        },
     )
 
     source = store.current()["source"]
@@ -312,6 +320,15 @@ def test_store_keeps_sanitized_source_provenance_with_the_backdrop(tmp_path):
         "license": "CC0",
     }
     assert store._load()[-1]["source"] == source
+    trace = store.current()["trace"]
+    assert trace == {
+        "pipeline": "trace",
+        "underlay": "reference",
+        "fragmentId": "a" * 16,
+        "query": ("bridge " * 100)[:500],
+        "used": True,
+    }
+    assert store._load()[-1]["trace"] == trace
 
 
 def test_store_rejects_bad_mobile_atomically(tmp_path):

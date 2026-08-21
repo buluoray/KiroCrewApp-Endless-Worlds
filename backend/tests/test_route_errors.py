@@ -178,7 +178,7 @@ def test_backdrop_route_selects_variants_and_preserves_legacy_fallback(app):
     assert legacy_mobile.status == 200 and "#333" in legacy_mobile.text
 
 
-def test_live_and_chronicle_metadata_report_mobile_availability(app):
+def test_live_and_chronicle_metadata_report_mobile_and_trace_audit(app):
     worlds = app["data"] / "worlds"
     worlds.mkdir()
     (worlds / "test-world.md").write_text(world_file(), encoding="utf-8")
@@ -193,7 +193,14 @@ def test_live_and_chronicle_metadata_report_mobile_availability(app):
     app["store"].append_turn(run_id, {"turn": 5, "prose": "desktop page"})
     backdrops = BackdropStore(app["data"], run_id)
     backdrops.set(_svg("#111"), turn=1, mobile=_svg("#abc"))
-    backdrops.set(_svg("#222"), turn=5)
+    trace = {
+        "pipeline": "trace",
+        "underlay": "base",
+        "fragmentId": "0123456789abcdef",
+        "query": "moonlit harbor",
+        "used": True,
+    }
+    backdrops.set(_svg("#222"), turn=5, trace=trace)
 
     live = body_of(call(routes_mod.get_run, app["ctx"], match={"run_id": run_id}))
     history = body_of(
@@ -202,5 +209,8 @@ def test_live_and_chronicle_metadata_report_mobile_availability(app):
     by_turn = {row["turn"]: row for row in history["turns"]}
 
     assert live["backdrop"]["mobile"] is False
+    assert live["backdrop"]["trace"] == trace
     assert by_turn[1]["backdrop"]["mobile"] is True
+    assert by_turn[1]["backdrop"]["trace"] is None
     assert by_turn[5]["backdrop"]["mobile"] is False
+    assert by_turn[5]["backdrop"]["trace"] == trace

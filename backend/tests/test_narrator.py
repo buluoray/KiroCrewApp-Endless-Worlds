@@ -469,18 +469,27 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "SMALL palette",
         "one motion verb or none",
         "Work with SVG's strengths",
-        "pattern-first and architecture-first",
+        "motif-first and architecture-first",
         "first "
         "line declares the lane",
-        "`LANE: pattern` or `LANE: scene`",
+        "`LANE: motif` or `LANE: scene`",
         "The storyteller already made "
         "this choice; never re-route it",
-        "If no lane line is present, work in the pattern lane",
-        "In the PATTERN lane",
+        "If no lane line is present, work in the motif lane",
+        "In the MOTIF lane",
+        "without calling endless_trace_reference",
+        "The brief tells you what must be felt; it does not tell you what shapes to draw",
+        "Derive the visual metaphor, mark language, material character, spatial balance, and motion",
+        "silently develop at least three substantially different visual concepts",
+        "Reject the literal summary, the first obvious symbol, any generic screensaver treatment",
+        "strongest world-specific metaphor, compositional tension, and emotional afterimage",
+        "intentional and distinctive at first glance, then richer on a second look",
+        "expressive decisions rather than a checklist",
+        "No technique is mandatory",
+        "only when this page's chosen concept earns them",
+        "must not read as an icon, diagram, UI ornament, stock particle effect, or decorative filler",
         "in "
         "either lane",
-        "Pattern does not mean uniform wallpaper or tiling the whole frame",
-        "the pattern lane never explains the plot",
         "In the SCENE lane",
         "call endless_trace_reference",
         "REFERENCE keywords",
@@ -502,44 +511,46 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "`underlay: base`",
         "at most ONE trace retry total",
         "never do both",
-        "one large macro-form",
-        "arch-like span",
-        "Localized light, shadow, and tonal gradients may organize that form",
-        "brightest region may sit near an edge or the top",
-        "need not encode the irreversible event",
-        "direction, interruption, density, light, and negative space",
-        "without forcing narrative symbolism",
-        "Straight lines, grids, tiles, windows",
         "Prefer environment and evidence",
         "large anatomically detailed people or animals",
         "small, distant, cropped, shadowed",
         "Never wrap either SVG in a Markdown code fence",
         "SMIL only",
-        "Follow exactly ONE visual feedback loop before publication",
+        "Follow the lane-specific visual feedback loop before publication",
         "endless_submit_backdrop_draft",
         "does not publish them",
         "opaque `draftId`",
         "safe PNG thumbnail paths",
-        "built-in `read` tool exactly once in Image mode",
+        "built-in `read` tool once in Image mode",
         "ALL returned PNG paths together",
         "judge desktop and mobile side by side",
         "Inspect the rendered pixels",
         "one clear visual thesis",
         "genuinely independent compositions",
-        "deliberate pattern macro-composition rather than accidental uniform wallpaper",
+        "a world-specific artistic concept rather than a generic effect",
         "calm prose reading fields",
         "clipping or dead space",
-        "at most ONE revision",
-        "keep them unchanged if the rendered result already works",
-        "call endless_commit_backdrop once with the `draftId`",
-        "Never publish before reading the thumbnails",
-        "never submit a second accepted draft",
+        "For MOTIF, the first rendered draft is diagnosis, never the final",
+        "single weakest or most generic artistic decision",
+        "exactly ONE structural revision",
+        "not merely a color adjustment or additional effects",
+        "as a SECOND draft",
+        "call `read` once more with ALL second-draft previews together",
+        "Commit only that second `draftId`",
+        "never make a third draft",
+        "mandatory second pass must make the idea more specific and authored",
+        "For SCENE, the first reviewed draft may be final",
+        "submit the complete revision as a second draft",
+        "never publish revised markup that was not rendered and inspected",
+        "use only the latest reviewed `draftId`",
     ):
         assert required in prompt, f"illustrator prompt missing: {required!r}"
 
-    assert prompt.index("endless_submit_backdrop_draft") < prompt.index(
-        "built-in `read` tool"
-    ) < prompt.index("endless_commit_backdrop once")
+    assert prompt.index("First call endless_submit_backdrop_draft") < prompt.index(
+        "built-in `read` tool once"
+    ) < prompt.index("as a SECOND draft") < prompt.index(
+        "call `read` once more"
+    ) < prompt.index("Commit only that second `draftId`")
 
     trace_tool = OWN_SERVER_REF + "/endless_trace_reference"
     draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
@@ -560,14 +571,10 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "meaning instead of becoming generic wallpaper",
         "First look for repeated rhythm, architecture, interiors",
         "with a clear routing order",
-        "Route in this order: pure pattern",
         "make a fully ornamental field with no recognizable story noun",
-        "fully ornamental, world-specific repeating pattern",
-        "Pattern-first may mean pattern-only",
         "silently choose exactly one lane",
         "HYBRID is second",
         "STORY IMAGE is the exception",
-        "If uncertain, choose PATTERN",
         "Then draw a sparse overlay ON the traced structure",
     ):
         assert rejected not in prompt, f"illustrator prompt retained: {rejected!r}"
@@ -582,10 +589,27 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     assert fallback in narrator_agent["tools"]
     assert fallback in narrator_agent["allowedTools"]
     assert "Never call endless_commit_fallback_backdrop during a normal turn" in narrator
-    # The lane decision lives with the storyteller: the brief's first line
-    # declares it, and scene briefs carry the photo-search keywords.
-    for lane_pin in ("LANE: pattern", "LANE: scene", "REFERENCE:", "PALETTE:"):
+    # The lane decision lives with the storyteller: MOTIF briefs name one abstract
+    # phenomenon, while SCENE briefs carry photo-search keywords.
+    for lane_pin in (
+        "LANE: motif", "LANE: scene", "THESIS:", "MOTION:",
+        "REFERENCE:", "PALETTE:",
+        "if the image's point is what a place physically looks like, choose SCENE",
+        "naming the invisible dramatic fact or emotional logic the art should make felt",
+        "Never prescribe geometry, objects, placement, SVG techniques, or a visual solution",
+        "emotional temperature, material atmosphere",
+        "let it derive the motif",
+    ):
         assert lane_pin in narrator, f"narrator brief guidance missing: {lane_pin!r}"
+    for removed_recipe in (
+        "source → path or field → destination",
+        "A bright source at the left",
+        "one anchor or source",
+        "one winding carrier curve",
+        "sparse family of blue points",
+    ):
+        assert removed_recipe not in prompt
+        assert removed_recipe not in narrator
     assert "endless_set_backdrop" not in narrator
     for recipe in (
         "viewBox='0 0 800 600'", "viewBox='0 0 450 900'",

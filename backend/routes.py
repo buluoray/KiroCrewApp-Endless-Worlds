@@ -259,12 +259,15 @@ async def _recover_backdrop(
                 store.update_backdrop_request(run_id, attempts=attempt)
                 task = (
                     "Paint the desktop/mobile backdrop pair for one page of a life. "
-                    "First call endless_submit_backdrop_draft with EXACTLY this "
-                    "runId and turn, read every returned preview PNG together as "
-                    "images, revise at most once, then publish the final pair with "
-                    "endless_commit_backdrop using the returned draftId. "
-                    f"This is invisible recovery attempt {attempt}; draw directly "
-                    "from the brief and use no research.\n"
+                    "Follow the ART BRIEF's declared lane exactly. In LANE: scene, "
+                    "first call endless_trace_reference with its REFERENCE keywords "
+                    "and inspect both trace previews; in LANE: motif, draw directly "
+                    "without tracing. Then call endless_submit_backdrop_draft with "
+                    "EXACTLY this runId and turn, read every returned preview PNG "
+                    "together as images, revise at most once, and publish the final "
+                    "pair with endless_commit_backdrop using the returned draftId. "
+                    f"This is invisible recovery attempt {attempt}; use only the "
+                    "brief and the lane's provided tools, with no external research.\n"
                     f"runId: {run_id}\nturn: {turn}\n\nBrief:\n"
                     f"{str(request.get('brief') or '')}"
                 )
@@ -1568,6 +1571,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
             "version": backdrop["version"],
             "buttons": bool(backdrop.get("buttons")),
             "mobile": bool(backdrop.get("mobile")),
+            "trace": backdrop.get("trace"),
         }
         if backdrop
         else None
@@ -1851,6 +1855,7 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
             {
                 "version": backdrop["version"],
                 "mobile": bool(backdrop.get("mobile")),
+                "trace": backdrop.get("trace"),
             }
             if backdrop
             else None

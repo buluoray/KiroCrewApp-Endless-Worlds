@@ -132,13 +132,17 @@ sees is produced locally from a closed, code-owned vocabulary.
   blank background.
 
 - **The lane is the storyteller's decision, executed — never re-routed — by the
-  illustrator.** The narrator's brief opens with `LANE: pattern` (the default:
-  atmosphere from a repeated mark grammar, no story nouns) or `LANE: scene`
-  (a concrete place or major irreversible event whose real structure matters),
-  plus `REFERENCE:` keywords and an optional `PALETTE:` hex ramp for scene
-  briefs. The illustrator prompt forbids re-routing and treats a missing lane
-  line as pattern; the old self-routed HYBRID/STORY-IMAGE gate is retired.
-  Pinned by the lane pins in
+  illustrator.** The narrator's brief opens with `LANE: motif` (the default: an
+  abstract force, perception, emotion, atmosphere, or change made visible) or
+  `LANE: scene` (a concrete environment whose real spatial structure must remain
+  recognizable). The routing test is semantic: “what does this place physically
+  look like?” selects SCENE; “how does this force, feeling, perception, or
+  transformation appear?” selects MOTIF. A motif brief carries one `THESIS:` naming
+  the invisible dramatic fact or emotional logic to make felt, never a proposed
+  geometry or visual solution, and optionally one intrinsic `MOTION:` verb. A scene
+  brief carries `REFERENCE:` keywords. Either may carry a `PALETTE:` ramp. The
+  illustrator never re-routes and
+  treats a missing lane line as MOTIF. Pinned by the lane pins in
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
 
 - **The SCENE lane's underlay never enters the model's context.** For pages that
@@ -163,15 +167,29 @@ sees is produced locally from a closed, code-owned vocabulary.
 
   The resulting fragments are stored in `TraceStore` keyed to the run and turn;
   the Illustrator receives only raster previews and places one
-  `<g id="etr-underlay"/>` per SVG, which the server splices at draft AND commit
-  time (`compose_with_underlay`). If the underlay already carries the composition,
-  the overlay may contain zero marks; sparse architecture/light marks are added
-  only when they materially clarify the scene. A placeholder with no stored trace
-  is refused, a document without a placeholder is untouched (the pattern lane pays
-  nothing), and the private trace is cleared after publication. When no usable
-  reference exists the tool degrades to a procedural tonal base. The
+  `<g id="etr-underlay"/>` per SVG (single or double XML quotes are accepted),
+  which the server splices at draft AND commit time (`compose_with_underlay`). Once
+  a trace exists, each variant must contain exactly one recognized placeholder;
+  omission, duplication, a missing fragment, or any unresolved `etr-underlay`
+  marker is refused rather than silently publishing hand-drawn-only scene art. If
+  the underlay already carries the composition, the overlay may contain zero marks;
+  sparse architecture/light marks are added only when they materially clarify the
+  scene. Motif documents remain untouched when no trace exists, while a
+  placeholder without a stored trace is refused.
+
+  Publication copies a sanitized trace receipt into the same durable
+  `BackdropStore` history entry before private fragments are cleared:
+  `pipeline: trace`, `underlay: reference|base`, the opaque `fragmentId`, final
+  query, and `used: true`. `GET /runs/{runId}` exposes the current receipt in
+  backdrop metadata, and chronicle rows expose the receipt effective on each page.
+  This makes a completed SCENE pipeline auditable after security logs and preview
+  files rotate; photo-backed entries additionally retain their source provenance.
+  When no usable reference exists the tool degrades to a
+  procedural tonal base, and that `underlay: base` result is still composed and
+  recorded rather than becoming indistinguishable from a motif. The
   composed-document ceiling is `MAX_BACKDROP_BYTES` (1MB); hand-drawn tool inputs
-  stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py`.
+  stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py` and
+  `backend/tests/test_backdrop.py`.
 
 - **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
   successful commit, not on dispatch, so a dropped request or gateway restart can
@@ -282,14 +300,17 @@ sees is produced locally from a closed, code-owned vocabulary.
 - **Backdrop guidance is an art brief, not a rendering recipe.** The packaged
   illustrator receives only the page inputs and commits one coordinated set: desktop
   `markup` at 800×600 and portrait `mobile` at 450×900. Both share a palette, visual
-  thesis, pattern grammar, and optional motion verb, but each frame is composed
-  independently; mobile is never a crop or scaled desktop copy. PATTERN is the
-  default lane, but it means a repeated visual grammar leads the composition, not
-  that one tile must cover the whole frame uniformly: units may gather into a large
-  arch-like or architectural macro-form, occupy only one region, and be organized by
-  localized light, density, interruption, negative space, or a tonal gradient.
-  HYBRID adds one cropped environmental trace; STORY IMAGE remains the explicit
-  exception for a separately drawn dominant subject. Calm reading fields come from
+  thesis, motif grammar, and optional motion verb, but each frame is composed
+  independently; mobile is never a crop or scaled desktop copy. MOTIF is the default
+  lane. The brief supplies meaning, emotional temperature, world character, and the
+  desired difference from recent backdrops, but never a visual recipe. Before
+  drawing, the illustrator silently develops multiple substantially different
+  concepts, rejects literal summaries, obvious symbols, generic screensaver
+  treatments, and repeated composition families, then chooses the most
+  world-specific metaphor with the strongest compositional tension and emotional
+  afterimage. No shape family or SVG technique is mandatory; formal choices must be
+  earned by the selected concept. SCENE is reserved for recognizable environmental
+  structure and enters the trace pipeline. Calm reading fields come from
   low luminance, scale, and contrast; portrait art avoids full borders, left/right
   pair dependence, and bright central motifs. For visual review, the illustrator
   first submits the complete desktop/mobile set as an unpublished draft. The server
@@ -299,11 +320,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   bounded by `RENDER_TIMEOUT_SECS`, so a pathological draft (deep filter stacks
   can make cairo rasterization spin) times out instead of wedging the MCP server;
   the parent trusts only its own PNG signature and dimension check, never the
-  child's exit status. The illustrator reads every preview together as images, judges
-  the coordinated set, and may revise the SVGs at most once before publishing the
-  final set with the returned `draftId`. Draft submission neither clears the waiting
-  request nor makes art visible to live play, history, or shelf surfaces; only the
-  final atomic write does. Enforced by
+  child's exit status. The illustrator reads every first-draft preview together as
+  images and judges the coordinated set. MOTIF always treats that first render as
+  diagnosis: it identifies the weakest or most generic artistic decision, makes one
+  structural revision, submits a replacement draft, reads the replacement previews
+  together, and commits only that reviewed second `draftId`. SCENE may keep a strong
+  first draft, but any revision must likewise be resubmitted and visually reviewed;
+  unrendered final markup is never published. Draft submission neither clears the
+  waiting request nor makes art visible to live play, history, or shelf surfaces;
+  only the final atomic write does. Enforced by
   the `prompt` and path-restricted `read` capability in
   `agents/illustrator.json`, the draft/final handlers in `backend/mcp_server.py`,
   and `BackdropDraftStore`; pinned by
