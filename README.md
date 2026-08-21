@@ -51,6 +51,19 @@ Open the dashboard and pick **无限世界 / Endless Worlds** from the sidebar. 
 app self-heals its MCP server path to wherever it was installed, so no manual
 editing of `app.json` is needed.
 
+Backdrop publication additionally needs **one local SVG rasterizer** on the
+gateway host — the illustrator visually reviews server-rendered PNG previews
+before publishing. Any one of these satisfies it, checked in this order:
+
+- the `cairosvg` Python package (`pip install cairosvg`),
+- the `rsvg-convert` binary (`librsvg2-bin` on Debian/Ubuntu),
+- the librsvg shared library itself (`librsvg2-2` on Debian/Ubuntu,
+  `dnf install librsvg2` on Fedora/AL2023, `brew install librsvg` on macOS),
+  reached directly through `ctypes` with no Python package.
+
+Without a renderer, illustrator draft submission fails and page art falls back
+to the narrator's emergency path; the story itself is unaffected.
+
 ## Build and develop
 
 The shipped `ui/index.mjs` is a build artifact; rebuild it after changing

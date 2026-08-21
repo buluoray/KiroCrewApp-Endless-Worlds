@@ -39,7 +39,7 @@ export function StarMap({
   initialFocus?: string
   /** The life's narrator backdrop, shown behind the star map the same way the
    *  play page shows it behind the story. Null = plain panel. */
-  backdrop?: { version: number } | null
+  backdrop?: { version: number; mobile?: boolean } | null
 }) {
   const [payload, setPayload] = useState<StarPayload | null>(null)
   const [lens, setLens] = useState<MemoryView | null>(null)
@@ -72,7 +72,7 @@ export function StarMap({
     return (
       <div className="ews-overlay" role="dialog" aria-modal="true">
         <StarStyles />
-        {backdrop ? <Backdrop runId={runId} version={backdrop.version} /> : null}
+        {backdrop ? <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} /> : null}
         <div className="ews-head">
           <button className="ews-btn" type="button" onClick={onClose}>
             {mt(lang, 'star.close')}
@@ -103,7 +103,7 @@ export function StarMap({
     <div className="ews-overlay" role="dialog" aria-modal="true"
       aria-label={mt(lang, 'star.title')}>
       <StarStyles />
-      {backdrop ? <Backdrop runId={runId} version={backdrop.version} /> : null}
+      {backdrop ? <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} /> : null}
       <div className="ews-head">
         <div className="ews-title">{mt(lang, 'star.title')}</div>
         {/* The lens switcher is always visible and never locked (§8.3.2). */}

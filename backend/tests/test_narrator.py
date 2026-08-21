@@ -395,17 +395,109 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     belongs to ``compile_backdrop``; this contract protects visual variety.
 
     The NARRATOR must carry none of the SVG recipe — it delegates via a brief."""
-    prompt = json.loads(ILLUSTRATOR_JSON.read_text(encoding="utf-8"))["prompt"]
+    illustrator_agent = json.loads(ILLUSTRATOR_JSON.read_text(encoding="utf-8"))
+    prompt = illustrator_agent["prompt"]
 
     for required in (
-        "not a checklist of SVG effects",
-        "one dominant image",
+        "senior game environment artist",
+        "ONE coordinated backdrop set",
+        "desktop raw SVG as `markup`",
+        "mobile raw SVG as `mobile`",
+        "viewBox='0 0 800 600'",
+        "viewBox='0 0 450 900'",
+        "share the same palette",
+        "compose each frame independently",
+        "must not be a crop, stretch, or scaled copy",
+        "low luminance",
+        "complete tall composition",
+        "passing both `markup` and `mobile` in the same call",
+        "PLAYER CHOICE",
+        "PAGE PROSE",
+        "ART BRIEF",
+        "ONE visual thesis",
         "SMALL palette",
-        "one motion verb, or none",
-        "do not reuse the same composition family",
+        "one motion verb or none",
+        "Work with SVG's strengths",
+        "pattern-first and architecture-first",
+        "silently choose exactly one lane",
+        "PATTERN is the default",
+        "Pattern does not mean uniform wallpaper or tiling the whole frame",
+        "Repeated units may accumulate, align, bend, thin, interrupt, or fade",
+        "one large macro-form",
+        "arch-like span",
+        "Localized light, shadow, and tonal gradients may organize that form",
+        "brightest region may sit near an edge or the top",
+        "Pattern may fill the frame, occupy one region, or leave substantial negative space",
+        "Do not add a separate literal story noun",
+        "HYBRID is second",
+        "pattern-dominant composition with exactly one small",
+        "STORY IMAGE is the exception",
+        "ART BRIEF explicitly asks for a recognizable dominant image",
+        "If uncertain, choose PATTERN",
+        "just because the task names plot nouns",
+        "major irreversible event",
+        "cohere into the dominant silhouette",
+        "need not encode the irreversible event",
+        "without repeating uniformly everywhere",
+        "direction, interruption, density, light, and negative space",
+        "without forcing narrative symbolism",
+        "Straight lines, grids, tiles, windows",
+        "one consequential object",
+        "Prefer environment and evidence",
+        "large anatomically detailed people or animals",
+        "small, distant, cropped, shadowed",
+        "Never wrap either SVG in a Markdown code fence",
         "SMIL only",
+        "Follow exactly ONE visual feedback loop before publication",
+        "endless_submit_backdrop_draft",
+        "does not publish them",
+        "opaque `draftId`",
+        "safe PNG thumbnail paths",
+        "built-in `read` tool exactly once in Image mode",
+        "ALL returned PNG paths together",
+        "judge desktop and mobile side by side",
+        "Inspect the rendered pixels",
+        "one clear visual thesis",
+        "genuinely independent compositions",
+        "deliberate pattern macro-composition rather than accidental uniform wallpaper",
+        "calm prose reading fields",
+        "clipping or dead space",
+        "at most ONE revision",
+        "keep them unchanged if the rendered result already works",
+        "call endless_commit_backdrop once with the `draftId`",
+        "Never publish before reading the thumbnails",
+        "never submit a second accepted draft",
     ):
         assert required in prompt, f"illustrator prompt missing: {required!r}"
+
+    assert prompt.index("endless_submit_backdrop_draft") < prompt.index(
+        "built-in `read` tool"
+    ) < prompt.index("endless_commit_backdrop once")
+
+    draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
+    commit_tool = OWN_SERVER_REF + "/endless_commit_backdrop"
+    assert illustrator_agent["tools"] == [draft_tool, commit_tool, "read"]
+    assert illustrator_agent["allowedTools"] == [draft_tool, commit_tool, "read"]
+    assert illustrator_agent["toolsSettings"]["read"]["allowedPaths"] == [
+        "**/runs/*/backdrop-previews/backdrop-preview-*.png"
+    ]
+
+    for rejected in (
+        "paths, gradients, masks, clipping, patterns, filters, texture",
+        "semantic `<g>` groups",
+        "recognizable silhouette",
+        "Bézier curves and arcs",
+        "spotlight the hero",
+        "faux-photorealism",
+        "meaning instead of becoming generic wallpaper",
+        "First look for repeated rhythm, architecture, interiors",
+        "with a clear routing order",
+        "Route in this order: pure pattern",
+        "make a fully ornamental field with no recognizable story noun",
+        "fully ornamental, world-specific repeating pattern",
+        "Pattern-first may mean pattern-only",
+    ):
+        assert rejected not in prompt, f"illustrator prompt retained: {rejected!r}"
 
     # The narrator delegates during every normal turn. Direct SVG exists only as a
     # separately gated recovery capability after two worker failures; keeping the
@@ -418,7 +510,10 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     assert fallback in narrator_agent["allowedTools"]
     assert "Never call endless_commit_fallback_backdrop during a normal turn" in narrator
     assert "endless_set_backdrop" not in narrator
-    for recipe in ("viewBox='0 0 800 600'", "feTurbulence", "<animateTransform>"):
+    for recipe in (
+        "viewBox='0 0 800 600'", "viewBox='0 0 450 900'",
+        "feTurbulence", "<animateTransform>",
+    ):
         assert recipe not in narrator, f"narrator still carries SVG recipe: {recipe!r}"
 
 

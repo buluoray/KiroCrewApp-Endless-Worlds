@@ -24,12 +24,32 @@ import { API } from './api'
  * `version` is the cache-buster: a replaced background loads the new image.
  */
 export function Backdrop(
-  { runId, version, turn }: { runId: string; version: number; turn?: number },
+  { runId, version, turn, mobile = false }: {
+    runId: string; version: number; turn?: number; mobile?: boolean
+  },
 ) {
+  // Use the same narrow environment boundary as the rest of the app. A variant
+  // change only changes `src`; the existing double buffer below preloads it before
+  // replacing the painted frame, so resizing never flashes the plain page.
+  const [narrow, setNarrow] = useState(
+    () => (typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(max-width: 1100px)').matches
+      : false),
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const query = window.matchMedia('(max-width: 1100px)')
+    const changed = () => setNarrow(query.matches)
+    changed()
+    query.addEventListener('change', changed)
+    return () => query.removeEventListener('change', changed)
+  }, [])
+
   // `?turn=` selects the backdrop effective on a PAST page (server resolves it);
   // without it the server serves the latest. `v` is only the cache-buster.
   const q = turn != null ? `?turn=${turn}&v=${version}` : `?v=${version}`
-  const src = `${API}/runs/${encodeURIComponent(runId)}/backdrop${q}`
+  const variant = mobile && narrow ? '&variant=mobile' : ''
+  const src = `${API}/runs/${encodeURIComponent(runId)}/backdrop${q}${variant}`
 
   // Double-buffered swap: the frame currently PAINTED, distinct from the `src` the
   // props are asking for. A new page's backdrop is fetched and decoded off-DOM

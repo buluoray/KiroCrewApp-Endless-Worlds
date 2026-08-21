@@ -77,7 +77,12 @@ from scenes import (  # noqa: E402
     slugify_scene_id,
 )
 from widget import scene_warnings  # noqa: E402
-from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
+from backdrop import (  # noqa: E402
+    BackdropDraftStore,
+    BackdropError,
+    BackdropStore,
+    compile_backdrop,
+)
 from chapters import (  # noqa: E402
     ChapterError,
     brief,
@@ -432,23 +437,48 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "endless_commit_backdrop",
+        "name": "endless_submit_backdrop_draft",
         "description": (
-            "Hang a finished backdrop behind a page. This is the ILLUSTRATOR's "
-            "commit — `markup` is a single self-contained SVG image, and `turn` is "
-            "the page it belongs to (given to you in your task). Optionally also pass "
-            "`buttons`: a second SVG, the common motif shown behind the ordinary "
-            "choice buttons this scene. Refused if either is not an <svg> document or "
-            "carries script, an event handler, <foreignObject>, or an external link."
+            "Submit the ILLUSTRATOR's unpublished first draft for visual review. "
+            "The server validates all supplied SVGs, renders small safe PNG thumbnails, "
+            "and returns their local paths plus an opaque `draftId`. This does NOT "
+            "publish art or clear the waiting page. Read every returned PNG together "
+            "with the built-in `read` tool in Image mode before making at most one "
+            "revision and calling endless_commit_backdrop."
         ),
         "inputSchema": {
             "type": "object",
-            "required": ["runId", "turn", "markup"],
+            "required": ["runId", "turn", "markup", "mobile"],
             "additionalProperties": False,
             "properties": {
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
                 "markup": {"type": "string", "maxLength": 24000},
+                "mobile": {"type": "string", "maxLength": 24000},
+                "buttons": {"type": "string", "maxLength": 8000},
+            },
+        },
+    },
+    {
+        "name": "endless_commit_backdrop",
+        "description": (
+            "Publish the ILLUSTRATOR's final backdrop after visual draft review. "
+            "Pass the opaque `draftId` returned by endless_submit_backdrop_draft, "
+            "the final desktop SVG as `markup`, the independently composed portrait "
+            "SVG as `mobile`, and optional `buttons`. The final may be the reviewed "
+            "draft unchanged or its one revision. Publication is atomic and refused "
+            "unless the draft id and page match; draft thumbnails are never public."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "turn", "draftId", "markup", "mobile"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "turn": {"type": "integer", "minimum": 0},
+                "draftId": {"type": "string", "minLength": 24, "maxLength": 24},
+                "markup": {"type": "string", "maxLength": 24000},
+                "mobile": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
             },
         },
@@ -458,9 +488,10 @@ _TOOLS: list[dict[str, Any]] = [
         "description": (
             "Emergency page-art recovery for the NARRATOR only. Use this solely "
             "when an internal recovery prompt says illustrator attempts failed. "
-            "Commit one safe self-contained SVG for the exact runId and turn in "
-            "that prompt. The server refuses this tool unless that page's persisted "
-            "fallback gate is open."
+            "Commit one safe backdrop set for the exact runId and turn in that "
+            "prompt: required desktop `markup`, plus optional coordinated portrait "
+            "`mobile` and choice motif `buttons`. The server refuses this tool unless "
+            "that page's persisted fallback gate is open."
         ),
         "inputSchema": {
             "type": "object",
@@ -470,6 +501,7 @@ _TOOLS: list[dict[str, Any]] = [
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
                 "markup": {"type": "string", "maxLength": 24000},
+                "mobile": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
             },
         },
@@ -692,6 +724,11 @@ def _backdrop_store(run_id: str) -> BackdropStore:
     one-file confinement the scene ledger has, so a backdrop call can never write
     panels, chronicle, or facts."""
     return BackdropStore(_DATA, run_id)
+
+
+def _backdrop_draft_store(run_id: str) -> BackdropDraftStore:
+    """A handle for unpublished raster previews; runtime routes never read it."""
+    return BackdropDraftStore(_DATA, run_id)
 
 
 def _backdrop_turn(run_id: str) -> int:
@@ -1548,11 +1585,42 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     return {"backdrop": "queued", "turn": turn}
 
 
-def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
-    """The illustrator's commit: validate the SVG and publish its waiting page."""
+def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
+    """Validate an Illustrator first draft and return safe raster preview paths."""
     run_id = args["runId"]
     turn = int(args["turn"])
-    version = _backdrop_store(run_id).set(args["markup"], args.get("buttons"), turn)
+    request = _store().read_backdrop_request(run_id)
+    if not request or int(request.get("turn") or 0) != turn:
+        raise BackdropError("no backdrop is waiting for this run and turn")
+    draft = _backdrop_draft_store(run_id).submit(
+        args["markup"], args["mobile"], turn=turn, buttons=args.get("buttons")
+    )
+    return {
+        "backdrop": "drafted",
+        "draftId": draft["draftId"],
+        "turn": turn,
+        "previews": draft["previews"],
+        "next": "read every preview PNG together in Image mode, then publish once",
+    }
+
+
+def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
+    """Publish one reviewed Illustrator final; the draft itself was never public."""
+    run_id = args["runId"]
+    turn = int(args["turn"])
+    draft_id = args["draftId"]
+    drafts = _backdrop_draft_store(run_id)
+    drafts.require(draft_id, turn)
+    version = _backdrop_store(run_id).set(
+        args["markup"], args.get("buttons"), turn, args["mobile"]
+    )
+    try:
+        drafts.discard(draft_id, turn)
+    except (BackdropError, OSError):
+        # The final is already atomically published. A stale or concurrently
+        # replaced draft record and leftover private thumbnails are cleanup debt,
+        # never a reason to report that publication failed.
+        pass
     try:
         store = _store()
         request = store.read_backdrop_request(run_id)
@@ -1581,7 +1649,9 @@ def _commit_fallback_backdrop(args: dict[str, Any]) -> dict[str, Any]:
             "direct narrator backdrop commit is available only for the page "
             "whose illustrator recovery failed"
         )
-    version = _backdrop_store(run_id).set(args["markup"], args.get("buttons"), turn)
+    version = _backdrop_store(run_id).set(
+        args["markup"], args.get("buttons"), turn, args.get("mobile")
+    )
     store.clear_backdrop_request(run_id)
     return {"backdrop": "committed", "version": version, "turn": turn}
 
@@ -1669,6 +1739,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_await_scene": _await_scene,
     "endless_dismiss_scene": _dismiss_scene,
     "endless_paint_backdrop": _paint_backdrop,
+    "endless_submit_backdrop_draft": _submit_backdrop_draft,
     "endless_commit_backdrop": _commit_backdrop,
     "endless_commit_fallback_backdrop": _commit_fallback_backdrop,
     "endless_clear_backdrop": _clear_backdrop,

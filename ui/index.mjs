@@ -3480,9 +3480,18 @@ var CSS_TEXT$2 = `
 *
 * `version` is the cache-buster: a replaced background loads the new image.
 */
-function Backdrop({ runId, version, turn }) {
+function Backdrop({ runId, version, turn, mobile = false }) {
+	const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(max-width: 1100px)").matches : false);
+	useEffect(() => {
+		if (typeof window === "undefined" || !window.matchMedia) return;
+		const query = window.matchMedia("(max-width: 1100px)");
+		const changed = () => setNarrow(query.matches);
+		changed();
+		query.addEventListener("change", changed);
+		return () => query.removeEventListener("change", changed);
+	}, []);
 	const q = turn != null ? `?turn=${turn}&v=${version}` : `?v=${version}`;
-	const src = `${API}/runs/${encodeURIComponent(runId)}/backdrop${q}`;
+	const src = `${API}/runs/${encodeURIComponent(runId)}/backdrop${q}${mobile && narrow ? "&variant=mobile" : ""}`;
 	const [shownSrc, setShownSrc] = useState(null);
 	const retried = useRef(null);
 	useEffect(() => {
@@ -4391,7 +4400,8 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 			/* @__PURE__ */ jsx(StarStyles, {}),
 			backdrop ? /* @__PURE__ */ jsx(Backdrop, {
 				runId,
-				version: backdrop.version
+				version: backdrop.version,
+				mobile: backdrop.mobile
 			}) : null,
 			/* @__PURE__ */ jsx("div", {
 				className: "ews-head",
@@ -4425,7 +4435,8 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 			/* @__PURE__ */ jsx(StarStyles, {}),
 			backdrop ? /* @__PURE__ */ jsx(Backdrop, {
 				runId,
-				version: backdrop.version
+				version: backdrop.version,
+				mobile: backdrop.mobile
 			}) : null,
 			/* @__PURE__ */ jsxs("div", {
 				className: "ews-head",
@@ -5398,13 +5409,15 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 		const shown = viewTurn ?? latest;
 		if (shown >= latest) onBackdrop(v.backdrop ? {
 			version: v.backdrop.version,
-			turn: latest
+			turn: latest,
+			mobile: v.backdrop.mobile
 		} : null);
 		else {
 			const past = chron.find((c) => c.turn === shown)?.backdrop;
 			onBackdrop(past ? {
 				version: past.version,
-				turn: shown
+				turn: shown,
+				mobile: past.mobile
 			} : v.backdrop ?? null);
 		}
 	}, [
@@ -7088,7 +7101,8 @@ function EndlessWorlds() {
 				view === "live" && live && backdrop ? /* @__PURE__ */ jsx(Backdrop, {
 					runId: live,
 					version: backdrop.version,
-					turn: backdrop.turn
+					turn: backdrop.turn,
+					mobile: backdrop.mobile
 				}) : null,
 				/* @__PURE__ */ jsxs("div", {
 					className: "ew-head",

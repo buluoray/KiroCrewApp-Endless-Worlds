@@ -140,7 +140,7 @@ export default function EndlessWorlds() {
   const [live, setLive] = useState<string | null>(null)
   const [scenes, setScenes] = useState<SceneRow[]>([])
   const [panels, setPanels] = useState<PanelView[]>([])
-  const [backdrop, setBackdrop] = useState<{ version: number; turn?: number } | null>(null)
+  const [backdrop, setBackdrop] = useState<{ version: number; turn?: number; mobile?: boolean } | null>(null)
   // ── phone bottom tab bar ──────────────────────────────────────────────
   // Narrow-viewport only; the desktop keeps the WorldRail. `tab` is the active
   // surface within a life: 'reading', 'starmap', or a scene region id.
@@ -748,7 +748,12 @@ export default function EndlessWorlds() {
           desktop it spans the rail AND the play area for immersion, and on a phone
           it fills the screen. Only on a live view — the shelf stays plain. */}
       {view === 'live' && live && backdrop ? (
-        <Backdrop runId={live} version={backdrop.version} turn={backdrop.turn} />
+        <Backdrop
+          runId={live}
+          version={backdrop.version}
+          turn={backdrop.turn}
+          mobile={backdrop.mobile}
+        />
       ) : null}
 
       <div className="ew-head">
