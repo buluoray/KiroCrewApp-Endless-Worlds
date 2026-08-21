@@ -133,7 +133,9 @@ _TOOLS: list[dict[str, Any]] = [
             "Commit one turn: the prose the player reads, the state that follows, "
             "and the choices offered. THE ONLY call that changes a life. A living "
             "turn MUST include `choices` — each an object whose `label` is the "
-            "button text the player reads (optional: `id`, `fateful`, `art`); omit "
+            "button text the player reads (optional: `id`, `fateful`, `art`, and — "
+            "for a moment that earns motion — `effect`: one of "
+            "shimmer|aura|embers|ripple, with an optional `tint` hex color); omit "
             "them only on a terminal turn, marked "
             "`ending: true` or via state that fires a world ending. Declare "
             "state in full — a field you leave out reads to the player as a fact "
@@ -789,7 +791,15 @@ def _backdrop_turn(run_id: str) -> int:
 
 #: The only keys a stored choice carries. Anything else the narrator sends is
 #: model noise and is stripped rather than stored.
-_CHOICE_KEYS = ("id", "label", "fateful", "art")
+_CHOICE_KEYS = ("id", "label", "fateful", "art", "effect", "tint")
+
+#: The runtime effect vocabulary for choice buttons. The narrator DECLARES a
+#: name; the app's own CSS/canvas renders it — model bytes never carry code
+#: into the dashboard document (the play page is NOT an iframe). Unknown names
+#: are dropped fail-soft, so an over-imaginative narrator degrades to the
+#: static styling instead of losing the turn.
+_CHOICE_EFFECTS = ("shimmer", "aura", "embers", "ripple")
+_TINT_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 #: Key names a narrator plausibly uses for a choice's visible text. `label` is
 #: canonical; the rest are salvaged onto it. A model that invents a key here is
@@ -846,6 +856,13 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
                 clean.pop("art", None)
         else:
             clean.pop("art", None)
+        if clean.get("effect") not in _CHOICE_EFFECTS:
+            clean.pop("effect", None)
+        tint = clean.get("tint")
+        if isinstance(tint, str) and _TINT_RE.match(tint.strip()):
+            clean["tint"] = tint.strip()
+        else:
+            clean.pop("tint", None)
         out.append(clean)
         if len(out) >= 8:
             break
