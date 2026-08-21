@@ -395,7 +395,8 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     belongs to ``compile_backdrop``; this contract protects visual variety.
 
     The NARRATOR must carry none of the SVG recipe — it delegates via a brief."""
-    prompt = json.loads(ILLUSTRATOR_JSON.read_text(encoding="utf-8"))["prompt"]
+    illustrator_agent = json.loads(ILLUSTRATOR_JSON.read_text(encoding="utf-8"))
+    prompt = illustrator_agent["prompt"]
 
     for required in (
         "senior game environment artist",
@@ -447,8 +448,39 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "small, distant, cropped, shadowed",
         "Never wrap either SVG in a Markdown code fence",
         "SMIL only",
+        "Follow exactly ONE visual feedback loop before publication",
+        "endless_submit_backdrop_draft",
+        "does not publish them",
+        "opaque `draftId`",
+        "safe PNG thumbnail paths",
+        "built-in `read` tool exactly once in Image mode",
+        "ALL returned PNG paths together",
+        "judge desktop and mobile side by side",
+        "Inspect the rendered pixels",
+        "one clear visual thesis",
+        "genuinely independent compositions",
+        "deliberate pattern macro-composition rather than accidental uniform wallpaper",
+        "calm prose reading fields",
+        "clipping or dead space",
+        "at most ONE revision",
+        "keep them unchanged if the rendered result already works",
+        "call endless_commit_backdrop once with the `draftId`",
+        "Never publish before reading the thumbnails",
+        "never submit a second accepted draft",
     ):
         assert required in prompt, f"illustrator prompt missing: {required!r}"
+
+    assert prompt.index("endless_submit_backdrop_draft") < prompt.index(
+        "built-in `read` tool"
+    ) < prompt.index("endless_commit_backdrop once")
+
+    draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
+    commit_tool = OWN_SERVER_REF + "/endless_commit_backdrop"
+    assert illustrator_agent["tools"] == [draft_tool, commit_tool, "read"]
+    assert illustrator_agent["allowedTools"] == [draft_tool, commit_tool, "read"]
+    assert illustrator_agent["toolsSettings"]["read"]["allowedPaths"] == [
+        "**/runs/*/backdrop-previews/backdrop-preview-*.png"
+    ]
 
     for rejected in (
         "paths, gradients, masks, clipping, patterns, filters, texture",

@@ -29,9 +29,14 @@ silently stripped):
 
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import json
 import os
 import re
+import secrets
+import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -56,8 +61,11 @@ _FORBIDDEN_SUBSTRINGS = (
 #: letter between ``on`` and ``=`` so ordinary attributes never match.
 _HANDLER_RE = re.compile(r"\bon[a-z]+\s*=", re.IGNORECASE)
 
-#: A reference that leaves the document — an external fetch dressed as a link.
+#: Fast pre-parse rejection for obviously remote hrefs. The parsed-attribute gate in
+#: ``compile_backdrop`` below is authoritative and rejects every non-fragment href,
+#: including relative/file/data references, before a server-side renderer sees it.
 _EXTERNAL_REF_RE = re.compile(r'(?:xlink:href|href)\s*=\s*["\']?\s*(?:https?:|//)', re.IGNORECASE)
+_CSS_URL_RE = re.compile(r"url\(([^)]*)\)", re.IGNORECASE)
 
 
 class BackdropError(ValueError):
@@ -125,10 +133,308 @@ def compile_backdrop(svg: str) -> str:
     # glyph. Parsed after the injections above so a merely-missing xmlns is repaired,
     # not rejected.
     try:
-        ET.fromstring(svg)
+        root = ET.fromstring(svg)
     except ET.ParseError as exc:
         raise BackdropError(f"the SVG is not well-formed and would not render ({exc})") from None
+
+    # Server-side preview rendering has a stronger trust boundary than browser
+    # <img>: a renderer may resolve relative paths or file: URLs. Permit only
+    # same-document fragment references (plus the historical empty xlink href we
+    # repair for compatibility). Embedded data, relative paths, and every scheme
+    # are refused even though the final browser image context would neuter them.
+    for element in root.iter():
+        for attr, value in element.attrib.items():
+            if attr.rsplit("}", 1)[-1].lower() != "href":
+                continue
+            ref = value.strip()
+            if ref and not ref.startswith("#"):
+                raise BackdropError(
+                    "a background reference must stay inside this SVG (#id); "
+                    "relative, data, file, and network resources are not allowed"
+                )
+    for match in _CSS_URL_RE.finditer(svg):
+        ref = match.group(1).strip().strip("\"'").strip()
+        if not ref.startswith("#"):
+            raise BackdropError(
+                "a background CSS url() must reference an element inside this SVG (#id)"
+            )
+    if "@import" in low:
+        raise BackdropError("a background may not import CSS or any external resource")
     return svg
+
+
+class _RsvgRectangle(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_double),
+        ("y", ctypes.c_double),
+        ("width", ctypes.c_double),
+        ("height", ctypes.c_double),
+    ]
+
+
+def _load_shared_library(name: str, fallbacks: tuple[str, ...]) -> ctypes.CDLL:
+    candidates = [ctypes.util.find_library(name), *fallbacks]
+    last: Exception | None = None
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            return ctypes.CDLL(candidate)
+        except OSError as exc:
+            last = exc
+    raise OSError(f"shared library {name!r} is unavailable") from last
+
+
+def _render_with_librsvg(svg: str, target: Path, width: int, height: int) -> None:
+    """Rasterize one already-compiled SVG through librsvg into a bounded PNG."""
+    rsvg = _load_shared_library(
+        "rsvg-2", ("librsvg-2.so.2", "librsvg-2.dylib", "librsvg-2-2.dll")
+    )
+    cairo = _load_shared_library(
+        "cairo", ("libcairo.so.2", "libcairo.2.dylib", "libcairo-2.dll")
+    )
+    gobject = _load_shared_library(
+        "gobject-2.0",
+        ("libgobject-2.0.so.0", "libgobject-2.0.0.dylib", "libgobject-2.0-0.dll"),
+    )
+
+    rsvg.rsvg_handle_new_from_data.argtypes = [
+        ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_void_p)
+    ]
+    rsvg.rsvg_handle_new_from_data.restype = ctypes.c_void_p
+    rsvg.rsvg_handle_render_document.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(_RsvgRectangle),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    rsvg.rsvg_handle_render_document.restype = ctypes.c_int
+    cairo.cairo_image_surface_create.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    cairo.cairo_image_surface_create.restype = ctypes.c_void_p
+    cairo.cairo_surface_status.argtypes = [ctypes.c_void_p]
+    cairo.cairo_surface_status.restype = ctypes.c_int
+    cairo.cairo_create.argtypes = [ctypes.c_void_p]
+    cairo.cairo_create.restype = ctypes.c_void_p
+    cairo.cairo_status.argtypes = [ctypes.c_void_p]
+    cairo.cairo_status.restype = ctypes.c_int
+    cairo.cairo_surface_write_to_png.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    cairo.cairo_surface_write_to_png.restype = ctypes.c_int
+    cairo.cairo_destroy.argtypes = [ctypes.c_void_p]
+    cairo.cairo_surface_destroy.argtypes = [ctypes.c_void_p]
+    gobject.g_object_unref.argtypes = [ctypes.c_void_p]
+
+    raw = svg.encode("utf-8")
+    buf = ctypes.create_string_buffer(raw)
+    error = ctypes.c_void_p()
+    handle = rsvg.rsvg_handle_new_from_data(buf, len(raw), ctypes.byref(error))
+    if not handle:
+        raise BackdropError("the safe SVG renderer could not decode this draft")
+
+    surface = ctypes.c_void_p()
+    drawing = ctypes.c_void_p()
+    try:
+        surface = cairo.cairo_image_surface_create(0, width, height)  # ARGB32
+        if not surface or cairo.cairo_surface_status(surface) != 0:
+            raise BackdropError("the safe SVG renderer could not allocate a thumbnail")
+        drawing = cairo.cairo_create(surface)
+        if not drawing or cairo.cairo_status(drawing) != 0:
+            raise BackdropError("the safe SVG renderer could not start a thumbnail")
+        viewport = _RsvgRectangle(0.0, 0.0, float(width), float(height))
+        error = ctypes.c_void_p()
+        if not rsvg.rsvg_handle_render_document(
+            handle, drawing, ctypes.byref(viewport), ctypes.byref(error)
+        ):
+            raise BackdropError("the safe SVG renderer refused this draft")
+        if cairo.cairo_surface_write_to_png(surface, os.fsencode(target)) != 0:
+            raise BackdropError("the safe SVG renderer could not write its thumbnail")
+    finally:
+        if drawing:
+            cairo.cairo_destroy(drawing)
+        if surface:
+            cairo.cairo_surface_destroy(surface)
+        gobject.g_object_unref(handle)
+
+
+def _render_svg_thumbnail(svg: str, target: Path, width: int, height: int) -> None:
+    """Render a compiled SVG to a small PNG without allowing network/file input.
+
+    CairoSVG and ``rsvg-convert`` are optional compatibility paths; the app's Linux
+    runtime normally reaches librsvg directly through ``ctypes`` and needs no Python
+    package. Every backend receives only the already-compiled, off-box-reference-free
+    SVG. The PNG signature and dimensions are checked before the draft can be read.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".png.tmp")
+    errors: list[str] = []
+
+    try:
+        try:
+            import cairosvg  # type: ignore[import-not-found]  # optional runtime
+
+            cairosvg.svg2png(
+                bytestring=svg.encode("utf-8"),
+                write_to=str(tmp),
+                output_width=width,
+                output_height=height,
+                unsafe=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — try the next local renderer
+            errors.append(f"CairoSVG:{type(exc).__name__}")
+            tmp.unlink(missing_ok=True)
+
+        converter = shutil.which("rsvg-convert")
+        if not tmp.is_file() and converter:
+            try:
+                subprocess.run(
+                    [
+                        converter,
+                        "--width", str(width),
+                        "--height", str(height),
+                        "--output", str(tmp),
+                    ],
+                    input=svg.encode("utf-8"),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                    timeout=20,
+                )
+            except Exception as exc:  # noqa: BLE001 — try direct librsvg
+                errors.append(f"rsvg-convert:{type(exc).__name__}")
+                tmp.unlink(missing_ok=True)
+
+        if not tmp.is_file():
+            try:
+                _render_with_librsvg(svg, tmp, width, height)
+            except Exception as exc:  # noqa: BLE001 — normalized below
+                errors.append(f"librsvg:{type(exc).__name__}")
+                tmp.unlink(missing_ok=True)
+
+        try:
+            header = tmp.read_bytes()[:24]
+        except OSError:
+            header = b""
+        if (
+            not header.startswith(b"\x89PNG\r\n\x1a\n")
+            or len(header) < 24
+            or int.from_bytes(header[16:20], "big") != width
+            or int.from_bytes(header[20:24], "big") != height
+        ):
+            detail = ", ".join(errors) or "no renderer produced a PNG"
+            raise BackdropError(f"safe backdrop preview rendering is unavailable ({detail})")
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+class BackdropDraftStore:
+    """One unpublished Illustrator draft and its safe raster thumbnails.
+
+    Drafts live beside but never inside ``backdrop.json``. Runtime routes read only
+    :class:`BackdropStore`, so a draft cannot leak into live play, chronicle history,
+    or shelf thumbnails. A newer recovery attempt replaces the stale draft. The
+    opaque id binds the eventual final commit to the exact preview the Illustrator
+    was asked to inspect.
+    """
+
+    def __init__(self, data_dir: Path, run_id: str) -> None:
+        if not isinstance(run_id, str) or not _ID_RE.match(run_id):
+            raise BackdropError(f"not a run id: {run_id!r}")
+        run_dir = data_dir / "runs" / run_id
+        self._path = run_dir / "backdrop-draft.json"
+        self._preview_dir = run_dir / "backdrop-previews"
+
+    def _load(self) -> dict[str, Any] | None:
+        if not self._path.is_file():
+            return None
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        if not isinstance(data.get("draftId"), str) or not isinstance(data.get("turn"), int):
+            return None
+        return data
+
+    def _save(self, draft: dict[str, Any]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(draft, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self._path)
+
+    def _remove_previews(self, draft: dict[str, Any] | None) -> None:
+        previews = draft.get("previews") if isinstance(draft, dict) else None
+        if not isinstance(previews, dict):
+            return
+        expected_parent = self._preview_dir.resolve()
+        for value in previews.values():
+            if not isinstance(value, str):
+                continue
+            path = Path(value)
+            try:
+                if (
+                    path.resolve().parent == expected_parent
+                    and path.name.startswith("backdrop-preview-")
+                    and path.suffix == ".png"
+                ):
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def submit(
+        self,
+        markup: str,
+        mobile: str,
+        *,
+        turn: int,
+        buttons: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate all draft SVGs, then atomically expose only raster previews."""
+        clean_markup = compile_backdrop(markup)
+        clean_mobile = compile_backdrop(mobile)
+        clean_buttons = (
+            compile_backdrop(buttons)
+            if isinstance(buttons, str) and buttons.strip()
+            else None
+        )
+
+        draft_id = secrets.token_hex(12)
+        previews: dict[str, str] = {}
+        specs = [
+            ("desktop", clean_markup, 400, 300),
+            ("mobile", clean_mobile, 150, 300),
+        ]
+        if clean_buttons:
+            specs.append(("buttons", clean_buttons, 240, 80))
+        created: list[Path] = []
+        try:
+            for label, svg, width, height in specs:
+                path = self._preview_dir / f"backdrop-preview-{draft_id}-{label}.png"
+                _render_svg_thumbnail(svg, path, width, height)
+                created.append(path)
+                previews[label] = str(path.resolve())
+            draft = {"draftId": draft_id, "turn": int(turn), "previews": previews}
+            old = self._load()
+            self._save(draft)
+            self._remove_previews(old)
+            return draft
+        except Exception:
+            for path in created:
+                path.unlink(missing_ok=True)
+            raise
+
+    def require(self, draft_id: str, turn: int) -> dict[str, Any]:
+        draft = self._load()
+        if not draft:
+            raise BackdropError("submit and visually review a backdrop draft before publishing")
+        if draft.get("draftId") != draft_id or int(draft.get("turn") or 0) != int(turn):
+            raise BackdropError("this final backdrop does not match the current reviewed draft")
+        return draft
+
+    def discard(self, draft_id: str, turn: int) -> None:
+        draft = self.require(draft_id, turn)
+        self._remove_previews(draft)
+        self._path.unlink(missing_ok=True)
 
 
 class BackdropStore:

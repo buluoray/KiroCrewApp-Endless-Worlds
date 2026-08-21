@@ -258,8 +258,11 @@ async def _recover_backdrop(
                 attempt = attempts + 1
                 store.update_backdrop_request(run_id, attempts=attempt)
                 task = (
-                    "Paint the backdrop for one page of a life, then commit it with "
-                    "endless_commit_backdrop using EXACTLY this runId and turn. "
+                    "Paint the desktop/mobile backdrop pair for one page of a life. "
+                    "First call endless_submit_backdrop_draft with EXACTLY this "
+                    "runId and turn, read every returned preview PNG together as "
+                    "images, revise at most once, then publish the final pair with "
+                    "endless_commit_backdrop using the returned draftId. "
                     f"This is invisible recovery attempt {attempt}; draw directly "
                     "from the brief and use no research.\n"
                     f"runId: {run_id}\nturn: {turn}\n\nBrief:\n"

@@ -18,7 +18,12 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
 import mcp_server as srv  # noqa: E402
-from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
+from backdrop import (  # noqa: E402
+    BackdropDraftStore,
+    BackdropError,
+    BackdropStore,
+    compile_backdrop,
+)
 
 OK_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">'
@@ -37,6 +42,11 @@ OK_SVG = (
 def test_compile_accepts_a_self_contained_svg():
     out = compile_backdrop(OK_SVG)
     assert out.startswith("<svg") and "<pattern" in out and "radialGradient" in out
+    local_use = compile_backdrop(
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<defs><path id="shape" d="M0 0h1v1z"/></defs><use href="#shape"/></svg>'
+    )
+    assert 'href="#shape"' in local_use
 
 
 def test_compile_injects_the_namespace_when_missing():
@@ -52,6 +62,11 @@ def test_compile_injects_the_namespace_when_missing():
         '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:x()"><rect/></a></svg>',
         '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div>x</div></foreignObject></svg>',
         '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://x/y.png"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><image href="file:///etc/passwd"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><image href="../secret.png"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><image href="data:image/png;base64,eA=="/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://x/y)"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><style>@import "https://x/y"</style></svg>',
         '<svg xmlns="http://www.w3.org/2000/svg"><use xlink:href="//evil/x"/></svg>',
         '<div style="background:#111"></div>',  # not an SVG at all
     ],
@@ -107,7 +122,39 @@ def test_store_treats_a_corrupt_file_as_no_background(tmp_path):
     assert store.current() is None
 
 
-# -- the two MCP tools ----------------------------------------------------
+def _png_dimensions(path: Path) -> tuple[int, int]:
+    header = path.read_bytes()[:24]
+    assert header.startswith(b"\x89PNG\r\n\x1a\n")
+    return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+
+
+def test_draft_store_renders_private_thumbnails_and_replaces_stale_draft(tmp_path):
+    drafts = BackdropDraftStore(tmp_path, "run-abc")
+    first = drafts.submit(OK_SVG, OK_SVG, turn=3, buttons=_svg("#abc"))
+
+    assert BackdropStore(tmp_path, "run-abc").exact(3) is None
+    assert _png_dimensions(Path(first["previews"]["desktop"])) == (400, 300)
+    assert _png_dimensions(Path(first["previews"]["mobile"])) == (150, 300)
+    assert _png_dimensions(Path(first["previews"]["buttons"])) == (240, 80)
+
+    second = drafts.submit(_svg("#222"), _svg("#333"), turn=3)
+    assert second["draftId"] != first["draftId"]
+    assert not any(Path(path).exists() for path in first["previews"].values())
+    drafts.require(second["draftId"], 3)
+    with pytest.raises(BackdropError):
+        drafts.require(first["draftId"], 3)
+
+
+def test_invalid_draft_is_rejected_before_any_preview_or_publication(tmp_path):
+    drafts = BackdropDraftStore(tmp_path, "run-abc")
+    with pytest.raises(BackdropError):
+        drafts.submit(OK_SVG, '<svg><image href="file:///etc/passwd"/></svg>', turn=3)
+    run_dir = tmp_path / "runs" / "run-abc"
+    assert not (run_dir / "backdrop-draft.json").exists()
+    assert BackdropStore(tmp_path, "run-abc").current() is None
+
+
+# -- the draft/final MCP tools -------------------------------------------
 
 
 @pytest.fixture()
@@ -120,24 +167,80 @@ def _call(name, **args):
     return json.loads(srv.call_tool(name, args))
 
 
-def test_commit_backdrop_tool_stores_and_versions(data):
-    out = _call("endless_commit_backdrop", runId="run-x", turn=1, markup=_svg("#111"))
+def _submit_draft(data: Path, run_id: str, turn: int, markup: str, mobile: str):
+    from kiro_crew.apps.app_storage import AppStorage
+    from store import RunStore
+
+    runs = RunStore(AppStorage("endless-worlds", data), data)
+    runs.request_backdrop(run_id, turn=turn, brief="test art")
+    return _call(
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=turn,
+        markup=markup,
+        mobile=mobile,
+    )
+
+
+def test_draft_then_final_backdrop_stores_and_versions(data):
+    run_id = "a" * 32
+    draft = _submit_draft(data, run_id, 1, _svg("#111"), _svg("#112"))
+    assert draft["ok"] is True and draft["backdrop"] == "drafted"
+    assert BackdropStore(data, run_id).current() is None, "draft must not publish"
+
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=_svg("#121"),
+        mobile=_svg("#122"),
+    )
     assert out["ok"] is True and out["version"] == 1
-    assert _call("endless_commit_backdrop", runId="run-x", turn=2,
-                 markup=_svg("#222"))["version"] == 2
-    assert BackdropStore(data, "run-x").current()["version"] == 2
+    assert "#121" in BackdropStore(data, run_id).current()["markup"]
+    assert not (data / "runs" / run_id / "backdrop-draft.json").exists()
+    assert not any(draft_path.exists() for draft_path in map(Path, draft["previews"].values()))
+
+    second = _submit_draft(data, run_id, 2, _svg("#222"), _svg("#223"))
+    out2 = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=2,
+        draftId=second["draftId"],
+        markup=_svg("#222"),
+        mobile=_svg("#223"),
+    )
+    assert out2["version"] == 2
 
 
-def test_commit_backdrop_tool_refuses_non_svg(data):
-    out = _call("endless_commit_backdrop", runId="run-x", turn=1, markup="<div>x</div>")
+def test_submit_backdrop_draft_refuses_non_svg_atomically(data):
+    run_id = "b" * 32
+    out = _submit_draft(data, run_id, 1, "<div>x</div>", _svg("#111"))
     assert out["ok"] is False and "error" in out
-    assert BackdropStore(data, "run-x").current() is None
+    assert BackdropStore(data, run_id).current() is None
+    assert not (data / "runs" / run_id / "backdrop-draft.json").exists()
+
+
+def test_final_backdrop_is_refused_without_the_matching_reviewed_draft(data):
+    run_id = "c" * 32
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId="0" * 24,
+        markup=_svg("#111"),
+        mobile=_svg("#112"),
+    )
+    assert out["ok"] is False
+    assert "visually review" in out["error"]
+    assert BackdropStore(data, run_id).current() is None
 
 
 def test_clear_backdrop_tool(data):
-    _call("endless_commit_backdrop", runId="run-x", turn=0, markup=_svg("#111"))
-    assert _call("endless_clear_backdrop", runId="run-x")["ok"] is True
-    assert BackdropStore(data, "run-x").current() is None
+    run_id = "d" * 32
+    BackdropStore(data, run_id).set(_svg("#111"), turn=0)
+    assert _call("endless_clear_backdrop", runId=run_id)["ok"] is True
+    assert BackdropStore(data, run_id).current() is None
 
 
 def test_store_keeps_a_common_buttons_motif_with_the_backdrop(tmp_path):
@@ -176,20 +279,32 @@ def test_store_rejects_bad_mobile_atomically(tmp_path):
 
 
 def test_commit_backdrop_tool_stores_both_variants_in_one_version(data):
+    run_id = "e" * 32
+    draft = _submit_draft(data, run_id, 1, _svg("#111"), _svg("#abc"))
     out = _call(
-        "endless_commit_backdrop", runId="run-x", turn=1,
-        markup=_svg("#111"), mobile=_svg("#abc"),
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=_svg("#111"),
+        mobile=_svg("#abc"),
     )
-    cur = BackdropStore(data, "run-x").current()
+    cur = BackdropStore(data, run_id).current()
     assert out["ok"] is True and cur["version"] == out["version"]
     assert "#111" in cur["markup"] and "#abc" in cur["mobile"]
 
+    refused_run = "f" * 32
+    refused_draft = _submit_draft(data, refused_run, 1, _svg("#222"), _svg("#223"))
     refused = _call(
-        "endless_commit_backdrop", runId="run-y", turn=1,
-        markup=_svg("#222"), mobile="<div>x</div>",
+        "endless_commit_backdrop",
+        runId=refused_run,
+        turn=1,
+        draftId=refused_draft["draftId"],
+        markup=_svg("#222"),
+        mobile="<div>x</div>",
     )
     assert refused["ok"] is False
-    assert BackdropStore(data, "run-y").current() is None
+    assert BackdropStore(data, refused_run).current() is None
 
 
 # -- well-formedness: a malformed SVG renders as a broken image, so refuse it ---
@@ -259,8 +374,16 @@ def test_successful_illustrator_commit_clears_the_waiting_request(data):
 
     run_id = "a" * 32
     runs = RunStore(AppStorage("endless-worlds", data), data)
-    runs.request_backdrop(run_id, turn=1, brief="a closed red gate")
-    out = _call("endless_commit_backdrop", runId=run_id, turn=1, markup=_svg("#111"))
+    draft = _submit_draft(data, run_id, 1, _svg("#111"), _svg("#112"))
+    assert runs.read_backdrop_request(run_id) is not None
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=_svg("#111"),
+        mobile=_svg("#112"),
+    )
     assert out["ok"] is True
     assert runs.read_backdrop_request(run_id) is None
 

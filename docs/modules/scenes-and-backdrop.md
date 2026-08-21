@@ -249,7 +249,17 @@ sees is produced locally from a closed, code-owned vocabulary.
   HYBRID adds one cropped environmental trace; STORY IMAGE remains the explicit
   exception for a separately drawn dominant subject. Calm reading fields come from
   low luminance, scale, and contrast; portrait art avoids full borders, left/right
-  pair dependence, and bright central motifs. Both variants are passed in the same
-  commit. Enforced by the
-  `prompt` in `agents/illustrator.json`; pinned by
-  `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
+  pair dependence, and bright central motifs. For visual review, the illustrator
+  first submits the complete desktop/mobile set as an unpublished draft. The server
+  validates every SVG, rejects off-box file/data/network references before
+  rendering, and creates bounded PNG previews outside the public
+  `BackdropStore`. The illustrator reads every preview together as images, judges
+  the coordinated set, and may revise the SVGs at most once before publishing the
+  final set with the returned `draftId`. Draft submission neither clears the waiting
+  request nor makes art visible to live play, history, or shelf surfaces; only the
+  final atomic write does. Enforced by
+  the `prompt` and path-restricted `read` capability in
+  `agents/illustrator.json`, the draft/final handlers in `backend/mcp_server.py`,
+  and `BackdropDraftStore`; pinned by
+  `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe` and the backdrop
+  draft-store/MCP tests.
