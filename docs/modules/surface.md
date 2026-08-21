@@ -188,6 +188,38 @@ processes self-locate the same data dir so routes and tools see one set of files
   `test_the_enforced_schema_is_the_published_schema`; the surface being exactly the
   declared tools by `test_the_surface_is_exactly_the_declared_tools`.
 
+- **The schema says what it enforces, and only what it enforces.** `tools/list` is
+  the narrator's only machine-readable instruction, so a published keyword the
+  validator ignores is as much a lie as a rule it is refused for — and the lie is
+  the more expensive direction, because the model complies with it. `runId` was
+  published as `"pattern": "run-id"`, an internal sentinel the validator
+  special-cased by value; read as the JSON Schema regex it claims to be, it says
+  *must contain `run-id`*, and a narrator duly sent `run-id-<32 hex>` which the store
+  then refused as malformed. `minItems` and `minLength` were advertised and never
+  checked at all. So `pattern` is now honoured as a real regex (`_pattern`, cached),
+  `minItems`/`minLength` are enforced, and `runId` publishes
+  `^[0-9a-f]{32}$` — the pattern `store._RUN_ID_RE` actually enforces — plus a
+  `description` telling the narrator to copy the id from the addressing verbatim.
+  `description` is the one keyword allowed to be unenforced, because it is
+  documentation rather than a constraint. Pinned by
+  `test_every_published_constraint_is_one_the_validator_enforces` (data-driven over
+  the whole surface, so a future field cannot reintroduce the class) and
+  `test_a_published_pattern_is_a_real_regex_the_validator_applies`.
+
+- **A salvaged field publishes its shape as a `description`, never as `items`.**
+  `choices`, `events` and `gains` are bounded to `{"type": "array"}` on purpose:
+  `_clean_choices` / `_clean_gains` understand a bare-string choice and a `text`
+  caption, and an enforced `items` would convert exactly those recoverable shape
+  mistakes into a whole-turn refusal — the failure the salvage exists to prevent.
+  Publishing nothing was the other error, and the one that burned live: the shape
+  lived only in a clause of a 2,000-character tool description, and a narrator sent
+  `text` captions and looped six identical retries. Each of the three now carries
+  its shape in a field-level `description`, which instructs without arming a
+  refusal. Pinned by
+  `test_the_salvaged_arrays_publish_their_shape_without_arming_a_refusal`; arming
+  `items` on `choices` also turns
+  `test_choice_captions_are_salvaged_from_common_alias_keys` red.
+
 - **`call_tool` validates the whole call, then dispatches, and returns errors as
   data.** An unknown tool, a bad field, or a malformed turn comes back as JSON
   (`{ok:false, field, expected, …}`), never a raised exception — a raise is a
@@ -205,10 +237,14 @@ processes self-locate the same data dir so routes and tools see one set of files
   than a list of known prefixes because the narrator cannot debug the failure from
   its side: the addressing already told it the id it holds is correct, so a
   `malformed run id` refusal on the mandatory first read wedges the life with no way
-  forward. Ambiguity is still refused — two bare ids in one argument, or a longer hex
-  run, are left untouched, since addressing the wrong life is worse than failing.
-  `store._check_run_id` stays strict on purpose: ids are minted, never taken from a
-  request. Pinned by
+  forward. What made it *produce* a decorated id in the first place was the schema
+  itself (see "The schema says what it enforces"), so the two fixes are halves of
+  one: the schema stops asking for the wrong shape, and the boundary still repairs a
+  wrong one. Ambiguity is still refused — two bare ids in one argument, or a longer
+  hex run, are left untouched, since addressing the wrong life is worse than
+  failing, and an unrepairable value now fails against the published pattern rather
+  than at the store. `store._check_run_id` stays strict on purpose: ids are minted,
+  never taken from a request. Pinned by
   `test_a_run_prefix_the_narrator_adds_is_stripped_from_the_run_id`,
   `test_two_candidate_ids_in_one_arg_are_left_to_fail_loudly`, and end to end by
   `test_a_run_prefixed_id_reaches_the_handler_instead_of_being_refused`.

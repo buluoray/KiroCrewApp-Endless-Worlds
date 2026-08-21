@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -48,6 +49,12 @@ def call(name, **args):
     return json.loads(srv.call_tool(name, args))
 
 
+#: A well-formed run id, for cases probing some OTHER field. The published `runId`
+#: pattern is the one the store enforces, so a short placeholder would be refused
+#: first and the case would stop testing what it names.
+_ID = "0123456789abcdef" * 2
+
+
 # -- the surface is closed ------------------------------------------------
 
 
@@ -70,6 +77,86 @@ def test_the_enforced_schema_is_the_published_schema():
     server, not in the narrator."""
     for tool in srv.list_tools():
         assert srv._INPUT_SCHEMAS[tool["name"]] is tool["inputSchema"]
+
+
+#: Keywords that are documentation for the reader, not a constraint on the value.
+#: A published keyword outside this set MUST be one `_check` acts on.
+_DOC_KEYWORDS = {"description", "title"}
+
+
+def test_every_published_constraint_is_one_the_validator_enforces():
+    """The same-object assert above proves the two schemas are one dict; it cannot
+    prove the validator READS what that dict says. It did not: `pattern` was
+    published as the sentinel string "run-id" (which as a regex reads "must contain
+    run-id", and a narrator duly sent `run-id-<hex>`), while `minItems` and
+    `minLength` were advertised and never checked at all. A constraint the narrator
+    is shown and the server ignores is as much a lie as one it is refused for."""
+    enforced = set(
+        re.findall(r'schema\.get\("([a-zA-Z]+)"', inspect.getsource(srv._check))
+    ) | {"type", "properties", "items"}
+
+    published: dict[str, str] = {}
+
+    def walk(node, where):
+        if not isinstance(node, dict):
+            return
+        for key in node:
+            if key not in ("properties", "items"):
+                published.setdefault(key, where)
+        for name, sub in (node.get("properties") or {}).items():
+            walk(sub, f"{where}.{name}")
+        if isinstance(node.get("items"), dict):
+            walk(node["items"], f"{where}[]")
+
+    for tool in srv.list_tools():
+        walk(tool["inputSchema"], tool["name"])
+
+    unenforced = {k: v for k, v in published.items() if k not in enforced | _DOC_KEYWORDS}
+    assert not unenforced, f"published but never enforced: {unenforced}"
+
+
+def test_a_published_pattern_is_a_real_regex_the_validator_applies():
+    """`pattern` is honoured as a regex rather than special-cased by value, so the
+    run id schema can state the shape the store actually enforces."""
+    assert srv._RUN_ID["pattern"] == "^[0-9a-f]{32}$"
+    good = call("endless_read_runtime", runId="a" * 32)
+    assert good.get("field") != "arguments.runId", good
+    # Values no repair can rescue are refused BY THE PUBLISHED PATTERN, and the
+    # refusal quotes it — so the narrator is told the shape, not just told "no".
+    # (A decorated-but-recoverable id is repaired upstream and never reaches here.)
+    for bad in ("run-id", "a" * 31, "../etc", "9a1d8b6f-871e-4ea9"):
+        out = call("endless_read_runtime", runId=bad)
+        assert out["ok"] is False, f"{bad!r} should not satisfy the published pattern"
+        assert out["field"] == "arguments.runId", out
+        assert "^[0-9a-f]{32}$" in out["expected"], out
+    # An over-long id is refused too, by the length cap that now equals the id's own
+    # length rather than the 48 that left room for a prefix.
+    assert srv._RUN_ID["maxLength"] == 32
+    long_out = call("endless_read_runtime", runId="a" * 33)
+    assert long_out["ok"] is False and long_out["field"] == "arguments.runId"
+    # The sentinel is gone: nothing in the surface publishes a pattern that is not
+    # a regex, which is what let the old value read as an instruction to decorate.
+    for tool in srv.list_tools():
+        for rule in re.findall(r"'pattern': '([^']*)'", repr(tool["inputSchema"])):
+            re.compile(rule)  # raises if a sentinel crept back in
+            assert rule.startswith("^"), f"{tool['name']} publishes unanchored {rule!r}"
+
+
+def test_the_salvaged_arrays_publish_their_shape_without_arming_a_refusal():
+    """`choices`/`events`/`gains` are salvaged, so an enforced `items` would turn a
+    shape mistake into a whole-turn refusal — the exact failure the salvage exists
+    to prevent. They carry the shape as a description instead, and a bare-string
+    choice still commits."""
+    props = srv._INPUT_SCHEMAS["endless_advance_turn"]["properties"]
+    for field in ("choices", "events", "gains"):
+        assert "items" not in props[field], f"{field} must not arm a schema refusal"
+        assert props[field]["description"], f"{field} must still state its shape"
+    # The two salvage paths the description promises are real, not just documented.
+    assert "`text`" in props["choices"]["description"]
+    assert srv._clean_choices(["逃跑", {"text": "反击"}]) == [
+        {"label": "逃跑", "id": "c0"},
+        {"label": "反击", "id": "c1"},
+    ]
 
 
 def test_backdrop_visual_review_schemas_require_the_complete_pair_and_draft_id():
@@ -148,10 +235,13 @@ def test_a_malformed_turn_applies_nothing(app):
     ("args", "field"),
     [
         ({"runId": "../etc", "turn": 2, "prose": "p", "state": {}}, "arguments.runId"),
-        ({"runId": "r", "turn": 0, "prose": "p", "state": {}}, "arguments.turn"),
-        ({"runId": "r", "turn": True, "prose": "p", "state": {}}, "arguments.turn"),
-        ({"runId": "r", "turn": 2, "prose": "p", "state": []}, "arguments.state"),
-        ({"runId": "r", "turn": 2, "prose": 5, "state": {}}, "arguments.prose"),
+        # A traversal attempt is not the only bad id: the published pattern is the
+        # one the store enforces, so a short placeholder is refused here too.
+        ({"runId": "r", "turn": 2, "prose": "p", "state": {}}, "arguments.runId"),
+        ({"runId": _ID, "turn": 0, "prose": "p", "state": {}}, "arguments.turn"),
+        ({"runId": _ID, "turn": True, "prose": "p", "state": {}}, "arguments.turn"),
+        ({"runId": _ID, "turn": 2, "prose": "p", "state": []}, "arguments.state"),
+        ({"runId": _ID, "turn": 2, "prose": 5, "state": {}}, "arguments.prose"),
     ],
 )
 def test_every_bad_field_is_named(args, field):
@@ -163,7 +253,7 @@ def test_every_bad_field_is_named(args, field):
 def test_true_is_not_accepted_as_a_turn_number():
     """``bool`` is an ``int`` in Python; accepting ``True`` would commit turn 1
     for a narrator that meant something else entirely."""
-    out = call("endless_advance_turn", runId="r", turn=True, prose="p", state={})
+    out = call("endless_advance_turn", runId=_ID, turn=True, prose="p", state={})
     assert out["ok"] is False and out["field"] == "arguments.turn"
 
 
@@ -177,7 +267,7 @@ def test_true_is_not_accepted_as_a_turn_number():
     ],
 )
 def test_trace_numbers_must_be_finite_numeric_and_in_range(extra, field):
-    out = call("endless_trace_reference", runId="r", turn=1, **extra)
+    out = call("endless_trace_reference", runId=_ID, turn=1, **extra)
     assert out["ok"] is False
     assert out["field"] == field
 
