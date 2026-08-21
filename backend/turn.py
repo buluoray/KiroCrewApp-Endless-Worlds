@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+import narrator
 from content import Content
 from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from store import RunStore
@@ -266,9 +267,23 @@ async def advance_turn(
     baseline = int(run_state.get("turn") or 0)
     wanted = baseline + 1
 
+    # The generation marker lives beside RunStore bookkeeping rather than on the
+    # core slot object (which is intentionally slotted and cannot accept app
+    # attributes). A mismatch includes legacy lives with no marker. Replace only
+    # the validated app-owned conversation; narrative state is never touched.
+    install_generation = narrator.APP_INSTALL_GENERATION
+    install_changed = store.narrator_generation(run_id) != install_generation
+    if install_changed:
+        narrator.release_stale_narrator_slot(state_obj, run_id)
+        await narrator.purge_narrator_session(state_obj, run_id)
+
     slot, fresh_slot = ensure_narrator_slot_ex(
         state_obj, run_id, project=project, model=model, reasoning_effort=reasoning_effort
     )
+    if install_changed:
+        # Mark only after creation. If replacement fails, the old marker remains
+        # and the next request safely retries the invalidation instead of reusing.
+        store.mark_narrator_generation(run_id, install_generation)
     slot_key = str(getattr(slot, "key", "") or "")
 
     # -- slot health: a narrator that never touched the world is not ours --

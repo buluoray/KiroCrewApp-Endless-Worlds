@@ -15,7 +15,7 @@ argument.
 | Path | What it is |
 |---|---|
 | `agents/narrator.json` | the packaged agent: `name` `endless-narrator`, `model` `auto`, `tools` == `allowedTools` == the eight per-tool refs it uses under `@endless-worlds:endless-mcp/…` (its own tools only), and no `mcpServers` of its own |
-| `backend/narrator.py` | slot lifecycle + the seal: `ensure_narrator_slot_ex()` (ownership + memory-mode guards), `_apply_choice()`, and the constants `NARRATOR_AGENT`, `OWN_SERVER_REF`, `MEMORY_MODE` |
+| `backend/narrator.py` | slot lifecycle + the seal: `ensure_narrator_slot_ex()` (ownership and memory-mode guards), `_installation_generation()`, `release_stale_narrator_slot()`, `_apply_choice()`, and the constants `NARRATOR_AGENT`, `OWN_SERVER_REF`, `MEMORY_MODE` |
 | `backend/content.py` | `Content(language)` — one language's text with English behind it: `resolve()`, `__call__()`, `_table()` |
 | `content/{en,zh}.json` | the text tables themselves (prompt lines, shape descriptions, separators) |
 | `backend/settings.py` | `read_settings()` / `write_settings()` over `<data>/settings.json`, and `REASONING_EFFORTS` |
@@ -80,6 +80,21 @@ argument.
   `test_there_is_no_fallback_to_an_unsealed_slot`, and
   `test_only_temporary_blocks_memory_reads`; a malformed run id never becomes a slot
   key or a filename (`test_a_malformed_run_id_never_becomes_a_slot_key`).
+
+- **An updated or reinstalled app starts the next turn in a new narrator slot,
+  without deleting the life.** `_installation_generation()` hashes the installed
+  app's runtime files and their filesystem identity. `RunStore` records which
+  generation owns each life's conversation; a missing legacy marker or a mismatch
+  makes `advance_turn()` validate and release the app-owned slot, purge its persisted
+  conversation, and create the replacement before composing the prompt. Content
+  detects an update even when timestamps are preserved, while inode/ctime identity
+  detects a same-content reinstall. An unchanged install keeps its slot. The
+  replacement is fresh, so the turn loop sends the world rulebook again and treats
+  any old pending writer as gone. Generation is separate bookkeeping, not world
+  state: state, rollback, chronicle, worlds, and shelf rows are untouched. Pinned by
+  `test_install_generation_changes_on_update_and_same_content_reinstall`,
+  `test_stale_install_release_keeps_foreign_or_unsealed_slots`, and
+  `test_app_update_replaces_the_slot_but_keeps_the_saved_life`.
 
 - **The model is `auto`; the concrete choice is applied per slot at dispatch.**
   `narrator.json` carries `model: auto` and no reasoning field — the player's

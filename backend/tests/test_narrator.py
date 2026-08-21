@@ -53,6 +53,7 @@ class FakeState:
 
     def __init__(self):
         self.slots: dict[str, FakeSlot] = {}
+        self._slots = self.slots
         self.create_calls: list[dict] = []
 
     def get_slot(self, key):
@@ -104,6 +105,56 @@ def test_a_second_call_returns_the_same_slot_without_recreating():
 
     assert second is first
     assert len(state.create_calls) == before, "must not re-enter creation"
+
+
+def test_install_generation_changes_on_update_and_same_content_reinstall(tmp_path):
+    root = tmp_path / "app"
+    (root / "backend").mkdir(parents=True)
+    manifest = root / "app.json"
+    backend = root / "backend" / "narrator.py"
+    manifest.write_text('{"version":"1"}', encoding="utf-8")
+    backend.write_text("old", encoding="utf-8")
+
+    first = narrator._installation_generation(root)
+    backend.write_text("new", encoding="utf-8")
+    after_update = narrator._installation_generation(root)
+
+    replacement = root / "app.reinstalled.json"
+    replacement.write_bytes(manifest.read_bytes())
+    replacement.replace(manifest)
+    after_reinstall = narrator._installation_generation(root)
+
+    assert after_update != first, "changed installed bytes must start a new generation"
+    assert after_reinstall != after_update, (
+        "reinstalling identical app.json bytes must still start a new generation"
+    )
+
+
+@pytest.mark.parametrize(
+    ("app", "mode", "error"),
+    [
+        ("some-other-app", MEMORY_MODE, SlotOwnedByAnother),
+        (APP_NAME, "persistent", MemoryModeConflict),
+    ],
+)
+def test_stale_install_release_keeps_foreign_or_unsealed_slots(app, mode, error):
+    state = FakeState()
+    slot = FakeSlot(narrator_slot_key("run-1"), app=app, memory_mode=mode)
+    state.slots[slot.key] = slot
+
+    with pytest.raises(error):
+        narrator.release_stale_narrator_slot(state, "run-1")
+
+    assert state.slots[slot.key] is slot
+
+
+def test_stale_install_release_removes_only_the_app_owned_sealed_slot():
+    state = FakeState()
+    slot = FakeSlot(narrator_slot_key("run-1"), app=APP_NAME, memory_mode=MEMORY_MODE)
+    state.slots[slot.key] = slot
+
+    assert narrator.release_stale_narrator_slot(state, "run-1") is True
+    assert slot.key not in state.slots
 
 
 # -- refusals -------------------------------------------------------------

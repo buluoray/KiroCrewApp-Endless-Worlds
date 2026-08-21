@@ -33,8 +33,54 @@ hoped for:
 
 from __future__ import annotations
 
+import hashlib
 import re
+from pathlib import Path
 from typing import Any
+
+#: Files that define the installed app. Content catches updates even when mtimes are
+#: preserved; inode/ctime metadata catches a same-content reinstall at the same path.
+_APP_ROOT = Path(__file__).resolve().parent.parent
+_GENERATION_GLOBS = (
+    "app.json",
+    "agents/*.json",
+    "backend/*.py",
+    "content/*.json",
+    "seeds/*.md",
+    "ui/*",
+)
+
+
+def _installation_generation(root: Path = _APP_ROOT) -> str:
+    """Stable for one install, different after an update or reinstall."""
+    digest = hashlib.sha256(str(root.resolve()).encode("utf-8"))
+    files = {
+        path
+        for pattern in _GENERATION_GLOBS
+        for path in root.glob(pattern)
+        if path.is_file()
+    }
+    for path in sorted(files, key=lambda item: item.as_posix()):
+        try:
+            stat = path.stat()
+            payload = path.read_bytes()
+        except OSError:
+            # A concurrent installer can replace a file between glob and read. Its
+            # absence still changes the generation; the next app load recomputes it.
+            digest.update(f"missing:{path.relative_to(root)}".encode("utf-8"))
+            continue
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(payload)
+        digest.update(
+            f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:"
+            f"{stat.st_mtime_ns}:{stat.st_ctime_ns}".encode("ascii")
+        )
+    return digest.hexdigest()[:20]
+
+
+#: Persisted per life by RunStore. A different value means the existing narrator
+#: conversation belongs to another installed build and must be replaced.
+APP_INSTALL_GENERATION = _installation_generation()
 
 #: Must equal app.json's ``name`` — it is what ``_app`` is compared against.
 APP_NAME = "endless-worlds"
@@ -189,6 +235,42 @@ async def purge_narrator_session(state: Any, run_id: str) -> bool:
     return True
 
 
+def _validate_existing_narrator_slot(slot: Any, slot_key: str) -> None:
+    """Refuse slots that this app cannot safely reuse or replace."""
+    owner = getattr(slot, "_app", "") or ""
+    if owner != APP_NAME:
+        raise SlotOwnedByAnother(
+            f"{slot_key} is held by {owner or 'nobody'}; refusing to take it over"
+        )
+    # Checked explicitly, and ALSO passed to the create call, so the two
+    # enforcement points are independent: core's own memory-mode guard is the
+    # backstop if this branch is ever bypassed.
+    if getattr(slot, "memory_mode", "") != MEMORY_MODE:
+        raise MemoryModeConflict(
+            f"{slot_key} has memory_mode="
+            f"{getattr(slot, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
+        )
+
+
+def release_stale_narrator_slot(state: Any, run_id: str) -> bool:
+    """Release an older-install slot after enforcing the normal reuse guards.
+
+    A foreign or memory-enabled slot is never removed automatically. A missing
+    slot is fine: its persisted conversation is still purged separately before
+    the replacement is created.
+    """
+    slot_key = narrator_slot_key(run_id)
+    existing = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
+    if existing is None:
+        return False
+    _validate_existing_narrator_slot(existing, slot_key)
+    if not release_narrator_slot(state, run_id):
+        raise NarratorSlotError(
+            f"{slot_key} belongs to an older app install and could not be replaced"
+        )
+    return True
+
+
 def ensure_narrator_slot(state: Any, run_id: str, *, project: str = "") -> Any:
     """Return this run's narrator slot, creating it scoped if it is not there.
 
@@ -217,22 +299,9 @@ def ensure_narrator_slot_ex(
 
     existing = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
     if existing is not None:
-        owner = getattr(existing, "_app", "") or ""
-        if owner != APP_NAME:
-            raise SlotOwnedByAnother(
-                f"{slot_key} is held by {owner or 'nobody'}; refusing to take it over"
-            )
-        # Checked explicitly, and ALSO passed to the create call below, so the
-        # two enforcement points are independent: core's own guard
-        # (state.py:4501) is the backstop if this branch is ever bypassed.
-        if getattr(existing, "memory_mode", "") != MEMORY_MODE:
-            raise MemoryModeConflict(
-                f"{slot_key} has memory_mode="
-                f"{getattr(existing, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
-            )
-        # Re-applied on an EXISTING slot too, so a player who changes the model or
-        # effort on the home page sees it take on the very next turn of a life
-        # already in progress, not only on a fresh one.
+        _validate_existing_narrator_slot(existing, slot_key)
+        # Re-applied on an EXISTING slot too, so a player who changes model or
+        # effort sees it take on the very next turn.
         _apply_choice(existing, model, reasoning_effort)
         return existing, False
 
