@@ -242,9 +242,14 @@ sees is produced locally from a closed, code-owned vocabulary.
   `markup` at 800×600 and portrait `mobile` at 450×900. Both share a palette, visual
   thesis, pattern grammar, and optional motion verb, but each frame is composed
   independently; mobile is never a crop or scaled desktop copy. PATTERN is the
-  default lane, HYBRID allows one cropped environmental trace, and STORY IMAGE is an
-  explicit exception. Calm reading fields come from low luminance, scale, and
-  contrast; portrait art avoids full borders, left/right pair dependence, and bright
-  central motifs. Both variants are passed in the same commit. Enforced by the
+  default lane, but it means a repeated visual grammar leads the composition, not
+  that one tile must cover the whole frame uniformly: units may gather into a large
+  arch-like or architectural macro-form, occupy only one region, and be organized by
+  localized light, density, interruption, negative space, or a tonal gradient.
+  HYBRID adds one cropped environmental trace; STORY IMAGE remains the explicit
+  exception for a separately drawn dominant subject. Calm reading fields come from
+  low luminance, scale, and contrast; portrait art avoids full borders, left/right
+  pair dependence, and bright central motifs. Both variants are passed in the same
+  commit. Enforced by the
   `prompt` in `agents/illustrator.json`; pinned by
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
