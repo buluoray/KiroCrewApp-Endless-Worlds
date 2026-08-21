@@ -23,12 +23,13 @@ Three things are borrowed from apps that already drive agent sessions
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from content import Content
-from narrator import ensure_narrator_slot_ex
+from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from store import RunStore
 
 #: R4.2 — how long a waited turn runs before the request returns un-advanced and
@@ -36,7 +37,13 @@ from store import RunStore
 #: past shorter deadlines, surfacing the retry button while the narrator was still
 #: writing. Must stay under half of PENDING_STALE_SECS so a turn that overran one
 #: request is never mistaken for abandoned.
+logger = logging.getLogger(__name__)
+
 TURN_DEADLINE_SECS = 300.0
+
+#: One fresh conversation per stuck turn. A SECOND zero-contact expiry on a
+#: freshly built slot means the problem is not the conversation.
+_MAX_SLOT_HEALS_PER_TURN = 1
 
 #: The opening turn gets longer. It is the heaviest turn a life ever asks for — the
 #: narrator reads the whole opening brief and invents a world's first moment from
@@ -264,6 +271,41 @@ async def advance_turn(
     )
     slot_key = str(getattr(slot, "key", "") or "")
 
+    # -- slot health: a narrator that never touched the world is not ours --
+    #
+    # A slot created while agent registration was broken binds a fallback agent,
+    # and reuse never re-resolves the binding — so the poisoning persists across
+    # every later turn and every retry. The signature is unambiguous: a healthy
+    # narrator's first act each turn is `endless_read_runtime`, so a dispatched
+    # turn whose full deadline passed with ZERO tool calls (`steps` never moved;
+    # note_tool_call stamps every endless_* call) was never running this app's
+    # narrator at all. Drop the conversation and let this call rebuild it under
+    # the current registration; the fresh slot re-briefs the rulebook by the
+    # existing fresh_slot path. Capped per turn so a fresh slot that ALSO fails
+    # surfaces as a failure instead of churning conversations every deadline.
+    if not fresh_slot and _slot_never_touched_world(
+        store.read_pending(run_id), wanted, deadline_secs
+    ):
+        if store.count_slot_heals(run_id, wanted) < _MAX_SLOT_HEALS_PER_TURN and (
+            release_narrator_slot(state_obj, run_id)
+        ):
+            store.note_slot_heal(run_id, wanted)
+            store.clear_pending(run_id)
+            logger.warning(
+                "endless-worlds: narrator slot for %s never touched the world "
+                "within its turn %s deadline; dropped and recreated",
+                run_id,
+                wanted,
+            )
+            slot, fresh_slot = ensure_narrator_slot_ex(
+                state_obj,
+                run_id,
+                project=project,
+                model=model,
+                reasoning_effort=reasoning_effort,
+            )
+            slot_key = str(getattr(slot, "key", "") or "")
+
     # Does the narrator still have the world's rulebook?
     #
     # Its session is ONE conversation across every turn of a life — measured: a single
@@ -383,6 +425,28 @@ async def _await_commit(
             # Counter is ahead of the chronicle: mid-commit gap. Keep polling —
             # the append lands on the next tick in the normal case.
     return None
+
+
+def _slot_never_touched_world(
+    pending: dict[str, Any] | None, wanted: int, deadline_secs: float
+) -> bool:
+    """The poisoned-slot signature: dispatched, expired, and zero tool calls.
+
+    ``steps`` is stamped by the MCP server on EVERY endless_* call while a turn
+    is pending, and a healthy narrator opens every turn with
+    ``endless_read_runtime`` — so a record whose full deadline passed with the
+    counter still at zero was answered by something that never had (or never
+    used) this app's tools. Judged only against the wanted turn: an old record
+    for another month proves nothing about this one.
+    """
+    if not pending or int(pending.get("turn") or 0) != wanted:
+        return False
+    if int(pending.get("steps") or 0) > 0:
+        return False
+    asked_at = pending.get("askedAt")
+    if not isinstance(asked_at, (int, float)):
+        return False
+    return (time.time() - asked_at) > deadline_secs
 
 
 def _in_flight(store: RunStore, run_id: str, wanted: int) -> dict[str, Any] | None:

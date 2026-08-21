@@ -317,6 +317,34 @@ class RunStore:
         _check_run_id(run_id)
         self._kv.delete(self._pending_key(run_id))
 
+    # -- slot self-heal bookkeeping -----------------------------------------
+
+    @staticmethod
+    def _heal_key(run_id: str) -> str:
+        return f"slot-heals-{run_id}"
+
+    def count_slot_heals(self, run_id: str, turn: int) -> int:
+        """How many times ``turn`` already replaced this life's narrator slot.
+
+        Keyed per turn so the counter resets itself the moment the life moves on:
+        the cap protects against a heal LOOP (a fresh slot that is also broken
+        must surface as a failure, not churn a new conversation every deadline),
+        never against healing a later turn.
+        """
+        _check_run_id(run_id)
+        raw = self._kv.get(self._heal_key(run_id))
+        if not isinstance(raw, dict) or int(raw.get("turn") or -1) != int(turn):
+            return 0
+        return int(raw.get("count") or 0)
+
+    def note_slot_heal(self, run_id: str, turn: int) -> None:
+        """Record one slot replacement for ``turn``."""
+        _check_run_id(run_id)
+        self._kv.set(
+            self._heal_key(run_id),
+            {"turn": int(turn), "count": self.count_slot_heals(run_id, turn) + 1},
+        )
+
     # -- backdrop request (the narrator's brief for the illustrator) -------
 
     @staticmethod

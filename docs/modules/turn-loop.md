@@ -24,6 +24,25 @@ turn 200 as at turn 1.
 
 ## Load-bearing contracts
 
+
+- **A narrator that never touched the world is not ours — the slot self-heals.**
+  A slot created while agent registration was broken binds a fallback agent, and
+  slot reuse never re-resolves the binding, so the poisoning persists across
+  every turn and retry. The signature is a dispatched turn whose full deadline
+  expired with the pending record's `steps` counter still at zero (the MCP
+  server stamps every `endless_*` call via `note_tool_call`, and a healthy
+  narrator opens every turn with `endless_read_runtime`). `advance_turn` then
+  drops the conversation (`release_narrator_slot`), clears the pending record,
+  and rebuilds the slot in the same call — the fresh slot re-briefs the rulebook
+  through the existing `fresh_slot` path. Capped at one heal per turn
+  (`_MAX_SLOT_HEALS_PER_TURN`, per-turn counter in the store) so a fresh slot
+  that also fails surfaces as a failure instead of churning a new conversation
+  every deadline. One endless_* call is proof of the right narrator: slow is
+  never healed. Pinned by
+  `test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs`,
+  `test_a_turn_with_tool_activity_is_never_healed`, and
+  `test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop`.
+
 - **The prompt size is independent of life length.** A turn's prompt carries the
   run id, the turn number, the player's action, and — only on the turn that needs
   it — the rulebook; it never carries state or history, because the narrator's
