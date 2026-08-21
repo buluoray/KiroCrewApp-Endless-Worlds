@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 import sys
 from pathlib import Path
 
@@ -489,3 +490,84 @@ def test_every_key_the_prompts_use_exists_in_both_tables():
     zh = _json.loads((root / "zh.json").read_text(encoding="utf-8"))
     en = _json.loads((root / "en.json").read_text(encoding="utf-8"))
     assert set(zh) == set(en), f"tables disagree: {set(zh) ^ set(en)}"
+
+
+# -- slot health self-heal -------------------------------------------------
+#
+# A slot created while agent registration was broken binds a fallback agent and
+# stays poisoned across reuse. The signature: a dispatched turn's full deadline
+# passes with zero endless_* calls. The cure: drop the conversation, rebuild it
+# under the current registration, re-brief — once per turn, never a loop.
+
+
+def _silent(st, slot, prompt):
+    """A dispatch whose narrator never calls a tool and never commits."""
+    slot.prompts.append(prompt)
+    return True
+
+
+def _fake_state_with_release():
+    state = FakeState()
+    state._slots = state.slots  # release_narrator_slot reads the gateway's _slots
+    return state
+
+
+def test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs(store):
+    state = _fake_state_with_release()
+    run = store.create_run({"turn": 0}, {"runId": "r1"})
+
+    first = asyncio.run(advance_turn(
+        state_obj=state, store=store, run_id=run, rulebook="THE LAW",
+        dispatch=_silent, deadline_secs=0.01,
+    ))
+    assert first.advanced is False and first.reason == "timeout"
+    poisoned = next(iter(state.slots.values()))
+    time.sleep(0.05)  # let the pending record age past the deadline
+
+    second = asyncio.run(advance_turn(
+        state_obj=state, store=store, run_id=run, rulebook="THE LAW",
+        dispatch=_silent, deadline_secs=0.01,
+    ))
+    assert second.reason == "timeout"
+    healed = next(iter(state.slots.values()))
+    assert healed is not poisoned, "the poisoned conversation must be replaced"
+    # A fresh conversation has no rulebook; the heal path must re-brief it.
+    assert "THE LAW" in healed.prompts[0]
+
+
+def test_a_turn_with_tool_activity_is_never_healed(store):
+    """Slow is not poisoned: one endless_* call proves the right narrator ran."""
+    state = _fake_state_with_release()
+    run = store.create_run({"turn": 0}, {"runId": "r1"})
+
+    asyncio.run(advance_turn(
+        state_obj=state, store=store, run_id=run, rulebook="r",
+        dispatch=_silent, deadline_secs=0.01,
+    ))
+    original = next(iter(state.slots.values()))
+    store.note_tool_call(run, "endless_read_runtime")
+    time.sleep(0.05)
+
+    asyncio.run(advance_turn(
+        state_obj=state, store=store, run_id=run, rulebook="r",
+        dispatch=_silent, deadline_secs=0.01,
+    ))
+    assert next(iter(state.slots.values())) is original
+
+
+def test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop(store):
+    state = _fake_state_with_release()
+    run = store.create_run({"turn": 0}, {"runId": "r1"})
+
+    def expire_once():
+        asyncio.run(advance_turn(
+            state_obj=state, store=store, run_id=run, rulebook="r",
+            dispatch=_silent, deadline_secs=0.01,
+        ))
+        time.sleep(0.05)
+
+    expire_once()                                   # poisoned dispatch
+    expire_once()                                   # heal #1: new slot
+    second_slot = next(iter(state.slots.values()))
+    expire_once()                                   # would be heal #2: capped
+    assert next(iter(state.slots.values())) is second_slot
