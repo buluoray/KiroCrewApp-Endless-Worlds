@@ -400,6 +400,10 @@ def test_a_living_turn_with_no_choices_is_refused(store, tmp_path, monkeypatch):
         "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
     })
     assert out["committed"] is False and out["reason"] == "choices-required"
+    # The refusal must also teach the way out for a character who CANNOT act. Turn 1
+    # is a birth, and a live narrator stalled here reasoning about whether a newborn
+    # may be offered choices at all instead of resending the call.
+    assert "newborn" in out["detail"]
     assert int(store.read_state(run).get("turn") or 0) == 0, "nothing committed"
     assert store.read_chronicle(run) == []
 

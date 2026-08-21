@@ -647,29 +647,44 @@ STATE_WRITERS = frozenset({"endless_advance_turn"})
 _RUN_ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 #: A stored run id is a bare uuid4 hex (store._RUN_ID_RE). The addressing hands it
-#: over bare, but a narrator sometimes prepends "run-"/"run_" (the slot-key shape),
-#: which the store then rejects as malformed and the opening read fails. Since a real
-#: id never starts with "run", that prefix is safe to strip.
+#: over bare, but a narrator decorates it anyway — observed live as "run-<id>",
+#: "run_<id>" and "run-id-<id>" (the slot-key shape) — and the store then rejects it
+#: as malformed, which fails the mandatory first read and wedges the turn.
 _BARE_RUN_ID = re.compile(r"^[0-9a-f]{32}$")
+
+#: One bare id embedded in a decorated string. The negative lookarounds keep it from
+#: matching a 32-hex window inside a longer hex run, so a genuinely different value
+#: is left to fail loudly rather than being silently truncated into some other run.
+_EMBEDDED_RUN_ID = re.compile(r"(?<![0-9a-f])([0-9a-f]{32})(?![0-9a-f])")
 
 
 def _normalize_run_id_arg(args: dict[str, Any]) -> None:
-    """Strip a stray ``run-``/``run_`` prefix off ``runId`` in place, when the rest
-    is a bare run id. Tolerates the one id-mangling the narrator model repeats
-    despite the addressing telling it to use the id verbatim."""
+    """Recover the bare run id from a decorated ``runId``, in place.
+
+    A stored id is ``uuid4().hex`` — 32 lowercase hex and nothing else — so any
+    surrounding text (a ``run-``/``run_``/``run-id-`` prefix, quotes, whitespace, a
+    case mangle) is decoration the narrator added, and the one embedded bare id is
+    the id it meant. Repairing the whole class here rather than a fixed prefix list
+    is what stops the next spelling of the same mistake from wedging a life: the
+    narrator cannot debug "malformed run id" from its side, because the addressing
+    already told it the id it is holding is correct.
+
+    Anything with no single embedded id is left untouched, so a real mistake still
+    reaches the store and is reported as one.
+    """
     rid = args.get("runId")
     if not isinstance(rid, str):
         return
-    for prefix in ("run-", "run_"):
-        if rid.startswith(prefix) and _BARE_RUN_ID.match(rid[len(prefix):]):
-            args["runId"] = rid[len(prefix):]
-            return
-    # Surrounding whitespace or a case-mangle of an otherwise-bare id. A stored id
-    # is uuid4().hex — always 32 lowercase hex — so if the trimmed, lowercased value
-    # is a bare id, that is the id the narrator meant; any other value is left alone.
     trimmed = rid.strip().lower()
-    if trimmed != rid and _BARE_RUN_ID.match(trimmed):
-        args["runId"] = trimmed
+    if _BARE_RUN_ID.match(trimmed):
+        if trimmed != rid:
+            args["runId"] = trimmed
+        return
+    found = _EMBEDDED_RUN_ID.findall(trimmed)
+    # Exactly one candidate, or nothing: two ids in one string is ambiguous, and
+    # guessing which life to write would be worse than refusing the call.
+    if len(found) == 1:
+        args["runId"] = found[0]
 
 
 def _validate(name: str, args: Any, *, path: str = "") -> None:
@@ -1263,9 +1278,15 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
             else:
                 detail = (
                     "This turn has no `choices`, so the player would have nothing to "
-                    "do. Resend the WHOLE call with `choices`. If the life or world "
-                    "has ended, pass `ending: true` (or declare state that fires a "
-                    "world ending) — only a terminal turn may omit choices."
+                    "do. Resend the WHOLE call with `choices`. A character who cannot "
+                    "deliberately act — a newborn, an infant, someone asleep, bound, "
+                    "or carried along by events — still gets choices: offer what this "
+                    "life leans into or takes from what happens around it, written in "
+                    "the player's own voice (\"I reach toward the noise beyond the "
+                    "door\", \"I keep the name they gave me\"), not as a deliberate "
+                    "plan they are too young to make. If the life or world has ended, "
+                    "pass `ending: true` (or declare state that fires a world ending) "
+                    "— only a terminal turn may omit choices."
                 )
             return {
                 "committed": False,
@@ -2067,9 +2088,10 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
     """
     dropped_top_level: list[str] = []
     try:
-        # A narrator sometimes prepends "run-"/"run_" to the run id despite the
-        # addressing giving it bare; strip it before anything validates or looks it
-        # up, so the opening read does not fail on an id-mangling the model repeats.
+        # A narrator decorates the run id despite the addressing giving it bare
+        # ("run-<id>", "run-id-<id>"); recover the embedded id before anything
+        # validates or looks it up, so the opening read is not wedged by a mangling
+        # the model cannot see is wrong.
         _normalize_run_id_arg(args)
         # The mandatory first read must never be refused over a bad OPTIONAL arg —
         # the narrator has to be able to look before it narrates. Normalize/drop the
