@@ -204,6 +204,46 @@ sees is produced locally from a closed, code-owned vocabulary.
   live, `gothic cathedral nave vaulted` returns 15 results plain and **0** with the
   filter. It converts hits into misses, so the client-side gate stays.
 
+- **The brief names its SUBJECT separately, because the words that would match are
+  usually already in it.** This is the upstream half of the recall fix above, and it
+  came from measuring what the ladder could not reach. On the only two real briefs
+  recorded, the front held the era and the photographable subject sat in the MIDDLE:
+
+  | queried alone | usable candidates |
+  |---|---|
+  | `thatched roofs` / `thatched cottage` / `harvest wagon` | 5 / 5 / 5 |
+  | `stone keep` / `stone bridge` / `walled town` | 5 / 5 / 5 |
+  | `river valley` / `watermill` / `village lane` | 5 / 5 / 5 |
+  | the whole 18-word brief containing all of them | **0** |
+
+  Every one of those subjects was already inside a brief that returned nothing, so
+  the ladder's front-truncation never reached them (both briefs open with `medieval
+  European …`). Quoting the leading phrase was tested and does NOT help here —
+  `"medieval European farming"` returns 0 exactly as the bare form does — so the
+  remedy is not a smarter query shape but naming the subject:
+
+  `REFERENCE: subject="thatched cottage"; context="medieval northern Europe, autumn
+  dusk, muddy lane after rain"`
+
+  Only `subject` is searched, and it is searched as EVERY word at once; `context` is
+  the illustrator's to draw with and never reaches an archive. The tool's own `query`
+  description carries the same rule, since that schema is the only machine-readable
+  instruction the Illustrator gets — and its previous example (`'stone bridge river
+  mist'`) invited exactly the query shape that returns nothing.
+
+- **A total miss offers a way back, and a different one per reason.** A base underlay
+  used to be reported as a finished outcome ("here is a tonal base, compose over
+  it"), which left no route out of a miss the Illustrator could have fixed in one
+  call. `_base_underlay_next` now branches on the audit: `no-candidates` asks for one
+  retry with the bare subject and shows what a subject looks like (the miss cache
+  makes that retry nearly free); `search-failed` asks for a retry with the SAME words,
+  because the archive not answering says nothing about the query and rewording it
+  would be superstition; `fetch-failed` and a page that asked for no photograph get
+  no retry at all. Pinned by
+  `test_a_total_miss_offers_a_way_back_and_names_the_subject_rule` and
+  `test_the_query_contract_asks_for_a_subject_not_a_scene`; the illustrator prompt's
+  half by `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
+
 - **Cost: a source is asked once per subject, and only when it might answer.**
   Wikimedia rate-limits a burst — an unbounded probe earned a 429 inside about
   twenty calls — and every request also costs the player latency, so three

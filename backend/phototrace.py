@@ -394,8 +394,18 @@ def search_smithsonian(query: str, limit: int = 5) -> list[dict[str, str]]:
 #: of concrete keywords — matches nothing at all: measured live against Commons, an
 #: 18-word river-mill brief returns ZERO hits while its first two words return
 #: several. A specific brief therefore failed BECAUSE it was specific, on every
-#: good-faith attempt. Front words first, because a brief leads with its subject and
-#: trails into atmosphere.
+#: good-faith attempt.
+#:
+#: The rungs keep FRONT words, and it is worth being honest that this is the weaker
+#: half of the fix. On the only two real briefs recorded, the front held the era
+#: ("medieval European ...") and the photographable subject sat in the MIDDLE:
+#: measured live, "thatched roofs", "stone keep", "walled town", "river valley" and
+#: "watermill" each returned a full set of candidates on their own, and every one of
+#: them was already inside a brief that returned nothing. Truncating from the front
+#: never reaches them. The real remedy is upstream — the brief now declares its
+#: `subject=` separately (see the narrator and illustrator contracts, and the tool's
+#: own `query` description), and a total miss tells the Illustrator to retry with the
+#: bare subject. The ladder stays as the backstop for when it does not.
 #:
 #: The ladder FLOORS at four words rather than bottoming out at two, and that floor
 #: is the judgement: two words stop being about the subject — the river-mill brief's
