@@ -14,6 +14,8 @@ third. The store had every turn on disk the whole time; nothing exposed them.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 import sys
 from pathlib import Path
@@ -22,6 +24,7 @@ import pytest
 
 _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import routes as routes_mod  # noqa: E402
 from narrator import APP_NAME  # noqa: E402
@@ -132,6 +135,103 @@ def test_the_ui_shows_the_action_it_is_sent():
     src = module("history.tsx")
     assert "p.action" in src, "the choice that caused a month is never shown"
     assert "history.chose" in src
+
+
+# ── a past page shows its own standing ──────────────────────────────────────
+
+
+def test_a_past_page_carries_the_summary_it_ended_on(tmp_path):
+    """Re-reading month three showed month twelve's situation.
+
+    The summary above the story and the system panels behind it were both read from
+    the LIVE view, so paging back changed the prose and left the standing at today's
+    — a page describing a siege under a heading saying the war is over. The month's
+    own standing is snapshotted when it commits and served with the page.
+
+    A month committed before snapshots existed omits the keys rather than sending an
+    empty list, because the page tells those two apart: absent means "not recorded"
+    and falls back to the live standing, while empty would mean "nothing was
+    happening".
+    """
+    from kiro_crew.apps.app_storage import AppStorage
+
+    from test_delete_world import FakeCtx, FakeRequest, body_of
+
+    data = tmp_path / "data"
+    data.mkdir()
+    storage = AppStorage(APP_NAME, data)
+    st = RunStore(storage, data)
+    run = st.create_run({"turn": 2, "worldId": "w"}, {"worldId": "w", "title": "t"})
+    st.append_turn(run, {
+        "turn": 1,
+        "prose": "the first month",
+        "digest": [{"category": "国家", "text": "the court is silent", "rumour": False}],
+        "panels": [{"id": "status", "label": "身份", "always": True, "fields": [], "empty": True}],
+    })
+    st.append_turn(run, {"turn": 2, "prose": "a month from before snapshots"})
+
+    ctx = FakeCtx(data, storage)
+    res = asyncio.run(routes_mod.get_chronicle(FakeRequest(match={"run_id": run}), ctx))
+    turns = {int(t["turn"]): t for t in body_of(res)["turns"]}
+
+    assert turns[1]["digest"][0]["text"] == "the court is silent", (
+        "the page's own summary never reaches it, so a past page shows today's"
+    )
+    assert turns[1]["panels"][0]["label"] == "身份"
+    assert "digest" not in turns[2] and "panels" not in turns[2], (
+        "a month with no snapshot must OMIT the keys — an empty list would read as "
+        "'nothing was happening' instead of falling back to the live standing"
+    )
+
+
+def test_the_summary_and_the_panels_come_from_one_shaper():
+    """Two callers need the same answer: the live view, and the chronicle line a
+    commit writes. Computing the panels twice is how the page a player re-reads
+    drifts from the page they lived.
+    """
+    from template import parse_template
+    from view import build_play_view, shape_panels
+
+    from test_delete_world import HEADER, world_file
+
+    # The suite's own known-good world header, so this test cannot fail over an
+    # unrelated required field it forgot to declare.
+    t = parse_template(world_file({**HEADER, "id": "shaper-probe"}))
+    state = {"turn": 1, "status": {"age": "30"}}
+
+    assert shape_panels(t, state) == build_play_view(t, state)["panels"], (
+        "the view and the snapshot disagree about the same state"
+    )
+
+
+def test_the_commit_snapshots_the_page_it_wrote():
+    src = (_BACKEND / "mcp_server.py").read_text(encoding="utf-8")
+    start = src.index("def _advance_turn")
+    end = src.index("\ndef ", start)
+    commit = src[start:end]
+    assert 'entry["digest"] = gate_digest(' in commit, (
+        "the month's summary is not recorded, so it cannot be re-read"
+    )
+    assert 'entry["panels"] = shape_panels(' in commit
+    # And REACHABLE: written after the pack it reads from is loaded. Asserting only
+    # that the lines exist passes while they sit above that load, where they raise
+    # UnboundLocalError on every commit.
+    assert commit.index("pack = None") < commit.index('entry["digest"]'), (
+        "the snapshot runs before the world pack is loaded, so every commit raises"
+    )
+    # Snapshotting must never cost a narrated month.
+    snap = commit[commit.index('entry["digest"]'):]
+    assert "except Exception" in snap[:400], (
+        "a failed snapshot must not lose a committed turn"
+    )
+
+
+def test_a_page_without_a_snapshot_falls_back_to_the_live_standing():
+    src = module("play.tsx")
+    assert "past.digest ?? v.digest" in src, (
+        "an unrecorded month would render an empty summary instead of the live one"
+    )
+    assert "past.panels ?? v.panels" in src
 
 
 # ── the shelf, once ─────────────────────────────────────────────────────────

@@ -402,22 +402,18 @@ def resolve_ending(template: Template, state: dict[str, Any]) -> str:
     return "ended" if flag else ""
 
 
-def build_play_view(
+def shape_panels(
     template: Template,
     state: dict[str, Any],
-    *,
-    chronicle: list[dict[str, Any]] | None = None,
-    scenes: list[dict[str, Any]] | None = None,
-    unlocked: list[str] | None = None,
-    milestones_reached: list[str] | None = None,
-    milestones: list[str] | None = None,
     capability_packs: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Everything the play page renders, with nothing left for it to decide."""
-    chronicle = chronicle or []
-    last = chronicle[-1] if chronicle else {}
-    turn = int(state.get("turn") or 0)
+) -> list[dict[str, Any]]:
+    """The panels a state resolves to, shaped for the page.
 
+    Its own function because two callers need the SAME answer: the live view, and
+    the chronicle line a commit writes so re-reading a past month shows that
+    month's standing rather than today's. Computing it twice is how the two
+    silently drift.
+    """
     panels: list[dict[str, Any]] = []
     for panel in template.panels:
         if not panel.visible(state):
@@ -448,6 +444,26 @@ def build_play_view(
     # so the play page draws them with no per-world code. A malformed pack degrades
     # to a labelled value list rather than breaking the view (design §7.2, R5.9).
     panels.extend(render_pack_panels(capability_packs, state, shape=_shape))
+    return panels
+
+
+def build_play_view(
+    template: Template,
+    state: dict[str, Any],
+    *,
+    chronicle: list[dict[str, Any]] | None = None,
+    scenes: list[dict[str, Any]] | None = None,
+    unlocked: list[str] | None = None,
+    milestones_reached: list[str] | None = None,
+    milestones: list[str] | None = None,
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Everything the play page renders, with nothing left for it to decide."""
+    chronicle = chronicle or []
+    last = chronicle[-1] if chronicle else {}
+    turn = int(state.get("turn") or 0)
+
+    panels = shape_panels(template, state, capability_packs)
 
     ending_id = resolve_ending(template, state)
 

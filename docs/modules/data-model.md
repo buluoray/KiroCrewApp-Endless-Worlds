@@ -22,7 +22,7 @@ deletion.
 | `kv/index.json` | `{ "runs": [ …Lives-view rows… ] }`, the shelf |
 | `kv/briefed-<runId>.json` | `{ slot, at }` rulebook-delivery marker |
 | `kv/pending-<runId>.json` | in-flight-turn record (`turn`, `slot`, `askedAt`, `action`, `readAt?`, `readTurn?`, …) |
-| `runs/<runId>/chronicle.jsonl` | append-only, one JSON line per committed turn |
+| `runs/<runId>/chronicle.jsonl` | append-only, one JSON line per committed turn (`turn`, `prose`, `action`, `choices`, `events`, `gains`, `memory?`, and the `digest?`/`panels?` snapshot of the standing that turn ended on) |
 | `mcp_server.py` (`_advance_turn`) | applies `RESERVED_STATE_KEYS` carry-forward, then the milestone rebuild and the systems engine, on each commit |
 
 ## Identity fields
@@ -160,6 +160,18 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   absent rather than bounded with another cache policy. Enforced by `RunStore`'s
   surface; pinned by
   `test_store.test_store_has_no_process_lifetime_per_run_lock_table`.
+
+- **A page's standing is snapshotted, not recomputed.** Each committed turn records
+  the `digest` and `panels` it ended on, because the play view resolves both from the
+  CURRENT state — so a month re-read showed today's situation over its own prose.
+  Resolving them later is not an option: that needs the world pack in force at the
+  time, and a later pack edit would silently rewrite history. A turn committed before
+  this was recorded OMITS the keys (never an empty list), and the page falls back to
+  the live standing; an empty list would read as "nothing was happening" rather than
+  "not recorded". `view.shape_panels` is shared by the live view and the commit so the
+  two can never disagree; pinned by
+  `test_history.test_a_past_page_carries_the_summary_it_ended_on` and
+  `test_history.test_the_summary_and_the_panels_come_from_one_shaper`.
 
 - **A torn chronicle line costs only that line.** The chronicle is appended one
   JSON line per turn; `read_chronicle` skips an unparseable trailing line rather

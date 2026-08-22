@@ -1878,6 +1878,20 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
                     str(x) for x in (e.get("events") or [])
                     if isinstance(x, str) and x.strip()
                 ][:12],
+                # The standing that month ended on, snapshotted at commit, so a page
+                # being re-read shows its own situation. Omitted on turns committed
+                # before this was recorded — the page falls back to the live panels
+                # rather than showing an empty frame.
+                **(
+                    {"digest": e["digest"]}
+                    if isinstance(e.get("digest"), list) and e["digest"]
+                    else {}
+                ),
+                **(
+                    {"panels": e["panels"]}
+                    if isinstance(e.get("panels"), list) and e["panels"]
+                    else {}
+                ),
                 "gains": [
                     {
                         "field": str(g.get("field") or ""),

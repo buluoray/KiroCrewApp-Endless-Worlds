@@ -455,6 +455,12 @@ export interface PastTurn {
   /** The backdrop that was effective on this page, so re-reading it restores the
    *  scene it had. Null when the page had no background. */
   backdrop?: { version: number; mobile?: boolean; trace?: TraceAudit | null } | null
+  /** The standing this month ended on, snapshotted when it committed: the summary
+   *  above the story, and the system panels behind it. Absent on months committed
+   *  before it was recorded — the page shows the live ones then, rather than an
+   *  empty frame. */
+  digest?: DigestRow[]
+  panels?: PanelView[]
 }
 
 export interface Chronicle {
