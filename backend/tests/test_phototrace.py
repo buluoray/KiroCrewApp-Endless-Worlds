@@ -905,6 +905,15 @@ def test_a_total_miss_offers_a_way_back_and_names_the_subject_rule(data, monkeyp
         assert "procedural tonal base is active" in quiet
         assert "once more" not in quiet.lower()
 
+    # A no-candidates miss is TERMINAL (the forced single-keyword retry already ran),
+    # so the base hint no longer asks for another search — it directs a hand-drawn
+    # scene over the tonal ground rather than committing bare tonal bars.
+    handdrawn = srv._base_underlay_next({"reason": "no-candidates"})
+    assert "hand-drawn scene" in handdrawn
+    assert "tonal GROUND" in handdrawn
+    assert "Do not settle for the bare base" in handdrawn
+    assert "once more" not in handdrawn.lower() and "just the subject" not in handdrawn
+
 
 def test_the_query_contract_asks_for_a_subject_not_a_scene():
     """`query` is the page's SUBJECT. Both archives match every word, so the schema

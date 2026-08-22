@@ -421,8 +421,8 @@ sees is produced locally from a closed, code-owned vocabulary.
   stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py` and
   `backend/tests/test_backdrop.py`.
 
-- **Backdrop-agent failure stays behind the curtain, and a scene never degrades to
-  a hand-drawn one.** The brief is cleared on successful commit, not on dispatch, so
+- **Backdrop-agent failure stays behind the curtain, and a timed-out scene never
+  falls through to the narrator hand-drawing one.** The brief is cleared on successful commit, not on dispatch, so
   a dropped request or gateway restart can resume recovery. The backend gives the
   model a whole-recovery budget of `_BACKDROP_FALLBACK_SECS` (120s) across its
   illustrator attempts. When that budget elapses without an exact commit, the server
@@ -445,12 +445,17 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_successful_illustrator_commit_clears_the_waiting_request`, and
   `test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate`.
 
-- **A base underlay is a finished backdrop, not a canvas to paint over.** When the
-  trace returns `underlay: base` (no usable photo), the illustrator is told to commit
-  the base as-is (one placeholder, no other marks) rather than composing a full scene
-  onto it; sparse marks are allowed only when they clearly earn their place. This is
-  the from-source half of the timeout fix: the base case no longer invites the slow
-  hand-draw that most often blew the recovery budget. The instruction lives in
+- **A base's degradation depends on WHY the photo search missed.** When the trace
+  returns `underlay: base` the illustrator follows the result's `next`. A *transient*
+  miss (`search-failed` / `fetch-failed`) leaves a finished tonal backdrop to commit
+  as-is (one placeholder, no other marks). But a `no-candidates` miss is terminal —
+  the forced single-keyword retry already ran and still found nothing, so no
+  free-license photograph exists for this page — and the base is then only a tonal
+  GROUND: the illustrator authors a hand-drawn scene over it (photographic realism is
+  not required — an abstract, artful evocation of the place is welcome), with the full
+  review pass, rather than committing bare tonal bars that read as flat. Committing
+  the base ALONE is reserved for the timeout safety net (`commit_underlay_only`),
+  never the intended output of a no-candidates page. The instructions live in
   `agents/illustrator.json` and `_base_underlay_next`.
 
 - **The backdrop pipeline is timed for audit.** `backdrop_timing.py`'s

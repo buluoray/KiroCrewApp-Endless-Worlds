@@ -1949,12 +1949,12 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
     for a reason the Illustrator could fix in one call. The three reasons need three
     different answers, so this branches on the audit rather than saying one thing:
 
-    - ``no-candidates``: every source answered and holds nothing for these WORDS.
-      The words that would have matched are usually already in the brief — measured
-      on two real failing briefs, every mid-brief subject ("thatched roofs", "stone
-      keep", "walled town") returned a full set of candidates on its own, while the
-      whole 18-word brief returned none. So the useful instruction is to retry with
-      the subject alone, and the miss cache makes that retry nearly free.
+    - ``no-candidates``: the search is SPENT — the forced single-keyword retry (see
+      _trace_reference) already ran and still found nothing, so no free-license
+      photograph exists for this page. The base is a tonal GROUND, not the finished
+      image: the Illustrator authors a real hand-drawn scene over it, with the full
+      review pass. This is the intended degradation; committing the bare base is only
+      the timeout safety net (commit_underlay_only), never the instruction here.
     - ``search-failed``: the archive did not answer. Retrying the SAME query is the
       right move here, and rewording would be superstition.
     - ``fetch-failed`` / no query: nothing to retry — compose over the base.
@@ -1967,13 +1967,15 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
     )
     if reason == "no-candidates":
         return (
-            "no reference matched these words, and a quiet procedural tonal base is "
-            "ready as a fallback. The archives match EVERY word, so a long brief "
-            "matches nothing: call endless_trace_reference ONCE more with just the "
-            "subject — two or three of the commonest nouns for the thing itself "
-            "('thatched cottage', 'stone bridge', 'harvest wagon'), with no era, "
-            "weather or mood attached. If that misses too, this world's page has no "
-            "photograph and the base is the answer." + tail
+            "no free-license photograph exists for this page — the search is spent "
+            "(only the narrow CC0/public-domain slice is searched, so many subjects "
+            "have no usable photo even when the open web does). The procedural tonal "
+            "base is NOT the finished image; it is a tonal GROUND. Put one "
+            "<g id=\"etr-underlay\"/> in each SVG for that ground, then author a real "
+            "hand-drawn scene above it — architecture, light, and evidence composed "
+            "with the same care as any scene, never a few bars over bare tone — and "
+            "take it through the full review pass before committing. Do not settle "
+            "for the bare base."
         )
     if reason == "search-failed":
         return (
