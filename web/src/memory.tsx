@@ -92,15 +92,24 @@ export function StarMap({
       || payload.keepsakes.some((kp) => kp.cites.includes(focused.id))
     : false
 
+  const [keepFailed, setKeepFailed] = useState(false)
   const keep = async () => {
     if (!focused || focused.kind !== 'event') return
-    await api.createKeepsake(runId, {
-      kind: 'event',
-      title: focused.title ?? mt(lang, 'star.keeps.newTitle'),
-      cites: [focused.id],
-    })
-    setKept((k) => [...k, focused.id])
-    await load()
+    setKeepFailed(false)
+    try {
+      await api.createKeepsake(runId, {
+        kind: 'event',
+        title: focused.title ?? mt(lang, 'star.keeps.newTitle'),
+        cites: [focused.id],
+      })
+      setKept((k) => [...k, focused.id])
+      await load()
+    } catch {
+      // Without this the promise rejected unhandled and the tap looked inert:
+      // no "kept" mark, no error. Name the failure so the button reads as
+      // retryable.
+      setKeepFailed(true)
+    }
   }
 
   return (
@@ -205,6 +214,11 @@ export function StarMap({
                   >
                     {mt(lang, isKept ? 'star.keep.kept' : 'star.keep.this')}
                   </button>
+                  {keepFailed ? (
+                    <span className="ews-detail-meta" role="alert">
+                      {mt(lang, 'star.keep.failed')}
+                    </span>
+                  ) : null}
                 </div>
               </>
             ) : (

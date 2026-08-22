@@ -1477,13 +1477,18 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-tabmore {
   position: fixed; bottom: 66px; left: 0; right: 0; z-index: 32;
   max-width: 900px; margin: 0 auto; width: calc(100% - 16px); padding: 6px;
-  background: var(--panel, #12142a); border: 1px solid var(--border, #262a3e);
+  /* Fixed dark, NOT theme vars: this sheet floats directly above the fixed-dark
+     tab bar, and following --panel/--border rendered it as a light box over a
+     dark bar under a light dashboard theme (same trap .ew-digest documents). */
+  background: rgba(6, 7, 14, .96); border: 1px solid rgba(255, 255, 255, .09);
   border-radius: 14px; box-shadow: 0 14px 34px rgba(0, 0, 0, .55);
   display: flex; flex-direction: column;
 }
 .ew-tabmore-item {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  background: transparent; border: 0; color: var(--text, #e9e6df);
+  /* Fixed light-on-dark: the sheet above is pinned dark, so a light theme's
+     --text (near-black) would vanish on it. */
+  background: transparent; border: 0; color: #e9e6df;
   font: inherit; font-size: 13.5px; border-radius: 10px; cursor: pointer;
   text-align: start;
 }
@@ -1659,4 +1664,13 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   .ew-fx-aura { animation: none; }
   .ew-fx-ripple::before, .ew-fx-ripple::after { animation: none; opacity: 0; }
   /* embers: ChoiceEffect checks the same query and mounts no canvas at all. */
+}
+
+/* Touch targets: several controls sit at 36px, under the 44px minimum. Raised
+   only for coarse pointers so desktop density is untouched; the visual glyph
+   size is unchanged (the extra room is hit area, not chrome). The pager arrows
+   matter most — they are the primary re-reading control. */
+@media (pointer: coarse) {
+  .ew-opt, .ew-rail-x, .ew-jump { min-height: 44px; }
+  .ew-pager-arw { width: 44px; height: 44px; }
 }

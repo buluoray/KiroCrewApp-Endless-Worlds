@@ -10,7 +10,7 @@
  * re-read in: what just happened, then further back.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { PastTurn } from './api'
 import { api, API } from './api'
@@ -30,11 +30,21 @@ export function History({ runId }: { runId: string }) {
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
 
+  // The newest turn this life has, learned from any unfiltered latest-page load.
+  // A jump beyond it returned an empty page and the component then showed the
+  // generic "no history yet" for a life that plainly has history; clamping the
+  // jump lands on the real last page instead.
+  const latestRef = useRef(0)
+
   const load = useCallback(async (before: number, replace = false, q = '') => {
     setBusy(true)
     setFailed(false)
     try {
       const out = await api.chronicle(runId, before, q)
+      const newest = out.turns[0]
+      if (before === 0 && !q && newest) {
+        latestRef.current = Math.max(latestRef.current, newest.turn)
+      }
       // Paging further back appends; a jump, a search, or a fresh open replaces.
       setTurns((have) => (before > 0 && !replace ? [...have, ...out.turns] : out.turns))
       setMore(out.more)
@@ -48,8 +58,10 @@ export function History({ runId }: { runId: string }) {
 
   const jumpTo = () => {
     const n = parseInt(jump, 10)
+    if (!Number.isFinite(n) || n <= 0) return
+    const capped = latestRef.current ? Math.min(n, latestRef.current) : n
     // `before` is exclusive, so n+1 lands the page ON turn n rather than just above it.
-    if (Number.isFinite(n) && n > 0) void load(n + 1, true, query)
+    void load(capped + 1, true, query)
   }
 
   const runSearch = () => {
