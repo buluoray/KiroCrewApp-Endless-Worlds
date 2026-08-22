@@ -53,28 +53,15 @@ Open the dashboard and pick **无限世界 / Endless Worlds** from the sidebar. 
 app self-heals its MCP server path to wherever it was installed, so no manual
 editing of `app.json` is needed.
 
-Backdrop publication additionally needs **one local SVG rasterizer** on the
-gateway host — the illustrator visually reviews server-rendered PNG previews
-before publishing. Any one of these satisfies it, checked in this order:
-
-- the `cairosvg` Python package (`pip install cairosvg`),
-- the `rsvg-convert` binary (`librsvg2-bin` on Debian/Ubuntu),
-- the librsvg shared library itself (`librsvg2-2` on Debian/Ubuntu,
-  `dnf install librsvg2` on Fedora/AL2023, `brew install librsvg` on macOS),
-  reached directly through `ctypes` with no Python package.
-
-The SCENE lane additionally needs the `vtracer` and `pillow` Python packages
-(`pip install vtracer pillow`) to trace reference photos into underlays; the
-motif lane works without them. Photo decoding and tracing run per variant in a
-killable child process with a wall-clock timeout, input/output byte ceilings, and
-format/dimension/pixel guards. References are fetched only over HTTPS from
-Wikimedia Commons hosts, redirects cannot leave that allowlist, and only CC0 or
-public-domain photos are accepted. If search, fetch, validation, or tracing fails,
-the scene gets a quiet procedural tonal base instead of exposing a broken or
-partially trusted trace.
-
-Without a renderer, illustrator draft submission fails and page art falls back
-to the narrator's emergency path; the story itself is unaffected.
+On a registry install (or update) the app runs `setup.sh` — a **best-effort,
+non-blocking** setup of its OPTIONAL art dependencies: an SVG rasterizer (so the
+illustrator can preview draft backdrops) and `vtracer` + `pillow` (so SCENE pages
+can trace reference photos). The install never fails on them — if any are missing
+the app still runs: backdrop publication falls back to the narrator's hand-drawn
+path, and photo scenes degrade to a quiet procedural tonal base. Reference photos
+are fetched only over HTTPS from a fixed CC0/public-domain allowlist. A local-path
+`kirocrew app install <dir>` does not run `setup.sh`; run `bash setup.sh` yourself
+if you want the optional dependencies while developing.
 
 ## Build and develop
 

@@ -45,23 +45,13 @@ kirocrew app enable endless-worlds
 打开 dashboard，在侧栏选择 **无限世界 / Endless Worlds**。应用会把自己的 MCP server
 路径自愈到实际安装位置，无需手动编辑 `app.json`。
 
-发布背景画还需要 gateway 主机上有**一个本地 SVG 光栅化器**——插画师会先审阅服务端
-渲染出的 PNG 预览再发布。以下任一即可满足，按此顺序检查：
-
-- `cairosvg` Python 包（`pip install cairosvg`）；
-- `rsvg-convert` 可执行文件（Debian/Ubuntu 上的 `librsvg2-bin`）；
-- librsvg 共享库本身（Debian/Ubuntu 上的 `librsvg2-2`、Fedora/AL2023 上的
-  `dnf install librsvg2`、macOS 上的 `brew install librsvg`），通过 `ctypes` 直接调用，
-  无需 Python 包。
-
-SCENE 车道还需要 `vtracer` 与 `pillow` 两个 Python 包
-（`pip install vtracer pillow`）把参考照片描摹成底图；motif 车道没有它们也能工作。
-照片解码与描摹按每个变体在一个可被杀死的子进程里运行，带墙钟超时、输入/输出字节上限，
-以及格式/尺寸/像素守卫。参考图仅从 Wikimedia Commons 主机经 HTTPS 拉取，重定向不能离开
-该允许列表，且只接受 CC0 或公有领域的照片。若搜索、拉取、校验或描摹失败，该场景会退化为
-一张安静的程序生成色调底图，而不是暴露一个损坏或部分不可信的描摹。
-
-没有光栅化器时，插画师的草稿提交会失败、页面美术回退到叙事者的应急路径；故事本身不受影响。
+从 registry 安装（或更新）时，应用会运行 `setup.sh`——对**可选**的美术依赖做一次
+**尽力而为、绝不阻拦**的安装：一个 SVG 光栅化器（供插画师预览草稿背景）以及
+`vtracer` + `pillow`（供 SCENE 页面描摹参考照片）。安装不会因此失败——即使这些都缺，
+应用照常运行：发布背景画会回退到叙事者的手绘路径，照片场景则降级为安静的程序生成色调底图。
+参考照片仅从固定的 CC0/公有领域白名单经 HTTPS 拉取。用本地路径
+`kirocrew app install <dir>` 安装时不会运行 `setup.sh`；开发时若想要这些可选依赖，
+自己跑 `bash setup.sh` 即可。
 
 ## 构建与开发
 
