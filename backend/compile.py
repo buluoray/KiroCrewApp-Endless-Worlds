@@ -20,7 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from typing import Any
 
 from chapters import bodies, brief
@@ -382,7 +383,7 @@ def _as_mapping(header: Any) -> tuple[dict[str, Any] | None, str | None]:
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
         if text.rstrip().endswith("```"):
-            text = text.rstrip()[: -3]
+            text = text.rstrip()[:-3]
     # Try a plain parse, then one with stray backslashes doubled: a lone backslash
     # is a recoverable escape mistake, not a different answer.
     parsed: Any = None
@@ -397,8 +398,7 @@ def _as_mapping(header: Any) -> tuple[dict[str, Any] | None, str | None]:
     if parsed is None:
         assert first_err is not None
         return None, (
-            f"the compiled header is not valid JSON "
-            f"({first_err.msg} at line {first_err.lineno})"
+            f"the compiled header is not valid JSON ({first_err.msg} at line {first_err.lineno})"
         )
     if not isinstance(parsed, dict):
         return None, f"expected a JSON object, got {type(parsed).__name__}"
@@ -415,7 +415,7 @@ def _suspicious_paths(paths: list[str]) -> list[str]:
     warnings: list[str] = []
     parts = [p.split(".") for p in paths]
     for i, a in enumerate(parts):
-        for b in parts[i + 1:]:
+        for b in parts[i + 1 :]:
             if len(a) != len(b) or a == b:
                 continue
             diffs = [k for k in range(len(a)) if a[k] != b[k]]
@@ -442,7 +442,7 @@ def _slugify(value: str) -> str:
     `birth_city` → `birth-city`, `HP Bar` → `hp-bar`. Idempotent on a real slug."""
     s = str(value).strip()
     s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", s)  # camelCase boundary
-    s = re.sub(r"[^A-Za-z0-9]+", "-", s).lower()   # any other run → one hyphen
+    s = re.sub(r"[^A-Za-z0-9]+", "-", s).lower()  # any other run → one hyphen
     return s.strip("-")[:64]
 
 
@@ -536,11 +536,19 @@ def _normalize_ids(header: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
 #: names. Mapping the common synonyms — and defaulting anything still unknown to a
 #: plain field — turns a localized primitive slip into a warning, not a lost world.
 _PRIMITIVE_SYNONYMS = {
-    "text": "field", "string": "field", "name": "field", "date": "field",
-    "bool": "field", "boolean": "field",
-    "number": "stat", "int": "stat", "integer": "stat", "counter": "stat",
+    "text": "field",
+    "string": "field",
+    "name": "field",
+    "date": "field",
+    "bool": "field",
+    "boolean": "field",
+    "number": "stat",
+    "int": "stat",
+    "integer": "stat",
+    "counter": "stat",
     "float": "stat",
-    "list": "inventory", "items": "inventory",
+    "list": "inventory",
+    "items": "inventory",
     "ladder": "rank",
     "roster": "people",
 }
@@ -733,8 +741,7 @@ def _salvage_panels(body: dict[str, Any], warnings: list[str]) -> None:
             new = _coerce_primitive(f.get("primitive"))
             if new is not None:
                 warnings.append(
-                    f"coerced primitive {f.get('primitive')!r} to {new!r} "
-                    f"in field {f.get('id')!r}"
+                    f"coerced primitive {f.get('primitive')!r} to {new!r} in field {f.get('id')!r}"
                 )
                 f["primitive"] = new
             if "label" in f and not _has_label(f["label"]):
@@ -930,9 +937,7 @@ def _chapter_warnings(pack: WorldPack, panel_paths: set[str]) -> list[str]:
 
     empty = [c.id for c in template.chapters if not texts.get(c.id, "").strip()]
     if empty:
-        out.append(
-            "these chapters resolve to no text at all: " + ", ".join(sorted(empty))
-        )
+        out.append("these chapters resolve to no text at all: " + ", ".join(sorted(empty)))
     return out
 
 

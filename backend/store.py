@@ -313,9 +313,7 @@ class RunStore:
     def _pending_key(run_id: str) -> str:
         return f"pending-{run_id}"
 
-    def mark_pending(
-        self, run_id: str, *, turn: int, slot: str, action: str = ""
-    ) -> None:
+    def mark_pending(self, run_id: str, *, turn: int, slot: str, action: str = "") -> None:
         """Record that ``turn`` was asked of ``slot``, before asking.
 
         The caller must do this BEFORE dispatching. Written after would leave open
@@ -407,9 +405,7 @@ class RunStore:
         _check_run_id(run_id)
         prior = self.read_backdrop_request(run_id)
         recovering = bool(
-            prior
-            and int(prior.get("turn") or 0) == int(turn)
-            and prior.get("fallbackAllowed")
+            prior and int(prior.get("turn") or 0) == int(turn) and prior.get("fallbackAllowed")
         )
         self._kv.set(
             self._backdrop_request_key(run_id),
@@ -444,7 +440,6 @@ class RunStore:
         """Forget the backdrop brief only after its page art commits."""
         _check_run_id(run_id)
         self._kv.delete(self._backdrop_request_key(run_id))
-
 
     # -- chronicle --------------------------------------------------------
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import time
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -106,7 +106,8 @@ def test_the_prompt_carries_the_law_and_the_players_words_and_little_else():
     instruction it can fail to fetch.
     """
     prompt = compose_prompt(
-        run_id="run-1", language=LANG,
+        run_id="run-1",
+        language=LANG,
         rulebook=RULEBOOK,
         state={"turn": 3, "facts": [FACT]},
         chronicle=[{"turn": 3, "prose": PROSE}],
@@ -122,6 +123,7 @@ def test_the_prompt_carries_the_law_and_the_players_words_and_little_else():
     assert FACT not in prompt, "the state is being pushed again"
     assert PROSE not in prompt, "the chronicle is being pushed again"
 
+
 def test_no_amount_of_history_grows_the_prompt():
     """The property the old rolling summary was reaching for, now exact.
 
@@ -131,10 +133,16 @@ def test_no_amount_of_history_grows_the_prompt():
     the same size.
     """
     short = compose_prompt(
-        run_id="run-1", language=LANG, rulebook="", state={"turn": 1}, chronicle=[],
+        run_id="run-1",
+        language=LANG,
+        rulebook="",
+        state={"turn": 1},
+        chronicle=[],
     )
     long = compose_prompt(
-        run_id="run-1", language=LANG, rulebook="",
+        run_id="run-1",
+        language=LANG,
+        rulebook="",
         state={"turn": 200, "facts": [FACT] * 50},
         chronicle=[{"turn": i, "prose": LONG_PROSE.format(i=i)} for i in range(1, 201)],
     )
@@ -143,6 +151,7 @@ def test_no_amount_of_history_grows_the_prompt():
         f"a 200-turn life produced a prompt {len(long) - len(short)} characters "
         "longer than a 1-turn life"
     )
+
 
 def test_the_prompt_has_no_channel_for_the_players_own_memory():
     """R26 — the seal is enforced by ``memory_mode`` and the tool allowlist.
@@ -156,7 +165,13 @@ def test_the_prompt_has_no_channel_for_the_players_own_memory():
     """
     params = set(inspect.signature(compose_prompt).parameters)
     assert params == {
-        "rulebook", "state", "chronicle", "run_id", "shape", "action", "style",
+        "rulebook",
+        "state",
+        "chronicle",
+        "run_id",
+        "shape",
+        "action",
+        "style",
         "language",
     }
 
@@ -166,14 +181,18 @@ def test_the_players_own_words_are_quoted_as_intent_not_instruction():
     quotes, labelled as a character's intent — so "ignore the rules above" reads
     as something a person said rather than as a directive."""
     prompt = compose_prompt(
-        run_id="run-1", language=LANG, rulebook="r", state={"turn": 1}, chronicle=[],
+        run_id="run-1",
+        language=LANG,
+        rulebook="r",
+        state={"turn": 1},
+        chronicle=[],
         action=INJECTION,
     )
     assert T("turn.action.quote", action=INJECTION) in prompt
     assert T("turn.action.preamble") in prompt
-    assert prompt.rstrip().endswith(
-        T("turn.action.quote", action=INJECTION)
-    ), "the action must be last"
+    assert prompt.rstrip().endswith(T("turn.action.quote", action=INJECTION)), (
+        "the action must be last"
+    )
 
 
 def test_an_empty_state_is_not_described_at_all():
@@ -185,10 +204,15 @@ def test_an_empty_state_is_not_described_at_all():
     re-adding a state block would quietly undo the whole change.
     """
     prompt = compose_prompt(
-        run_id="run-1", language=LANG, rulebook="", state={}, chronicle=[],
+        run_id="run-1",
+        language=LANG,
+        rulebook="",
+        state={},
+        chronicle=[],
     )
     assert T("turn.state.empty") not in prompt
     assert T("turn.pull") not in prompt, "the pull instruction lives in the system prompt now"
+
 
 def test_a_turn_is_charged_against_the_background_turn_cap():
     """Calling the chat runner directly would skip the cap, which crew_runtime
@@ -249,10 +273,22 @@ def test_a_double_tap_cannot_produce_two_versions_of_one_month(store):
 
     async def both():
         return await asyncio.gather(
-            advance_turn(state_obj=state, store=store, run_id=run, rulebook="r",
-                         dispatch=commit_once, deadline_secs=3),
-            advance_turn(state_obj=state, store=store, run_id=run, rulebook="r",
-                         dispatch=commit_once, deadline_secs=3),
+            advance_turn(
+                state_obj=state,
+                store=store,
+                run_id=run,
+                rulebook="r",
+                dispatch=commit_once,
+                deadline_secs=3,
+            ),
+            advance_turn(
+                state_obj=state,
+                store=store,
+                run_id=run,
+                rulebook="r",
+                dispatch=commit_once,
+                deadline_secs=3,
+            ),
         )
 
     a, b = asyncio.run(both())
@@ -273,8 +309,9 @@ def test_a_committed_turn_is_returned_with_its_prose(store):
         return True
 
     out = asyncio.run(
-        advance_turn(state_obj=state, store=store, run_id=run, rulebook="r",
-                     dispatch=commit, deadline_secs=3)
+        advance_turn(
+            state_obj=state, store=store, run_id=run, rulebook="r", dispatch=commit, deadline_secs=3
+        )
     )
     assert out.advanced is True
     assert out.turn == 2
@@ -290,8 +327,14 @@ def test_a_silent_narrator_times_out_without_rolling_anything_back(store):
     before = store.read_state(run)
 
     out = asyncio.run(
-        advance_turn(state_obj=state, store=store, run_id=run, rulebook="r",
-                     dispatch=lambda *a: True, deadline_secs=0.6)
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=lambda *a: True,
+            deadline_secs=0.6,
+        )
     )
 
     assert out.advanced is False
@@ -316,8 +359,14 @@ def test_a_queued_turn_is_still_waited_for(store):
         return False  # queued, not started
 
     out = asyncio.run(
-        advance_turn(state_obj=state, store=store, run_id=run, rulebook="r",
-                     dispatch=queued_then_commits, deadline_secs=3)
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=queued_then_commits,
+            deadline_secs=3,
+        )
     )
     assert out.advanced is True and out.turn == 2
 
@@ -337,9 +386,15 @@ def test_the_turn_runs_in_a_sealed_app_owned_slot(store):
     run = store.create_run({"turn": 1}, {"runId": "r1"})
 
     asyncio.run(
-        advance_turn(state_obj=state, store=store, run_id=run, rulebook="r",
-                     dispatch=lambda *a: True, deadline_secs=0.4,
-                     project="/tmp/whatever")
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=lambda *a: True,
+            deadline_secs=0.4,
+            project="/tmp/whatever",
+        )
     )
 
     slot = next(iter(state.slots.values()))
@@ -379,8 +434,11 @@ def test_the_prompt_names_the_run_the_narrator_is_advancing():
     produce a committed turn.
     """
     prompt = compose_prompt(
-        run_id="9856fa638614440fbc7171ba8fe896c5", language=LANG,
-        rulebook="r", state={"turn": 4}, chronicle=[],
+        run_id="9856fa638614440fbc7171ba8fe896c5",
+        language=LANG,
+        rulebook="r",
+        state={"turn": 4},
+        chronicle=[],
     )
     assert "9856fa638614440fbc7171ba8fe896c5" in prompt
     assert prompt.index("9856fa") < prompt.index(T("turn.rulebook")), "the id comes first"
@@ -413,15 +471,21 @@ def test_the_prompt_spells_out_the_shape_to_declare():
         language=LANG,
         panels=[
             SimpleNamespace(
-                id="status", always=True, when=None,
-                fields=[SimpleNamespace(id="age", label="Age"),
-                        SimpleNamespace(id="race", label="Race")],
+                id="status",
+                always=True,
+                when=None,
+                fields=[
+                    SimpleNamespace(id="age", label="Age"),
+                    SimpleNamespace(id="race", label="Race"),
+                ],
             ),
             # Conditional, and carrying its condition — the real Panel dataclass
             # always has `when`, so a fixture without it was exercising a shape that
             # cannot reach this code.
             SimpleNamespace(
-                id="magic", always=False, when=SimpleNamespace(source=GATE),
+                id="magic",
+                always=False,
+                when=SimpleNamespace(source=GATE),
                 fields=[SimpleNamespace(id="mana", label="Mana")],
             ),
         ],
@@ -447,11 +511,17 @@ def test_the_prompt_spells_out_the_shape_to_declare():
 
 def test_the_shape_reaches_the_turn_prompt():
     prompt = compose_prompt(
-        run_id="run-1", language=LANG, rulebook="r", state={}, chronicle=[],
+        run_id="run-1",
+        language=LANG,
+        rulebook="r",
+        state={},
+        chronicle=[],
         shape=SHAPE_STUB,
     )
     assert SHAPE_STUB in prompt
-    assert prompt.index(SHAPE_STUB) < prompt.index(T("turn.ask", turn=1)), "the shape comes before the ask"
+    assert prompt.index(SHAPE_STUB) < prompt.index(T("turn.ask", turn=1)), (
+        "the shape comes before the ask"
+    )
 
 
 # -- the world decides the language --------------------------------------
@@ -476,7 +546,11 @@ def test_an_unknown_language_falls_back_rather_than_failing():
     """A world is not broken for being written in a language this app has not been
     translated into yet."""
     out = compose_prompt(
-        run_id="run-1", rulebook="r", state={}, chronicle=[], language="kling",
+        run_id="run-1",
+        rulebook="r",
+        state={},
+        chronicle=[],
+        language="kling",
     )
     assert Content("en")("turn.ask", turn=1) in out
 
@@ -516,18 +590,30 @@ def test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs(store):
     state = _fake_state_with_release()
     run = store.create_run({"turn": 0}, {"runId": "r1"})
 
-    first = asyncio.run(advance_turn(
-        state_obj=state, store=store, run_id=run, rulebook="THE LAW",
-        dispatch=_silent, deadline_secs=0.01,
-    ))
+    first = asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="THE LAW",
+            dispatch=_silent,
+            deadline_secs=0.01,
+        )
+    )
     assert first.advanced is False and first.reason == "timeout"
     poisoned = next(iter(state.slots.values()))
     time.sleep(0.05)  # let the pending record age past the deadline
 
-    second = asyncio.run(advance_turn(
-        state_obj=state, store=store, run_id=run, rulebook="THE LAW",
-        dispatch=_silent, deadline_secs=0.01,
-    ))
+    second = asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="THE LAW",
+            dispatch=_silent,
+            deadline_secs=0.01,
+        )
+    )
     assert second.reason == "timeout"
     healed = next(iter(state.slots.values()))
     assert healed is not poisoned, "the poisoned conversation must be replaced"
@@ -540,18 +626,30 @@ def test_a_turn_with_tool_activity_is_never_healed(store):
     state = _fake_state_with_release()
     run = store.create_run({"turn": 0}, {"runId": "r1"})
 
-    asyncio.run(advance_turn(
-        state_obj=state, store=store, run_id=run, rulebook="r",
-        dispatch=_silent, deadline_secs=0.01,
-    ))
+    asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=_silent,
+            deadline_secs=0.01,
+        )
+    )
     original = next(iter(state.slots.values()))
     store.note_tool_call(run, "endless_read_runtime")
     time.sleep(0.05)
 
-    asyncio.run(advance_turn(
-        state_obj=state, store=store, run_id=run, rulebook="r",
-        dispatch=_silent, deadline_secs=0.01,
-    ))
+    asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=_silent,
+            deadline_secs=0.01,
+        )
+    )
     assert next(iter(state.slots.values())) is original
 
 
@@ -560,14 +658,20 @@ def test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop(store):
     run = store.create_run({"turn": 0}, {"runId": "r1"})
 
     def expire_once():
-        asyncio.run(advance_turn(
-            state_obj=state, store=store, run_id=run, rulebook="r",
-            dispatch=_silent, deadline_secs=0.01,
-        ))
+        asyncio.run(
+            advance_turn(
+                state_obj=state,
+                store=store,
+                run_id=run,
+                rulebook="r",
+                dispatch=_silent,
+                deadline_secs=0.01,
+            )
+        )
         time.sleep(0.05)
 
-    expire_once()                                   # poisoned dispatch
-    expire_once()                                   # heal #1: new slot
+    expire_once()  # poisoned dispatch
+    expire_once()  # heal #1: new slot
     second_slot = next(iter(state.slots.values()))
-    expire_once()                                   # would be heal #2: capped
+    expire_once()  # would be heal #2: capped
     assert next(iter(state.slots.values())) is second_slot

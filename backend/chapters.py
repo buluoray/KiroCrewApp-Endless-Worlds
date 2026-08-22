@@ -152,9 +152,7 @@ def read_chapter(template: Template, state: dict[str, Any], chapter_id: str) -> 
     return body
 
 
-def opened_since(
-    template: Template, before: dict[str, Any], after: dict[str, Any]
-) -> list[str]:
+def opened_since(template: Template, before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     """Chapter ids the world has just opened.
 
     The table of contents is static per world and costs real tokens — measured on the
@@ -167,8 +165,4 @@ def opened_since(
     something the narrator has already read, and pretending otherwise would be the
     app deciding what the narrator remembers.
     """
-    return [
-        c.id
-        for c in template.chapters
-        if c.available(after) and not c.available(before)
-    ]
+    return [c.id for c in template.chapters if c.available(after) and not c.available(before)]

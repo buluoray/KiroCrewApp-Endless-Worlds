@@ -31,9 +31,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -74,30 +75,14 @@ except Exception as exc:  # noqa: BLE001
     if not _IMPORT_ERROR:
         _IMPORT_ERROR = f"cannot import kiro_crew.apps.app_storage: {exc}"
 
-from scenes import (  # noqa: E402
-    SceneLedger,
-    SceneLedgerError,
-    slugify_scene_id,
-)
-from widget import scene_warnings  # noqa: E402
-from backdrop_timing import BackdropTimeline  # noqa: E402
+import memory_graph  # noqa: E402
 from backdrop import (  # noqa: E402
     BackdropDraftStore,
     BackdropError,
     BackdropStore,
     compile_backdrop,
 )
-from phototrace import (  # noqa: E402
-    TRACE_CANDIDATE_COUNT,
-    MissCache,
-    CandidateStore,
-    TraceStore,
-    build_underlay_fragment_bounded,
-    compose_with_underlay,
-    fetch_photo,
-    procedural_base_fragment,
-    search_candidates,
-)
+from backdrop_timing import BackdropTimeline  # noqa: E402
 from chapters import (  # noqa: E402
     ChapterError,
     brief,
@@ -105,16 +90,31 @@ from chapters import (  # noqa: E402
     opened_since,
     read_chapter,
 )
-from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
-import memory_graph  # noqa: E402
-from store import RunStore, StoreError, brief_lane  # noqa: E402
-from turn import declaration_shape  # noqa: E402
-from systems import apply_systems  # noqa: E402
-from view import always_panels_empty, shape_panels  # noqa: E402
-from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
-from compile import COMPILER_BRIEF, CLEANING_CONTRACT, accept_compiled_header, preview  # noqa: E402
+from compile import CLEANING_CONTRACT, COMPILER_BRIEF, accept_compiled_header, preview  # noqa: E402
 from drafts import DraftError, DraftStore  # noqa: E402
-
+from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
+from phototrace import (  # noqa: E402
+    TRACE_CANDIDATE_COUNT,
+    CandidateStore,
+    MissCache,
+    TraceStore,
+    build_underlay_fragment_bounded,
+    compose_with_underlay,
+    fetch_photo,
+    procedural_base_fragment,
+    search_candidates,
+)
+from scenes import (  # noqa: E402
+    SceneLedger,
+    SceneLedgerError,
+    slugify_scene_id,
+)
+from store import RunStore, StoreError, brief_lane  # noqa: E402
+from systems import apply_systems  # noqa: E402
+from turn import declaration_shape  # noqa: E402
+from view import always_panels_empty, shape_panels  # noqa: E402
+from widget import scene_warnings  # noqa: E402
+from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
 
 # ── errors ───────────────────────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ _TOOLS: list[dict[str, Any]] = [
             "a new event answers an old one, name the old event's canonical id in "
             "`echoes` — that is the only thing that makes the world's memory of it "
             "real. To open a NEW thread, list it under an event's `threads` with "
-            "effect \"opened\" — that declares it, no separate entity needed; only "
+            'effect "opened" — that declares it, no separate entity needed; only '
             "`advanced`/`resolved` need a thread opened before. Memory is REPAIRED, "
             "not rejected: a namespaced id, a synonym for a closed vocabulary, a "
             "reused key or a missing title are all read and fixed server-side, and "
@@ -334,7 +334,7 @@ _TOOLS: list[dict[str, Any]] = [
                     "type": "array",
                     "description": (
                         "Up to 12 objects, each naming what this turn credited: "
-                        '`field` (required, the state field that grew), `amount`, and '
+                        "`field` (required, the state field that grew), `amount`, and "
                         "`source` (where it came from — how the anti-halo reading is "
                         "made measurable). An entry naming no `field` is dropped."
                     ),
@@ -566,7 +566,9 @@ _TOOLS: list[dict[str, Any]] = [
                 "mobileFocalX": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "mobileFocalY": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "ramp": {
-                    "type": "array", "minItems": 3, "maxItems": 8,
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 8,
                     "items": {"type": "string", "pattern": "^#?[0-9a-fA-F]{6}$"},
                 },
             },
@@ -581,7 +583,7 @@ _TOOLS: list[dict[str, Any]] = [
             "the page's active underlay; the others are discarded. Only call this "
             "when endless_trace_reference returned `candidates` — a procedural "
             "`base` result is already active and needs no selection. After "
-            "selecting, place exactly one `<g id=\"etr-underlay\"/>` in each SVG."
+            'selecting, place exactly one `<g id="etr-underlay"/>` in each SVG.'
         ),
         "inputSchema": {
             "type": "object",
@@ -1012,11 +1014,7 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
         if not isinstance(c, dict):
             continue
         label = next(
-            (
-                c[k]
-                for k in _CHOICE_LABEL_ALIASES
-                if isinstance(c.get(k), str) and c[k].strip()
-            ),
+            (c[k] for k in _CHOICE_LABEL_ALIASES if isinstance(c.get(k), str) and c[k].strip()),
             None,
         )
         if label is None:
@@ -1106,14 +1104,10 @@ def _sanitize_read_runtime_args(args: dict[str, Any]) -> None:
             args["since"] = since[:64]
     if "memoryEvents" in args:
         v = args.get("memoryEvents")
-        args["memoryEvents"] = (
-            [str(e)[:96] for e in list(v)][:6] if isinstance(v, list) else []
-        )
+        args["memoryEvents"] = [str(e)[:96] for e in list(v)][:6] if isinstance(v, list) else []
     if "chapters" in args:
         v = args.get("chapters")
-        args["chapters"] = (
-            [str(c)[:64] for c in list(v)][:8] if isinstance(v, list) else []
-        )
+        args["chapters"] = [str(c)[:64] for c in list(v)][:8] if isinstance(v, list) else []
     if "includeProse" in args:
         args["includeProse"] = bool(args.get("includeProse"))
 
@@ -1125,7 +1119,16 @@ def _sanitize_read_runtime_args(args: dict[str, Any]) -> None:
 #: story — so a commit carries them forward instead of letting a full-state
 #: declaration drop them. Losing ``worldId`` this way made a life unreadable the
 #: moment its first turn landed: the play view could no longer find its world.
-RESERVED_STATE_KEYS = ("worldId", "style", "language", "opening", "status", "role", "granted", "milestones")
+RESERVED_STATE_KEYS = (
+    "worldId",
+    "style",
+    "language",
+    "opening",
+    "status",
+    "role",
+    "granted",
+    "milestones",
+)
 
 #: State keys that MERGE forward at the sub-key level instead of replacing wholesale.
 #: `digest` (world news by category) and `relations` (per-figure standing) are
@@ -1237,15 +1240,18 @@ def _resolve_handoff(template: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
     lore = [
         {"id": e.id, "name": e.name or e.id, "summary": e.summary, "text": e.text}
-        for e in template.lore if picked("lore", e.id)
+        for e in template.lore
+        if picked("lore", e.id)
     ]
     systems = [
         {"id": s.id, "kind": s.kind, "into": s.into}
-        for s in template.systems if picked("systems", s.id)
+        for s in template.systems
+        if picked("systems", s.id)
     ]
     roles = [
         {"id": r.id, "name": r.name or r.id, "summary": r.summary, "grants": r.grants}
-        for r in template.roles if picked("roles", r.id)
+        for r in template.roles
+        if picked("roles", r.id)
     ]
     if lore:
         out["lore"] = lore
@@ -1377,9 +1383,7 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # synthetic turn with no world cannot be judged for endings and is left alone.
     choices = _clean_choices(args.get("choices") or [])
     if not choices and pack is not None:
-        fired = any(
-            e.when is not None and e.when.evaluate(state) for e in pack.template.endings
-        )
+        fired = any(e.when is not None and e.when.evaluate(state) for e in pack.template.endings)
         if args.get("ending") is not True and not fired:
             sent = args.get("choices")
             # Name the TRUE failure. "No choices" when the narrator sent some is
@@ -1402,7 +1406,7 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                     "or carried along by events — still gets choices: offer what this "
                     "life leans into or takes from what happens around it, written in "
                     "the player's own voice (\"I reach toward the noise beyond the "
-                    "door\", \"I keep the name they gave me\"), not as a deliberate "
+                    'door", "I keep the name they gave me"), not as a deliberate '
                     "plan they are too young to make. If the life or world has ended, "
                     "pass `ending: true` (or declare state that fires a world ending) "
                     "— only a terminal turn may omit choices."
@@ -1750,7 +1754,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 opening_out: list[dict[str, Any]] = []
                 for g in pack.template.opening:
                     entry: dict[str, Any] = {
-                        "id": g.id, "label": g.label, "worldDecides": g.random,
+                        "id": g.id,
+                        "label": g.label,
+                        "worldDecides": g.random,
                     }
                     val = answers.get(g.id)
                     if isinstance(val, (str, int, float)) and str(val).strip():
@@ -1924,7 +1930,7 @@ def _require_scene_underlay(run_id: str, turn: int, request: dict[str, Any]) -> 
     raise BackdropError(
         "this brief declared LANE: scene, so the page must be built on a traced "
         "underlay: call endless_trace_reference first (then endless_select_reference "
-        "if it offers candidates) and put one <g id=\"etr-underlay\"/> in each SVG. "
+        'if it offers candidates) and put one <g id="etr-underlay"/> in each SVG. '
         "If the search finds nothing it hands you a procedural base, which also "
         "satisfies this — what is refused is skipping the lane silently."
     )
@@ -1961,7 +1967,7 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
     """
     reason = str(search.get("reason") or "")
     tail = (
-        " Put one <g id=\"etr-underlay\"/> in each SVG with no other marks and commit "
+        ' Put one <g id="etr-underlay"/> in each SVG with no other marks and commit '
         "that — the base alone is a finished backdrop. Add a few sparse marks only if "
         "they clearly help; never paint a full scene from scratch over it."
     )
@@ -1971,7 +1977,7 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
             "(only the narrow CC0/public-domain slice is searched, so many subjects "
             "have no usable photo even when the open web does). The procedural tonal "
             "base is NOT the finished image; it is a tonal GROUND. Put one "
-            "<g id=\"etr-underlay\"/> in each SVG for that ground, then author a real "
+            '<g id="etr-underlay"/> in each SVG for that ground, then author a real '
             "hand-drawn scene above it — architecture, light, and evidence composed "
             "with the same care as any scene, never a few bars over bare tone — and "
             "take it through the full review pass before committing. Do not settle "
@@ -2043,9 +2049,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     traced: list[dict[str, Any]] = []
     search_audit: dict[str, Any] = {"reason": "no-query", "matched": "", "attempts": []}
     if query:
-        candidates, search_audit = search_candidates(
-            query, lane, misses=MissCache(_DATA)
-        )
+        candidates, search_audit = search_candidates(query, lane, misses=MissCache(_DATA))
         # Candidates existed but the fetch/trace can transiently fail every one (a
         # network blip or a 429 on the image host). Retry the fetch pass a bounded
         # number of times with a short backoff — the search is not repeated — before
@@ -2056,19 +2060,28 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
                 try:
                     photo = fetch_photo(candidate["url"])
                     desktop = build_underlay_fragment_bounded(
-                        photo, view=(800, 600), ramp=ramp, opacity=opacity,
+                        photo,
+                        view=(800, 600),
+                        ramp=ramp,
+                        opacity=opacity,
                         focal=desktop_focal,
                     )
                     mobile = build_underlay_fragment_bounded(
-                        photo, view=(450, 900), ramp=ramp, opacity=opacity,
+                        photo,
+                        view=(450, 900),
+                        ramp=ramp,
+                        opacity=opacity,
                         focal=mobile_focal,
                     )
                 except BackdropError:
                     continue
-                traced.append({
-                    "desktop": desktop, "mobile": mobile,
-                    "source": {k: candidate[k] for k in ("title", "pageUrl", "license")},
-                })
+                traced.append(
+                    {
+                        "desktop": desktop,
+                        "mobile": mobile,
+                        "source": {k: candidate[k] for k in ("title", "pageUrl", "license")},
+                    }
+                )
                 if len(traced) >= TRACE_CANDIDATE_COUNT:
                     break
             if traced or fetch_attempt + 1 >= _FETCH_RETRY_ATTEMPTS:
@@ -2084,7 +2097,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         # Offer the choice: stash candidates and clear any stale active underlay so a
         # leftover from an earlier trace cannot be spliced before the Illustrator picks.
         _candidate_store(run_id).save(
-            turn=turn, query=query, candidates=traced, search=search_audit,
+            turn=turn,
+            query=query,
+            candidates=traced,
+            search=search_audit,
         )
         _trace_store(run_id).clear()
         options = [
@@ -2134,7 +2150,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             "turn": turn,
             "retry": retries + 1,
             "next": (
-                f'No attribution-free (CC0/public-domain) reference matched '
+                f"No attribution-free (CC0/public-domain) reference matched "
                 f'"{query}". Only the free-license slice is searched and it is '
                 "narrow, so a multi-word subject usually misses while a single "
                 "common noun hits. Call endless_trace_reference ONCE more with the "
@@ -2151,7 +2167,12 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
     _candidate_store(run_id).clear()
     fragment_id = _trace_store(run_id).save(
-        turn=turn, desktop=desktop, mobile=mobile, source=None, kind="base", query=query,
+        turn=turn,
+        desktop=desktop,
+        mobile=mobile,
+        source=None,
+        kind="base",
+        query=query,
         search=search_audit,
     )
     previews = _render_trace_previews(run_id, fragment_id, desktop, mobile)
@@ -2173,16 +2194,18 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
     candidates = _candidate_store(run_id).load(turn)
     if not candidates:
         raise BackdropError(
-            "no reference candidates are waiting for this page; call "
-            "endless_trace_reference first"
+            "no reference candidates are waiting for this page; call endless_trace_reference first"
         )
     options = candidates.get("candidates") or []
     if not 0 <= index < len(options):
         raise BackdropError(f"pick an index between 0 and {len(options) - 1}")
     chosen = options[index]
     fragment_id = _trace_store(run_id).save(
-        turn=turn, desktop=chosen["desktop"], mobile=chosen["mobile"],
-        source=chosen.get("source"), kind="reference",
+        turn=turn,
+        desktop=chosen["desktop"],
+        mobile=chosen["mobile"],
+        source=chosen.get("source"),
+        kind="reference",
         query=str(candidates.get("query") or ""),
         # Carried from the trace that produced these candidates, so the committed
         # receipt can name which ladder rung actually matched.
@@ -2195,7 +2218,7 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
         "source": chosen.get("source"),
         "next": (
             "the chosen reference is now the page's underlay. Put exactly one "
-            "<g id=\"etr-underlay\"/> in each SVG (above your sky, below every mark); "
+            '<g id="etr-underlay"/> in each SVG (above your sky, below every mark); '
             "the server splices it in at draft and commit."
         ),
     }
@@ -2266,7 +2289,10 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     version = _backdrop_store(run_id).set(
-        markup, args.get("buttons"), turn, mobile,
+        markup,
+        args.get("buttons"),
+        turn,
+        mobile,
         source=source if isinstance(source, dict) else None,
         trace=trace_audit,
     )
@@ -2340,12 +2366,8 @@ def commit_underlay_only(data_dir: Path, store: RunStore, run_id: str, turn: int
         "used": True,
         "serverFallback": True,
     }
-    markup = compose_with_underlay(
-        _UNDERLAY_ONLY_DESKTOP, desktop_frag, require_placeholder=True
-    )
-    mobile = compose_with_underlay(
-        _UNDERLAY_ONLY_MOBILE, mobile_frag, require_placeholder=True
-    )
+    markup = compose_with_underlay(_UNDERLAY_ONLY_DESKTOP, desktop_frag, require_placeholder=True)
+    mobile = compose_with_underlay(_UNDERLAY_ONLY_MOBILE, mobile_frag, require_placeholder=True)
     version = BackdropStore(data_dir, run_id).set(
         markup, None, turn, mobile, source=source, trace=trace_audit
     )
@@ -2371,9 +2393,7 @@ def _commit_fallback_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     store = _store()
     request = store.read_backdrop_request(run_id)
     if not (
-        request
-        and request.get("fallbackAllowed") is True
-        and int(request.get("turn") or 0) == turn
+        request and request.get("fallbackAllowed") is True and int(request.get("turn") or 0) == turn
     ):
         raise BackdropError(
             "direct narrator backdrop commit is available only for the page "
@@ -2541,14 +2561,16 @@ def _lenient_json_array(raw: str) -> list[Any] | None:
 #: The tools whose wall-clock is worth auditing — the backdrop pipeline. Every
 #: other tool (reads, advance_turn) is timed by the turn loop already; recording
 #: them here would only bury the backdrop steps the audit is about.
-_BACKDROP_TIMED_TOOLS = frozenset({
-    "endless_paint_backdrop",
-    "endless_trace_reference",
-    "endless_select_reference",
-    "endless_submit_backdrop_draft",
-    "endless_commit_backdrop",
-    "endless_commit_fallback_backdrop",
-})
+_BACKDROP_TIMED_TOOLS = frozenset(
+    {
+        "endless_paint_backdrop",
+        "endless_trace_reference",
+        "endless_select_reference",
+        "endless_submit_backdrop_draft",
+        "endless_commit_backdrop",
+        "endless_commit_fallback_backdrop",
+    }
+)
 
 
 def _record_backdrop_timing(run_id: Any, name: str, args: dict[str, Any], t0: float) -> None:
@@ -2562,8 +2584,10 @@ def _record_backdrop_timing(run_id: Any, name: str, args: dict[str, Any], t0: fl
         return
     try:
         raw_turn = args.get("turn")
-        turn = int(raw_turn) if raw_turn is not None else int(
-            _store().read_state(run_id).get("turn") or 0
+        turn = (
+            int(raw_turn)
+            if raw_turn is not None
+            else int(_store().read_state(run_id).get("turn") or 0)
         )
         BackdropTimeline(_DATA, run_id).mark(
             turn, f"tool:{name}", serverMs=int((time.monotonic() - t0) * 1000)
@@ -2664,9 +2688,7 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
         )
     except (StoreError, WorldError, SceneLedgerError, BackdropError, DraftError) as exc:
         _record_backdrop_timing(run_id, name, args, _timer_start)
-        return json.dumps(
-            {"ok": False, "error": str(exc), "applied": False}, ensure_ascii=False
-        )
+        return json.dumps({"ok": False, "error": str(exc), "applied": False}, ensure_ascii=False)
     _record_backdrop_timing(run_id, name, args, _timer_start)
     return json.dumps({"ok": True, **result}, ensure_ascii=False)
 

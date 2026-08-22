@@ -131,10 +131,9 @@ def test_return_recap_uses_recent_unique_facts_without_generating_copy(tpl) -> N
         "choices": ["Stay", "Go"],
     }
 
+
 def test_a_declared_ending_wins_over_the_bare_flag(tpl):
-    v = build_play_view(
-        tpl, {"turn": 9, "ended": True, "world": {"epochClosed": True}}
-    )
+    v = build_play_view(tpl, {"turn": 9, "ended": True, "world": {"epochClosed": True}})
     assert v["endingId"] == "world-epoch-closed"
 
 
@@ -200,8 +199,7 @@ def test_no_shaping_branches_on_a_field_id():
             continue
         # Only comparisons against a string literal can encode a world's vocabulary.
         against_text = any(
-            isinstance(c, ast.Constant) and isinstance(c.value, str)
-            for c in node.comparators
+            isinstance(c, ast.Constant) and isinstance(c.value, str) for c in node.comparators
         )
         if against_text and isinstance(node.left, ast.Name):
             compared.add(node.left.id)
@@ -244,9 +242,7 @@ def test_people_and_threads_accept_a_bare_string_or_a_list():
     one = view_mod._shape("people", "父亲")
     assert one["entries"] == [{"name": "父亲", "note": ""}]
     many = view_mod._shape("people", [{"name": "母亲", "note": "病重"}, "邻居"])
-    assert many["entries"] == [
-        {"name": "母亲", "note": "病重"}, {"name": "邻居", "note": ""}
-    ]
+    assert many["entries"] == [{"name": "母亲", "note": "病重"}, {"name": "邻居", "note": ""}]
     assert view_mod._shape("threads", ["父亲的债"])["entries"][0]["text"] == "父亲的债"
 
 
@@ -256,10 +252,10 @@ def test_an_inventory_drops_empty_entries():
 
 
 def test_an_inventory_keeps_count_and_note():
-    """"三瓶药水" must not shape down to the same chip as "一瓶"."""
-    items = view_mod._shape(
-        "inventory", [{"name": "药水", "count": 3, "note": "治疗"}, "剑"]
-    )["items"]
+    """ "三瓶药水" must not shape down to the same chip as "一瓶"."""
+    items = view_mod._shape("inventory", [{"name": "药水", "count": 3, "note": "治疗"}, "剑"])[
+        "items"
+    ]
     assert items[0] == {"name": "药水", "count": "3", "note": "治疗"}
     assert items[1] == {"name": "剑"}
 
@@ -368,9 +364,7 @@ def test_empty_prose_is_empty():
 
 
 def test_the_view_strips_framing_from_what_the_narrator_wrote(tpl):
-    v = build_play_view(
-        tpl, {"turn": 2}, chronicle=[{"turn": 2, "prose": "═══════\n下雪了。"}]
-    )
+    v = build_play_view(tpl, {"turn": 2}, chronicle=[{"turn": 2, "prose": "═══════\n下雪了。"}])
     assert v["prose"] == "下雪了。"
 
 
@@ -379,7 +373,8 @@ def test_the_view_strips_framing_from_what_the_narrator_wrote(tpl):
 
 def test_choices_come_from_the_turn_that_was_committed(tpl):
     v = build_play_view(
-        tpl, {"turn": 2},
+        tpl,
+        {"turn": 2},
         chronicle=[{"turn": 2, "prose": "p", "choices": [{"id": "a", "label": "走"}]}],
     )
     assert v["choices"] == [{"id": "a", "label": "走"}]

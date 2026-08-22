@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from aiohttp import web
-
 from kiro_crew.apps.context import AppContext
 from kiro_crew.apps.route_registry import AppRoute
 
@@ -144,8 +143,11 @@ def _drop_stale_siblings(modules: dict[str, Any] | None = None) -> None:
 
 _drop_stale_siblings()
 
+from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
+from backdrop_timing import BackdropTimeline  # noqa: E402
 from chapters import brief as world_brief  # noqa: E402
 from chapters import opened_since  # noqa: E402
+from drafts import DraftError, DraftStore, worldsmith_prompt  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
 from memory_routes import memory_routes  # noqa: E402
 from narrator import (  # noqa: E402
@@ -156,22 +158,19 @@ from narrator import (  # noqa: E402
     release_worldsmith_slot,
     worldsmith_slot_key,
 )
-from drafts import DraftError, DraftStore, worldsmith_prompt  # noqa: E402
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
-from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
+from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
 from store import CorruptRunState, RunStore, StoreError  # noqa: E402
 from turn import (  # noqa: E402
+    OPENING_DEADLINE_SECS,
     advance_turn,
     already_committed,
     declaration_shape,
     generating,
     make_dispatcher,
-    OPENING_DEADLINE_SECS,
 )
 from view import build_play_view, resolve_ending, world_detail  # noqa: E402
-from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
-from backdrop_timing import BackdropTimeline  # noqa: E402
 from widget import CSP, SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
@@ -233,7 +232,11 @@ def _backdrop_is_pending(
 
 
 async def _wait_for_backdrop(
-    ctx: AppContext, store: RunStore, run_id: str, turn: int, spawn_id: str,
+    ctx: AppContext,
+    store: RunStore,
+    run_id: str,
+    turn: int,
+    spawn_id: str,
     deadline_secs: float = _BACKDROP_ATTEMPT_SECS,
 ) -> bool:
     """Wait for exact page art, or until this illustrator has ended."""
@@ -354,7 +357,9 @@ async def _recover_backdrop(
             except Exception as exc:  # noqa: BLE001 — fall through to narrator
                 logger.warning(
                     "endless-worlds: server underlay fallback failed for %s/%s: %s",
-                    run_id, turn, exc,
+                    run_id,
+                    turn,
+                    exc,
                 )
 
             # No traced underlay to publish (a motif page, or the illustrator never
@@ -366,16 +371,16 @@ async def _recover_backdrop(
                 # Budget spent: stop re-dispatching. The request stays for a
                 # possible late commit, and staleness releases the page.
                 logger.warning(
-                    "endless-worlds: backdrop recovery for %s/%s stopped after "
-                    "%s narrator cycles",
+                    "endless-worlds: backdrop recovery for %s/%s stopped after %s narrator cycles",
                     run_id,
                     turn,
                     _BACKDROP_NARRATOR_CYCLES,
                 )
                 return
-            request = store.update_backdrop_request(
-                run_id, fallbackAllowed=True, narratorNotified=True
-            ) or request
+            request = (
+                store.update_backdrop_request(run_id, fallbackAllowed=True, narratorNotified=True)
+                or request
+            )
             marker = float(request.get("askedAt") or 0.0)
             slot, _fresh = ensure_narrator_slot_ex(
                 state_obj,
@@ -420,9 +425,7 @@ async def _recover_backdrop(
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — GET can resume the durable request
-        logger.exception(
-            "endless-worlds: backdrop recovery paused for run %s: %s", run_id, exc
-        )
+        logger.exception("endless-worlds: backdrop recovery paused for run %s: %s", run_id, exc)
 
 
 def _ensure_backdrop_recovery(
@@ -456,6 +459,7 @@ def _ensure_backdrop_recovery(
             _BACKDROP_RECOVERY_TASKS.pop(run_id, None)
 
     task.add_done_callback(_forget)
+
 
 #: Seeds ship in the install tree, one level up from backend/.
 _SEEDS_DIR = _HERE.parent / "seeds"
@@ -574,9 +578,12 @@ async def put_settings(request: web.Request, ctx: AppContext) -> web.Response:
         body = {}
     if not isinstance(body, dict):
         return web.json_response({"error": "expected an object"}, status=400)
-    model = body.get("model") if isinstance(body.get("model"), str) else ""
-    effort = body.get("reasoningEffort") if isinstance(body.get("reasoningEffort"), str) else ""
-    painter = body.get("painterModel") if isinstance(body.get("painterModel"), str) else ""
+    raw_model = body.get("model")
+    model = raw_model if isinstance(raw_model, str) else ""
+    raw_effort = body.get("reasoningEffort")
+    effort = raw_effort if isinstance(raw_effort, str) else ""
+    raw_painter = body.get("painterModel")
+    painter = raw_painter if isinstance(raw_painter, str) else ""
     if effort not in REASONING_EFFORTS:
         return web.json_response(
             {"field": "reasoningEffort", "expected": "a known effort level or empty"},
@@ -631,19 +638,21 @@ async def list_worlds(request: web.Request, ctx: AppContext) -> web.Response:
             status=500,
         )
 
-    return web.json_response({
-        "worlds": library.list_worlds(request.query.get("language") or None),
-        "seeds": {
-            "installed": seeds.installed,
-            "alreadyPresent": seeds.already_present,
-            "newerAvailable": seeds.newer_seed_available,
-            "failed": seeds.failed,
-            # Reported rather than silently omitted: a removed seed-backed world is
-            # gone AND recoverable, and the shelf is the only place that can offer
-            # the way back.
-            "removed": seeds.removed,
-        },
-    })
+    return web.json_response(
+        {
+            "worlds": library.list_worlds(request.query.get("language") or None),
+            "seeds": {
+                "installed": seeds.installed,
+                "alreadyPresent": seeds.already_present,
+                "newerAvailable": seeds.newer_seed_available,
+                "failed": seeds.failed,
+                # Reported rather than silently omitted: a removed seed-backed world is
+                # gone AND recoverable, and the shelf is the only place that can offer
+                # the way back.
+                "removed": seeds.removed,
+            },
+        }
+    )
 
 
 async def get_world(request: web.Request, ctx: AppContext) -> web.Response:
@@ -716,9 +725,7 @@ def lives_claiming(
     return out
 
 
-def _deletion_facts(
-    ctx: AppContext, world_id: str, gateway_state: Any = None
-) -> dict[str, Any]:
+def _deletion_facts(ctx: AppContext, world_id: str, gateway_state: Any = None) -> dict[str, Any]:
     """What the confirmation must be able to say, gathered once.
 
     The dialog is not allowed to guess any of this. A confirmation that does not
@@ -890,16 +897,21 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
         library.remove(world_id)
     except (LibraryError, OSError) as exc:
         return web.json_response(
-            {"error": "the world's file could not be removed", "detail": str(exc),
-             "livesRemoved": removed},
+            {
+                "error": "the world's file could not be removed",
+                "detail": str(exc),
+                "livesRemoved": removed,
+            },
             status=500,
         )
 
-    return web.json_response({
-        "worldId": world_id,
-        "livesRemoved": removed,
-        "restorable": facts["restorable"],
-    })
+    return web.json_response(
+        {
+            "worldId": world_id,
+            "livesRemoved": removed,
+            "restorable": facts["restorable"],
+        }
+    )
 
 
 async def restore_world(request: web.Request, ctx: AppContext) -> web.Response:
@@ -918,8 +930,7 @@ async def restore_world(request: web.Request, ctx: AppContext) -> web.Response:
     try:
         if not library.seed_path_for(world_id).is_file():
             return web.json_response(
-                {"error": "no seed to restore this world from",
-                 "code": "not_restorable"},
+                {"error": "no seed to restore this world from", "code": "not_restorable"},
                 status=409,
             )
         library.restore(world_id)
@@ -933,9 +944,7 @@ async def restore_world(request: web.Request, ctx: AppContext) -> web.Response:
     return web.json_response({"worldId": world_id, "restored": True})
 
 
-def _life_deletion_facts(
-    ctx: AppContext, run_id: str, gateway_state: Any = None
-) -> dict[str, Any]:
+def _life_deletion_facts(ctx: AppContext, run_id: str, gateway_state: Any = None) -> dict[str, Any]:
     """What ending ONE life would cost, gathered once.
 
     An unreadable life still answers here. It is the one that most needs to be
@@ -1090,7 +1099,7 @@ async def set_life_meta(request: web.Request, ctx: AppContext) -> web.Response:
         label = body.get("label")
         if not isinstance(label, str):
             return web.json_response(
-                {"field": "label", "expected": "a name, or \"\" to clear it"}, status=400
+                {"field": "label", "expected": 'a name, or "" to clear it'}, status=400
             )
         changes["label"] = label.strip()[:LIFE_LABEL_MAX]
     if "archived" in body:
@@ -1150,18 +1159,25 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
     if _backdrop_is_pending(ctx, store, run_id, run_state):
         _cfg = read_settings(ctx.data_dir)
         _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)
-        return web.json_response({
-            "advanced": False,
-            "turn": int(run_state.get("turn") or 0),
-            "reason": "generating",
-        })
+        return web.json_response(
+            {
+                "advanced": False,
+                "turn": int(run_state.get("turn") or 0),
+                "reason": "generating",
+            }
+        )
 
     if isinstance(wanted, int) and not isinstance(wanted, bool):
         done = already_committed(store, run_id, wanted)
         if done is not None:
             return web.json_response(
-                {"advanced": False, "turn": wanted, "reason": "already",
-                 "prose": done.get("prose", ""), "choices": done.get("choices") or []}
+                {
+                    "advanced": False,
+                    "turn": wanted,
+                    "reason": "already",
+                    "prose": done.get("prose", ""),
+                    "choices": done.get("choices") or [],
+                }
             )
 
     world_id = run_state.get("worldId")
@@ -1180,13 +1196,15 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
     # the same terminal page instead of quietly resurrecting the life.
     ending_id = resolve_ending(pack.template, run_state)
     if ending_id:
-        return web.json_response({
-            "advanced": False,
-            "turn": int(run_state.get("turn") or 0),
-            "reason": "ended",
-            "endingId": ending_id,
-            "state": run_state,
-        })
+        return web.json_response(
+            {
+                "advanced": False,
+                "turn": int(run_state.get("turn") or 0),
+                "reason": "ended",
+                "endingId": ending_id,
+                "state": run_state,
+            }
+        )
 
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 
@@ -1217,20 +1235,22 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         if withheld
         else store.read_state(run_id)
     )
-    return web.json_response({
-        # `advanced` remains true so the initiating client clears its submitted
-        # action; the page bytes themselves remain withheld until GET publishes.
-        "advanced": outcome.advanced,
-        "turn": outcome.turn,
-        "reason": outcome.reason,
-        "prose": "" if withheld else outcome.prose,
-        "state": visible_state,
-        "scenes": (
-            SceneLedger(ctx.data_dir, run_id).mounted()
-            if outcome.advanced and not withheld
-            else []
-        ),
-    })
+    return web.json_response(
+        {
+            # `advanced` remains true so the initiating client clears its submitted
+            # action; the page bytes themselves remain withheld until GET publishes.
+            "advanced": outcome.advanced,
+            "turn": outcome.turn,
+            "reason": outcome.reason,
+            "prose": "" if withheld else outcome.prose,
+            "state": visible_state,
+            "scenes": (
+                SceneLedger(ctx.data_dir, run_id).mounted()
+                if outcome.advanced and not withheld
+                else []
+            ),
+        }
+    )
 
 
 async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
@@ -1258,9 +1278,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
         # Silently coercing this to {} turned "the player chose" into "the world
         # decides everything" with no signal — the one drop the fail-soft rule
         # says must be loud, because it is the player's own input.
-        return web.json_response(
-            {"field": "answers", "expected": "an object"}, status=422
-        )
+        return web.json_response({"field": "answers", "expected": "an object"}, status=422)
     answers = raw_answers if isinstance(raw_answers, dict) else {}
     style = str(body.get("style") or "")
     role = str(body.get("role") or "")
@@ -1283,10 +1301,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
         if not answers:
             src_opening = src.get("opening")
             if isinstance(src_opening, dict):
-                answers = {
-                    k: v for k, v in src_opening.items()
-                    if isinstance(v, str) and v.strip()
-                }
+                answers = {k: v for k, v in src_opening.items() if isinstance(v, str) and v.strip()}
         if not style:
             style = str(src.get("style") or "")
         if not role:
@@ -1319,9 +1334,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
     try:
         state = build_initial_state(pack.template, answers, style=style, role=role)
     except OpeningError as exc:
-        return web.json_response(
-            {"field": exc.field, "expected": exc.expected}, status=400
-        )
+        return web.json_response({"field": exc.field, "expected": exc.expected}, status=400)
 
     # The legacy bridge (design §9): carry a finished life's chosen inheritance
     # into this one. Validated BEFORE the run exists, so a refused bridge
@@ -1337,8 +1350,11 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
 
         if not pack.template.lineage:
             return web.json_response(
-                {"field": "legacy", "expected": "a world that declares lineage",
-                 "code": "world_without_lineage"},
+                {
+                    "field": "legacy",
+                    "expected": "a world that declares lineage",
+                    "code": "world_without_lineage",
+                },
                 status=422,
             )
         src_run = str(legacy_body.get("fromRunId") or "")
@@ -1354,9 +1370,11 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
             # ending (state.alive == false) carries no narrator flag, and both
             # lives share one world, so the already-loaded pack judges it.
             return web.json_response(
-                {"field": "legacy.fromRunId",
-                 "expected": "a finished life — inheritance is settled at the ending",
-                 "code": "not_ended"},
+                {
+                    "field": "legacy.fromRunId",
+                    "expected": "a finished life — inheritance is settled at the ending",
+                    "code": "not_ended",
+                },
                 status=409,
             )
         if src_state.get("worldId") != world_id:
@@ -1391,8 +1409,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
         # every narrated turn uses, so the graph stays rebuildable from the
         # chronicle alone and dies with the run directory (§9 + Phase 0).
         store.append_turn(run_id, bridge_entry)
-    return web.json_response({"runId": run_id, "state": store.read_state(run_id)},
-                             status=201)
+    return web.json_response({"runId": run_id, "state": store.read_state(run_id)}, status=201)
 
 
 async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
@@ -1425,11 +1442,15 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
             (e for e in reversed(chronicle) if int(e.get("turn") or 0) == wanted),
             {},
         )
-        return web.json_response({
-            "advanced": False, "reason": "already", "turn": wanted,
-            "prose": entry.get("prose", ""),
-            "state": run_state,
-        })
+        return web.json_response(
+            {
+                "advanced": False,
+                "reason": "already",
+                "turn": wanted,
+                "prose": entry.get("prose", ""),
+                "state": run_state,
+            }
+        )
 
     world_id = run_state.get("worldId")
     if not isinstance(world_id, str) or not world_id:
@@ -1466,16 +1487,18 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         if withheld
         else store.read_state(run_id)
     )
-    return web.json_response({
-        "advanced": outcome.advanced,
-        "turn": outcome.turn,
-        "reason": outcome.reason,
-        "prose": "" if withheld else outcome.prose,
-        "state": visible_state,
-        # A failed opening leaves the run retryable rather than half-created.
-        "retryable": not outcome.advanced,
-        "generating": outcome.reason in ("generating", "timeout"),
-    })
+    return web.json_response(
+        {
+            "advanced": outcome.advanced,
+            "turn": outcome.turn,
+            "reason": outcome.reason,
+            "prose": "" if withheld else outcome.prose,
+            "state": visible_state,
+            # A failed opening leaves the run retryable rather than half-created.
+            "retryable": not outcome.advanced,
+            "generating": outcome.reason in ("generating", "timeout"),
+        }
+    )
 
 
 def life_subtitle(state: dict[str, Any]) -> str:
@@ -1544,9 +1567,7 @@ async def list_runs(request: web.Request, ctx: AppContext) -> web.Response:
             rows.append(live)
             continue
         live["turn"] = int(state.get("turn") or 0)
-        live["awaitingOpening"] = (
-            state.get("status") == "awaiting-opening" and live["turn"] == 0
-        )
+        live["awaitingOpening"] = state.get("status") == "awaiting-opening" and live["turn"] == 0
         live["ended"] = bool(state.get("ended"))
         live["subtitle"] = life_subtitle(state)
         rows.append(live)
@@ -1720,16 +1741,18 @@ async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
         return web.json_response({"error": "no such scene"}, status=404)
     try:
         html_text, cached = compile_cached(
-            ctx.data_dir, run_id, scene_id, spec, state,
+            ctx.data_dir,
+            run_id,
+            scene_id,
+            spec,
+            state,
             bound_slice=bound_values(spec, state),
             nonce=nonce,
         )
     except SceneSpecError as exc:
         # Named field, no partial mount: the page shows nothing rather than half
         # a scene, and the narrator is told which field to fix on its next turn.
-        return web.json_response(
-            {"field": exc.field, "expected": exc.expected}, status=422
-        )
+        return web.json_response({"field": exc.field, "expected": exc.expected}, status=422)
 
     return web.Response(
         text=html_text,
@@ -1860,9 +1883,7 @@ async def answer_scene(request: web.Request, ctx: AppContext) -> web.Response:
     except SceneLedgerError as exc:
         return web.json_response({"accepted": False, "reason": str(exc)}, status=422)
     if scene_id not in mounted:
-        return web.json_response(
-            {"accepted": False, "reason": "no such scene"}, status=404
-        )
+        return web.json_response({"accepted": False, "reason": "no such scene"}, status=404)
 
     nonce = body.get("nonce")
     if not isinstance(nonce, str) or not nonce:
@@ -1920,10 +1941,7 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
     entries = store.read_chronicle(run_id)
     if _backdrop_is_pending(ctx, store, run_id):
         visible_turn = max(0, int(store.read_state(run_id).get("turn") or 0) - 1)
-        entries = [
-            e for e in entries
-            if int(e.get("turn") or 0) <= visible_turn
-        ]
+        entries = [e for e in entries if int(e.get("turn") or 0) <= visible_turn]
     # Turn 0 is the app's own record (the legacy bridge, design §9), not a page
     # of the story: it has no prose and nobody lived it. The star map still
     # shows the inheritance — through the graph, where it belongs.
@@ -1934,13 +1952,17 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
     # over prose, the player's action, and the marked events.
     q = request.query.get("q", "").strip().lower()
     if q:
+
         def _hit(e: dict[str, Any]) -> bool:
-            hay = " ".join([
-                str(e.get("prose") or ""),
-                str(e.get("action") or ""),
-                " ".join(str(x) for x in (e.get("events") or [])),
-            ]).lower()
+            hay = " ".join(
+                [
+                    str(e.get("prose") or ""),
+                    str(e.get("action") or ""),
+                    " ".join(str(x) for x in (e.get("events") or [])),
+                ]
+            ).lower()
             return q in hay
+
         entries = [e for e in entries if _hit(e)]
 
     # `before` is a turn NUMBER, not an offset: an offset would shift under a turn
@@ -1968,57 +1990,57 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
             else None
         )
 
-    return web.json_response({
-        "runId": run_id,
-        "turns": [
-            {
-                "turn": int(e.get("turn") or 0),
-                "prose": str(e.get("prose") or ""),
-                # What the player chose, so a re-read shows the fork and not only
-                # the outcome. Absent on turns nobody chose from.
-                "action": str(e.get("action") or ""),
-                # What the month marked notable, and what it credited a gain to.
-                # Already stored on every turn (they drive the anti-halo readings);
-                # surfaced here so the player can read a life as a timeline of events
-                # rather than only as pages of prose.
-                "events": [
-                    str(x) for x in (e.get("events") or [])
-                    if isinstance(x, str) and x.strip()
-                ][:12],
-                # The standing that month ended on, snapshotted at commit, so a page
-                # being re-read shows its own situation. Omitted on turns committed
-                # before this was recorded — the page falls back to the live panels
-                # rather than showing an empty frame.
-                **(
-                    {"digest": e["digest"]}
-                    if isinstance(e.get("digest"), list) and e["digest"]
-                    else {}
-                ),
-                **(
-                    {"panels": e["panels"]}
-                    if isinstance(e.get("panels"), list) and e["panels"]
-                    else {}
-                ),
-                "gains": [
-                    {
-                        "field": str(g.get("field") or ""),
-                        "amount": str(g.get("amount") or ""),
-                        "source": str(g.get("source") or ""),
-                    }
-                    for g in (e.get("gains") or [])
-                    if isinstance(g, dict) and g.get("field")
-                ][:12],
-                # The scene this page had, so the history reader can restore it.
-                "backdrop": _bd(int(e.get("turn") or 0)),
-            }
-            for e in page
-        ],
-        # Whether reading further back is possible, so the UI offers "more" only
-        # when there is more rather than on every page.
-        "more": bool(page) and any(
-            int(e.get("turn") or 0) < int(page[-1].get("turn") or 0) for e in entries
-        ),
-    })
+    return web.json_response(
+        {
+            "runId": run_id,
+            "turns": [
+                {
+                    "turn": int(e.get("turn") or 0),
+                    "prose": str(e.get("prose") or ""),
+                    # What the player chose, so a re-read shows the fork and not only
+                    # the outcome. Absent on turns nobody chose from.
+                    "action": str(e.get("action") or ""),
+                    # What the month marked notable, and what it credited a gain to.
+                    # Already stored on every turn (they drive the anti-halo readings);
+                    # surfaced here so the player can read a life as a timeline of events
+                    # rather than only as pages of prose.
+                    "events": [
+                        str(x) for x in (e.get("events") or []) if isinstance(x, str) and x.strip()
+                    ][:12],
+                    # The standing that month ended on, snapshotted at commit, so a page
+                    # being re-read shows its own situation. Omitted on turns committed
+                    # before this was recorded — the page falls back to the live panels
+                    # rather than showing an empty frame.
+                    **(
+                        {"digest": e["digest"]}
+                        if isinstance(e.get("digest"), list) and e["digest"]
+                        else {}
+                    ),
+                    **(
+                        {"panels": e["panels"]}
+                        if isinstance(e.get("panels"), list) and e["panels"]
+                        else {}
+                    ),
+                    "gains": [
+                        {
+                            "field": str(g.get("field") or ""),
+                            "amount": str(g.get("amount") or ""),
+                            "source": str(g.get("source") or ""),
+                        }
+                        for g in (e.get("gains") or [])
+                        if isinstance(g, dict) and g.get("field")
+                    ][:12],
+                    # The scene this page had, so the history reader can restore it.
+                    "backdrop": _bd(int(e.get("turn") or 0)),
+                }
+                for e in page
+            ],
+            # Whether reading further back is possible, so the UI offers "more" only
+            # when there is more rather than on every page.
+            "more": bool(page)
+            and any(int(e.get("turn") or 0) < int(page[-1].get("turn") or 0) for e in entries),
+        }
+    )
 
 
 #: How many months one read of the chronicle returns. Enough to re-read the recent
@@ -2060,7 +2082,7 @@ def _retitle(world_text: str, title: str) -> str:
     if not isinstance(header, dict):
         return world_text
     header["title"] = title
-    prose = world_text[end + len(marker):]
+    prose = world_text[end + len(marker) :]
     return f"---\n{json.dumps(header, ensure_ascii=False, indent=2)}\n---\n{prose}"
 
 
@@ -2155,21 +2177,23 @@ async def get_world_draft(request: web.Request, ctx: AppContext) -> web.Response
         slot_key = worldsmith_slot_key(draft_id)
     except Exception:  # noqa: BLE001
         slot_key = ""
-    return web.json_response({
-        "draftId": record.get("draftId", draft_id),
-        "title": record.get("title") or "",
-        "status": record.get("status", "new"),
-        "steps": int(record.get("steps") or 0),
-        "stage": record.get("stage") or "",
-        "lastTool": record.get("lastTool") or "",
-        "problem": record.get("problem") or "",
-        "field": record.get("field") or "",
-        "worldId": record.get("worldId") or "",
-        "preview": record.get("preview") or None,
-        "warnings": record.get("warnings") or [],
-        "dropped": record.get("dropped") or [],
-        "slotKey": slot_key,
-    })
+    return web.json_response(
+        {
+            "draftId": record.get("draftId", draft_id),
+            "title": record.get("title") or "",
+            "status": record.get("status", "new"),
+            "steps": int(record.get("steps") or 0),
+            "stage": record.get("stage") or "",
+            "lastTool": record.get("lastTool") or "",
+            "problem": record.get("problem") or "",
+            "field": record.get("field") or "",
+            "worldId": record.get("worldId") or "",
+            "preview": record.get("preview") or None,
+            "warnings": record.get("warnings") or [],
+            "dropped": record.get("dropped") or [],
+            "slotKey": slot_key,
+        }
+    )
 
 
 async def install_world_draft(request: web.Request, ctx: AppContext) -> web.Response:
@@ -2249,7 +2273,8 @@ def _absolutized_mcp_spec(data: dict, backend_dir: Path) -> dict | None:
         return None
     want_script = str(backend_dir / "mcp_server.py")
     want_pythonpath = str(backend_dir)
-    env = srv.get("env") if isinstance(srv.get("env"), dict) else {}
+    raw_env = srv.get("env")
+    env = raw_env if isinstance(raw_env, dict) else {}
     if srv.get("args") == [want_script] and env.get("PYTHONPATH") == want_pythonpath:
         return None  # already absolute and correct for this install
     new_srv = {**srv, "args": [want_script], "env": {**env, "PYTHONPATH": want_pythonpath}}
@@ -2320,9 +2345,7 @@ async def backdrop_timeline(request: web.Request, ctx: AppContext) -> web.Respon
 
     events = BackdropTimeline(ctx.data_dir, run_id).read(turn)
     gaps = [
-        (int(e["gapMs"]), str(e.get("step") or ""))
-        for e in events
-        if e.get("gapMs") is not None
+        (int(e["gapMs"]), str(e.get("step") or "")) for e in events if e.get("gapMs") is not None
     ]
     slowest_gap_ms, slowest_gap_before = max(gaps, default=(0, ""))
     server_steps = {
@@ -2332,23 +2355,23 @@ async def backdrop_timeline(request: web.Request, ctx: AppContext) -> web.Respon
     }
     slowest_server = max(server_steps.items(), key=lambda kv: kv[1], default=("", 0))
     total_ms = (
-        int((float(events[-1]["at"]) - float(events[0]["at"])) * 1000)
-        if len(events) >= 2
-        else 0
+        int((float(events[-1]["at"]) - float(events[0]["at"])) * 1000) if len(events) >= 2 else 0
     )
-    return web.json_response({
-        "turn": turn,
-        "events": events,
-        "summary": {
-            "totalMs": total_ms,
-            # The step that FOLLOWED the longest wait — i.e. what the model spent
-            # the most time thinking/generating before doing.
-            "slowestGapMs": slowest_gap_ms,
-            "slowestGapBefore": slowest_gap_before,
-            "slowestServerStep": slowest_server[0],
-            "slowestServerMs": slowest_server[1],
-        },
-    })
+    return web.json_response(
+        {
+            "turn": turn,
+            "events": events,
+            "summary": {
+                "totalMs": total_ms,
+                # The step that FOLLOWED the longest wait — i.e. what the model spent
+                # the most time thinking/generating before doing.
+                "slowestGapMs": slowest_gap_ms,
+                "slowestGapBefore": slowest_gap_before,
+                "slowestServerStep": slowest_server[0],
+                "slowestServerMs": slowest_server[1],
+            },
+        }
+    )
 
 
 def register_routes(ctx: AppContext) -> list[AppRoute]:
@@ -2387,9 +2410,7 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
             handler=answer_scene,
         ),
         AppRoute(method="POST", path="/runs/{run_id}/open", handler=open_run),
-        AppRoute(
-            method="GET", path="/runs/{run_id}/chronicle", handler=get_chronicle
-        ),
+        AppRoute(method="GET", path="/runs/{run_id}/chronicle", handler=get_chronicle),
         AppRoute(method="POST", path="/runs/{run_id}/turn", handler=advance_run_turn),
         # World drafts: paste raw text → background worldsmith cleans+compiles →
         # review → install. Mirrors the life-creation job (create, then a separate

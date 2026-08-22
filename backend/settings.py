@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 #: The reasoning-effort levels the narrator may run at. Mirrors core's
 #: ``kiro_crew.effort.EFFORT_LEVELS`` plus "" for "the model's default". Kept as a
@@ -26,7 +27,7 @@ def _path(data_dir: Path) -> Path:
     return data_dir / "settings.json"
 
 
-def read_settings(data_dir: Path) -> dict[str, str]:
+def read_settings(data_dir: Path) -> dict[str, Any]:
     """The saved settings, or the empty defaults. A damaged file reads as default
     rather than raising — a preference is never worth failing a page over."""
     try:

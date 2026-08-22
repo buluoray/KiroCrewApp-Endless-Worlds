@@ -1,0 +1,61 @@
+# Backend lint + type config for the Endless Worlds app.
+#
+# This is a deliberately conservative gate: a small, high-signal rule set that
+# the whole backend passes today, meant to widen over time — not maximal
+# strictness on day one. CI (.github/workflows/ci.yml) runs:
+#   ruff check backend
+#   ruff format --check backend
+#   mypy backend
+# Keep it green; broaden `select`/`strict` only once a wider set stays green.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# tests/ are linted too — they are backend code and benefit from the same
+# import-order and pyflakes checks. Nothing below is test-hostile.
+
+[tool.ruff.lint]
+# E,F  — pycodestyle errors + pyflakes (real bugs: undefined names, unused imports)
+# I    — import sorting (isort)
+# UP   — pyupgrade (modernize for the py312 floor CI already runs on)
+# B    — flake8-bugbear (likely-bug patterns)
+select = ["E", "F", "I", "UP", "B"]
+
+ignore = [
+    # Line length is enforced by the formatter, not the linter. Long string
+    # literals / URLs the formatter cannot split would otherwise trip E501
+    # with no clean fix, so we let `ruff format` own line width.
+    "E501",
+    # Bugbear's "no explicit stacklib in warnings.warn"/loop-var-binding class
+    # of stylistic warnings are noisy on this codebase; keep the high-signal
+    # B rules and silence the two that fire widely without indicating a bug.
+    "B008",  # function call in argument defaults — used intentionally for DI-style defaults
+    "B905",  # zip() without strict= — py312 default is fine here; not a bug source
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests bind names for readability and occasionally shadow builtins in fixtures.
+"tests/*" = ["B011"]
+
+[tool.mypy]
+# Lenient, incremental baseline. NO strict flags — this exists to catch obvious
+# type errors and widen over time, not to gate on annotation completeness.
+# Run from the backend/ directory (`cd backend && mypy .`) so this config is
+# discovered from the CWD; CI does exactly that.
+python_version = "3.12"
+ignore_missing_imports = true
+follow_imports = "silent"
+# Scope: application modules only. tests/ are excluded (heavy fixtures, dynamic
+# monkeypatching) and can be folded in later once the app modules stay green.
+# Regex matched against the path as mypy sees it when run from backend/.
+exclude = "(^|/)tests/"
+warn_unused_ignores = false
+warn_redundant_casts = false
+check_untyped_defs = false
+
+# The host gateway package (installed from source in CI, absent locally) ships
+# no type stubs and no py.typed marker; treat its namespace as untyped so the
+# gate does not depend on the host package's internal module layout.
+[[tool.mypy.overrides]]
+module = ["kiro_crew.*"]
+ignore_missing_imports = true

@@ -278,9 +278,7 @@ def world_detail(pack: Any, *, include_prose: bool = False) -> dict[str, Any]:
             }
             for g in t.opening
         ],
-        "styleRows": [
-            {"id": s.id, "label": s.label, "default": s.default} for s in t.styles
-        ],
+        "styleRows": [{"id": s.id, "label": s.label, "default": s.default} for s in t.styles],
         "panels": [
             {
                 "id": p.id,
@@ -288,8 +286,7 @@ def world_detail(pack: Any, *, include_prose: bool = False) -> dict[str, Any]:
                 "always": p.always,
                 "when": p.when.source if p.when else None,
                 "fields": [
-                    {"id": f.id, "label": f.label, "primitive": f.primitive}
-                    for f in p.fields
+                    {"id": f.id, "label": f.label, "primitive": f.primitive} for f in p.fields
                 ],
             }
             for p in t.panels
@@ -315,10 +312,7 @@ def world_detail(pack: Any, *, include_prose: bool = False) -> dict[str, Any]:
         ],
         # Starting archetypes the world offers (grants stay server-side; the UI shows
         # the name + summary, and the narrator seeds state from grants at the opening).
-        "roles": [
-            {"id": r.id, "name": r.name or r.id, "summary": r.summary}
-            for r in t.roles
-        ],
+        "roles": [{"id": r.id, "name": r.name or r.id, "summary": r.summary} for r in t.roles],
     }
     if include_prose:
         body["prose"] = pack.prose
@@ -429,16 +423,18 @@ def shape_panels(
             }
             for f in panel.fields
         ]
-        panels.append({
-            "id": panel.id,
-            "label": panel.label,
-            "always": panel.always,
-            "region": panel.region,
-            "fields": fields,
-            # A panel where the narrator has said nothing yet is still shown, but
-            # the UI can quiet it down rather than presenting a wall of dashes.
-            "empty": all(f["kind"] == "gap" for f in fields),
-        })
+        panels.append(
+            {
+                "id": panel.id,
+                "label": panel.label,
+                "always": panel.always,
+                "region": panel.region,
+                "fields": fields,
+                # A panel where the narrator has said nothing yet is still shown, but
+                # the UI can quiet it down rather than presenting a wall of dashes.
+                "empty": all(f["kind"] == "gap" for f in fields),
+            }
+        )
 
     # Capability packs render as additional panels, shaped by the same primitives
     # so the play page draws them with no per-world code. A malformed pack degrades
@@ -472,11 +468,7 @@ def build_play_view(
     reveals = []
     for group in template.opening:
         value = opening.get(group.id)
-        if (
-            group.random
-            and isinstance(value, (str, int, float))
-            and str(value).strip()
-        ):
+        if group.random and isinstance(value, (str, int, float)) and str(value).strip():
             reveals.append({"label": group.label, "value": str(value).strip()})
 
     recap_events: list[str] = []

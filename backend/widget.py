@@ -68,12 +68,22 @@ MAX_TREE_DEPTH = 12
 #: The closed set. A kind absent here is refused, never skipped.
 ELEMENT_KINDS: frozenset[str] = frozenset(
     {
-        "heading", "text", "note", "stat", "bar", "keyvalue", "list", "table",
-        "choice", "divider",
+        "heading",
+        "text",
+        "note",
+        "stat",
+        "bar",
+        "keyvalue",
+        "list",
+        "table",
+        "choice",
+        "divider",
         # Spatial / relational kinds. The narrator declares STRUCTURE (cells,
         # nodes, edges, parents) and never geometry — every coordinate below is
         # computed here, so a scene map cannot smuggle markup or a layout exploit.
-        "grid", "links", "tree",
+        "grid",
+        "links",
+        "tree",
     }
 )
 
@@ -308,9 +318,7 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         raise SceneSpecError(where, "an object")
     kind = el.get("kind")
     if kind not in ELEMENT_KINDS:
-        raise SceneSpecError(
-            f"{where}.kind", f"one of {sorted(ELEMENT_KINDS)}, got {kind!r}"
-        )
+        raise SceneSpecError(f"{where}.kind", f"one of {sorted(ELEMENT_KINDS)}, got {kind!r}")
 
     # A bound value replaces `value`/`text`. An unresolvable bind is NOT fatal
     # here: it falls back to the element's literal, and drops only this element
@@ -346,8 +354,16 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         value = _esc(_text(raw, f"{where}.value", cap=64))
         cap = el.get("max")
         pct = _pct(raw, cap) if cap is not None else None
-        tail = f'<span class="n"> / {_esc(_text(cap, f"{where}.max", cap=32))}</span>' if cap is not None else ""
-        bar = f'<div class="t"><div class="f" style="width:{round(pct * 100)}%"></div></div>' if pct is not None else ""
+        tail = (
+            f'<span class="n"> / {_esc(_text(cap, f"{where}.max", cap=32))}</span>'
+            if cap is not None
+            else ""
+        )
+        bar = (
+            f'<div class="t"><div class="f" style="width:{round(pct * 100)}%"></div></div>'
+            if pct is not None
+            else ""
+        )
         return (
             f'<div class="r"><div class="k">{label}</div>'
             f'<div class="v">{value}{tail}{bar}</div></div>'
@@ -358,9 +374,8 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         if not isinstance(items, list):
             raise SceneSpecError(f"{where}.items", "an array")
         items = items[:MAX_ROWS]  # truncate rather than reject
-        cells = "".join(
-            f"<li>{_esc(_celltext(i, f'{where}.items[{n}]'))}</li>"
-            for n, i in enumerate(items)
+        cells: Any = "".join(
+            f"<li>{_esc(_celltext(i, f'{where}.items[{n}]'))}</li>" for n, i in enumerate(items)
         )
         return f"<ul>{cells}</ul>"
 
@@ -372,19 +387,22 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         rows = el.get("rows")
         rows = rows[:MAX_ROWS] if isinstance(rows, list) else []
         head = "".join(
-            f"<th>{_esc(_celltext(c, f'{where}.columns[{n}]'))}</th>"
-            for n, c in enumerate(cols)
+            f"<th>{_esc(_celltext(c, f'{where}.columns[{n}]'))}</th>" for n, c in enumerate(cols)
         )
         body = ""
         for rn, row in enumerate(rows):
             if not isinstance(row, list):
                 continue  # drop a non-array row, keep the table
-            cells = list(row[: len(cols)])              # truncate a long row
-            cells += [""] * (len(cols) - len(cells))    # pad a short row
-            body += "<tr>" + "".join(
-                f"<td>{_esc(_celltext(c, f'{where}.rows[{rn}][{cn}]'))}</td>"
-                for cn, c in enumerate(cells)
-            ) + "</tr>"
+            cells = list(row[: len(cols)])  # truncate a long row
+            cells += [""] * (len(cols) - len(cells))  # pad a short row
+            body += (
+                "<tr>"
+                + "".join(
+                    f"<td>{_esc(_celltext(c, f'{where}.rows[{rn}][{cn}]'))}</td>"
+                    for cn, c in enumerate(cells)
+                )
+                + "</tr>"
+            )
         return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
     if kind == "grid":
@@ -431,7 +449,8 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
             out.append(f'<div class="gc{tint}">{badge}{label}{note_html}</div>')
         return (
             f'<div class="grid" style="grid-template-columns:repeat({cols},1fr)">'
-            + "".join(out) + "</div>"
+            + "".join(out)
+            + "</div>"
         )
 
     if kind == "links":
@@ -521,7 +540,7 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
             visited.add(nid)
             node = byid[nid]
             note_html = f' <span class="tn">{_esc(node["note"])}</span>' if node["note"] else ""
-            inner = f'{_esc(node["label"])}{note_html}'
+            inner = f"{_esc(node['label'])}{note_html}"
             kids = "".join(_branch(k, depth + 1) for k in node["children"])
             if kids:
                 inner += "<ul>" + kids + "</ul>"
@@ -625,8 +644,12 @@ def _compile_scene(
     # The CSP meta is the FIRST thing in <head>, ahead of every generated byte: a
     # policy that arrives after the content it governs has already lost.
     html_out = (
-        "<!DOCTYPE html><html lang=\"zh\" data-scene=\"" + _esc(scene_id) + "\""
-        + " data-nonce=\"" + _esc(nonce) + "\"><head>"
+        '<!DOCTYPE html><html lang="zh" data-scene="'
+        + _esc(scene_id)
+        + '"'
+        + ' data-nonce="'
+        + _esc(nonce)
+        + '"><head>'
         '<meta charset="utf-8">'
         f'<meta http-equiv="Content-Security-Policy" content="{CSP}">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -681,7 +704,8 @@ def spec_digest(spec: dict[str, Any], state_slice: Any = None) -> str:
     """
     payload = json.dumps(
         {"c": COMPILER, "spec": spec, "s": state_slice},
-        ensure_ascii=False, sort_keys=True,
+        ensure_ascii=False,
+        sort_keys=True,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

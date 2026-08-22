@@ -335,19 +335,31 @@ def test_a_json_front_matter_header_parses_identically() -> None:
             {"id": "standard", "label": "Standard", "default": True},
         ],
         "opening": [
-            {"id": "era", "label": "Era", "kind": "pick",
-             "options": ["Golden", "Waning"], "custom": True},
+            {
+                "id": "era",
+                "label": "Era",
+                "kind": "pick",
+                "options": ["Golden", "Waning"],
+                "custom": True,
+            },
             {"id": "name", "label": "Name", "kind": "text"},
         ],
         "panels": [
-            {"id": "status", "always": True, "fields": [
-                {"id": "age", "label": "Age", "primitive": "field"},
-                {"id": "renown", "label": "Renown", "primitive": "stat",
-                 "min": 0, "max": 100},
-            ]},
-            {"id": "magic", "when": "state.magic.awakened == true", "fields": [
-                {"id": "mana", "label": "Mana", "primitive": "stat"},
-            ]},
+            {
+                "id": "status",
+                "always": True,
+                "fields": [
+                    {"id": "age", "label": "Age", "primitive": "field"},
+                    {"id": "renown", "label": "Renown", "primitive": "stat", "min": 0, "max": 100},
+                ],
+            },
+            {
+                "id": "magic",
+                "when": "state.magic.awakened == true",
+                "fields": [
+                    {"id": "mana", "label": "Mana", "primitive": "stat"},
+                ],
+            },
         ],
         "endings": [{"id": "died", "when": "state.alive == false"}],
         "digest": {"categories": ["nations", "wars"], "rumours": True},
@@ -382,9 +394,15 @@ def test_a_json_front_matter_header_parses_identically() -> None:
             ),
             "styles",
         ),
-        (HEADER.replace("kind: pick, options: [Golden, Waning]", "kind: pick"), "opening[0].options"),
+        (
+            HEADER.replace("kind: pick, options: [Golden, Waning]", "kind: pick"),
+            "opening[0].options",
+        ),
         (HEADER.replace("kind: pick", "kind: slider"), "opening[0].kind"),
-        (HEADER.replace("primitive: field", "primitive: magic-bar"), "panels[0].fields[0].primitive"),
+        (
+            HEADER.replace("primitive: field", "primitive: magic-bar"),
+            "panels[0].fields[0].primitive",
+        ),
         (HEADER.replace("    always: true\n", ""), "panels[0]"),
         (HEADER.replace("when: state.magic.awakened == true", "always: true"), "panels"),
         (HEADER.replace("  - { id: died, when: state.alive == false }\n", ""), "endings"),
@@ -399,16 +417,14 @@ def test_header_errors_name_the_field(bad_header: str, field: str) -> None:
 
 
 def test_a_panel_declaring_both_always_and_when_is_refused() -> None:
-    bad = HEADER.replace(
-        "    always: true\n", "    always: true\n    when: state.x == 1\n"
-    )
+    bad = HEADER.replace("    always: true\n", "    always: true\n    when: state.x == 1\n")
     with pytest.raises(TemplateError) as exc:
         parse_template(build(bad))
     assert exc.value.field == "panels[0]"
 
 
 def test_an_unparseable_when_in_a_panel_surfaces_as_a_template_error() -> None:
-    bad = HEADER.replace("when: state.magic.awakened == true", "when: \"state.a ==\"")
+    bad = HEADER.replace("when: state.magic.awakened == true", 'when: "state.a =="')
     with pytest.raises(TemplateError):
         parse_template(build(bad))
 
@@ -507,6 +523,7 @@ def test_lore_carries_optional_structure_and_reveal() -> None:
 
 # -- systems (backend-managed mechanics) ----------------------------------
 
+
 def test_systems_parse_and_validate_structure() -> None:
     header = _with_block(
         "systems:\n"
@@ -524,12 +541,14 @@ def test_systems_parse_and_validate_structure() -> None:
 
 def test_an_unknown_system_kind_is_refused() -> None:
     import pytest
+
     with pytest.raises(TemplateError):
         parse_template(_with_block("systems:\n  - { id: x, kind: teleport, into: state.x }"))
 
 
 def test_an_unlock_without_a_condition_is_refused() -> None:
     import pytest
+
     with pytest.raises(TemplateError):
         parse_template(_with_block("systems:\n  - { id: x, kind: unlock, into: state.x }"))
 
@@ -539,6 +558,7 @@ def test_absent_systems_is_not_an_error() -> None:
 
 
 # -- roles + opening hand-off ---------------------------------------------
+
 
 def test_roles_parse_with_open_vocabulary() -> None:
     header = _with_block(
@@ -554,6 +574,7 @@ def test_roles_parse_with_open_vocabulary() -> None:
 
 def test_handoff_refs_parse_and_reject_a_bad_shape() -> None:
     import pytest
+
     t = parse_template(_with_block('handToAgent: [lore.keep, systems.xp, "roles.*"]'))
     assert t.hand_to_agent == ["lore.keep", "systems.xp", "roles.*"]
     with pytest.raises(TemplateError):

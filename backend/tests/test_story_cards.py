@@ -21,8 +21,14 @@ import story_cards as sc  # noqa: E402
 
 
 def turn_entry(turn, memory=None, action="", prose="p"):
-    entry = {"turn": turn, "prose": prose, "action": action,
-             "choices": [], "events": [], "gains": []}
+    entry = {
+        "turn": turn,
+        "prose": prose,
+        "action": action,
+        "choices": [],
+        "events": [],
+        "gains": [],
+    }
     if memory is not None:
         entry["memory"] = memory
     return entry
@@ -30,54 +36,90 @@ def turn_entry(turn, memory=None, action="", prose="p"):
 
 def life_chronicle():
     return [
-        turn_entry(1, {
-            "entities": [
-                {"id": "elin", "kind": "character", "name": "艾琳"},
-                {"id": "bridge", "kind": "place", "name": "老石桥"},
-                {"id": "debt", "kind": "thread", "name": "人情"},
-            ],
-            "events": [
-                {"key": "saved", "title": "救出艾琳", "summary": "你把艾琳拉上岸。",
-                 "importance": "major", "participants": ["player", "elin"],
-                 "place": "bridge",
-                 "threads": [{"id": "debt", "effect": "opened"}],
-                 "disclosure": "known"},
-                {"key": "watcher", "title": "暗处的注视", "summary": "有人看见了。",
-                 "participants": ["elin"], "disclosure": "hidden"},
-            ],
-        }, action="把她拉上岸"),
-        turn_entry(5, {
-            "events": [
-                {"key": "repaid", "title": "艾琳还了人情", "summary": "她记得那一天。",
-                 "participants": ["player", "elin"],
-                 "threads": [{"id": "debt", "effect": "resolved"}],
-                 "echoes": ["event-1-saved"], "disclosure": "known"},
-            ],
-        }),
-        turn_entry(9, {
-            "events": [
-                {"key": "ending", "title": "落幕", "summary": "她陪你走完最后一程。",
-                 "participants": ["player", "elin"], "disclosure": "known"},
-            ],
-        }),
+        turn_entry(
+            1,
+            {
+                "entities": [
+                    {"id": "elin", "kind": "character", "name": "艾琳"},
+                    {"id": "bridge", "kind": "place", "name": "老石桥"},
+                    {"id": "debt", "kind": "thread", "name": "人情"},
+                ],
+                "events": [
+                    {
+                        "key": "saved",
+                        "title": "救出艾琳",
+                        "summary": "你把艾琳拉上岸。",
+                        "importance": "major",
+                        "participants": ["player", "elin"],
+                        "place": "bridge",
+                        "threads": [{"id": "debt", "effect": "opened"}],
+                        "disclosure": "known",
+                    },
+                    {
+                        "key": "watcher",
+                        "title": "暗处的注视",
+                        "summary": "有人看见了。",
+                        "participants": ["elin"],
+                        "disclosure": "hidden",
+                    },
+                ],
+            },
+            action="把她拉上岸",
+        ),
+        turn_entry(
+            5,
+            {
+                "events": [
+                    {
+                        "key": "repaid",
+                        "title": "艾琳还了人情",
+                        "summary": "她记得那一天。",
+                        "participants": ["player", "elin"],
+                        "threads": [{"id": "debt", "effect": "resolved"}],
+                        "echoes": ["event-1-saved"],
+                        "disclosure": "known",
+                    },
+                ],
+            },
+        ),
+        turn_entry(
+            9,
+            {
+                "events": [
+                    {
+                        "key": "ending",
+                        "title": "落幕",
+                        "summary": "她陪你走完最后一程。",
+                        "participants": ["player", "elin"],
+                        "disclosure": "known",
+                    },
+                ],
+            },
+        ),
     ]
 
 
 def keepsake(cites, kp_id="k1", title="石桥下的那一天", thought="一切由此开始"):
-    return {"id": kp_id, "kind": "echo", "title": title, "thought": thought,
-            "cites": cites, "entities": [], "turn": 0, "spoiler": False,
-            "excerpt": ""}
+    return {
+        "id": kp_id,
+        "kind": "echo",
+        "title": title,
+        "thought": thought,
+        "cites": cites,
+        "entities": [],
+        "turn": 0,
+        "spoiler": False,
+        "excerpt": "",
+    }
 
 
 def make_card(cites=("event-1-saved", "event-5-repaid"), *, ended_turn=0):
     index = mg.build_index(life_chronicle())
-    return sc.build_draft(index, keepsake(list(cites)), ended_turn=ended_turn,
-                          language="zh")
+    return sc.build_draft(index, keepsake(list(cites)), ended_turn=ended_turn, language="zh")
 
 
 def all_exports(card):
-    return {"md": sc.to_markdown(card), "html": sc.to_html(card),
-            "svg": sc.to_svg(card)}
+    return {"md": sc.to_markdown(card), "html": sc.to_html(card), "svg": sc.to_svg(card)}
 
 
 # ── the allowlist is the whole card ──────────────────────────────────────
@@ -145,10 +187,13 @@ def test_excluding_an_event_takes_its_edges_and_text():
 
 def test_a_renamed_entity_leaves_no_trace_of_the_real_name():
     card = make_card()
-    sc.apply_edits(card, {
-        "title": "那一天",  # keep the name out of the player-authored title
-        "entities": {"elin": {"display": "少女A"}},
-    })
+    sc.apply_edits(
+        card,
+        {
+            "title": "那一天",  # keep the name out of the player-authored title
+            "entities": {"elin": {"display": "少女A"}},
+        },
+    )
     for fmt, text in all_exports(card).items():
         assert "艾琳" not in text, f"real name survived in {fmt}"
         assert "少女A" in text
@@ -190,9 +235,7 @@ def test_exports_carry_no_network_no_script_no_run_or_event_ids():
         # The canonical event id is a plain slug now (`event-1-saved`), so this
         # guard must match THAT shape — asserting the retired `event:` spelling
         # would pass on any export and catch nothing.
-        assert not re.search(r"event-\d+-", text), (
-            f"internal event id leaked into {fmt}"
-        )
+        assert not re.search(r"event-\d+-", text), f"internal event id leaked into {fmt}"
         # The one URL an SVG needs is its xmlns namespace; nothing else may
         # reference the network.
         urls = re.findall(r"https?://[^\s\"'<>]+", text)

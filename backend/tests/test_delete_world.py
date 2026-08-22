@@ -49,8 +49,13 @@ HEADER = {
     "clock": {"unit": "month", "label": "{year}/{month}"},
     "styles": [{"id": "standard", "label": "Standard", "default": True}],
     "opening": [{"id": "name", "label": "Name", "kind": "text"}],
-    "panels": [{"id": "status", "always": True, "fields": [
-        {"id": "age", "label": "Age", "primitive": "field"}]}],
+    "panels": [
+        {
+            "id": "status",
+            "always": True,
+            "fields": [{"id": "age", "label": "Age", "primitive": "field"}],
+        }
+    ],
     "endings": [{"id": "died", "when": "state.alive == false"}],
 }
 
@@ -136,8 +141,10 @@ def a_life(world, *, world_id="test-world", state_world=..., turn=1):
 
 def delete(world, *, confirm="test-world", lives=0, world_id="test-world"):
     return call(
-        routes_mod.delete_world, world["ctx"],
-        match={"world_id": world_id}, body={"confirm": confirm, "lives": lives},
+        routes_mod.delete_world,
+        world["ctx"],
+        match={"world_id": world_id},
+        body={"confirm": confirm, "lives": lives},
     )
 
 
@@ -317,8 +324,12 @@ def test_deleting_a_world_erases_the_lives_lived_in_it(world):
     assert world["store"].read_index() == []
     assert not (world["data"] / "runs" / run_id).exists()
     # Every key the store writes, not just the obvious two.
-    for key in (f"run.{run_id}.state", f"run.{run_id}.prev",
-                f"briefed-{run_id}", f"pending-{run_id}"):
+    for key in (
+        f"run.{run_id}.state",
+        f"run.{run_id}.prev",
+        f"briefed-{run_id}",
+        f"pending-{run_id}",
+    ):
         assert world["ctx"].storage.get(key) is None, f"{key} was left behind"
 
 
@@ -328,9 +339,7 @@ def test_a_life_that_claims_the_world_only_in_its_index_row_is_still_swept(world
     the world that could have cleaned it up would be gone."""
     run_id = a_life(world, state_world=None)
 
-    facts = body_of(call(
-        routes_mod.world_deletion, world["ctx"], match={"world_id": "test-world"}
-    ))
+    facts = body_of(call(routes_mod.world_deletion, world["ctx"], match={"world_id": "test-world"}))
     assert facts["liveCount"] == 1
 
     assert delete(world, lives=1).status == 200
@@ -378,9 +387,7 @@ def test_the_preflight_names_every_life_it_would_end(world):
     a_life(world)
     a_life(world)
 
-    facts = body_of(call(
-        routes_mod.world_deletion, world["ctx"], match={"world_id": "test-world"}
-    ))
+    facts = body_of(call(routes_mod.world_deletion, world["ctx"], match={"world_id": "test-world"}))
 
     assert facts["liveCount"] == 2
     assert len(facts["lives"]) == 2
@@ -394,9 +401,7 @@ def test_a_world_with_no_seed_is_reported_as_unrecoverable(world):
     a world nothing can put back."""
     (world["seeds"] / "test-world.md").unlink()
 
-    facts = body_of(call(
-        routes_mod.world_deletion, world["ctx"], match={"world_id": "test-world"}
-    ))
+    facts = body_of(call(routes_mod.world_deletion, world["ctx"], match={"world_id": "test-world"}))
 
     assert facts["restorable"] is False
 
@@ -418,15 +423,13 @@ def test_requested_art_withholds_the_new_page_until_its_exact_commit(world):
     store.append_turn(run_id, {"turn": 2, "prose": "the hidden page"})
     store.request_backdrop(run_id, turn=2, brief="a red gate closes")
 
-    waiting = body_of(call(
-        routes_mod.get_run, world["ctx"], match={"run_id": run_id}
-    ))
+    waiting = body_of(call(routes_mod.get_run, world["ctx"], match={"run_id": run_id}))
     assert waiting["turn"] == 1
     assert waiting["prose"] == "the old page"
     assert waiting["generating"]["stage"] == "painting"
-    waiting_history = body_of(call(
-        routes_mod.get_chronicle, world["ctx"], match={"run_id": run_id}
-    ))
+    waiting_history = body_of(
+        call(routes_mod.get_chronicle, world["ctx"], match={"run_id": run_id})
+    )
     assert [entry["turn"] for entry in waiting_history["turns"]] == [1]
 
     BackdropStore(world["data"], run_id).set(
@@ -435,22 +438,18 @@ def test_requested_art_withholds_the_new_page_until_its_exact_commit(world):
     )
     store.clear_backdrop_request(run_id)
 
-    published = body_of(call(
-        routes_mod.get_run, world["ctx"], match={"run_id": run_id}
-    ))
+    published = body_of(call(routes_mod.get_run, world["ctx"], match={"run_id": run_id}))
     assert published["turn"] == 2
     assert published["prose"] == "the hidden page"
     assert published["generating"] is None
     assert published["backdrop"]["version"] == 1
-    published_history = body_of(call(
-        routes_mod.get_chronicle, world["ctx"], match={"run_id": run_id}
-    ))
+    published_history = body_of(
+        call(routes_mod.get_chronicle, world["ctx"], match={"run_id": run_id})
+    )
     assert [entry["turn"] for entry in published_history["turns"]] == [2, 1]
 
 
-def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(
-    world, monkeypatch
-):
+def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(world, monkeypatch):
     from backdrop import BackdropStore
 
     store = world["store"]
@@ -476,9 +475,7 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(
     slot = object()
     prompts = []
 
-    monkeypatch.setattr(
-        routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (slot, False)
-    )
+    monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (slot, False))
 
     def fake_dispatcher(_runner):
         def dispatch(_state, got_slot, prompt):
@@ -492,23 +489,29 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(
             )
             store.clear_backdrop_request(run_id)
             return True
+
         return dispatch
 
     monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
     monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
-    asyncio.run(routes_mod._recover_backdrop(
-        world["ctx"], store, object(), run_id,
-        painter_model="paint-model", narrator_model="story-model", reasoning_effort="high",
-    ))
+    asyncio.run(
+        routes_mod._recover_backdrop(
+            world["ctx"],
+            store,
+            object(),
+            run_id,
+            painter_model="paint-model",
+            narrator_model="story-model",
+            reasoning_effort="high",
+        )
+    )
 
     assert len(spawn.calls) == 2
     assert all(call[1] == "endless-illustrator" for call in spawn.calls)
     for task, _agent, _silent, _model in spawn.calls:
         assert "In LANE: scene, first call endless_trace_reference" in task
         assert "in LANE: motif, draw directly without tracing" in task
-        assert task.index("endless_trace_reference") < task.index(
-            "endless_submit_backdrop_draft"
-        )
+        assert task.index("endless_trace_reference") < task.index("endless_submit_backdrop_draft")
         assert "First call endless_submit_backdrop_draft" not in task
         assert "draw directly from the brief" not in task
     assert len(prompts) == 1

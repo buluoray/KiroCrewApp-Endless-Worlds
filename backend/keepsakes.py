@@ -49,7 +49,7 @@ class KeepsakeStore:
 
     # -- reads -------------------------------------------------------------
 
-    def list(self) -> list[dict[str, Any]]:
+    def entries(self) -> list[dict[str, Any]]:
         if not self._path.is_file():
             return []
         try:
@@ -61,7 +61,7 @@ class KeepsakeStore:
         return raw if isinstance(raw, list) else []
 
     def get(self, keepsake_id: str) -> dict[str, Any] | None:
-        for kp in self.list():
+        for kp in self.entries():
             if kp.get("id") == keepsake_id:
                 return kp
         return None
@@ -114,7 +114,7 @@ class KeepsakeStore:
             # rendering (or of the player's memory) cannot silently drift what
             # the keepsake claims was on the page.
             kp["excerptSha256"] = hashlib.sha256(excerpt.encode("utf-8")).hexdigest()
-        rows = self.list()
+        rows = self.entries()
         rows.append(kp)
         self._write(rows)
         return kp
@@ -125,7 +125,7 @@ class KeepsakeStore:
         The cited path is what makes a keepsake honest; editing it would turn a
         memento into a claim. To point at something else, make a new keepsake.
         """
-        rows = self.list()
+        rows = self.entries()
         for kp in rows:
             if kp.get("id") != keepsake_id:
                 continue
@@ -146,7 +146,7 @@ class KeepsakeStore:
         return None
 
     def delete(self, keepsake_id: str) -> bool:
-        rows = self.list()
+        rows = self.entries()
         kept = [kp for kp in rows if kp.get("id") != keepsake_id]
         if len(kept) == len(rows):
             return False

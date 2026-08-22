@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 from uisrc import WEB_SRC, module, styles
 
@@ -54,7 +53,9 @@ def test_the_rail_only_appears_above_the_desktop_breakpoint():
     that width must be wide enough for a rail AND a readable measure."""
     css = styles()
     blocks = re.findall(r"@media \(min-width: (\d+)px\)\s*\{(.*?)\n\}", css, re.S)
-    showing = [int(w) for w, body in blocks if re.search(r"\.ew-rail\s*\{[^}]*display:\s*block", body)]
+    showing = [
+        int(w) for w, body in blocks if re.search(r"\.ew-rail\s*\{[^}]*display:\s*block", body)
+    ]
     assert showing, "the rail is never shown at any width"
     assert min(showing) >= BREAKPOINT, (
         f"the rail turns on at {min(showing)}px; below {BREAKPOINT}px a rail plus a "
@@ -126,9 +127,7 @@ def test_non_reading_desktop_pages_fill_the_canvas_from_the_top_left():
     # classes, not that they are adjacent in one literal: other state (the phone's
     # flush-top reading page) legitimately contributes a class between them, and an
     # adjacency check fails on that while the stylesheet still works perfectly.
-    assert "'ew-root ew-view-' + view" in src, (
-        "the stylesheet cannot tell which view it is styling"
-    )
+    assert "'ew-root ew-view-' + view" in src, "the stylesheet cannot tell which view it is styling"
     assert "' ew-w-' + readWidth" in src, (
         "the stylesheet cannot distinguish live prose from non-reading pages"
     )
@@ -162,9 +161,7 @@ def test_the_two_width_modes_are_the_only_two_and_one_of_them_is_stored():
     assert re.search(r"localStorage\.setItem\(WIDTH_KEY", src), (
         "the width choice is read but never written"
     )
-    assert re.search(r"ew-w-' \+ readWidth", src), (
-        "the chosen width never reaches the stylesheet"
-    )
+    assert re.search(r"ew-w-' \+ readWidth", src), "the chosen width never reaches the stylesheet"
     rail = module("rail.tsx")
     assert re.search(r"ReadWidth = 'fluid' \| 'fixed'", rail), (
         "the width type must name exactly the two modes the stylesheet implements"
@@ -192,9 +189,7 @@ def test_the_shelf_drawer_rests_closed_and_unmounts_when_it_is():
     assert re.search(r"if \(!open\) return null", rail), (
         "the drawer stays mounted while closed, so a resize can strand it"
     )
-    assert "'Escape'" in rail, (
-        "a drawer covering the story must be dismissible from the keyboard"
-    )
+    assert "'Escape'" in rail, "a drawer covering the story must be dismissible from the keyboard"
 
 
 def test_the_desktop_opener_exists_only_where_the_inline_back_button_is_hidden():
@@ -204,12 +199,9 @@ def test_the_desktop_opener_exists_only_where_the_inline_back_button_is_hidden()
     css = styles()
     bare = re.search(r"^\.ew-shelfbtn\s*\{([^}]*)\}", css, re.MULTILINE)
     assert bare and "display: none" in bare.group(1), (
-        "the opener renders at phone widths, where it would sit beside the inline "
-        "back button"
+        "the opener renders at phone widths, where it would sit beside the inline back button"
     )
-    wide = re.search(
-        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
-    )
+    wide = re.search(rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S)
     assert wide, "no rule block at the desktop breakpoint"
     assert re.search(r"\.ew-shelfbtn\s*\{[^}]*display:\s*inline-flex", wide.group(1)), (
         "with the inline back button hidden at this width, nothing opens the shelf"
@@ -234,17 +226,12 @@ def test_the_drawer_pushes_the_story_instead_of_covering_it():
         if not re.search(r"\.ew-rail\b", selector):
             continue
         assert not re.search(r"position:\s*fixed", body), (
-            selector + " pins the shelf to the viewport, which is not where this app "
-            "lives"
+            selector + " pins the shelf to the viewport, which is not where this app lives"
         )
     # And the push itself: the open state has to give the story its own track.
-    wide = re.search(
-        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
-    )
+    wide = re.search(rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S)
     assert wide, "no rule block at the desktop breakpoint"
-    grid = re.search(
-        r"\.ew-shell-open\s*\{[^}]*grid-template-columns:\s*([^;]+);", wide.group(1)
-    )
+    grid = re.search(r"\.ew-shell-open\s*\{[^}]*grid-template-columns:\s*([^;]+);", wide.group(1))
     assert grid, "the open drawer does not create a column for itself"
     assert "minmax(0" in grid.group(1), (
         "the story's track must be minmax(0, …) or a long unbroken world title "
@@ -258,13 +245,9 @@ def test_the_cap_moved_off_the_root_so_the_measure_owns_the_page():
     column set the measure -- either by widening it or by dropping it entirely, which
     is what the full-bleed backdrop needs."""
     css = styles()
-    wide = re.search(
-        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
-    )
+    wide = re.search(rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S)
     assert wide, "no rule block at the desktop breakpoint"
-    root = re.search(
-        r"\.ew-root\s*\{[^}]*max-width:\s*(none|\d+px)", wide.group(1)
-    )
+    root = re.search(r"\.ew-root\s*\{[^}]*max-width:\s*(none|\d+px)", wide.group(1))
     assert root, "the desktop block must release .ew-root's phone/tablet cap"
     if root.group(1) != "none":
         assert int(root.group(1).removesuffix("px")) > 900, (
@@ -282,15 +265,13 @@ def test_the_star_map_has_a_way_in_at_every_width():
     star = re.search(r"setStarOpen\(true\)", src)
     assert star, "nothing opens the star map on the desktop aside"
     # The opener may be a multi-line handler, so look back a generous window.
-    button = src[max(0, star.start() - 600):star.start()]
+    button = src[max(0, star.start() - 600) : star.start()]
     assert 'className="ew-aside-tab"' in button, (
         "the desktop star opener lives on the right-aside tab strip"
     )
     # The phone entrance is the bottom bar's built-in 星图 tab.
     bar = module("tabbar.tsx")
-    assert "'starmap'" in bar and "tab.starmap" in bar, (
-        "the phone bottom bar must carry a 星图 tab"
-    )
+    assert "'starmap'" in bar and "tab.starmap" in bar, "the phone bottom bar must carry a 星图 tab"
     # Neither entrance's own class may be hidden by a width query.
     css = styles()
     for cls in (".ew-aside-tab", ".ew-tab"):
@@ -315,12 +296,13 @@ def test_the_star_map_is_a_backdrop_adaptive_observatory():
     assert ".ews-body { gap: 14px; padding: 14px 16px 16px; }" in src
     tabbed = re.search(r"@media \(max-width: 1100px\) \{(.*?)\n\}", src, re.S)
     assert tabbed, "the detail sheet does not cover the full bottom-tab range"
-    assert "--ews-tab-clearance: calc(74px + env(safe-area-inset-bottom, 0px))" in tabbed.group(1), (
-        "the phone map must clear both the portalled tab bar and the device safe area"
-    )
-    assert "position: absolute; inset-inline: 10px; bottom: var(--ews-tab-clearance)" in tabbed.group(1), (
-        "a selected star's detail must rise into view above the phone tab bar"
-    )
+    assert "--ews-tab-clearance: calc(74px + env(safe-area-inset-bottom, 0px))" in tabbed.group(
+        1
+    ), "the phone map must clear both the portalled tab bar and the device safe area"
+    assert (
+        "position: absolute; inset-inline: 10px; bottom: var(--ews-tab-clearance)"
+        in tabbed.group(1)
+    ), "a selected star's detail must rise into view above the phone tab bar"
     assert "animation: ews-detail-rise .18s ease-out" in tabbed.group(1), (
         "a phone tap needs visible feedback that the detail sheet appeared"
     )
@@ -404,9 +386,7 @@ def test_the_play_view_reads_the_language_without_a_type_assertion():
     compiled cleanly while the route sent no such field, so the read was dead and
     the type system had been told not to notice."""
     src = module("play.tsx")
-    assert "as unknown as" not in src, (
-        "an assertion here can hide a field the backend never sends"
-    )
+    assert "as unknown as" not in src, "an assertion here can hide a field the backend never sends"
     api = module("api.ts")
     play = re.search(r"export interface PlayView \{(.*?)\n\}", api, re.S)
     assert play and re.search(r"^\s*language:", play.group(1), re.MULTILINE), (
@@ -443,13 +423,10 @@ def test_the_desktop_has_one_way_back_not_two():
         "hiding the inline back button by default would leave a phone with no way "
         "back at all — the rail does not render there"
     )
-    wide = re.search(
-        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
-    )
+    wide = re.search(rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S)
     assert wide, "no rule block at the desktop breakpoint"
     assert re.search(r"\.ew-back\s*\{[^}]*display:\s*none", wide.group(1)), (
-        "with the rail showing, the view's own back button is a second control doing "
-        "the same thing"
+        "with the rail showing, the view's own back button is a second control doing the same thing"
     )
 
 
@@ -528,21 +505,17 @@ def test_the_variants_are_contiguous_from_zero():
 
     zh = json.loads((WEB_SRC / "strings" / "zh.json").read_text(encoding="utf-8"))
     for prefix in ("play.waiting", "opening.waiting"):
-        found = sorted(
-            int(k.rsplit(".", 1)[1]) for k in zh if k.startswith(prefix + ".")
-        )
+        found = sorted(int(k.rsplit(".", 1)[1]) for k in zh if k.startswith(prefix + "."))
         assert found == list(range(len(found))), (
             f"{prefix} indices are {found}; the picker stops at the first gap"
         )
 
 
 def test_a_birth_does_not_borrow_the_phrase_for_a_passing_month():
-    """"The years slip by" is the wrong image for a life that has not begun. The
+    """ "The years slip by" is the wrong image for a life that has not begun. The
     opening has its own set."""
     src = module("play.tsx")
-    assert "pick('opening.waiting')" in src, (
-        "the opening screen reuses the month-passing phrases"
-    )
+    assert "pick('opening.waiting')" in src, "the opening screen reuses the month-passing phrases"
 
 
 def _z(css: str, selector: str) -> int:
@@ -633,5 +606,3 @@ def test_the_reading_bar_is_pinned_at_both_ends_of_the_page():
     assert "useScrollHide(narrowLive, READER_BAR_PIN_PX)" in root, (
         "the reading bar still rides the bare 40px default"
     )
-
-

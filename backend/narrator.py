@@ -54,12 +54,7 @@ _GENERATION_GLOBS = (
 def _installation_generation(root: Path = _APP_ROOT) -> str:
     """Stable for one install, different after an update or reinstall."""
     digest = hashlib.sha256(str(root.resolve()).encode("utf-8"))
-    files = {
-        path
-        for pattern in _GENERATION_GLOBS
-        for path in root.glob(pattern)
-        if path.is_file()
-    }
+    files = {path for pattern in _GENERATION_GLOBS for path in root.glob(pattern) if path.is_file()}
     for path in sorted(files, key=lambda item: item.as_posix()):
         try:
             stat = path.stat()
@@ -67,7 +62,7 @@ def _installation_generation(root: Path = _APP_ROOT) -> str:
         except OSError:
             # A concurrent installer can replace a file between glob and read. Its
             # absence still changes the generation; the next app load recomputes it.
-            digest.update(f"missing:{path.relative_to(root)}".encode("utf-8"))
+            digest.update(f"missing:{path.relative_to(root)}".encode())
             continue
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(payload)
@@ -247,8 +242,7 @@ def _validate_existing_narrator_slot(slot: Any, slot_key: str) -> None:
     # backstop if this branch is ever bypassed.
     if getattr(slot, "memory_mode", "") != MEMORY_MODE:
         raise MemoryModeConflict(
-            f"{slot_key} has memory_mode="
-            f"{getattr(slot, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
+            f"{slot_key} has memory_mode={getattr(slot, 'memory_mode', '')!r}, need {MEMORY_MODE!r}"
         )
 
 

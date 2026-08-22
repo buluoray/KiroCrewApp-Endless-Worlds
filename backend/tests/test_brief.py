@@ -142,8 +142,7 @@ def test_the_next_turn_does_not_repeat_it(store, run):
         "the narrator must still be told which month it is writing"
     )
     assert Content("en")("turn.pull") not in sent[1], (
-        "the pull instruction is in the system prompt (narrator.json), not repeated "
-        "each turn"
+        "the pull instruction is in the system prompt (narrator.json), not repeated each turn"
     )
 
 
@@ -156,9 +155,7 @@ def test_omitting_the_rulebook_omits_its_heading_too(store, run):
     with_book = compose_prompt(
         run_id="run-1", rulebook=RULEBOOK, state={}, chronicle=[], language="en"
     )
-    without = compose_prompt(
-        run_id="run-1", rulebook="", state={}, chronicle=[], language="en"
-    )
+    without = compose_prompt(run_id="run-1", rulebook="", state={}, chronicle=[], language="en")
     assert heading in with_book
     assert heading not in without
 
@@ -244,8 +241,7 @@ def test_the_marker_is_written_after_the_prompt_that_carries_it(store, run):
     _advance(FakeState(), store, run, dispatch)
 
     assert seen["at_dispatch"] == "", (
-        "the run was marked as briefed before the prompt carrying the rulebook was "
-        "even handed over"
+        "the run was marked as briefed before the prompt carrying the rulebook was even handed over"
     )
     assert store.briefed_slot(run), "the marker was never written"
 

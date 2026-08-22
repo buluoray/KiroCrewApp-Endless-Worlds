@@ -46,6 +46,37 @@ jobs:
         working-directory: backend
         run: python -m pytest tests -q
 
+  backend-lint:
+    name: Backend lint + types (ruff + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lint tooling
+        run: |
+          python -m pip install --upgrade pip
+          # Ruff (lint + format) and mypy only. The gate is intentionally
+          # host-package-free: backend/pyproject.toml sets ignore_missing_imports
+          # (and treats the kiro_crew.* namespace as untyped), so neither the
+          # gateway package nor the runtime deps need installing to type-check.
+          pip install ruff mypy
+
+      - name: Ruff lint
+        working-directory: backend
+        run: ruff check .
+
+      - name: Ruff format check
+        working-directory: backend
+        run: ruff format --check .
+
+      - name: Mypy (application modules)
+        working-directory: backend
+        run: mypy .
+
   frontend-build:
     name: Frontend typecheck + build
     runs-on: ubuntu-latest

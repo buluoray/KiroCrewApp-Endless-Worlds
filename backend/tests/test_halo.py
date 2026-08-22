@@ -15,8 +15,6 @@ import inspect
 import sys
 from pathlib import Path
 
-import pytest
-
 _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
@@ -48,7 +46,7 @@ CATS = ["realm", "war", "church"]
 
 
 def test_a_new_life_hears_only_what_is_near_it():
-    """"local" and not "world": a newborn farmer briefed on continental
+    """ "local" and not "world": a newborn farmer briefed on continental
     diplomacy has been handed a protagonist's vantage point before drawing
     breath."""
     assert DEFAULT_REACH == "local"
@@ -56,7 +54,10 @@ def test_a_new_life_hears_only_what_is_near_it():
 
 
 def test_something_within_reach_is_reported_plainly():
-    state = {"reach": "local", "digest": {"realm": {"text": "the village tax went up", "at": "local"}}}
+    state = {
+        "reach": "local",
+        "digest": {"realm": {"text": "the village tax went up", "at": "local"}},
+    }
     out = gate_digest(CATS, state)
     assert out == [{"category": "realm", "text": "the village tax went up", "rumour": False}]
 
@@ -65,7 +66,10 @@ def test_a_distant_event_arrives_as_rumour_even_when_declared_as_fact():
     """ENFORCED, not reported. Where the character is standing is not a stylistic
     choice, so a narrator that states a far-off war as established fact has it
     marked as rumour rather than obeyed."""
-    state = {"reach": "local", "digest": {"war": {"text": "the empire declared war", "at": "realm"}}}
+    state = {
+        "reach": "local",
+        "digest": {"war": {"text": "the empire declared war", "at": "realm"}},
+    }
     out = gate_digest(CATS, state)
     assert out == [{"category": "war", "text": "the empire declared war", "rumour": True}]
 
@@ -109,7 +113,9 @@ def test_a_bare_string_is_treated_as_within_reach():
     """Both shapes accepted, for the same reason the panel primitives accept
     both: refusing one would be the app telling the narrator how to write."""
     out = gate_digest(CATS, {"digest": {"church": "the temple changed its high priest"}})
-    assert out == [{"category": "church", "text": "the temple changed its high priest", "rumour": False}]
+    assert out == [
+        {"category": "church", "text": "the temple changed its high priest", "rumour": False}
+    ]
 
 
 def test_an_unknown_distance_degrades_to_the_default_rather_than_failing():
@@ -122,14 +128,19 @@ def test_an_unknown_distance_degrades_to_the_default_rather_than_failing():
 def test_the_worlds_own_rumours_stay_rumours():
     state = {"digest": {"rumours": ["they say a knight died north of here", ""]}}
     out = gate_digest(CATS, state)
-    assert out == [{"category": "rumour", "text": "they say a knight died north of here", "rumour": True}]
+    assert out == [
+        {"category": "rumour", "text": "they say a knight died north of here", "rumour": True}
+    ]
 
 
 def test_a_far_off_rumour_still_arrives_because_that_is_what_rumours_do():
     """A rumour from the other side of the world is exactly the kind of thing that
     reaches a village — garbled, late, and possibly wrong, which is what the
     rumour marking is for."""
-    state = {"reach": "here", "digest": {"rumours": [{"text": "a rumour from far away", "at": "world"}]}}
+    state = {
+        "reach": "here",
+        "digest": {"rumours": [{"text": "a rumour from far away", "at": "world"}]},
+    }
     out = gate_digest(CATS, state)
     assert out == [{"category": "rumour", "text": "a rumour from far away", "rumour": True}]
 
@@ -232,11 +243,13 @@ def test_a_blank_source_counts_as_no_source():
 
 
 def test_leaning_is_ordered_by_pressure():
-    chronicle = (
-        [{"turn": i, "gains": [{"field": "f", "source": "the usual trick"}]} for i in range(1, 6)]
-        + [{"turn": i, "gains": [{"field": "f", "source": "the rarer trick"}]} for i in range(6, 9)]
-    )
-    assert [r["source"] for r in attribution(chronicle)["leaning"]] == ["the usual trick", "the rarer trick"]
+    chronicle = [
+        {"turn": i, "gains": [{"field": "f", "source": "the usual trick"}]} for i in range(1, 6)
+    ] + [{"turn": i, "gains": [{"field": "f", "source": "the rarer trick"}]} for i in range(6, 9)]
+    assert [r["source"] for r in attribution(chronicle)["leaning"]] == [
+        "the usual trick",
+        "the rarer trick",
+    ]
 
 
 def test_a_malformed_gain_is_ignored_rather_than_crashing_the_turn():
@@ -262,10 +275,7 @@ def test_a_busy_life_is_told_so_in_the_worlds_terms():
 
 
 def test_a_repeated_source_is_named_back_to_the_narrator():
-    chronicle = [
-        {"turn": i, "gains": [{"field": "wealth", "source": SOURCE}]}
-        for i in range(1, 5)
-    ]
+    chronicle = [{"turn": i, "gains": [{"field": "wealth", "source": SOURCE}]} for i in range(1, 5)]
     out = compose_restraint(chronicle, LANG)
     assert SOURCE in out
     assert T("restraint.leaning", source=SOURCE, turns=4, times=4) in out
@@ -300,9 +310,9 @@ def test_the_app_never_rewrites_narration():
 def test_the_reading_never_leaks_implementation_vocabulary():
     """R25 — this text goes into a prompt, and a narrator taught these words
     repeats them at the player."""
-    chronicle = (
-        [{"turn": i, "events": ["a", "b", "c"], "gains": [{"field": "wealth"}]} for i in range(1, 7)]
-    )
+    chronicle = [
+        {"turn": i, "events": ["a", "b", "c"], "gains": [{"field": "wealth"}]} for i in range(1, 7)
+    ]
     out = compose_restraint(chronicle, LANG)
     for word in ("state", "chronicle", "digest", "schema", "JSON"):
         assert word not in out

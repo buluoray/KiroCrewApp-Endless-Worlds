@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import secrets
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -324,6 +325,6 @@ class SceneLedger:
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

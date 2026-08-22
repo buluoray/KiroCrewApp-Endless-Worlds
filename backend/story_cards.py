@@ -105,9 +105,9 @@ def build_draft(
                 "action": ev["action"],
                 # The player's own selected prose rides on the event of its
                 # turn, replacing the one-line summary in the render (§8.4).
-                "excerpt": excerpt if excerpt and ev["turn"] == int(
-                    keepsake.get("turn") or 0
-                ) else "",
+                "excerpt": excerpt
+                if excerpt and ev["turn"] == int(keepsake.get("turn") or 0)
+                else "",
                 "included": True,
             }
             for ev in events
@@ -188,9 +188,7 @@ def apply_edits(card: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]
         order = [str(x) for x in changes["order"] or []]
         known = {ev["id"] for ev in card["events"]}
         if set(order) != known:
-            raise StoryCardError(
-                "order", "exactly the ids already on this card, reordered"
-            )
+            raise StoryCardError("order", "exactly the ids already on this card, reordered")
         by_id = {ev["id"]: ev for ev in card["events"]}
         card["events"] = [by_id[i] for i in order]
 
@@ -202,9 +200,7 @@ def apply_edits(card: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]
         known = {ev["id"] for ev in card["events"]}
         for eid in flags:
             if str(eid) not in known:
-                raise StoryCardError(
-                    "events", f"an event already on this card, got {eid!r}"
-                )
+                raise StoryCardError("events", f"an event already on this card, got {eid!r}")
         for ev in card["events"]:
             if ev["id"] in flags:
                 ev["included"] = bool(flags[ev["id"]])
@@ -213,25 +209,19 @@ def apply_edits(card: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]
         # {id: {included?, display?}} — hide or rename, never add.
         rows = changes["entities"]
         if not isinstance(rows, dict):
-            raise StoryCardError(
-                "entities", "an object of {entityId: {included, display}}"
-            )
+            raise StoryCardError("entities", "an object of {entityId: {included, display}}")
         known_e = {e["id"]: e for e in card["entities"]}
         for eid, patch in rows.items():
             ent = known_e.get(str(eid))
             if ent is None:
-                raise StoryCardError(
-                    "entities", f"an entity already on this card, got {eid!r}"
-                )
+                raise StoryCardError("entities", f"an entity already on this card, got {eid!r}")
             if isinstance(patch, dict):
                 if "included" in patch:
                     ent["included"] = bool(patch["included"])
                 if "display" in patch:
                     display = str(patch["display"]).strip()
                     if not display or len(display) > 120:
-                        raise StoryCardError(
-                            "entities", f"{eid}: display must be 1–120 characters"
-                        )
+                        raise StoryCardError("entities", f"{eid}: display must be 1–120 characters")
                     ent["display"] = display
 
     card["updatedAt"] = time.time()
@@ -255,7 +245,8 @@ def resolve(card: dict[str, Any]) -> dict[str, Any]:
     # 「艾琳欠下的人情」 embeds the very name the player anonymised, and a cast
     # chip or SVG label printing it verbatim would undo the rename (§12.3).
     renames = [
-        (e["name"], e["display"]) for e in card["entities"]
+        (e["name"], e["display"])
+        for e in card["entities"]
         if e["included"] and e["display"] != e["name"] and e["name"]
     ]
     hidden_names = [e["name"] for e in card["entities"] if not e["included"] and e["name"]]
@@ -292,18 +283,21 @@ def resolve(card: dict[str, Any]) -> dict[str, Any]:
             continue
         if not spoilers and ended and ev["turn"] >= ended:
             continue  # ending content stays out when spoilers are off (§12.3)
-        events.append({
-            **ev,
-            "title": scrub(ev["title"]),
-            "summary": scrub(ev["summary"]),
-            "excerpt": scrub(ev["excerpt"]),
-            "action": scrub(ev["action"]),
-        })
+        events.append(
+            {
+                **ev,
+                "title": scrub(ev["title"]),
+                "summary": scrub(ev["summary"]),
+                "excerpt": scrub(ev["excerpt"]),
+                "action": scrub(ev["action"]),
+            }
+        )
 
     kept_events = {ev["id"] for ev in events}
     kept_entities = set(names)
     edges = [
-        e for e in card["edges"]
+        e
+        for e in card["edges"]
         if (e["from"] in kept_events or e["from"] in kept_entities)
         and (e["to"] in kept_events or e["to"] in kept_entities)
     ]
@@ -323,10 +317,20 @@ def resolve(card: dict[str, Any]) -> dict[str, Any]:
 # ── exporters (self-contained: no scripts, no network, no ids) ──────────
 
 _STRINGS = {
-    "zh": {"page": "第 {n} 页", "then": "你当时的选择", "cast": "这段往事里的他们",
-           "thought": "写在最后", "graph": "这几件事如何相连"},
-    "en": {"page": "Page {n}", "then": "What was chosen then", "cast": "Who was there",
-           "thought": "A closing thought", "graph": "How these moments connect"},
+    "zh": {
+        "page": "第 {n} 页",
+        "then": "你当时的选择",
+        "cast": "这段往事里的他们",
+        "thought": "写在最后",
+        "graph": "这几件事如何相连",
+    },
+    "en": {
+        "page": "Page {n}",
+        "then": "What was chosen then",
+        "cast": "Who was there",
+        "thought": "A closing thought",
+        "graph": "How these moments connect",
+    },
 }
 
 
@@ -351,10 +355,13 @@ def to_markdown(card: dict[str, Any]) -> str:
         if ev["action"]:
             out.append(f"*{_s(lang, 'then')}: {ev['action']}*")
     if view["entities"]:
-        out += ["", f"### {_s(lang, 'cast')}",
-                "、".join(e["display"] for e in view["entities"])
-                if lang == "zh" else
-                ", ".join(e["display"] for e in view["entities"])]
+        out += [
+            "",
+            f"### {_s(lang, 'cast')}",
+            "、".join(e["display"] for e in view["entities"])
+            if lang == "zh"
+            else ", ".join(e["display"] for e in view["entities"]),
+        ]
     if view["thought"]:
         out += ["", f"### {_s(lang, 'thought')}", view["thought"]]
     return "\n".join(out) + "\n"
@@ -370,7 +377,8 @@ def to_html(card: dict[str, Any]) -> str:
         body = esc(ev["excerpt"] or ev["summary"])
         action = (
             f"<div class='act'>{esc(_s(lang, 'then'))}: {esc(ev['action'])}</div>"
-            if ev["action"] else ""
+            if ev["action"]
+            else ""
         )
         rows.append(
             f"<section><h2><span class='turn'>{esc(_s(lang, 'page', n=ev['turn']))}"
@@ -378,19 +386,18 @@ def to_html(card: dict[str, Any]) -> str:
         )
     cast = ""
     if view["entities"]:
-        chips = "".join(
-            f"<span class='chip'>{esc(e['display'])}</span>" for e in view["entities"]
-        )
+        chips = "".join(f"<span class='chip'>{esc(e['display'])}</span>" for e in view["entities"])
         cast = f"<h3>{esc(_s(lang, 'cast'))}</h3><div class='cast'>{chips}</div>"
     thought = (
         f"<h3>{esc(_s(lang, 'thought'))}</h3><p class='thought'>{esc(view['thought'])}</p>"
-        if view["thought"] else ""
+        if view["thought"]
+        else ""
     )
     cover = f"<p class='cover'>{esc(view['coverLine'])}</p>" if view["coverLine"] else ""
     graph = to_svg(card, standalone=False)
     return f"""<!doctype html>
 <html lang="{esc(lang)}"><head><meta charset="utf-8">
-<title>{esc(view['title'])}</title>
+<title>{esc(view["title"])}</title>
 <style>
 body {{ margin: 0 auto; max-width: 640px; padding: 32px 20px; background: #14151f;
        color: #e5e7eb; font: 16px/1.8 system-ui, sans-serif; }}
@@ -405,11 +412,11 @@ h3 {{ font-size: 14px; color: #9ca3af; margin: 28px 0 8px; }}
 .thought {{ font-style: italic; }}
 svg {{ width: 100%; height: auto; margin-top: 10px; }}
 </style></head><body>
-<h1>{esc(view['title'])}</h1>
+<h1>{esc(view["title"])}</h1>
 {cover}
-{''.join(rows)}
+{"".join(rows)}
 {cast}
-<h3>{esc(_s(lang, 'graph'))}</h3>
+<h3>{esc(_s(lang, "graph"))}</h3>
 {graph}
 {thought}
 </body></html>
@@ -450,7 +457,7 @@ def to_svg(card: dict[str, Any], *, standalone: bool = True) -> str:
         x, y = pos[ev["id"]]
         label = esc(ev["title"][:18])
         parts.append(
-            f'<g><title>{esc(ev["title"])}</title>'
+            f"<g><title>{esc(ev['title'])}</title>"
             f'<circle cx="{x}" cy="{y}" r="8" fill="#7c3aed"/>'
             f'<text x="{x - 16}" y="{y + 4}" text-anchor="end" fill="#e5e7eb" '
             f'font-size="12">{label}</text></g>'
@@ -459,7 +466,7 @@ def to_svg(card: dict[str, Any], *, standalone: bool = True) -> str:
         x, y = pos[ent["id"]]
         label = esc(ent["display"][:14])
         parts.append(
-            f'<g><title>{esc(ent["display"])}</title>'
+            f"<g><title>{esc(ent['display'])}</title>"
             f'<circle cx="{x}" cy="{y}" r="6" fill="#1f2030" stroke="#9ca3af"/>'
             f'<text x="{x + 14}" y="{y + 4}" fill="#e5e7eb" font-size="12">{label}</text></g>'
         )
@@ -467,8 +474,7 @@ def to_svg(card: dict[str, Any], *, standalone: bool = True) -> str:
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
         f'role="img" aria-label="{esc(view["title"])}">'
-        f'<rect width="{width}" height="{height}" fill="#14151f"/>'
-        + "".join(parts) + "</svg>"
+        f'<rect width="{width}" height="{height}" fill="#14151f"/>' + "".join(parts) + "</svg>"
     )
     return svg
 

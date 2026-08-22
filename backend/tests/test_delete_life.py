@@ -27,9 +27,10 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from test_delete_world import FakeCtx, body_of, call  # noqa: E402
+
 import routes as routes_mod  # noqa: E402
 from store import RunStore  # noqa: E402
-from test_delete_world import FakeCtx, FakeRequest, body_of, call  # noqa: E402
 
 
 @pytest.fixture()
@@ -53,7 +54,8 @@ def a_life(app, *, turn=3, world_id="test-world"):
 
 def wipe(app, run_id, *, confirm=None, turn=3):
     return call(
-        routes_mod.delete_life, app["ctx"],
+        routes_mod.delete_life,
+        app["ctx"],
         match={"run_id": run_id},
         body={"confirm": run_id if confirm is None else confirm, "turn": turn},
     )
@@ -75,8 +77,7 @@ def test_one_life_is_erased_and_its_world_is_untouched(app, tmp_path):
     assert [r["runId"] for r in app["store"].read_index()] == [keep]
     assert not (app["data"] / "runs" / drop).exists()
     # Every key the store writes for that life, not just the obvious two.
-    for key in (f"run.{drop}.state", f"run.{drop}.prev",
-                f"briefed-{drop}", f"pending-{drop}"):
+    for key in (f"run.{drop}.state", f"run.{drop}.prev", f"briefed-{drop}", f"pending-{drop}"):
         assert app["ctx"].storage.get(key) is None, f"{key} was left behind"
     # The life that was kept is fully intact.
     assert app["store"].read_state(keep)["turn"] == 3
@@ -92,12 +93,9 @@ def test_a_life_too_damaged_to_open_can_still_be_erased(app):
     """
     run_id = a_life(app)
     # Corrupt the state the way a real run got corrupted: unreadable bytes.
-    (app["data"] / "kv" / f"run.{run_id}.state.json").write_text("{ not json",
-                                                                encoding="utf-8")
+    (app["data"] / "kv" / f"run.{run_id}.state.json").write_text("{ not json", encoding="utf-8")
 
-    facts = body_of(call(
-        routes_mod.life_deletion, app["ctx"], match={"run_id": run_id}
-    ))
+    facts = body_of(call(routes_mod.life_deletion, app["ctx"], match={"run_id": run_id}))
     assert facts["unreadable"] is True
     assert facts["turn"] == 0
 
@@ -178,9 +176,7 @@ def test_the_preflight_says_which_month_this_life_reached(app):
     months behind it."""
     run_id = a_life(app, turn=7)
 
-    facts = body_of(call(
-        routes_mod.life_deletion, app["ctx"], match={"run_id": run_id}
-    ))
+    facts = body_of(call(routes_mod.life_deletion, app["ctx"], match={"run_id": run_id}))
 
     assert facts["runId"] == run_id
     assert facts["turn"] == 7
@@ -209,9 +205,7 @@ def test_both_deletion_bodies_carry_every_field_the_dialogs_read(app, tmp_path):
         pytest.skip("web/src not present")
 
     run_id = a_life(app, turn=2)
-    life_body = body_of(call(
-        routes_mod.life_deletion, app["ctx"], match={"run_id": run_id}
-    ))
+    life_body = body_of(call(routes_mod.life_deletion, app["ctx"], match={"run_id": run_id}))
 
     # The world-deletion body, built from its own real library + store.
     from test_delete_world import HEADER, world_file
@@ -225,9 +219,9 @@ def test_both_deletion_bodies_carry_every_field_the_dialogs_read(app, tmp_path):
     import routes as _routes
 
     _routes._SEEDS_DIR = seeds
-    world_body = body_of(call(
-        routes_mod.world_deletion, app["ctx"], match={"world_id": "test-world"}
-    ))
+    world_body = body_of(
+        call(routes_mod.world_deletion, app["ctx"], match={"world_id": "test-world"})
+    )
 
     sent = set(life_body) | set(world_body)
     read = uisrc_reads(uisrc.module("confirm.tsx"), "facts")
@@ -245,6 +239,4 @@ def uisrc_reads(src: str, obj: str) -> set[str]:
     """
     import re
 
-    return set(
-        re.findall(rf"(?<![\w'\"]){re.escape(obj)}\??\.([a-zA-Z][a-zA-Z0-9]*)", src)
-    )
+    return set(re.findall(rf"(?<![\w'\"]){re.escape(obj)}\??\.([a-zA-Z][a-zA-Z0-9]*)", src))

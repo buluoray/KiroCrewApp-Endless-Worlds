@@ -166,9 +166,7 @@ class DraftStore:
             if created and time.time() - created > STALE_SECS:
                 out = dict(record)
                 out["status"] = "failed"
-                out["problem"] = out.get("problem") or (
-                    "the compile never started — try again"
-                )
+                out["problem"] = out.get("problem") or ("the compile never started — try again")
                 return out
         return record
 

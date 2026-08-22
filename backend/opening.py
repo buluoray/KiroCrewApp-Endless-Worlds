@@ -159,20 +159,22 @@ def compose_opening_prompt(*, template: Template, run_id: str) -> str:
     name.
     """
     text = Content(template.language)
-    return "\n".join([
-        text("addressing", run_id=run_id, turn=1),
-        "",
-        text("opening.pull"),
-        "",
-        # The first backdrop is almost always the slowest thing the player waits
-        # on: LANE: motif is the narrator's default, and a hand-drawn motif is two
-        # illustrator attempts of up to three minutes each. Nudging the FIRST page
-        # toward LANE: scene (a traced establishing photograph) trades that for the
-        # bounded trace pipeline and gives the player a real place to open in — but
-        # only where a real photograph could exist, so a purely fantastical or
-        # anime-styled opening still falls back to motif rather than a blank base.
-        text("opening.firstBackdrop"),
-    ])
+    return "\n".join(
+        [
+            text("addressing", run_id=run_id, turn=1),
+            "",
+            text("opening.pull"),
+            "",
+            # The first backdrop is almost always the slowest thing the player waits
+            # on: LANE: motif is the narrator's default, and a hand-drawn motif is two
+            # illustrator attempts of up to three minutes each. Nudging the FIRST page
+            # toward LANE: scene (a traced establishing photograph) trades that for the
+            # bounded trace pipeline and gives the player a real place to open in — but
+            # only where a real photograph could exist, so a purely fantastical or
+            # anime-styled opening still falls back to motif rather than a blank base.
+            text("opening.firstBackdrop"),
+        ]
+    )
 
 
 # ── internals ────────────────────────────────────────────────────────────
@@ -202,9 +204,7 @@ def _coerce(group: Any, raw: Any) -> Any:
 
     if group.kind == "pick" and group.options and value not in group.options:
         if not group.custom:
-            raise OpeningError(
-                f"answers.{group.id}", "one of the options this world offers"
-            )
+            raise OpeningError(f"answers.{group.id}", "one of the options this world offers")
     return value
 
 

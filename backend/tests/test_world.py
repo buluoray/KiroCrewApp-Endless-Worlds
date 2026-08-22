@@ -35,9 +35,13 @@ MINIMAL_HEADER = {
     "styles": [{"id": "standard", "label": "Standard", "default": True}],
     "opening": [{"id": "name", "label": "Name", "kind": "text"}],
     "panels": [
-        {"id": "status", "always": True, "fields": [
-            {"id": "age", "label": "Age", "primitive": "field"},
-        ]},
+        {
+            "id": "status",
+            "always": True,
+            "fields": [
+                {"id": "age", "label": "Age", "primitive": "field"},
+            ],
+        },
     ],
     "endings": [{"id": "died", "when": "state.alive == false"}],
 }
@@ -130,8 +134,7 @@ def test_a_pack_without_an_id_is_refused(bad: dict) -> None:
 
 
 def test_a_fresh_pack_is_not_stale() -> None:
-    header = {**MINIMAL_HEADER,
-              "compiledFrom": Provenance.for_prose(PROSE).to_dict()}
+    header = {**MINIMAL_HEADER, "compiledFrom": Provenance.for_prose(PROSE).to_dict()}
     assert read_world(build(header)).is_stale() is False
 
 
@@ -141,8 +144,7 @@ def test_editing_the_prose_flips_staleness_but_the_world_still_loads() -> None:
     Refusing to load would mean fixing a typo locks you out of a world you played
     for two hundred turns.
     """
-    header = {**MINIMAL_HEADER,
-              "compiledFrom": Provenance.for_prose(PROSE).to_dict()}
+    header = {**MINIMAL_HEADER, "compiledFrom": Provenance.for_prose(PROSE).to_dict()}
     edited = read_world(build(header, prose=PROSE + "补一句。\n"))
 
     assert edited.is_stale() is True
@@ -164,8 +166,7 @@ def test_staleness_note_follows_the_world_language() -> None:
     edited = read_world(build(header, prose=PROSE + "补一句。\n"))
 
     assert edited.staleness_note() == (
-        "这个世界的设定在面板生成后有过改动，"
-        "面板内容可能已经和设定对不上了。"
+        "这个世界的设定在面板生成后有过改动，面板内容可能已经和设定对不上了。"
     )
 
 
@@ -174,18 +175,14 @@ def test_summary_carries_only_clean_emotional_card_copy() -> None:
         **MINIMAL_HEADER,
         "card": {
             "promise": "  Live with the consequences.  ",
-            "possibilities": [
-                "  Keep a promise  ", 7, "", "Lose a crown", "Raise an heir"
-            ],
+            "possibilities": ["  Keep a promise  ", 7, "", "Lose a crown", "Raise an heir"],
         },
     }
 
     row = summarize(read_world(build(header)))
 
     assert row["cardPromise"] == "Live with the consequences."
-    assert row["cardPossibilities"] == [
-        "Keep a promise", "Lose a crown", "Raise an heir"
-    ]
+    assert row["cardPossibilities"] == ["Keep a promise", "Lose a crown", "Raise an heir"]
     assert summarize(read_world(build()))["cardPromise"] == ""
     assert summarize(read_world(build()))["cardPossibilities"] == []
 
@@ -202,8 +199,7 @@ def test_provenance_digest_is_over_the_prose_only() -> None:
     """Changing the header must not read as 'the rulebook moved'."""
     prov = Provenance.for_prose(PROSE)
     header_a = {**MINIMAL_HEADER, "compiledFrom": prov.to_dict()}
-    header_b = {**MINIMAL_HEADER, "title": "Renamed",
-                "compiledFrom": prov.to_dict()}
+    header_b = {**MINIMAL_HEADER, "title": "Renamed", "compiledFrom": prov.to_dict()}
     assert read_world(build(header_a)).is_stale() is False
     assert read_world(build(header_b)).is_stale() is False
 
@@ -212,15 +208,19 @@ def test_an_older_compiler_marks_a_pack_improvable(monkeypatch) -> None:
     import world as world_mod
 
     monkeypatch.setattr(world_mod, "COMPILER_VERSION", 5)
-    header = {**MINIMAL_HEADER, "compiledFrom": {
-        "proseSha256": prose_digest(PROSE), "compiler": "1", "contract": CONTRACT}}
+    header = {
+        **MINIMAL_HEADER,
+        "compiledFrom": {"proseSha256": prose_digest(PROSE), "compiler": "1", "contract": CONTRACT},
+    }
     assert read_world(build(header)).is_improvable() is True
 
 
 def test_a_hand_written_header_is_never_improvable() -> None:
     """A person's judgement is not superseded by a compiler bump."""
-    header = {**MINIMAL_HEADER, "compiledFrom": {
-        "proseSha256": prose_digest(PROSE), "compiler": HAND_COMPILED}}
+    header = {
+        **MINIMAL_HEADER,
+        "compiledFrom": {"proseSha256": prose_digest(PROSE), "compiler": HAND_COMPILED},
+    }
     assert read_world(build(header)).is_improvable() is False
 
 
@@ -228,8 +228,10 @@ def test_a_hand_written_header_is_never_improvable() -> None:
 
 
 def test_a_pack_needing_a_newer_core_is_refused_with_both_versions() -> None:
-    header = {**MINIMAL_HEADER, "compiledFrom": {
-        "proseSha256": prose_digest(PROSE), "compiler": "1", "contract": 99}}
+    header = {
+        **MINIMAL_HEADER,
+        "compiledFrom": {"proseSha256": prose_digest(PROSE), "compiler": "1", "contract": 99},
+    }
     with pytest.raises(ContractTooNew) as exc:
         read_world(build(header))
     assert exc.value.needed == 99
@@ -238,8 +240,10 @@ def test_a_pack_needing_a_newer_core_is_refused_with_both_versions() -> None:
 
 
 def test_a_pack_on_the_current_contract_loads() -> None:
-    header = {**MINIMAL_HEADER, "compiledFrom": {
-        "proseSha256": prose_digest(PROSE), "compiler": "1", "contract": CONTRACT}}
+    header = {
+        **MINIMAL_HEADER,
+        "compiledFrom": {"proseSha256": prose_digest(PROSE), "compiler": "1", "contract": CONTRACT},
+    }
     assert read_world(build(header)).id == "test-world"
 
 
@@ -293,14 +297,17 @@ def test_installing_the_real_flagship_seed_keeps_its_prose_intact() -> None:
 
     # …but every declaration they annotated survived.
     assert [p.id for p in installed.template.panels] == [
-        "status", "magic", "relations", "nation", "academy", "family",
+        "status",
+        "magic",
+        "relations",
+        "nation",
+        "academy",
+        "family",
     ]
     # Including the chapter declarations, whose headings ARE prose text and must
     # survive exactly: a heading that no longer matches the prose is refused at load,
     # so an installed copy that mangled one would make the world unplayable.
-    assert [c.id for c in installed.template.chapters] == [
-        c.id for c in original.template.chapters
-    ]
+    assert [c.id for c in installed.template.chapters] == [c.id for c in original.template.chapters]
     for got, want in zip(installed.template.chapters, original.template.chapters):
         assert got.heading == want.heading
         assert got.heading in installed.prose

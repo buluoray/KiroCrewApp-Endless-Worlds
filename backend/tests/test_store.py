@@ -108,9 +108,7 @@ def test_rollback_without_a_prior_commit_is_refused(store: RunStore) -> None:
 # -- corrupt vs absent ----------------------------------------------------
 
 
-def test_corrupt_state_is_reported_and_never_rewritten(
-    store: RunStore, tmp_path: Path
-) -> None:
+def test_corrupt_state_is_reported_and_never_rewritten(store: RunStore, tmp_path: Path) -> None:
     """AppStorage.get() returns None for BOTH absent and unparseable JSON.
 
     Conflating them would let a damaged save be mistaken for a new run and
@@ -262,9 +260,7 @@ def test_store_has_no_process_lifetime_per_run_lock_table(store: RunStore) -> No
 # -- deletion -------------------------------------------------------------
 
 
-def test_delete_removes_state_index_row_and_chronicle(
-    store: RunStore, tmp_path: Path
-) -> None:
+def test_delete_removes_state_index_row_and_chronicle(store: RunStore, tmp_path: Path) -> None:
     run_id = store.create_run(_state(1), {"templateId": "t"})
     store.commit_state(run_id, _state(2))
     store.append_turn(run_id, {"turn": 1})

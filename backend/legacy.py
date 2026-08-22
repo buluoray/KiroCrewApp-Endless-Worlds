@@ -40,10 +40,12 @@ BRIDGE_KEY = "legacy-bridge"
 MAX_INHERITED = 12
 
 _STRINGS = {
-    "zh": {"bridge": "传承", "summary": "上一代留给这一世的东西。",
-           "from": "来自上一世"},
-    "en": {"bridge": "Inheritance", "summary": "What the last life left to this one.",
-           "from": "from a life before"},
+    "zh": {"bridge": "传承", "summary": "上一代留给这一世的东西。", "from": "来自上一世"},
+    "en": {
+        "bridge": "Inheritance",
+        "summary": "What the last life left to this one.",
+        "from": "from a life before",
+    },
 }
 
 
@@ -91,23 +93,38 @@ def candidates(index: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
             continue
         for end in (slot["from"], slot["to"]):
             if end != PLAYER:
-                relations_of.setdefault(end, []).append({
-                    "type": slot["type"], "level": slot["level"],
-                    "value": slot["value"],
-                })
+                relations_of.setdefault(end, []).append(
+                    {
+                        "type": slot["type"],
+                        "level": slot["level"],
+                        "value": slot["value"],
+                    }
+                )
 
     groups: dict[str, list[dict[str, Any]]] = {
-        "characters": [], "objects": [], "groups": [], "threads": [], "places": [],
+        "characters": [],
+        "objects": [],
+        "groups": [],
+        "threads": [],
+        "places": [],
     }
-    kind_to_group = {"character": "characters", "object": "objects",
-                     "group": "groups", "thread": "threads", "place": "places"}
+    kind_to_group = {
+        "character": "characters",
+        "object": "objects",
+        "group": "groups",
+        "thread": "threads",
+        "place": "places",
+    }
     for eid in sorted(visible):
         ent = index["entities"].get(eid)
         if ent is None:
             continue
         row: dict[str, Any] = {
-            "id": eid, "kind": ent["kind"], "name": ent["name"],
-            "summary": ent["summary"], "appearances": appearances.get(eid, 0),
+            "id": eid,
+            "kind": ent["kind"],
+            "name": ent["name"],
+            "summary": ent["summary"],
+            "appearances": appearances.get(eid, 0),
         }
         if ent["kind"] == "character" and eid in relations_of:
             row["relations"] = relations_of[eid]
@@ -161,20 +178,22 @@ def build_bridge_record(
     entities: list[dict[str, Any]] = []
     for eid in picked:
         src = source_index["entities"][eid]
-        entities.append({
-            "id": eid,
-            "kind": src["kind"],
-            "name": src["name"],
-            "aliases": list(src["aliases"]),
-            "summary": src["summary"],
-            # Stamped by the app, never by a narrator: the tool schema has no
-            # such field, so this can only originate here (§9 step 4).
-            "inheritsFrom": {
-                "runId": source_run_id,
-                "nodeId": eid,
-                "turn": int(src.get("firstTurn") or 0),
-            },
-        })
+        entities.append(
+            {
+                "id": eid,
+                "kind": src["kind"],
+                "name": src["name"],
+                "aliases": list(src["aliases"]),
+                "summary": src["summary"],
+                # Stamped by the app, never by a narrator: the tool schema has no
+                # such field, so this can only originate here (§9 step 4).
+                "inheritsFrom": {
+                    "runId": source_run_id,
+                    "nodeId": eid,
+                    "turn": int(src.get("firstTurn") or 0),
+                },
+            }
+        )
 
     from memory_graph import project_relations
 
@@ -190,24 +209,30 @@ def build_bridge_record(
         if not ends <= (set(picked) | {PLAYER}):
             continue
         level = slot["level"]
-        relations.append({
-            "from": slot["from"], "type": slot["type"], "to": slot["to"],
-            "change": "set",
-            "value": slot["value"] or (f"{level:+d}" if level else ""),
-            "reasonEvent": BRIDGE_KEY,
-        })
+        relations.append(
+            {
+                "from": slot["from"],
+                "type": slot["type"],
+                "to": slot["to"],
+                "change": "set",
+                "value": slot["value"] or (f"{level:+d}" if level else ""),
+                "reasonEvent": BRIDGE_KEY,
+            }
+        )
 
     lang = language if language in _STRINGS else "en"
     memory = {
         "entities": entities,
-        "events": [{
-            "key": BRIDGE_KEY,
-            "title": _s(lang, "bridge"),
-            "summary": _s(lang, "summary"),
-            "importance": "major",
-            "participants": [PLAYER] + picked,
-            "disclosure": "known",
-        }],
+        "events": [
+            {
+                "key": BRIDGE_KEY,
+                "title": _s(lang, "bridge"),
+                "summary": _s(lang, "summary"),
+                "importance": "major",
+                "participants": [PLAYER] + picked,
+                "disclosure": "known",
+            }
+        ],
         "relations": relations,
     }
     return {
@@ -233,8 +258,7 @@ def narrator_summary(index: dict[str, Any], language: str = "en") -> dict[str, A
     the player did not choose to carry.
     """
     inherited = [
-        {"id": eid, "kind": ent["kind"], "name": ent["name"],
-         "summary": ent["summary"]}
+        {"id": eid, "kind": ent["kind"], "name": ent["name"], "summary": ent["summary"]}
         for eid, ent in index["entities"].items()
         if isinstance(ent.get("inheritsFrom"), dict)
     ]

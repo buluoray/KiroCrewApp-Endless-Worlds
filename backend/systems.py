@@ -85,7 +85,7 @@ def _set(state: dict[str, Any], path: str, value: Any) -> None:
     cur[parts[-1]] = value
 
 
-def _clamp(value: float, floor: "float | None", cap: "float | None") -> float:
+def _clamp(value: float, floor: float | None, cap: float | None) -> float:
     if floor is not None and value < floor:
         value = floor
     if cap is not None and value > cap:

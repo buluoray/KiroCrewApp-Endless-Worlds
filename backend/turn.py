@@ -25,8 +25,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import narrator
 from content import Content
@@ -365,7 +366,9 @@ async def advance_turn(
         prose = await _await_commit(store, run_id, wanted, deadline_secs)
         if prose is None:
             return TurnOutcome(
-                advanced=False, turn=baseline, reason="generating",
+                advanced=False,
+                turn=baseline,
+                reason="generating",
             )
         store.clear_pending(run_id)
         return TurnOutcome(advanced=True, turn=wanted, prose=prose)
@@ -482,9 +485,7 @@ def _in_flight(store: RunStore, run_id: str, wanted: int) -> dict[str, Any] | No
     return pending
 
 
-def generating(
-    store: RunStore, run_id: str, state_obj: Any = None
-) -> dict[str, Any] | None:
+def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str, Any] | None:
     """What a returning player should be told, or ``None`` if nothing is in flight.
 
     Read by the run and play views so that coming back to a life mid-generation

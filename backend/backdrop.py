@@ -143,15 +143,11 @@ def compile_backdrop(svg: str) -> str:
 
     size = len(svg.encode("utf-8"))
     if size > MAX_BACKDROP_BYTES:
-        raise BackdropError(
-            f"a background is at most {MAX_BACKDROP_BYTES} bytes, got {size}"
-        )
+        raise BackdropError(f"a background is at most {MAX_BACKDROP_BYTES} bytes, got {size}")
 
     low = svg.lower()
     if "<svg" not in low:
-        raise BackdropError(
-            "a background must be a single SVG image (a <svg>…</svg> document)"
-        )
+        raise BackdropError("a background must be a single SVG image (a <svg>…</svg> document)")
     for banned in _FORBIDDEN_SUBSTRINGS:
         if banned in low:
             raise BackdropError(
@@ -161,9 +157,7 @@ def compile_backdrop(svg: str) -> str:
     if _HANDLER_RE.search(svg):
         raise BackdropError("a background may not carry an inline event handler (on…=)")
     if _EXTERNAL_REF_RE.search(svg):
-        raise BackdropError(
-            "a background may not link to an external resource — draw it inline"
-        )
+        raise BackdropError("a background may not link to an external resource — draw it inline")
 
     # A data/image-loaded SVG needs the namespace declared on its root or it will
     # not render. Inject it when the narrator left it off the first <svg>.
@@ -179,7 +173,9 @@ def compile_backdrop(svg: str) -> str:
         svg = re.sub(
             r"<svg\b",
             '<svg xmlns:xlink="http://www.w3.org/1999/xlink"',
-            svg, count=1, flags=re.IGNORECASE,
+            svg,
+            count=1,
+            flags=re.IGNORECASE,
         )
 
     # Well-formedness is the last gate. The denylist above catches dangerous
@@ -244,19 +240,17 @@ def _load_shared_library(name: str, fallbacks: tuple[str, ...]) -> ctypes.CDLL:
 
 def _render_with_librsvg(svg: str, target: Path, width: int, height: int) -> None:
     """Rasterize one already-compiled SVG through librsvg into a bounded PNG."""
-    rsvg = _load_shared_library(
-        "rsvg-2", ("librsvg-2.so.2", "librsvg-2.dylib", "librsvg-2-2.dll")
-    )
-    cairo = _load_shared_library(
-        "cairo", ("libcairo.so.2", "libcairo.2.dylib", "libcairo-2.dll")
-    )
+    rsvg = _load_shared_library("rsvg-2", ("librsvg-2.so.2", "librsvg-2.dylib", "librsvg-2-2.dll"))
+    cairo = _load_shared_library("cairo", ("libcairo.so.2", "libcairo.2.dylib", "libcairo-2.dll"))
     gobject = _load_shared_library(
         "gobject-2.0",
         ("libgobject-2.0.so.0", "libgobject-2.0.0.dylib", "libgobject-2.0-0.dll"),
     )
 
     rsvg.rsvg_handle_new_from_data.argtypes = [
-        ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_void_p)
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.POINTER(ctypes.c_void_p),
     ]
     rsvg.rsvg_handle_new_from_data.restype = ctypes.c_void_p
     rsvg.rsvg_handle_render_document.argtypes = [
@@ -348,9 +342,12 @@ def _render_thumbnail_backends(svg: str, tmp: Path, width: int, height: int) -> 
             subprocess.run(
                 [
                     converter,
-                    "--width", str(width),
-                    "--height", str(height),
-                    "--output", str(tmp),
+                    "--width",
+                    str(width),
+                    "--height",
+                    str(height),
+                    "--output",
+                    str(tmp),
                 ],
                 input=svg.encode("utf-8"),
                 stdout=subprocess.DEVNULL,
@@ -404,7 +401,10 @@ def _render_svg_thumbnail(svg: str, target: Path, width: int, height: int) -> No
                 [
                     sys.executable,
                     str(Path(__file__).resolve()),
-                    "--render-thumbnail", str(width), str(height), str(tmp),
+                    "--render-thumbnail",
+                    str(width),
+                    str(height),
+                    str(tmp),
                 ],
                 input=svg.encode("utf-8"),
                 stdout=subprocess.DEVNULL,
@@ -505,9 +505,7 @@ class BackdropDraftStore:
         clean_markup = compile_backdrop(markup)
         clean_mobile = compile_backdrop(mobile)
         clean_buttons = (
-            compile_backdrop(buttons)
-            if isinstance(buttons, str) and buttons.strip()
-            else None
+            compile_backdrop(buttons) if isinstance(buttons, str) and buttons.strip() else None
         )
 
         draft_id = secrets.token_hex(12)
@@ -611,8 +609,7 @@ class BackdropStore:
         source = None
         if isinstance(raw_source, dict):
             candidate = {
-                key: str(raw_source.get(key) or "")
-                for key in ("title", "pageUrl", "license")
+                key: str(raw_source.get(key) or "") for key in ("title", "pageUrl", "license")
             }
             if candidate["pageUrl"] and candidate["license"]:
                 source = candidate
@@ -668,8 +665,12 @@ class BackdropStore:
         return int(view["version"]) if view else 0
 
     def set(
-        self, markup: str, buttons: str | None = None, turn: int = 0,
-        mobile: str | None = None, source: dict[str, str] | None = None,
+        self,
+        markup: str,
+        buttons: str | None = None,
+        turn: int = 0,
+        mobile: str | None = None,
+        source: dict[str, str] | None = None,
         trace: dict[str, Any] | None = None,
     ) -> int:
         """Validate and append coordinated desktop/mobile backgrounds (and the
@@ -686,20 +687,15 @@ class BackdropStore:
         """
         clean_markup = compile_backdrop(markup)  # raises BackdropError on bad input
         clean_buttons = (
-            compile_backdrop(buttons)
-            if isinstance(buttons, str) and buttons.strip()
-            else None
+            compile_backdrop(buttons) if isinstance(buttons, str) and buttons.strip() else None
         )
         clean_mobile = (
-            compile_backdrop(mobile)
-            if isinstance(mobile, str) and mobile.strip()
-            else None
+            compile_backdrop(mobile) if isinstance(mobile, str) and mobile.strip() else None
         )
         clean_source = None
         if isinstance(source, dict):
             candidate = {
-                key: str(source.get(key) or "")[:500]
-                for key in ("title", "pageUrl", "license")
+                key: str(source.get(key) or "")[:500] for key in ("title", "pageUrl", "license")
             }
             if candidate["pageUrl"] and candidate["license"]:
                 clean_source = candidate
@@ -739,7 +735,6 @@ class BackdropStore:
         else:
             history.append(tomb)
         self._save(history)
-
 
 
 if __name__ == "__main__":  # the render child — see _render_svg_thumbnail
