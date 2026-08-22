@@ -476,7 +476,17 @@ export function PlayPage({
     )
   }
 
-  const panels = <>{(v.panels ?? []).map((p) => <PanelBox key={p.id} panel={p} />)}</>
+  // The page's own standing, not today's: a month re-read shows the summary and the
+  // panels it ended on. One `past` lookup feeds both so they can never disagree
+  // about which month is on screen. A month committed before snapshots existed
+  // falls back to the live ones — an empty frame would read as "nothing was
+  // happening" rather than "not recorded".
+  const past = viewTurn !== null && viewTurn < v.turn
+    ? chron.find((c) => c.turn === viewTurn)
+    : undefined
+  const shownDigest = past ? (past.digest ?? v.digest ?? []) : (v.digest ?? [])
+  const shownPanels = past ? (past.panels ?? v.panels ?? []) : (v.panels ?? [])
+  const panels = <>{shownPanels.map((p) => <PanelBox key={p.id} panel={p} />)}</>
 
   // A life that has reached its ending. The action controls are gone — a closed
   // life takes no more turns — and the last narration stands as its epilogue, with
@@ -655,9 +665,9 @@ export function PlayPage({
         </div>
       ) : null}
 
-      {(v.digest ?? []).length ? (
+      {shownDigest.length ? (
         <div className="ew-digest">
-          {(v.digest ?? []).map((dg, i) => (
+          {shownDigest.map((dg, i) => (
             <div
               className={`ew-drow${dg.rumour ? ' ew-drow-rumour' : ''}`}
               key={`${dg.category}-${i}`}
@@ -930,7 +940,7 @@ export function PlayPage({
       ) : null}
       {drawer && !narrow ? (
         <div id="ew-panels-drawer" style={{ marginTop: '10px' }}>
-          {(v.panels ?? []).length ? panels : (
+          {shownPanels.length ? panels : (
             <div className="ew-note">{t('play.nothingToShow')}</div>
           )}
         </div>

@@ -103,12 +103,12 @@ from chapters import (  # noqa: E402
     opened_since,
     read_chapter,
 )
-from halo import attribution, compose_restraint, event_density  # noqa: E402
+from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
 import memory_graph  # noqa: E402
 from store import RunStore, StoreError  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from systems import apply_systems  # noqa: E402
-from view import always_panels_empty  # noqa: E402
+from view import always_panels_empty, shape_panels  # noqa: E402
 from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
 from compile import COMPILER_BRIEF, CLEANING_CONTRACT, accept_compiled_header, preview  # noqa: E402
 from drafts import DraftError, DraftStore  # noqa: E402
@@ -1428,6 +1428,19 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         # story it narrates commit together or not at all, and every index over
         # them is derived and rebuildable from this line.
         entry["memory"] = memory
+    # The standing this month ENDED on, so re-reading a past page shows that
+    # month's situation instead of today's. A snapshot rather than the state itself:
+    # a chronicle records what the page looked like, and resolving panels later
+    # would need the world pack that was in force then — a later pack edit would
+    # silently rewrite history. Absent when the pack could not be loaded; the page
+    # then falls back to the live panels.
+    if pack is not None:
+        try:
+            entry["digest"] = gate_digest(pack.template.digest_categories, state)
+            entry["panels"] = shape_panels(pack.template, state, pack.capability_packs)
+        except Exception:  # noqa: BLE001
+            # A month that narrated fine is not lost over a summary snapshot.
+            pass
     store.append_turn(run_id, entry)
     result: dict[str, Any] = {"committed": True, "turn": turn}
     # Non-blocking corrections: a dropped memory block, and an always-on panel that

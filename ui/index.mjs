@@ -5613,7 +5613,10 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 			})
 		] })
 	] });
-	const panels = /* @__PURE__ */ jsx(Fragment, { children: (v.panels ?? []).map((p) => /* @__PURE__ */ jsx(PanelBox, { panel: p }, p.id)) });
+	const past = viewTurn !== null && viewTurn < v.turn ? chron.find((c) => c.turn === viewTurn) : void 0;
+	const shownDigest = past ? past.digest ?? v.digest ?? [] : v.digest ?? [];
+	const shownPanels = past ? past.panels ?? v.panels ?? [] : v.panels ?? [];
+	const panels = /* @__PURE__ */ jsx(Fragment, { children: shownPanels.map((p) => /* @__PURE__ */ jsx(PanelBox, { panel: p }, p.id)) });
 	if (v.ended) return /* @__PURE__ */ jsxs("div", { children: [
 		legacyOpen ? /* @__PURE__ */ jsx(LegacyPicker, {
 			runId,
@@ -5810,9 +5813,9 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 				children: t("play.milestone", { label: m })
 			}, `${m}-${i}`))
 		}) : null,
-		(v.digest ?? []).length ? /* @__PURE__ */ jsx("div", {
+		shownDigest.length ? /* @__PURE__ */ jsx("div", {
 			className: "ew-digest",
-			children: (v.digest ?? []).map((dg, i) => /* @__PURE__ */ jsxs("div", {
+			children: shownDigest.map((dg, i) => /* @__PURE__ */ jsxs("div", {
 				className: `ew-drow${dg.rumour ? " ew-drow-rumour" : ""}`,
 				children: [/* @__PURE__ */ jsx("div", {
 					className: "ew-dcat",
@@ -6030,7 +6033,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 		drawer && !narrow ? /* @__PURE__ */ jsx("div", {
 			id: "ew-panels-drawer",
 			style: { marginTop: "10px" },
-			children: (v.panels ?? []).length ? panels : /* @__PURE__ */ jsx("div", {
+			children: shownPanels.length ? panels : /* @__PURE__ */ jsx("div", {
 				className: "ew-note",
 				children: t("play.nothingToShow")
 			})
@@ -7290,7 +7293,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.5.10" })
+								children: t("app.version", { version: "0.5.11" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",
