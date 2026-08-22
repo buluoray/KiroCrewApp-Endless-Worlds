@@ -420,6 +420,10 @@ export interface LifeRowData {
   style: string
   turn: number
   lastPlayed: number
+  /** When this life began. Fixed for the life of the run, unlike `lastPlayed`,
+   *  so the shelf can offer an order that does not move as you play. Absent on
+   *  rows written before the field existed; treat `lastPlayed` as the stand-in. */
+  createdAt?: number
   awaitingOpening?: boolean
   ended?: boolean
   unreadable?: boolean

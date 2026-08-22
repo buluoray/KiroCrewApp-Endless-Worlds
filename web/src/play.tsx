@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
 import { api, API } from './api'
@@ -20,6 +21,7 @@ const ACT = 'act'
 const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
+import { useScrollHide } from './tabbar'
 import { ChoiceEffect, effectClass } from './effects'
 import { History, LifeSummary } from './history'
 import { LegacyPicker } from './legacy'
@@ -148,6 +150,7 @@ function EchoMark({
 
 export function PlayPage({
   runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh,
+  readerBar = false,
   openStar, onStarClose, onLiveTurn, narrow, onPanels, turnPending = false,
 }: {
   runId: string
@@ -157,6 +160,11 @@ export function PlayPage({
    *  at the ROOT rather than in this column — on a desktop it spans the page, not
    *  just the story. */
   onBackdrop: (backdrop: { version: number; turn?: number; mobile?: boolean } | null) => void
+  /** Phone only, and only while the READING tab is up: float the back/pager
+   *  controls over the foot of the screen instead of leaving them at the top of
+   *  a page you have to scroll back up to reach. False on desktop and while a
+   *  region tab has replaced the story, where a page pager means nothing. */
+  readerBar?: boolean
   onReplay: (worldId: string) => void
   onReplaySame: (fromRunId: string) => void
   /** Enter another life by id — how a legacy heir is stepped into (§9). */
@@ -212,6 +220,8 @@ export function PlayPage({
   // The ref distinguishes the first load of this run from subsequent refreshes.
   const loadedRun = useRef<string | null>(null)
   const [recapOpen, setRecapOpen] = useState(false)
+  // The same scroll signal the phone tab bar rides, so the two move together.
+  const barHidden = useScrollHide(readerBar)
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
@@ -982,10 +992,27 @@ export function PlayPage({
           }}
         />
       ) : null}
-      <div className="ew-topbar">
-        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-        {pager}
-      </div>
+      {/* On a phone these same two controls ride at the foot of the screen instead
+          (see `readerBar`), so rendering both would put the pager on screen twice. */}
+      {readerBar ? null : (
+        <div className="ew-topbar">
+          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+          {pager}
+        </div>
+      )}
+      {readerBar ? createPortal(
+        // Portalled for the same reason the tab bar is: `position: fixed` resolves
+        // against a transformed ancestor in the dashboard shell, not the viewport.
+        // Hidden on scroll-down and brought back on scroll-up by the SAME signal the
+        // tab bar uses, so one upward swipe returns every control at once — which is
+        // the point: at the bottom of a long month, paging on used to mean scrolling
+        // all the way back to the top.
+        <div className={`ew-readerbar${barHidden ? ' ew-readerbar-hidden' : ''}`}>
+          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+          {pager}
+        </div>,
+        document.body,
+      ) : null}
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
         // the story readable. The next successful poll clears it (M0.5).

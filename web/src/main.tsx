@@ -63,6 +63,39 @@ interface Where {
   draftId?: string
 }
 
+/** How the shelf orders lives. `recent` (the default) puts the life that moved
+ *  most recently first, which is what a reader coming back wants; `started` keeps
+ *  the order the lives were begun in, which is the one that does NOT rearrange
+ *  itself under you as you play. Remembered because a reader who prefers one
+ *  ordering prefers it every time. */
+type ShelfOrder = 'recent' | 'started'
+const ORDER_KEY = 'ew-shelf-order'
+
+const rememberOrder = (order: ShelfOrder) => {
+  try {
+    localStorage.setItem(ORDER_KEY, order)
+  } catch {
+    /* private mode */
+  }
+}
+const recallOrder = (): ShelfOrder => {
+  try {
+    return localStorage.getItem(ORDER_KEY) === 'started' ? 'started' : 'recent'
+  } catch {
+    return 'recent'
+  }
+}
+
+/** Order a shelf group. `createdAt` is absent on rows written before it existed,
+ *  so `lastPlayed` stands in — that orders such a row no worse than it was
+ *  ordered before, and never drops it. */
+const byOrder = (rows: LifeRowData[], order: ShelfOrder): LifeRowData[] =>
+  [...rows].sort((a, b) =>
+    order === 'started'
+      ? (a.createdAt ?? a.lastPlayed ?? 0) - (b.createdAt ?? b.lastPlayed ?? 0)
+      : (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0),
+  )
+
 const remember = (where: Where) => {
   try {
     localStorage.setItem(WHERE, JSON.stringify(where))
@@ -512,6 +545,7 @@ export default function EndlessWorlds() {
     [changeLifeMeta],
   )
   const [showArchived, setShowArchived] = useState(false)
+  const [order, setOrder] = useState<ShelfOrder>(recallOrder)
 
   // ── bottom tab bar: track viewport, reset per life, build tabs & dots ──
   useEffect(() => {
@@ -568,7 +602,7 @@ export default function EndlessWorlds() {
 
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onBackdrop={setBackdrop} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} openStar={narrowLive ? tab === 'starmap' : undefined} onStarClose={() => setTab('reading')} onLiveTurn={setLiveTurn} narrow={narrowLive} onPanels={setPanels} turnPending={turnPending} />
+    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onBackdrop={setBackdrop} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} openStar={narrowLive ? tab === 'starmap' : undefined} onStarClose={() => setTab('reading')} onLiveTurn={setLiveTurn} narrow={narrowLive} readerBar={narrowLive && !hideBody} onPanels={setPanels} turnPending={turnPending} />
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
   } else if (view === 'create') {
@@ -624,9 +658,12 @@ export default function EndlessWorlds() {
     // because the rail's existence is one), and what stays is the part a rail of
     // names cannot carry: one affordance to continue the most recent life, and the
     // notices about worlds. Those appear nowhere else.
-    const active = runs.filter((r) => !r.archived && !r.ended)
-    const endedRuns = runs.filter((r) => !r.archived && r.ended)
-    const archivedRuns = runs.filter((r) => r.archived)
+    // Ordered here rather than trusting the server's order, so the two orderings
+    // are symmetric: the toggle changes one expression, not one code path that
+    // sorts and another that accepts whatever arrived.
+    const active = byOrder(runs.filter((r) => !r.archived && !r.ended), order)
+    const endedRuns = byOrder(runs.filter((r) => !r.archived && r.ended), order)
+    const archivedRuns = byOrder(runs.filter((r) => r.archived), order)
     const newest = active.find((r) => !r.unreadable)
     const rowProps = {
       onOpen: enterLife,
@@ -648,7 +685,23 @@ export default function EndlessWorlds() {
         <div className="ew-shelflist ew-shelf-lives">
           {active.length ? (
             <>
-              <div className="ew-section">{t('library.lives')}</div>
+              <div className="ew-section-row">
+                <div className="ew-section">{t('library.lives')}</div>
+                {/* One button, not a pair of radios: with exactly two orderings the
+                    control that shows the one you would switch TO is smaller, needs
+                    no legend, and reads the same at phone width. */}
+                <button
+                  className="ew-order-toggle"
+                  type="button"
+                  onClick={() => {
+                    const next: ShelfOrder = order === 'recent' ? 'started' : 'recent'
+                    setOrder(next)
+                    rememberOrder(next)
+                  }}
+                >
+                  {t(order === 'recent' ? 'shelf.orderRecent' : 'shelf.orderStarted')}
+                </button>
+              </div>
               {active.map((r) => <LifeRow key={r.runId} run={r} {...rowProps} />)}
             </>
           ) : null}
@@ -838,7 +891,10 @@ export default function EndlessWorlds() {
             className="ew-bodywrap"
             style={{
               display: hideBody ? 'none' : undefined,
-              paddingBottom: narrowLive ? '72px' : undefined,
+              // Clear BOTH phone bars, not just the tab bar: the reading controls
+              // now float 60px above it, and 72px left the last lines of a month
+              // (measured: an echo marker at y=784) sitting underneath them.
+              paddingBottom: narrowLive ? 'calc(72px + 60px)' : undefined,
             }}
           >
             {body}

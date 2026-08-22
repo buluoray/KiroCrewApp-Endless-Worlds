@@ -204,7 +204,7 @@
   "play.nothingToShow": "Nothing to show yet — this life's panels appear once their conditions are met.",
   "play.opening": "Turning to the page where you left off…",
   "play.pollHiccup": "Connection hiccup — retrying…",
-  "play.writingAction": "Writing your choice: \u201c{action}\u201d",
+  "play.writingAction": "Writing your choice: “{action}”",
   "play.retry": "Try again",
   "play.rumour": "Rumor",
   "play.rumourSuffix": " — only hearsay",
@@ -299,5 +299,7 @@
   "world.summary": "{groups} opening settings · {panels} panels · {turn}",
   "world.turnUnit": "one {unit} per turn",
   "world.unopenable": "This world cannot be opened: {problem}",
-  "world.unreadableDetail": "This could not be loaded: {error}"
+  "world.unreadableDetail": "This could not be loaded: {error}",
+  "shelf.orderRecent": "Recently played",
+  "shelf.orderStarted": "When it began"
 }
