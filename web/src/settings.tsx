@@ -23,21 +23,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     let alive = true
-    void api.settings().then((s) => {
-      if (!alive) return
-      // The advertised list already carries an `auto` entry, and the default
-      // option ("") also resolves to auto — so a persisted "auto" is the same
-      // choice as default. Normalize it to "" so the select shows one auto row,
-      // not a value with no matching option.
-      setModel(s.model && s.model !== 'auto' ? s.model : '')
-      setEffort(s.reasoningEffort || '')
-      setPainterModel(s.painterModel && s.painterModel !== 'auto' ? s.painterModel : '')
-      if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts)
-    }).catch(() => {})
+    void api
+      .settings()
+      .then((s) => {
+        if (!alive) return
+        // The advertised list already carries an `auto` entry, and the default
+        // option ("") also resolves to auto — so a persisted "auto" is the same
+        // choice as default. Normalize it to "" so the select shows one auto row,
+        // not a value with no matching option.
+        setModel(s.model && s.model !== 'auto' ? s.model : '')
+        setEffort(s.reasoningEffort || '')
+        setPainterModel(s.painterModel && s.painterModel !== 'auto' ? s.painterModel : '')
+        if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts)
+      })
+      .catch(() => {})
     // `api.models()` proxies through the app's own backend route, which the app's
     // path-scoped cookie authorizes (the core /api/models route does not).
-    void api.models().then((m) => { if (alive) setModels(m) }).catch(() => {})
-    return () => { alive = false }
+    void api
+      .models()
+      .then((m) => {
+        if (alive) setModels(m)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
   }, [])
 
   const save = async () => {
@@ -76,11 +86,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <select
           className="ew-uilang ew-settings-select"
           value={model}
-          onChange={(e) => { setModel(e.target.value); setSaved(false) }}
+          onChange={(e) => {
+            setModel(e.target.value)
+            setSaved(false)
+          }}
         >
           <option value="">{t('settings.modelDefault')}</option>
           {optionsFor(model).map((id) => (
-            <option key={id} value={id}>{label(id)}</option>
+            <option key={id} value={id}>
+              {label(id)}
+            </option>
           ))}
         </select>
       </label>
@@ -90,11 +105,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <select
           className="ew-uilang ew-settings-select"
           value={painterModel}
-          onChange={(e) => { setPainterModel(e.target.value); setSaved(false) }}
+          onChange={(e) => {
+            setPainterModel(e.target.value)
+            setSaved(false)
+          }}
         >
           <option value="">{t('settings.modelDefault')}</option>
           {optionsFor(painterModel).map((id) => (
-            <option key={id} value={id}>{label(id)}</option>
+            <option key={id} value={id}>
+              {label(id)}
+            </option>
           ))}
         </select>
       </label>
@@ -104,7 +124,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <select
           className="ew-uilang ew-settings-select"
           value={effort}
-          onChange={(e) => { setEffort(e.target.value); setSaved(false) }}
+          onChange={(e) => {
+            setEffort(e.target.value)
+            setSaved(false)
+          }}
         >
           {efforts.map((lvl) => (
             <option key={lvl || 'default'} value={lvl}>
@@ -115,7 +138,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       </label>
 
       <div className="ew-settings-foot">
-        <button className="ew-btn ew-btn-go" type="button" disabled={busy} onClick={() => void save()}>
+        <button
+          className="ew-btn ew-btn-go"
+          type="button"
+          disabled={busy}
+          onClick={() => void save()}
+        >
           {t('settings.save')}
         </button>
         {saved ? <span className="ew-settings-saved">{t('settings.saved')}</span> : null}

@@ -17,12 +17,24 @@ const SIZE = 620
 const CX = SIZE / 2
 
 const LOCALIZED_RELATION_TYPES = new Set([
-  'trust', 'grudge', 'debt', 'fealty', 'love', 'fear',
-  'respect', 'hostility', 'kinship', 'friendship', 'rivalry',
+  'trust',
+  'grudge',
+  'debt',
+  'fealty',
+  'love',
+  'fear',
+  'respect',
+  'hostility',
+  'kinship',
+  'friendship',
+  'rivalry',
 ])
 
 function relationReading(lang: string, relation: StarRelation): string {
-  const normalized = relation.type.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const normalized = relation.type
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
   const type = LOCALIZED_RELATION_TYPES.has(normalized)
     ? mt(lang, `star.rel.type.${normalized}`)
     : relation.type.replace(/[_-]+/g, ' ')
@@ -38,7 +50,14 @@ function ring(index: number, count: number, radius: number): { x: number; y: num
 }
 
 export function RelationsLens({
-  payload, lang, focus, setFocus, filters, centre, setCentre, mode,
+  payload,
+  lang,
+  focus,
+  setFocus,
+  filters,
+  centre,
+  setCentre,
+  mode,
 }: {
   payload: StarPayload
   lang: string
@@ -58,12 +77,8 @@ export function RelationsLens({
   const self = payload.centre
   const selfLabel = self.name || mt(lang, 'star.people.me')
   const centred = centre || self.id
-  const characters = payload.nodes.filter(
-    (n) => n.kind === 'character' && nodeVisible(n, filters),
-  )
-  const relations = payload.relations.filter(
-    (r) => r.from === centred || r.to === centred,
-  )
+  const characters = payload.nodes.filter((n) => n.kind === 'character' && nodeVisible(n, filters))
+  const relations = payload.relations.filter((r) => r.from === centred || r.to === centred)
   if (!characters.length && !relations.length) {
     return <div className="ews-empty">{mt(lang, 'star.people.none')}</div>
   }
@@ -79,17 +94,18 @@ export function RelationsLens({
     .sort((a, b) => a.id.localeCompare(b.id))
   const outer = payload.nodes
     .filter(
-      (n) => n.kind !== 'event' && n.id !== centred && !partners.has(n.id)
-        && nodeVisible(n, filters),
+      (n) =>
+        n.kind !== 'event' && n.id !== centred && !partners.has(n.id) && nodeVisible(n, filters),
     )
     .sort((a, b) => a.id.localeCompare(b.id))
   const unrelatedCharacters = characters
     .filter((character) => character.id !== centred && !partners.has(character.id))
     .sort((a, b) => a.id.localeCompare(b.id))
 
-  const centreLabel = centred === self.id
-    ? selfLabel
-    : nodeLabel(nodeById(payload, centred) ?? { id: centred, kind: 'character', name: centred })
+  const centreLabel =
+    centred === self.id
+      ? selfLabel
+      : nodeLabel(nodeById(payload, centred) ?? { id: centred, kind: 'character', name: centred })
 
   const picker = (
     <div className="ews-centre-row">
@@ -101,16 +117,18 @@ export function RelationsLens({
       >
         {selfLabel}
       </button>
-      {characters.filter((c) => c.id !== self.id).map((c) => (
-        <button
-          className={'ews-chip ews-chip-character' + (centred === c.id ? ' ews-chip-sel' : '')}
-          type="button"
-          key={c.id}
-          onClick={() => setCentre(c.id)}
-        >
-          {nodeLabel(c)}
-        </button>
-      ))}
+      {characters
+        .filter((c) => c.id !== self.id)
+        .map((c) => (
+          <button
+            className={'ews-chip ews-chip-character' + (centred === c.id ? ' ews-chip-sel' : '')}
+            type="button"
+            key={c.id}
+            onClick={() => setCentre(c.id)}
+          >
+            {nodeLabel(c)}
+          </button>
+        ))}
     </div>
   )
 
@@ -131,9 +149,7 @@ export function RelationsLens({
                 >
                   {node ? nodeLabel(node) : other}
                 </button>
-                <span className="ews-rel-kind">
-                  {relationReading(lang, r)}
-                </span>
+                <span className="ews-rel-kind">{relationReading(lang, r)}</span>
                 {r.sources.length ? (
                   <span className="ews-rel-srcs">
                     {mt(lang, 'star.rel.evidence')}:{' '}
@@ -189,10 +205,7 @@ export function RelationsLens({
         {inner.map((n, i) => {
           const p = ring(i, inner.length, 150)
           return (
-            <line
-              key={`l-${n.id}`} x1={CX} y1={CX} x2={p.x} y2={p.y}
-              className="ews-rel-line"
-            />
+            <line key={`l-${n.id}`} x1={CX} y1={CX} x2={p.x} y2={p.y} className="ews-rel-line" />
           )
         })}
         <g
@@ -202,7 +215,9 @@ export function RelationsLens({
           tabIndex={0}
         >
           <circle cx={CX} cy={CX} r={26} />
-          <text x={CX} y={CX + 4} textAnchor="middle">{centreLabel}</text>
+          <text x={CX} y={CX + 4} textAnchor="middle">
+            {centreLabel}
+          </text>
         </g>
         {inner.map((n, i) => {
           const p = ring(i, inner.length, 150)
@@ -215,7 +230,9 @@ export function RelationsLens({
               tabIndex={0}
             >
               <circle cx={p.x} cy={p.y} r={20} />
-              <text x={p.x} y={p.y + 34} textAnchor="middle">{nodeLabel(n)}</text>
+              <text x={p.x} y={p.y + 34} textAnchor="middle">
+                {nodeLabel(n)}
+              </text>
             </g>
           )
         })}
@@ -230,7 +247,9 @@ export function RelationsLens({
               tabIndex={0}
             >
               <circle cx={p.x} cy={p.y} r={14} />
-              <text x={p.x} y={p.y + 28} textAnchor="middle">{nodeLabel(n)}</text>
+              <text x={p.x} y={p.y + 28} textAnchor="middle">
+                {nodeLabel(n)}
+              </text>
             </g>
           )
         })}

@@ -17,7 +17,12 @@ import type { MemoryView, StarPayload } from './api'
 import { api } from './api'
 import { Backdrop } from './backdrop'
 import {
-  ALL_FILTERS, mt, neighbours, nodeById, nodeLabel, nodeVisible,
+  ALL_FILTERS,
+  mt,
+  neighbours,
+  nodeById,
+  nodeLabel,
+  nodeVisible,
   type StarFilters,
 } from './memory-state'
 import { TimelineLens } from './memory-layouts/timeline'
@@ -25,11 +30,20 @@ import { RelationsLens } from './memory-layouts/relations'
 import { KeepsakesLens } from './memory-layouts/keepsakes'
 
 const FILTER_KEYS: Array<keyof StarFilters> = [
-  'characters', 'places', 'groups', 'objects', 'threads',
+  'characters',
+  'places',
+  'groups',
+  'objects',
+  'threads',
 ]
 
 export function StarMap({
-  runId, lang, onClose, onJumpTurn, initialFocus, backdrop,
+  runId,
+  lang,
+  onClose,
+  onJumpTurn,
+  initialFocus,
+  backdrop,
 }: {
   runId: string
   lang: string
@@ -50,11 +64,11 @@ export function StarMap({
   // from the payload rather than be guessed here. Staying empty until the player
   // picks also means a pick is never silently overwritten when the graph reloads.
   const [centre, setCentre] = useState('')
-  const [mode, setMode] = useState<'canvas' | 'list'>(() => (
+  const [mode, setMode] = useState<'canvas' | 'list'>(() =>
     typeof window !== 'undefined' && window.matchMedia('(max-width: 860px)').matches
       ? 'list'
-      : 'canvas'
-  ))
+      : 'canvas',
+  )
   const [kept, setKept] = useState<string[]>([])
   // MUST stay above the `if (!payload || !lens) return` early return below: a hook
   // declared after that guard runs only once the payload has loaded, so the render
@@ -69,7 +83,9 @@ export function StarMap({
     // smart entry and may pre-select, but never lock, the lens (§8.3.2).
     setLens((cur) => cur ?? got.view)
   }, [runId])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const pick = (next: MemoryView) => {
     setLens(next)
@@ -81,7 +97,9 @@ export function StarMap({
     return (
       <div className="ews-overlay" role="dialog" aria-modal="true">
         <StarStyles />
-        {backdrop ? <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} /> : null}
+        {backdrop ? (
+          <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} />
+        ) : null}
         <div className="ews-head">
           <button className="ews-btn" type="button" onClick={onClose}>
             {mt(lang, 'star.close')}
@@ -93,8 +111,7 @@ export function StarMap({
 
   const focused = focus ? nodeById(payload, focus) : undefined
   const isKept = focused
-    ? kept.includes(focused.id)
-      || payload.keepsakes.some((kp) => kp.cites.includes(focused.id))
+    ? kept.includes(focused.id) || payload.keepsakes.some((kp) => kp.cites.includes(focused.id))
     : false
 
   const keep = async () => {
@@ -117,10 +134,16 @@ export function StarMap({
   }
 
   return (
-    <div className="ews-overlay" role="dialog" aria-modal="true"
-      aria-label={mt(lang, 'star.title')}>
+    <div
+      className="ews-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={mt(lang, 'star.title')}
+    >
       <StarStyles />
-      {backdrop ? <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} /> : null}
+      {backdrop ? (
+        <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} />
+      ) : null}
       <div className="ews-head">
         <div className="ews-title">{mt(lang, 'star.title')}</div>
         {/* The lens switcher is always visible and never locked (§8.3.2). */}
@@ -169,19 +192,31 @@ export function StarMap({
         <div className="ews-lens-pane">
           {lens === 'life' ? (
             <TimelineLens
-              payload={payload} lang={lang}
-              focus={focus} setFocus={setFocus} filters={filters}
+              payload={payload}
+              lang={lang}
+              focus={focus}
+              setFocus={setFocus}
+              filters={filters}
             />
           ) : lens === 'people' ? (
             <RelationsLens
-              payload={payload} lang={lang}
-              focus={focus} setFocus={setFocus} filters={filters}
-              centre={centre} setCentre={setCentre} mode={mode}
+              payload={payload}
+              lang={lang}
+              focus={focus}
+              setFocus={setFocus}
+              filters={filters}
+              centre={centre}
+              setCentre={setCentre}
+              mode={mode}
             />
           ) : (
             <KeepsakesLens
-              runId={runId} payload={payload} lang={lang}
-              focus={focus} setFocus={setFocus} onChanged={() => void load()}
+              runId={runId}
+              payload={payload}
+              lang={lang}
+              focus={focus}
+              setFocus={setFocus}
+              onChanged={() => void load()}
             />
           )}
         </div>

@@ -67,6 +67,14 @@ jobs:
         working-directory: web
         run: npm run lint
 
+      - name: Format check (Prettier)
+        # Fails if any web/src file is not Prettier-formatted. `npm run format`
+        # (prettier --write src) fixes it locally. See web/.prettierrc and
+        # web/.prettierignore (styles.css is excluded — it is inlined verbatim
+        # into the committed bundle).
+        working-directory: web
+        run: npm run format:check
+
       - name: Typecheck and build
         working-directory: web
         run: npm run build

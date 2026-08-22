@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
-  LifeRowData, PanelView, SceneRow, SeedReport, WorldDetail, WorldRow, WorldDraftRow,
+  LifeRowData,
+  PanelView,
+  SceneRow,
+  SeedReport,
+  WorldDetail,
+  WorldRow,
+  WorldDraftRow,
 } from './api'
 import { api } from './api'
 import { DeleteWorldDialog } from './confirm'
 import {
-  CreateWorldCard, CreateWorldScreen, DRAFT_POLL_MS, WorldDraftCard, WorldDraftReview,
+  CreateWorldCard,
+  CreateWorldScreen,
+  DRAFT_POLL_MS,
+  WorldDraftCard,
+  WorldDraftReview,
 } from './create-world'
 import { LifeRow, WorldCard, WorldDetailView } from './library'
 import { DRAFT_PREFIX, OpeningScreen } from './opening'
@@ -47,9 +57,7 @@ const RAIL_KEY = 'endless-worlds:rail'
  *  so any Crew language it has no table for falls to English. A remembered explicit
  *  pick and world-follow both still override this default. */
 function crewLanguageDefault(): Lang {
-  const code = (document.documentElement.lang || navigator.language || '')
-    .slice(0, 2)
-    .toLowerCase()
+  const code = (document.documentElement.lang || navigator.language || '').slice(0, 2).toLowerCase()
   return asLang(code) ?? 'en'
 }
 
@@ -153,8 +161,8 @@ export default function EndlessWorlds() {
       return next
     })
   }, [])
-  const [readWidth, setReadWidth] = useState<ReadWidth>(
-    () => (localStorage.getItem(WIDTH_KEY) === 'fixed' ? 'fixed' : 'fluid'),
+  const [readWidth, setReadWidth] = useState<ReadWidth>(() =>
+    localStorage.getItem(WIDTH_KEY) === 'fixed' ? 'fixed' : 'fluid',
   )
   const chooseWidth = useCallback((next: ReadWidth) => {
     try {
@@ -178,14 +186,18 @@ export default function EndlessWorlds() {
   const [live, setLive] = useState<string | null>(null)
   const [scenes, setScenes] = useState<SceneRow[]>([])
   const [panels, setPanels] = useState<PanelView[]>([])
-  const [backdrop, setBackdrop] = useState<{ version: number; turn?: number; mobile?: boolean } | null>(null)
+  const [backdrop, setBackdrop] = useState<{
+    version: number
+    turn?: number
+    mobile?: boolean
+  } | null>(null)
   // ── phone bottom tab bar ──────────────────────────────────────────────
   // Narrow-viewport only; the desktop keeps the WorldRail. `tab` is the active
   // surface within a life: 'reading', 'starmap', or a scene region id.
-  const [isNarrow, setIsNarrow] = useState(
-    () => (typeof window !== 'undefined' && window.matchMedia
+  const [isNarrow, setIsNarrow] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(max-width: 1100px)').matches
-      : false),
+      : false,
   )
   const [tab, setTab] = useState('reading')
   const [liveTurn, setLiveTurn] = useState(0)
@@ -229,11 +241,14 @@ export default function EndlessWorlds() {
     () => localStorage.getItem(LANG_KEY) != null,
   )
   setCurrentLanguage(lang)
-  const applyLanguage = useCallback((code?: string) => {
-    if (langLocked) return
-    const next = asLang(code)
-    if (next) setLangState(next)
-  }, [langLocked])
+  const applyLanguage = useCallback(
+    (code?: string) => {
+      if (langLocked) return
+      const next = asLang(code)
+      if (next) setLangState(next)
+    },
+    [langLocked],
+  )
   // The explicit language dropdown: unlike opening a world (which otherwise follows
   // that world's language), this is the player's standing choice, so it persists,
   // locks out world-follow, and becomes the default the app next opens in.
@@ -270,7 +285,9 @@ export default function EndlessWorlds() {
     }
   }, [lang])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   // A world draft being compiled converges on the server; poll the shelf while any
   // is in flight so a returning player watches it finish (main.tsx has no other
@@ -279,7 +296,9 @@ export default function EndlessWorlds() {
     if (!drafts.some((d) => d.status === 'generating' || d.status === 'new')) {
       return undefined
     }
-    const timer = window.setInterval(() => { void load() }, DRAFT_POLL_MS)
+    const timer = window.setInterval(() => {
+      void load()
+    }, DRAFT_POLL_MS)
     return () => window.clearInterval(timer)
   }, [drafts, load])
 
@@ -309,25 +328,46 @@ export default function EndlessWorlds() {
       const rid = where.runId
       // Verify the life still exists: a remembered life that was since deleted must
       // clear the stale location and land on the shelf, not open a 404 page.
-      api.run(rid)
-        .then((v) => { applyLanguage(v.language); setLive(rid); setView('live') })
-        .catch(() => { forget() })
+      api
+        .run(rid)
+        .then((v) => {
+          applyLanguage(v.language)
+          setLive(rid)
+          setView('live')
+        })
+        .catch(() => {
+          forget()
+        })
       return
     }
     if (where.view === 'detail' && where.worldId) {
       const wid = where.worldId
-      api.world(wid)
-        .then((w) => { applyLanguage(w.language); setSelected(wid); setView('detail') })
-        .catch(() => { forget() })
+      api
+        .world(wid)
+        .then((w) => {
+          applyLanguage(w.language)
+          setSelected(wid)
+          setView('detail')
+        })
+        .catch(() => {
+          forget()
+        })
       return
     }
     // The opening screen is restorable now that its answers are kept with it. Its
     // world has to be re-read, because the screen is driven by the world's own
     // declared groups and those are not the player's to cache.
     if (where.view === 'opening' && where.worldId) {
-      api.world(where.worldId)
-        .then((w) => { applyLanguage(w.language); setWorld(w); setView('opening') })
-        .catch(() => { forget() })
+      api
+        .world(where.worldId)
+        .then((w) => {
+          applyLanguage(w.language)
+          setWorld(w)
+          setView('opening')
+        })
+        .catch(() => {
+          forget()
+        })
       return
     }
     // The paste screen has nothing to re-fetch — its text lives in its own draft.
@@ -338,9 +378,15 @@ export default function EndlessWorlds() {
     // A draft under review is re-read; a draft since discarded clears the location.
     if (where.view === 'draft' && where.draftId) {
       const did = where.draftId
-      api.worldDraft(did)
-        .then(() => { setReviewDraft(did); setView('draft') })
-        .catch(() => { forget() })
+      api
+        .worldDraft(did)
+        .then(() => {
+          setReviewDraft(did)
+          setView('draft')
+        })
+        .catch(() => {
+          forget()
+        })
     }
   }, [applyLanguage])
 
@@ -357,11 +403,17 @@ export default function EndlessWorlds() {
     // depth returns home, which is the predictable phone behaviour and avoids a
     // fragile per-hop stack the in-app buttons would fall out of sync with.
     if (prev === 'library' && view !== 'library') {
-      try { window.history.pushState({ ew: 'subview' }, '') } catch { /* no-op */ }
+      try {
+        window.history.pushState({ ew: 'subview' }, '')
+      } catch {
+        /* no-op */
+      }
     }
   }, [view])
   useEffect(() => {
-    const onPop = () => { homeRef.current() }
+    const onPop = () => {
+      homeRef.current()
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -402,9 +454,14 @@ export default function EndlessWorlds() {
     setReviewDraft(null)
     void load()
   }
-  const draftInstalled = () => { home() }
+  const draftInstalled = () => {
+    home()
+  }
   const discardDraftInline = (draftId: string) => {
-    void api.discardWorldDraft(draftId).then(() => void load()).catch(() => void load())
+    void api
+      .discardWorldDraft(draftId)
+      .then(() => void load())
+      .catch(() => void load())
   }
 
   const enterLife = (runId: string) => {
@@ -442,8 +499,7 @@ export default function EndlessWorlds() {
     setNote(
       (out.lives
         ? t(out.lives === 1 ? 'delete.doneWithLivesOne' : 'delete.doneWithLives', { n: out.lives })
-        : t('delete.done'))
-      + (out.restorable ? ' ' + t('delete.doneRestorable') : ''),
+        : t('delete.done')) + (out.restorable ? ' ' + t('delete.doneRestorable') : ''),
     )
     home()
   }
@@ -455,9 +511,11 @@ export default function EndlessWorlds() {
    * life that answers 404. The shelf is the only honest landing.
    */
   const afterLifeDelete = (turn: number) => {
-    setNote(turn > 0
-      ? t(turn === 1 ? 'life.delete.doneOne' : 'life.delete.done', { n: turn })
-      : t('life.delete.doneUnborn'))
+    setNote(
+      turn > 0
+        ? t(turn === 1 ? 'life.delete.doneOne' : 'life.delete.done', { n: turn })
+        : t('life.delete.doneUnborn'),
+    )
     home()
   }
 
@@ -540,11 +598,15 @@ export default function EndlessWorlds() {
     [load],
   )
   const renameLife = useCallback(
-    (runId: string, label: string) => { void changeLifeMeta(runId, { label }) },
+    (runId: string, label: string) => {
+      void changeLifeMeta(runId, { label })
+    },
     [changeLifeMeta],
   )
   const archiveLife = useCallback(
-    (runId: string, archived: boolean) => { void changeLifeMeta(runId, { archived }) },
+    (runId: string, archived: boolean) => {
+      void changeLifeMeta(runId, { archived })
+    },
     [changeLifeMeta],
   )
   const [showArchived, setShowArchived] = useState(false)
@@ -560,7 +622,9 @@ export default function EndlessWorlds() {
     return () => mq.removeEventListener?.('change', on)
   }, [])
   // A new life always opens on its story, never on a stale system tab.
-  useEffect(() => { setTab('reading') }, [live])
+  useEffect(() => {
+    setTab('reading')
+  }, [live])
 
   const tabs = useMemo(() => buildTabs(scenes, panels), [scenes, panels])
   const narrowLive = isNarrow && view === 'live' && !!live
@@ -571,18 +635,21 @@ export default function EndlessWorlds() {
     if (narrowLive && !tabs.some((tb) => tb.id === tab)) setTab('reading')
   }, [tabs, tab, narrowLive])
 
-  const sigOf = useCallback((id: string, sceneIds: string[]): string => {
-    if (id === 'reading') return `r${liveTurn}`
-    if (id === 'starmap') return 's'  // the star map never dots
-    const sc = sceneIds.map((sid) => {
-      const s = scenes.find((x) => x.sceneId === sid)
-      return [sid, s?.asks ?? false, s?.answered ?? false]
-    })
-    const pn = panels
-      .filter((p) => (p.region ?? '') === id)
-      .map((p) => [p.id, JSON.stringify(p.fields)])
-    return JSON.stringify([sc, pn])
-  }, [scenes, panels, liveTurn])
+  const sigOf = useCallback(
+    (id: string, sceneIds: string[]): string => {
+      if (id === 'reading') return `r${liveTurn}`
+      if (id === 'starmap') return 's' // the star map never dots
+      const sc = sceneIds.map((sid) => {
+        const s = scenes.find((x) => x.sceneId === sid)
+        return [sid, s?.asks ?? false, s?.answered ?? false]
+      })
+      const pn = panels
+        .filter((p) => (p.region ?? '') === id)
+        .map((p) => [p.id, JSON.stringify(p.fields)])
+      return JSON.stringify([sc, pn])
+    },
+    [scenes, panels, liveTurn],
+  )
 
   // Compute dots each render; first sight of a tab records its signature so it
   // does not dot on load, only on a later unseen change.
@@ -610,7 +677,25 @@ export default function EndlessWorlds() {
 
   let body: React.ReactNode
   if (view === 'live' && live) {
-    body = <PlayPage runId={live} onBack={home} onScenes={setScenes} onBackdrop={setBackdrop} onReplay={openWorld} onReplaySame={restartSameOpening} onEnterLife={enterLife} refresh={refresh} openStar={narrowLive ? tab === 'starmap' : undefined} onStarClose={() => setTab('reading')} onLiveTurn={setLiveTurn} narrow={narrowLive} readerBar={narrowLive && !hideBody} onPanels={setPanels} turnPending={turnPending} />
+    body = (
+      <PlayPage
+        runId={live}
+        onBack={home}
+        onScenes={setScenes}
+        onBackdrop={setBackdrop}
+        onReplay={openWorld}
+        onReplaySame={restartSameOpening}
+        onEnterLife={enterLife}
+        refresh={refresh}
+        openStar={narrowLive ? tab === 'starmap' : undefined}
+        onStarClose={() => setTab('reading')}
+        onLiveTurn={setLiveTurn}
+        narrow={narrowLive}
+        readerBar={narrowLive && !hideBody}
+        onPanels={setPanels}
+        turnPending={turnPending}
+      />
+    )
   } else if (view === 'opening' && world) {
     body = <OpeningScreen world={world} onBack={home} onLive={enterLife} />
   } else if (view === 'create') {
@@ -669,9 +754,18 @@ export default function EndlessWorlds() {
     // Ordered here rather than trusting the server's order, so the two orderings
     // are symmetric: the toggle changes one expression, not one code path that
     // sorts and another that accepts whatever arrived.
-    const active = byOrder(runs.filter((r) => !r.archived && !r.ended), order)
-    const endedRuns = byOrder(runs.filter((r) => !r.archived && r.ended), order)
-    const archivedRuns = byOrder(runs.filter((r) => r.archived), order)
+    const active = byOrder(
+      runs.filter((r) => !r.archived && !r.ended),
+      order,
+    )
+    const endedRuns = byOrder(
+      runs.filter((r) => !r.archived && r.ended),
+      order,
+    )
+    const archivedRuns = byOrder(
+      runs.filter((r) => r.archived),
+      order,
+    )
     const newest = active.find((r) => !r.unreadable)
     const rowProps = {
       onOpen: enterLife,
@@ -710,7 +804,9 @@ export default function EndlessWorlds() {
                   {t(order === 'recent' ? 'shelf.orderRecent' : 'shelf.orderStarted')}
                 </button>
               </div>
-              {active.map((r) => <LifeRow key={r.runId} run={r} {...rowProps} />)}
+              {active.map((r) => (
+                <LifeRow key={r.runId} run={r} {...rowProps} />
+              ))}
             </>
           ) : null}
 
@@ -719,7 +815,9 @@ export default function EndlessWorlds() {
               <div className="ew-section" style={{ marginTop: '22px' }}>
                 {t('shelf.ended')}
               </div>
-              {endedRuns.map((r) => <LifeRow key={r.runId} run={r} {...rowProps} />)}
+              {endedRuns.map((r) => (
+                <LifeRow key={r.runId} run={r} {...rowProps} />
+              ))}
             </>
           ) : null}
 
@@ -742,11 +840,7 @@ export default function EndlessWorlds() {
         </div>
 
         <div className="ew-shelflist ew-shelf-worlds">
-          {runs.length ? (
-            <div className="ew-section">
-              {t('library.otherWorlds')}
-            </div>
-          ) : null}
+          {runs.length ? <div className="ew-section">{t('library.otherWorlds')}</div> : null}
 
           {/* The way in to a player-made world — always present, above the shelf. */}
           <CreateWorldCard onClick={startCreate} />
@@ -776,7 +870,9 @@ export default function EndlessWorlds() {
         {(seeds?.newerAvailable ?? []).map((n) => (
           <div className="ew-note" key={n.worldId}>
             {t('library.newerSeed', {
-              world: n.worldId, installed: n.installed, available: n.available,
+              world: n.worldId,
+              installed: n.installed,
+              available: n.available,
             })}
           </div>
         ))}
@@ -798,138 +894,147 @@ export default function EndlessWorlds() {
 
   return (
     <LanguageContext.Provider value={applyLanguage}>
-    <div
-      className={'ew-root ew-view-' + view + (narrowLive ? ' ew-root-flushtop' : '') + ' ew-w-' + readWidth
-        + (view === 'library' ? ' ew-home' : '')}
-      lang={lang}
-      ref={rootRef}
-    >
-      {/* Injected rather than imported as a stylesheet: this app mounts into the
+      <div
+        className={
+          'ew-root ew-view-' +
+          view +
+          (narrowLive ? ' ew-root-flushtop' : '') +
+          ' ew-w-' +
+          readWidth +
+          (view === 'library' ? ' ew-home' : '')
+        }
+        lang={lang}
+        ref={rootRef}
+      >
+        {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
           instead of outliving it in the page's stylesheet list. */}
-      <style>{styles}</style>
+        <style>{styles}</style>
 
-      {/* Full-app backdrop: rendered at the root (not inside the play column) so on
+        {/* Full-app backdrop: rendered at the root (not inside the play column) so on
           desktop it spans the rail AND the play area for immersion, and on a phone
           it fills the screen. Only on a live view — the shelf stays plain. */}
-      {view === 'live' && live && backdrop ? (
-        <Backdrop
-          runId={live}
-          version={backdrop.version}
-          turn={backdrop.turn}
-          mobile={backdrop.mobile}
-        />
-      ) : null}
+        {view === 'live' && live && backdrop ? (
+          <Backdrop
+            runId={live}
+            version={backdrop.version}
+            turn={backdrop.turn}
+            mobile={backdrop.mobile}
+          />
+        ) : null}
 
-      {/* Inside a life on a phone the app's own name is dropped. It carries nothing a
+        {/* Inside a life on a phone the app's own name is dropped. It carries nothing a
           reader needs mid-story — the language picker and Settings live on the shelf,
           not here — and keeping it put a second, differently-coloured band above the
           reading bar, which read as two unrelated headers stacked. Without it the bar
           meets the dashboard's chrome directly and the page starts at the story. */}
-      {narrowLive ? null : (
-      <div className="ew-head">
-        <Glyph />
-        <h2>{t('app.title')}</h2>
-        {view === 'library' ? (
-          <div className="ew-headtools">
-            <select
-              className="ew-uilang"
-              aria-label={t('app.language')}
-              value={lang}
-              onChange={(e) => chooseLanguage(e.target.value)}
-            >
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-            </select>
-            <button
-              className="ew-uilang"
-              type="button"
-              onClick={() => setShowSettings((s) => !s)}
-              aria-expanded={showSettings}
-            >
-              {t('settings.open')}
+        {narrowLive ? null : (
+          <div className="ew-head">
+            <Glyph />
+            <h2>{t('app.title')}</h2>
+            {view === 'library' ? (
+              <div className="ew-headtools">
+                <select
+                  className="ew-uilang"
+                  aria-label={t('app.language')}
+                  value={lang}
+                  onChange={(e) => chooseLanguage(e.target.value)}
+                >
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                </select>
+                <button
+                  className="ew-uilang"
+                  type="button"
+                  onClick={() => setShowSettings((s) => !s)}
+                  aria-expanded={showSettings}
+                >
+                  {t('settings.open')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {view === 'library' ? <div className="ew-tagline">{t('app.tagline')}</div> : null}
+
+        {view === 'library' && showSettings ? (
+          <SettingsPanel onClose={() => setShowSettings(false)} />
+        ) : null}
+
+        {note ? (
+          <div className="ew-note ew-note-row">
+            <span>{note}</span>
+            <button className="ew-btn ew-btn-quiet" type="button" onClick={() => setNote('')}>
+              {t('note.dismiss')}
             </button>
           </div>
         ) : null}
-      </div>
-      )}
 
-      {view === 'library' ? (
-        <div className="ew-tagline">{t('app.tagline')}</div>
-      ) : null}
-
-      {view === 'library' && showSettings ? (
-        <SettingsPanel onClose={() => setShowSettings(false)} />
-      ) : null}
-
-      {note ? (
-        <div className="ew-note ew-note-row">
-          <span>{note}</span>
-          <button className="ew-btn ew-btn-quiet" type="button" onClick={() => setNote('')}>
-            {t('note.dismiss')}
-          </button>
-        </div>
-      ) : null}
-
-      {/* One axis, plus a drawer that pushes rather than covers. The rail renders
+        {/* One axis, plus a drawer that pushes rather than covers. The rail renders
           nothing below 1100px and nothing at all while closed, so a phone gets
           exactly the layout it had and a desktop gets the whole width for the story
           until it asks for the shelf. */}
-      <div className={'ew-shell' + (railOpen ? ' ew-shell-open' : '')}>
-        <WorldRail
-          worlds={worlds}
-          runs={runs}
-          activeRunId={live}
-          activeWorldId={world?.worldId ?? selected}
-          onWorld={openWorld}
-          onLife={enterLife}
-          onHome={home}
-          atShelf={view === 'library'}
-          open={railOpen}
-          onClose={toggleRail}
-          width={readWidth}
-          onWidth={chooseWidth}
-        />
-        <div className="ew-main">
-          {/* The desktop's shelf opener, in the same top-left slot the phone puts
+        <div className={'ew-shell' + (railOpen ? ' ew-shell-open' : '')}>
+          <WorldRail
+            worlds={worlds}
+            runs={runs}
+            activeRunId={live}
+            activeWorldId={world?.worldId ?? selected}
+            onWorld={openWorld}
+            onLife={enterLife}
+            onHome={home}
+            atShelf={view === 'library'}
+            open={railOpen}
+            onClose={toggleRail}
+            width={readWidth}
+            onWidth={chooseWidth}
+          />
+          <div className="ew-main">
+            {/* The desktop's shelf opener, in the same top-left slot the phone puts
               its "back to the shelf" in — that button is hidden at this width, so
               the corner carries one control at every size, not two. */}
-          <button
-            className="ew-shelfbtn"
-            type="button"
-            aria-expanded={railOpen}
-            onClick={toggleRail}
-          >
-            {t('rail.open')}
-          </button>
-          <div
-            className="ew-bodywrap"
-            style={{
-              display: hideBody ? 'none' : undefined,
-              // Only the tab bar sits at the foot now — the reading controls stick
-              // to the TOP of the pane, so nothing extra is owed down here.
-              paddingBottom: narrowLive ? '72px' : undefined,
-            }}
-          >
-            {body}
-          </div>
-          {view === 'library' && !hideBody ? (
-            <div className="ew-version">{t('app.version', { version: __APP_VERSION__ })}</div>
-          ) : null}
-          {/* A system region tab (phone): the story column is hidden and this
+            <button
+              className="ew-shelfbtn"
+              type="button"
+              aria-expanded={railOpen}
+              onClick={toggleRail}
+            >
+              {t('rail.open')}
+            </button>
+            <div
+              className="ew-bodywrap"
+              style={{
+                display: hideBody ? 'none' : undefined,
+                // Only the tab bar sits at the foot now — the reading controls stick
+                // to the TOP of the pane, so nothing extra is owed down here.
+                paddingBottom: narrowLive ? '72px' : undefined,
+              }}
+            >
+              {body}
+            </div>
+            {view === 'library' && !hideBody ? (
+              <div className="ew-version">{t('app.version', { version: __APP_VERSION__ })}</div>
+            ) : null}
+            {/* A system region tab (phone): the story column is hidden and this
               region's panels stand alone. Its mounted scenes render below, outside
               the shell, filtered to the same region. */}
-          {hideBody ? (
-            <div className="ew-region-pane" style={{ paddingBottom: scenesShown ? undefined : '72px' }}>
-              {panels.filter((p) => (p.region ?? '') === tab).map((p) => (
-                <PanelBox key={p.id} panel={p} />
-              ))}
-            </div>
-          ) : null}
+            {hideBody ? (
+              <div
+                className="ew-region-pane"
+                style={{ paddingBottom: scenesShown ? undefined : '72px' }}
+              >
+                {panels
+                  .filter((p) => (p.region ?? '') === tab)
+                  .map((p) => (
+                    <PanelBox key={p.id} panel={p} />
+                  ))}
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      {/* Outside `body` on purpose, and one frame per mounted scene: each is
+        {/* Outside `body` on purpose, and one frame per mounted scene: each is
           created on first need and never moved or re-keyed, because moving an
           iframe reloads it. The order is the mount order and never re-sorted, so an
           asking scene becoming answered does not shuffle a frame and reload it.
@@ -937,43 +1042,37 @@ export default function EndlessWorlds() {
           The wrapper is stable for the whole life of the run, so the frames are
           created inside it and never move: it exists to carry the phone's tab-bar
           clearance, which the shell's own padding cannot reach out here. */}
-      {live ? (
-        <div className={scenesShown ? 'ew-scenes-clear' : undefined}>
-          {scenes.map((s) => (
-            <SceneSlot
-              key={s.sceneId}
-              runId={live}
-              sceneId={s.sceneId}
-              asks={s.asks}
-              visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
-              onChoice={onSceneChoice}
-              resetSignal={sceneEpoch}
-              locked={turnPending}
-            />
-          ))}
-        </div>
-      ) : null}
-      {doomed ? (
-        <DeleteWorldDialog
-          worldId={doomed}
-          onCancel={() => setDoomed(null)}
-          onDeleted={afterDelete}
-        />
-      ) : null}
+        {live ? (
+          <div className={scenesShown ? 'ew-scenes-clear' : undefined}>
+            {scenes.map((s) => (
+              <SceneSlot
+                key={s.sceneId}
+                runId={live}
+                sceneId={s.sceneId}
+                asks={s.asks}
+                visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
+                onChoice={onSceneChoice}
+                resetSignal={sceneEpoch}
+                locked={turnPending}
+              />
+            ))}
+          </div>
+        ) : null}
+        {doomed ? (
+          <DeleteWorldDialog
+            worldId={doomed}
+            onCancel={() => setDoomed(null)}
+            onDeleted={afterDelete}
+          />
+        ) : null}
 
-      {/* The phone's bottom navigator — sticky at the foot of the app's own scroll
+        {/* The phone's bottom navigator — sticky at the foot of the app's own scroll
           container (never fixed, which would escape the panel in the dashboard).
           Desktop keeps the WorldRail and never shows this. */}
-      {narrowLive ? (
-        <WorldTabBar
-          tabs={tabs}
-          active={tab}
-          dots={dots}
-          hidden={barHidden}
-          onSelect={setTab}
-        />
-      ) : null}
-    </div>
+        {narrowLive ? (
+          <WorldTabBar tabs={tabs} active={tab} dots={dots} hidden={barHidden} onSelect={setTab} />
+        ) : null}
+      </div>
     </LanguageContext.Provider>
   )
 }

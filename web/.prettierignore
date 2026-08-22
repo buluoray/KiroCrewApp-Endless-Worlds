@@ -1,0 +1,8 @@
+node_modules
+../ui
+
+# Hand-authored CSS is inlined VERBATIM into the committed bundle (vite
+# minify:false), so reformatting it both bloats ui/index.mjs and buries the
+# meaningful TS/TSX formatting under thousands of cosmetic CSS line changes.
+# Prettier here targets the React/TypeScript source, not the stylesheet.
+src/styles.css

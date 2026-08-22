@@ -42,7 +42,14 @@ function Chevron({ dir }: { dir: 'l' | 'r' }) {
   const d = dir === 'l' ? 'M11 4 L6 9 L11 14' : 'M7 4 L12 9 L7 14'
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <path d={d} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d={d}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -75,7 +82,10 @@ function TurnProgress({ g, label }: { g?: PlayView['generating']; label: string 
  * celebration, no sound, no modal — the prose stays the protagonist.
  */
 function EchoMark({
-  e, lang, runId, onJump,
+  e,
+  lang,
+  runId,
+  onJump,
 }: {
   e: EchoMarker
   lang: string
@@ -135,11 +145,7 @@ function EchoMark({
             </span>
           </div>
           <div className="ew-echo-actions">
-            <button
-              className="ew-btn ew-btn-sm"
-              type="button"
-              onClick={() => onJump(e.sourceTurn)}
-            >
+            <button className="ew-btn ew-btn-sm" type="button" onClick={() => onJump(e.sourceTurn)}>
               {t('play.echoJump')}
             </button>
             <button
@@ -151,13 +157,11 @@ function EchoMark({
               {mt(lang, kept ? 'star.keep.kept' : 'star.keep.this')}
             </button>
             {keepFailed ? (
-              <span className="ew-meta" role="alert">{mt(lang, 'star.keep.failed')}</span>
+              <span className="ew-meta" role="alert">
+                {mt(lang, 'star.keep.failed')}
+              </span>
             ) : null}
-            <button
-              className="ew-btn ew-btn-sm"
-              type="button"
-              onClick={() => setOpen(false)}
-            >
+            <button className="ew-btn ew-btn-sm" type="button" onClick={() => setOpen(false)}>
               {t('play.echoClose')}
             </button>
           </div>
@@ -168,9 +172,21 @@ function EchoMark({
 }
 
 export function PlayPage({
-  runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh,
+  runId,
+  onBack,
+  onScenes,
+  onBackdrop,
+  onReplay,
+  onReplaySame,
+  onEnterLife,
+  refresh,
   readerBar = false,
-  openStar, onStarClose, onLiveTurn, narrow, onPanels, turnPending = false,
+  openStar,
+  onStarClose,
+  onLiveTurn,
+  narrow,
+  onPanels,
+  turnPending = false,
 }: {
   runId: string
   onBack: () => void
@@ -222,7 +238,10 @@ export function PlayPage({
   const [stalled, setStalled] = useState(false)
   // The last action that did not land, kept so a stall can be retried with the
   // exact same intent instead of making the player retype it.
-  const [retry, setRetry] = useState<{ payload: { turn?: number; action?: string }; what: string } | null>(null)
+  const [retry, setRetry] = useState<{
+    payload: { turn?: number; action?: string }
+    what: string
+  } | null>(null)
   const [drawer, setDrawer] = useState(false)
   // The life star map overlay (§8.3): opened from the secondary action area,
   // never from the per-turn controls — it reads the life, it does not play it.
@@ -254,8 +273,15 @@ export function PlayPage({
     // A newly written turn snaps the pager back to live, and refetches so the new
     // month is pageable.
     setViewTurn(null)
-    api.chronicle(runId).then((c) => { if (alive) setChron(c.turns) }).catch(() => {})
-    return () => { alive = false }
+    api
+      .chronicle(runId)
+      .then((c) => {
+        if (alive) setChron(c.turns)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, v?.turn])
   // The chronicle call above returns only the newest window of turns. Paging (or
@@ -270,14 +296,22 @@ export function PlayPage({
     pageFetchRef.current = viewTurn
     let alive = true
     // `before` is exclusive, so viewTurn+1 lands the page ON viewTurn.
-    api.chronicle(runId, viewTurn + 1).then((c) => {
-      if (!alive) return
-      setChron((have) => {
-        const seen = new Set(have.map((p) => p.turn))
-        return [...have, ...c.turns.filter((p) => !seen.has(p.turn))]
+    api
+      .chronicle(runId, viewTurn + 1)
+      .then((c) => {
+        if (!alive) return
+        setChron((have) => {
+          const seen = new Set(have.map((p) => p.turn))
+          return [...have, ...c.turns.filter((p) => !seen.has(p.turn))]
+        })
       })
-    }).catch(() => {}).finally(() => { pageFetchRef.current = 0 })
-    return () => { alive = false }
+      .catch(() => {})
+      .finally(() => {
+        pageFetchRef.current = 0
+      })
+    return () => {
+      alive = false
+    }
   }, [runId, v, viewTurn, chron])
   // Advancing to a new turn, or paging to another one, returns to the top. Scroll
   // the app root (which starts at the "Endless Worlds" header) into view, NOT the
@@ -286,7 +320,7 @@ export function PlayPage({
   const prevTurnRef = useRef(0)
   useEffect(() => {
     document.querySelector('.ew-root')?.scrollIntoView({ block: 'start' })
-    prevTurnRef.current = viewTurn ?? (v?.turn ?? 0)
+    prevTurnRef.current = viewTurn ?? v?.turn ?? 0
   }, [viewTurn, v?.turn])
 
   const load = useCallback(async () => {
@@ -309,7 +343,9 @@ export function PlayPage({
     }
   }, [runId])
 
-  useEffect(() => { void load() }, [load, refresh])
+  useEffect(() => {
+    void load()
+  }, [load, refresh])
 
   /**
    * A month being written is a fact on the server, not a fact about this page.
@@ -355,9 +391,8 @@ export function PlayPage({
   // label, the progress renders inside that option; a free-typed action shows
   // above the standalone bar instead.
   const gAction = v?.generating?.action ?? ''
-  const genChoice = generating && gAction
-    ? (v?.choices ?? []).find((c) => c.label === gAction)
-    : undefined
+  const genChoice =
+    generating && gAction ? (v?.choices ?? []).find((c) => c.label === gAction) : undefined
 
   // Cycle the arranging flavour while a life is being born.
   useEffect(() => {
@@ -381,7 +416,9 @@ export function PlayPage({
   // this page already speaking it (the setter is stable; the re-render is driven by
   // the root's state).
   const setLanguage = useSetLanguage()
-  useEffect(() => { setLanguage(v?.language) }, [v, setLanguage])
+  useEffect(() => {
+    setLanguage(v?.language)
+  }, [v, setLanguage])
 
   // Every mounted scene is reported upward, in the order it was mounted. The app
   // root draws one persistent frame per scene: an asking scene the player answers,
@@ -427,7 +464,10 @@ export function PlayPage({
   // poll, but the backdrop only matters when its version/turn/variant move.
   const backdropSig = JSON.stringify([v?.backdrop, v?.turn, viewTurn])
   useEffect(() => {
-    if (!v) { onBackdrop(null); return }
+    if (!v) {
+      onBackdrop(null)
+      return
+    }
     const latest = v.turn
     const shown = viewTurn ?? latest
     if (shown >= latest) {
@@ -435,14 +475,26 @@ export function PlayPage({
       // the NEXT page's backdrop mid-generation (tagged with the pending turn),
       // and an un-pinned request would repaint the page still being read. With
       // `?turn=` the new art appears exactly when the new page does.
-      onBackdrop(v.backdrop ? {
-        version: v.backdrop.version, turn: latest, mobile: v.backdrop.mobile,
-      } : null)
+      onBackdrop(
+        v.backdrop
+          ? {
+              version: v.backdrop.version,
+              turn: latest,
+              mobile: v.backdrop.mobile,
+            }
+          : null,
+      )
     } else {
       const past = chron.find((c) => c.turn === shown)?.backdrop
-      onBackdrop(past ? {
-        version: past.version, turn: shown, mobile: past.mobile,
-      } : (v.backdrop ?? null))
+      onBackdrop(
+        past
+          ? {
+              version: past.version,
+              turn: shown,
+              mobile: past.mobile,
+            }
+          : (v.backdrop ?? null),
+      )
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backdropSig, chron, onBackdrop])
@@ -479,10 +531,19 @@ export function PlayPage({
   if (error && !v) {
     return (
       <div>
-        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        <button className="ew-back" type="button" onClick={onBack}>
+          {t('play.back')}
+        </button>
         <div className="ew-meta">{t('world.unreadableDetail', { error })}</div>
         <div className="ew-bar">
-          <button className="ew-btn" type="button" onClick={() => { setError(null); void load() }}>
+          <button
+            className="ew-btn"
+            type="button"
+            onClick={() => {
+              setError(null)
+              void load()
+            }}
+          >
             {t('play.retry')}
           </button>
         </div>
@@ -502,7 +563,9 @@ export function PlayPage({
   if (v.awaitingOpening) {
     return (
       <div>
-        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        <button className="ew-back" type="button" onClick={onBack}>
+          {t('play.back')}
+        </button>
         <h3 className="ew-detail-title">{v.title}</h3>
         {generating ? (
           // The world is being made. This state lives on the server, so leaving and
@@ -513,9 +576,7 @@ export function PlayPage({
           </div>
         ) : (
           <>
-            <div className="ew-note">
-              {busy ? t('opening.arranging') : t('opening.notStarted')}
-            </div>
+            <div className="ew-note">{busy ? t('opening.arranging') : t('opening.notStarted')}</div>
             {stalled && !busy ? <div className="ew-note">{t('opening.silent')}</div> : null}
             <div className="ew-bar">
               <button
@@ -551,12 +612,17 @@ export function PlayPage({
   // about which month is on screen. A month committed before snapshots existed
   // falls back to the live ones — an empty frame would read as "nothing was
   // happening" rather than "not recorded".
-  const past = viewTurn !== null && viewTurn < v.turn
-    ? chron.find((c) => c.turn === viewTurn)
-    : undefined
+  const past =
+    viewTurn !== null && viewTurn < v.turn ? chron.find((c) => c.turn === viewTurn) : undefined
   const shownDigest = past ? (past.digest ?? v.digest ?? []) : (v.digest ?? [])
   const shownPanels = past ? (past.panels ?? v.panels ?? []) : (v.panels ?? [])
-  const panels = <>{shownPanels.map((p) => <PanelBox key={p.id} panel={p} />)}</>
+  const panels = (
+    <>
+      {shownPanels.map((p) => (
+        <PanelBox key={p.id} panel={p} />
+      ))}
+    </>
+  )
 
   // A life that has reached its ending. The action controls are gone — a closed
   // life takes no more turns — and the last narration stands as its epilogue, with
@@ -583,7 +649,9 @@ export function PlayPage({
             }}
           />
         ) : null}
-        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        <button className="ew-back" type="button" onClick={onBack}>
+          {t('play.back')}
+        </button>
         <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
         <h3 className="ew-detail-title">{v.title}</h3>
         <div className="ew-note ew-note-live">{t('play.endedBadge')}</div>
@@ -592,11 +660,7 @@ export function PlayPage({
         <LifeSummary runId={runId} />
         <div className="ew-bar">
           {v.lineage ? (
-            <button
-              className="ew-btn ew-btn-go"
-              type="button"
-              onClick={() => setLegacyOpen(true)}
-            >
+            <button className="ew-btn ew-btn-go" type="button" onClick={() => setLegacyOpen(true)}>
               {mt(v.language, 'legacy.entry')}
             </button>
           ) : null}
@@ -607,11 +671,7 @@ export function PlayPage({
           >
             {t('play.endedReplaySame')}
           </button>
-          <button
-            className="ew-btn"
-            type="button"
-            onClick={() => onReplay(v.worldId)}
-          >
+          <button className="ew-btn" type="button" onClick={() => onReplay(v.worldId)}>
             {t('play.endedReplay')}
           </button>
           <button className="ew-btn" type="button" onClick={onBack}>
@@ -627,7 +687,11 @@ export function PlayPage({
         >
           {back ? t('history.close') : t('history.open')}
         </button>
-        {back ? <div id="ew-history-panel-ended"><History runId={runId} /></div> : null}
+        {back ? (
+          <div id="ew-history-panel-ended">
+            <History runId={runId} />
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -647,29 +711,30 @@ export function PlayPage({
   const pastAction = isLive ? '' : (shownEntry?.action ?? '')
   // Forward when the turn number grew (a new page or a step right), back otherwise.
   const pageDir = shownTurn >= prevTurnRef.current ? 'fwd' : 'back'
-  const pager = latest >= 1 ? (
-    <div className="ew-pager">
-      <button
-        className="ew-pager-arw"
-        type="button"
-        disabled={shownTurn <= 1}
-        aria-label={t('play.prevTurn')}
-        onClick={() => setViewTurn(Math.max(1, shownTurn - 1))}
-      >
-        <Chevron dir="l" />
-      </button>
-      <span className="ew-pager-turn">{t('play.page', { n: shownTurn })}</span>
-      <button
-        className="ew-pager-arw"
-        type="button"
-        disabled={shownTurn >= latest}
-        aria-label={t('play.nextTurn')}
-        onClick={() => setViewTurn(shownTurn + 1 >= latest ? null : shownTurn + 1)}
-      >
-        <Chevron dir="r" />
-      </button>
-    </div>
-  ) : null
+  const pager =
+    latest >= 1 ? (
+      <div className="ew-pager">
+        <button
+          className="ew-pager-arw"
+          type="button"
+          disabled={shownTurn <= 1}
+          aria-label={t('play.prevTurn')}
+          onClick={() => setViewTurn(Math.max(1, shownTurn - 1))}
+        >
+          <Chevron dir="l" />
+        </button>
+        <span className="ew-pager-turn">{t('play.page', { n: shownTurn })}</span>
+        <button
+          className="ew-pager-arw"
+          type="button"
+          disabled={shownTurn >= latest}
+          aria-label={t('play.nextTurn')}
+          onClick={() => setViewTurn(shownTurn + 1 >= latest ? null : shownTurn + 1)}
+        >
+          <Chevron dir="r" />
+        </button>
+      </div>
+    ) : null
 
   const main = (
     <div>
@@ -695,7 +760,9 @@ export function PlayPage({
             <>
               <div className="ew-recap-label">{t('play.recapRecent')}</div>
               <ul className="ew-recap-list">
-                {recap.events.map((event, i) => <li key={`${i}-${event}`}>{event}</li>)}
+                {recap.events.map((event, i) => (
+                  <li key={`${i}-${event}`}>{event}</li>
+                ))}
               </ul>
             </>
           ) : null}
@@ -720,9 +787,7 @@ export function PlayPage({
           {(v.unlocked ?? []).map((h, i) => (
             <div className="ew-unlocked-row" key={`${h}-${i}`}>
               <div className="ew-unlocked-heading">{t('play.unlocked', { heading: h })}</div>
-              <div className="ew-unlocked-meaning">
-                {t('play.unlockedMeaning', { heading: h })}
-              </div>
+              <div className="ew-unlocked-meaning">{t('play.unlockedMeaning', { heading: h })}</div>
             </div>
           ))}
         </div>
@@ -753,9 +818,9 @@ export function PlayPage({
                 {/* Marked in the player's language, not with a tooltip: an unreliable
                     report that reads exactly like a reliable one makes the reach
                     gating invisible, which is the same as not having it. */}
-                {dg.rumour && dg.category !== 'rumour'
-                  ? <span className="ew-sub">{t('play.rumourSuffix')}</span>
-                  : null}
+                {dg.rumour && dg.category !== 'rumour' ? (
+                  <span className="ew-sub">{t('play.rumourSuffix')}</span>
+                ) : null}
               </div>
             </div>
           ))}
@@ -767,9 +832,11 @@ export function PlayPage({
       ) : null}
 
       <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
-        {pageLoading
-          ? <div className="ew-meta">{t('history.reading')}</div>
-          : <Prose text={shownProse} />}
+        {pageLoading ? (
+          <div className="ew-meta">{t('history.reading')}</div>
+        ) : (
+          <Prose text={shownProse} />
+        )}
       </div>
 
       {/* After the prose, never before it (design §8.1): the story is the
@@ -840,13 +907,13 @@ export function PlayPage({
               <div className="ew-choicewrap" key={c.id}>
                 <button
                   className={
-                    'ew-choice'
-                    + (c.fateful || c.art ? ' ew-choice-fateful' : '')
-                    + (c.art ? ' ew-choice-arted' : '')
-                    + effectClass(c.effect)
-                    + (armed ? ' ew-choice-armed' : '')
-                    + (writing ? ' ew-choice-waiting' : '')
-                    + (dimmed ? ' ew-choice-dimmed' : '')
+                    'ew-choice' +
+                    (c.fateful || c.art ? ' ew-choice-fateful' : '') +
+                    (c.art ? ' ew-choice-arted' : '') +
+                    effectClass(c.effect) +
+                    (armed ? ' ew-choice-armed' : '') +
+                    (writing ? ' ew-choice-waiting' : '') +
+                    (dimmed ? ' ew-choice-dimmed' : '')
                   }
                   // The narrator's declared tint drives every effect's color
                   // through one custom property; absent, the CSS falls back to
@@ -873,7 +940,9 @@ export function PlayPage({
                       alt=""
                       aria-hidden="true"
                       draggable={false}
-                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
                     />
                   ) : v.backdrop?.buttons ? (
                     <img
@@ -882,7 +951,9 @@ export function PlayPage({
                       alt=""
                       aria-hidden="true"
                       draggable={false}
-                      onError={(e) => { e.currentTarget.style.display = 'none' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
                     />
                   ) : null}
                   <span className="ew-choice-label">{c.label}</span>
@@ -913,11 +984,7 @@ export function PlayPage({
                     >
                       {t('play.confirmYes')}
                     </button>
-                    <button
-                      className="ew-btn ew-btn-sm"
-                      type="button"
-                      onClick={() => setArm('')}
-                    >
+                    <button className="ew-btn ew-btn-sm" type="button" onClick={() => setArm('')}>
                       {t('play.confirmNo')}
                     </button>
                   </div>
@@ -929,73 +996,70 @@ export function PlayPage({
       ) : null}
 
       {isLive ? (
-      <div>
-        <div className="ew-act">
-          <textarea
-            value={action}
-            maxLength={500}
-            rows={2}
-            placeholder={t('play.actionPlaceholder')}
-            disabled={busy}
-            onChange={(e) => { setAction(e.target.value); setArm('') }}
-            onKeyDown={(e) => {
-              // Cmd/Ctrl+Enter is itself the deliberate act, so it commits directly
-              // rather than only arming the two-step confirm.
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && action.trim() && !busy) {
-                e.preventDefault()
+        <div>
+          <div className="ew-act">
+            <textarea
+              value={action}
+              maxLength={500}
+              rows={2}
+              placeholder={t('play.actionPlaceholder')}
+              disabled={busy}
+              onChange={(e) => {
+                setAction(e.target.value)
                 setArm('')
-                void take({ turn: v.turn + 1, action: action.trim() }, ACT)
-              }
-            }}
-          />
-          <button
-            className="ew-btn ew-btn-go"
-            type="button"
-            style={{ flex: '0 0 auto', minWidth: 0, padding: '0 16px' }}
-            disabled={busy || !action.trim()}
-            onClick={() => setArm(arm === ACT ? '' : ACT)}
-            aria-pressed={arm === ACT}
-          >
-            {t('play.act')}
-          </button>
-        </div>
+              }}
+              onKeyDown={(e) => {
+                // Cmd/Ctrl+Enter is itself the deliberate act, so it commits directly
+                // rather than only arming the two-step confirm.
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && action.trim() && !busy) {
+                  e.preventDefault()
+                  setArm('')
+                  void take({ turn: v.turn + 1, action: action.trim() }, ACT)
+                }
+              }}
+            />
+            <button
+              className="ew-btn ew-btn-go"
+              type="button"
+              style={{ flex: '0 0 auto', minWidth: 0, padding: '0 16px' }}
+              disabled={busy || !action.trim()}
+              onClick={() => setArm(arm === ACT ? '' : ACT)}
+              aria-pressed={arm === ACT}
+            >
+              {t('play.act')}
+            </button>
+          </div>
 
-        {/* Typed text gets the same second step as a tapped choice. It is the same
+          {/* Typed text gets the same second step as a tapped choice. It is the same
             irreversible month, and the reason to confirm has nothing to do with how
             the intent was expressed. */}
-        {arm === ACT && !busy ? (
-          <div className="ew-confirm ew-confirm-act">
-            <span className="ew-confirm-ask">{t('play.confirmAct')}</span>
-            <button
-              className="ew-btn ew-btn-go ew-btn-sm"
-              type="button"
-              onClick={() => {
-                setArm('')
-                void take({ turn: v.turn + 1, action: action.trim() }, ACT)
-              }}
-            >
-              {t('play.confirmYes')}
-            </button>
-            <button
-              className="ew-btn ew-btn-sm"
-              type="button"
-              onClick={() => setArm('')}
-            >
-              {t('play.confirmNo')}
-            </button>
-          </div>
-        ) : null}
+          {arm === ACT && !busy ? (
+            <div className="ew-confirm ew-confirm-act">
+              <span className="ew-confirm-ask">{t('play.confirmAct')}</span>
+              <button
+                className="ew-btn ew-btn-go ew-btn-sm"
+                type="button"
+                onClick={() => {
+                  setArm('')
+                  void take({ turn: v.turn + 1, action: action.trim() }, ACT)
+                }}
+              >
+                {t('play.confirmYes')}
+              </button>
+              <button className="ew-btn ew-btn-sm" type="button" onClick={() => setArm('')}>
+                {t('play.confirmNo')}
+              </button>
+            </div>
+          ) : null}
 
-        {tapped === ACT ? (
-          <div className="ew-confirm ew-confirm-act">
-            <Waiting label={phrase} />
-          </div>
-        ) : null}
+          {tapped === ACT ? (
+            <div className="ew-confirm ew-confirm-act">
+              <Waiting label={phrase} />
+            </div>
+          ) : null}
 
-        {action.length > 400 ? (
-          <div className="ew-count">{`${action.length} / 500`}</div>
-        ) : null}
-      </div>
+          {action.length > 400 ? <div className="ew-count">{`${action.length} / 500`}</div> : null}
+        </div>
       ) : null}
 
       {/* The history drawer is hidden for now: the turn pager at the top of the
@@ -1015,9 +1079,7 @@ export function PlayPage({
       ) : null}
       {drawer && !narrow ? (
         <div id="ew-panels-drawer" style={{ marginTop: '10px' }}>
-          {shownPanels.length ? panels : (
-            <div className="ew-note">{t('play.nothingToShow')}</div>
-          )}
+          {shownPanels.length ? panels : <div className="ew-note">{t('play.nothingToShow')}</div>}
         </div>
       ) : null}
     </div>
@@ -1039,22 +1101,24 @@ export function PlayPage({
   const activeAside = asideStripTabs.some((tb) => tb.id === asideTab)
     ? asideTab
     : (asideStripTabs[0]?.id ?? '')
-  const asidePanels = activeAside === '__untagged'
-    ? asideUntagged
-    : (v.panels ?? []).filter((p) => (p.region ?? '').trim() === activeAside)
+  const asidePanels =
+    activeAside === '__untagged'
+      ? asideUntagged
+      : (v.panels ?? []).filter((p) => (p.region ?? '').trim() === activeAside)
 
   // Dot a region tab whose panels changed while the reader was on another tab.
   const asideSig = (regionId: string): string => {
-    const group = regionId === '__untagged'
-      ? asideUntagged
-      : (v.panels ?? []).filter((p) => (p.region ?? '').trim() === regionId)
+    const group =
+      regionId === '__untagged'
+        ? asideUntagged
+        : (v.panels ?? []).filter((p) => (p.region ?? '').trim() === regionId)
     return JSON.stringify(group.map((p) => [p.id, JSON.stringify(p.fields)]))
   }
   const asideDots: Record<string, boolean> = {}
   for (const tb of asideStripTabs) {
     const sig = asideSig(tb.id)
     if (tb.id === activeAside) {
-      asideSeenRef.current[tb.id] = sig  // the open tab is always current
+      asideSeenRef.current[tb.id] = sig // the open tab is always current
       asideDots[tb.id] = false
       continue
     }
@@ -1069,7 +1133,10 @@ export function PlayPage({
           runId={runId}
           lang={v.language}
           backdrop={v.backdrop ?? null}
-          onClose={() => { setStarOpen(false); onStarClose?.() }}
+          onClose={() => {
+            setStarOpen(false)
+            onStarClose?.()
+          }}
           onJumpTurn={(turn) => {
             setStarOpen(false)
             setViewTurn(turn >= latest ? null : turn)
@@ -1095,18 +1162,22 @@ export function PlayPage({
       {readerBar ? <div className="ew-topbar-slot" /> : null}
       <div
         className={
-          'ew-topbar'
-          + (readerBar ? ' ew-topbar-fixed' : '')
-          + (readerBar && barHidden ? ' ew-topbar-hidden' : '')
+          'ew-topbar' +
+          (readerBar ? ' ew-topbar-fixed' : '') +
+          (readerBar && barHidden ? ' ew-topbar-hidden' : '')
         }
       >
-        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        <button className="ew-back" type="button" onClick={onBack}>
+          {t('play.back')}
+        </button>
         {pager}
       </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
         // the story readable. The next successful poll clears it (M0.5).
-        <div className="ew-note" role="status">{t('play.pollHiccup')}</div>
+        <div className="ew-note" role="status">
+          {t('play.pollHiccup')}
+        </div>
       ) : null}
       <div className="ew-titleline">
         <h3 className="ew-detail-title">{v.title}</h3>
@@ -1130,17 +1201,17 @@ export function PlayPage({
                   {asideDots[tb.id] ? <i className="ew-aside-dot" /> : null}
                 </button>
               ))}
-              <button
-                type="button"
-                className="ew-aside-tab"
-                onClick={() => setStarOpen(true)}
-              >
+              <button type="button" className="ew-aside-tab" onClick={() => setStarOpen(true)}>
                 {tabIcon('starmap')}
                 <span>{mt(v.language, 'star.title')}</span>
               </button>
             </div>
             {asidePanels.length ? (
-              <>{asidePanels.map((p) => <PanelBox key={p.id} panel={p} />)}</>
+              <>
+                {asidePanels.map((p) => (
+                  <PanelBox key={p.id} panel={p} />
+                ))}
+              </>
             ) : (
               <div className="ew-note">{t('play.nothingToShow')}</div>
             )}

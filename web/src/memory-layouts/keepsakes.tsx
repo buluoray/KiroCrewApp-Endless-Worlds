@@ -15,7 +15,14 @@ import { mt, nodeById } from '../memory-state'
 import { StoryCardEditor } from '../story-card'
 
 function KeepsakeCard({
-  runId, kp, lang, payload, focus, setFocus, onChanged, onMakeCard,
+  runId,
+  kp,
+  lang,
+  payload,
+  focus,
+  setFocus,
+  onChanged,
+  onMakeCard,
 }: {
   runId: string
   kp: Keepsake
@@ -104,11 +111,7 @@ function KeepsakeCard({
       ) : null}
       <div className="ews-kp-actions">
         {kp.cites.length ? (
-          <button
-            className="ews-btn"
-            type="button"
-            onClick={() => onMakeCard(kp)}
-          >
+          <button className="ews-btn" type="button" onClick={() => onMakeCard(kp)}>
             {mt(lang, 'star.keeps.makeCard')}
           </button>
         ) : null}
@@ -124,8 +127,12 @@ function KeepsakeCard({
         {confirming ? (
           <>
             <span className="ews-kp-ask">{mt(lang, 'star.keeps.deleteAsk')}</span>
-            <button className="ews-btn ews-btn-danger" type="button" disabled={busy}
-              onClick={() => void remove()}>
+            <button
+              className="ews-btn ews-btn-danger"
+              type="button"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
               {mt(lang, 'star.keeps.deleteYes')}
             </button>
             <button className="ews-btn" type="button" onClick={() => setConfirming(false)}>
@@ -143,7 +150,12 @@ function KeepsakeCard({
 }
 
 export function KeepsakesLens({
-  runId, payload, lang, focus, setFocus, onChanged,
+  runId,
+  payload,
+  lang,
+  focus,
+  setFocus,
+  onChanged,
 }: {
   runId: string
   payload: StarPayload

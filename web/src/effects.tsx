@@ -17,9 +17,11 @@ export type ChoiceEffectName = 'shimmer' | 'aura' | 'embers' | 'ripple'
 const CSS_EFFECTS: ReadonlySet<string> = new Set(['shimmer', 'aura', 'ripple'])
 
 export function reducedMotion(): boolean {
-  return typeof window !== 'undefined'
-    && !!window.matchMedia
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  return (
+    typeof window !== 'undefined' &&
+    !!window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
 }
 
 /** The class list a button gains for a declared effect ('' when none). */
@@ -33,8 +35,13 @@ export function effectClass(effect?: string): string {
 const MAX_EMBERS = 24
 
 interface Ember {
-  x: number; y: number; r: number; vy: number; vx: number
-  life: number; ttl: number
+  x: number
+  y: number
+  r: number
+  vy: number
+  vx: number
+  life: number
+  ttl: number
 }
 
 /** The canvas half of the effect layer. Renders nothing for CSS effects. */
@@ -84,7 +91,10 @@ export function ChoiceEffect({ effect, tint }: { effect?: string; tint?: string 
         p.x += p.vx
         p.y -= p.vy
         const t = p.life / p.ttl
-        if (t >= 1 || p.y < -4) { embers.splice(i, 1); continue }
+        if (t >= 1 || p.y < -4) {
+          embers.splice(i, 1)
+          continue
+        }
         // Rise bright, fade out through the top third.
         const alpha = t < 0.2 ? t / 0.2 : 1 - (t - 0.2) / 0.8
         ctx.globalAlpha = Math.max(0, alpha * 0.85)
