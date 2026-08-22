@@ -2870,10 +2870,7 @@ function buildTabs(scenes, panels = []) {
 		}
 	];
 }
-/** Hide on scroll-down, show on scroll-up. Listens in the capture phase so it
-*  catches whichever element actually scrolls — the window in a standalone web
-*  view, or the dashboard's panel div when embedded. */
-function useScrollHide(enabled) {
+function useScrollHide(enabled, pinUntil = 40) {
 	const [hidden, setHidden] = useState(false);
 	useEffect(() => {
 		if (!enabled) {
@@ -2891,14 +2888,14 @@ function useScrollHide(enabled) {
 			}
 			const dy = y - last;
 			if (Math.abs(dy) < 8) return;
-			if (y < 40) setHidden(false);
+			if (y < pinUntil) setHidden(false);
 			else if (dy > 0) setHidden(true);
 			else setHidden(false);
 			last = y;
 		};
 		window.addEventListener("scroll", onScroll, true);
 		return () => window.removeEventListener("scroll", onScroll, true);
-	}, [enabled]);
+	}, [enabled, pinUntil]);
 	return hidden;
 }
 function icon(tab) {
@@ -6662,6 +6659,20 @@ function EndlessWorlds() {
 	}, []);
 	const rootRef = useRef(null);
 	useEffect(() => {
+		let node = rootRef.current?.parentElement ?? null;
+		while (node) {
+			const flow = getComputedStyle(node).overflowY;
+			if (flow === "auto" || flow === "scroll") break;
+			node = node.parentElement;
+		}
+		if (!node) return void 0;
+		const had = node.style.overscrollBehaviorY;
+		node.style.overscrollBehaviorY = "none";
+		return () => {
+			node.style.overscrollBehaviorY = had;
+		};
+	}, []);
+	useEffect(() => {
 		rootRef.current?.scrollIntoView({ block: "start" });
 	}, [view]);
 	const [selected, setSelected] = useState(null);
@@ -6974,7 +6985,7 @@ function EndlessWorlds() {
 	}, [live]);
 	const tabs = useMemo(() => buildTabs(scenes, panels), [scenes, panels]);
 	const narrowLive = isNarrow && view === "live" && !!live;
-	const barHidden = useScrollHide(narrowLive);
+	const barHidden = useScrollHide(narrowLive, 70);
 	useEffect(() => {
 		if (narrowLive && !tabs.some((tb) => tb.id === tab)) setTab("reading");
 	}, [
@@ -7293,7 +7304,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.5.11" })
+								children: t("app.version", { version: "0.5.12" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",

@@ -543,3 +543,48 @@ def test_a_birth_does_not_borrow_the_phrase_for_a_passing_month():
     assert "pick('opening.waiting')" in src, (
         "the opening screen reuses the month-passing phrases"
     )
+
+
+def test_the_reading_bar_is_pinned_until_the_reader_is_past_it():
+    """A 40px threshold let the bar slide away before the reader had passed the text
+    it sits over — and a swipe back down slid it in again, so a small gesture near
+    the top made it flicker in place. The pin zone is the bar's own footprint, and it
+    is derived once rather than written as a number at the call site.
+    """
+    bar = module("tabbar.tsx")
+    assert "READER_BAR_PIN_PX" in bar, "the pin zone has no named owner"
+    assert "if (y < pinUntil) setHidden(false)" in bar, (
+        "the hook no longer pins the bar near the top"
+    )
+    # The threshold must be a parameter, not a constant baked into the hook: the
+    # bottom tab bar and the reading bar are different heights.
+    assert "pinUntil = 40" in bar, "the default pin zone is gone"
+
+    root = module("main.tsx")
+    assert "useScrollHide(narrowLive, READER_BAR_PIN_PX)" in root, (
+        "the reading bar still rides the bare 40px default"
+    )
+
+
+def test_the_reading_bar_survives_an_overscrolled_pane():
+    """A sticky bar is pinned inside the SCROLLPORT, and a scrollport that rubber-bands
+    past its own top carries its content — bar included — down with it, leaving the bar
+    below a band of bare canvas. The app turns that bounce off on the container it
+    scrolls in, and gives the property back when it unmounts.
+
+    The container is found by WALKING UP for a scrollable ancestor, never by naming the
+    dashboard's own element: a hardcoded `main` breaks silently the day the shell
+    changes shape, and the failure is invisible (the bar simply drifts again).
+    """
+    root = module("main.tsx")
+    assert "overscrollBehaviorY = 'none'" in root, (
+        "the pane still bounces, so the bar is dragged off the top"
+    )
+    assert "querySelector('main')" not in root and 'querySelector("main")' not in root, (
+        "the scroll container must be discovered, not hardcoded to the host's DOM"
+    )
+    assert "overflowY" in root, "the walk-up never inspects what actually scrolls"
+    # Borrowed, not taken: the property goes back or every later page inherits it.
+    assert "node.style.overscrollBehaviorY = had" in root, (
+        "the borrowed property is never restored on unmount"
+    )
