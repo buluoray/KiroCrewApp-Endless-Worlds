@@ -127,7 +127,19 @@ SCENE_SCRIPT = """<script>
   });
   var last = 0;
   function report() {
-    var h = Math.ceil(document.body.getBoundingClientRect().height);
+    /* The CONTENT's own extent, not the body box: a body inflated to the frame's
+       viewport reports its own height back and the frame can then never shrink.
+       A child's own bottom margin counts -- it is part of what the picture
+       occupies, and leaving it out cropped the last row by exactly that much.
+       Block comments, not line ones: the document may not contain a double slash
+       anywhere, which is what keeps a protocol-relative URL out of it. */
+    var b = document.body, top = b.getBoundingClientRect().top, far = 0, i, el;
+    for (i = 0; i < b.children.length; i++) {
+      el = b.children[i];
+      far = Math.max(far, el.getBoundingClientRect().bottom - top
+        + (parseFloat(getComputedStyle(el).marginBottom) || 0));
+    }
+    var h = Math.ceil(far + (parseFloat(getComputedStyle(b).paddingBottom) || 0));
     if (!h || h === last) return;
     last = h;
     parent.postMessage(envelope({ height: h }), '*');
@@ -168,7 +180,18 @@ button {
   font: inherit; color: inherit; cursor: pointer;
   background: #1f2030; border: 1px solid #2d2f3d; border-radius: 8px;
 }
-.grid { display: grid; gap: 6px; margin: 8px 0; }
+/* Rows are sized by what is IN them and never by the room around them. Two
+   independent latches, because what hands this box a height larger than its rows on
+   a phone is not reproducible off-device: `align-content` otherwise defaults to
+   stretch and shares any surplus out among the auto rows, and `grid-auto-rows` pins
+   each track to its content even if something still does. Measured: a grid box
+   forced to 464px turned six short labels into 236px boxes holding 57px of text,
+   which is the shape a real phone showed; with these, 95px and 82px.
+   Cells still stretch to their own row, so a row's boxes stay equal height. */
+.grid {
+  display: grid; gap: 6px; margin: 8px 0;
+  align-content: start; grid-auto-rows: min-content;
+}
 /* A map cell is a label, not prose: the body's reading line-height turns six short
    cells into a tall airy block, and at phone width a column is ~100px wide, so a
    name that does not break lands outside its own box. */
