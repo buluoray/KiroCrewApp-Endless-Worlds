@@ -45,8 +45,19 @@ sees is produced locally from a closed, code-owned vocabulary.
   (`test_tree_nests_children_under_parents_and_escapes`). The `grid` branch places
   cells from a validated integer column count and rejects one out of range
   (`test_grid_rejects_out_of_range_columns`,
-  `test_grid_lays_cells_into_columns_and_escapes_labels`). Node, edge, and depth
-  ceilings are legibility bounds pinned by the same tests, not restated here.
+  `test_grid_lays_cells_into_columns_and_escapes_labels`). A cell's `mark` carries
+  two separable intentions: a STRING is that cell's own symbol and renders as an
+  escaped badge, while `true` tints the whole cell. A symbol deliberately does not
+  also tint — a narrator marks every cell of a map with its own symbol, and tinting
+  on any mark rendered all of them identically while dropping the symbols entirely.
+  A string past `MAX_MARK` is dropped whole rather than cut, because truncating an
+  emoji's codepoint sequence renders a lone joiner or variation selector.
+  `test_a_cells_symbol_mark_is_rendered_and_does_not_tint_every_cell`,
+  `test_a_true_mark_still_tints_the_cell_and_draws_no_badge`,
+  `test_a_mark_that_is_not_a_symbol_draws_nothing_rather_than_a_cut_one`, and
+  `test_a_symbol_mark_is_escaped_like_any_other_narrator_text` pin it. Node, edge,
+  and depth ceilings are legibility bounds pinned by the same tests, not restated
+  here.
 
 - **A scene is validated whole before any byte is emitted.** `compile_scene` builds
   the entire body or raises `SceneSpecError`; a scene never mounts half-drawn, and

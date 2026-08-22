@@ -53,6 +53,10 @@ MAX_ELEMENTS = 60
 MAX_TEXT = 400
 MAX_ROWS = 40
 MAX_COLUMNS = 6
+#: A grid cell's `mark` glyph, in codepoints. Wide enough for a real emoji with a
+#: variation selector or a keycap sequence, narrow enough that a sentence is not one:
+#: a mark is a symbol, and a longer string is a `note` wearing the wrong field.
+MAX_MARK = 4
 #: A relationship graph's ceilings. Nodes are laid out by the backend on a ring,
 #: so past a couple dozen the labels overlap and it stops being readable — the cap
 #: is a legibility bound, not only a safety one.
@@ -174,6 +178,9 @@ button {
   line-height: 1.3; min-width: 0; overflow-wrap: anywhere;
 }
 .gc.gm { border-color: #7c3aed; background: #241d3a; }
+/* The cell's own symbol, inline before its name so it rides the label's first line
+   and cannot be orphaned by a wrap. */
+.gmk { margin-inline-end: 4px; font-size: 13px; }
 .gn { display: block; color: #6b7280; font-size: 11px; line-height: 1.3; margin-top: 3px; }
 .lkwrap { margin: 8px 0; }
 svg.lk { width: 100%; height: auto; display: block; }
@@ -374,10 +381,31 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
             note = c.get("note")
             nt = _esc(_celltext(note, f"{where}.cells[{cn}].note", cap=64))
             note_html = f'<span class="gn">{nt}</span>' if note not in (None, "") else ""
-            # `columns` is a validated int and `mark` a bool — the only non-narrator
-            # values that reach markup, so no coordinate or class is ever author text.
-            mark = " gm" if bool(c.get("mark")) else ""
-            out.append(f'<div class="gc{mark}">{label}{note_html}</div>')
+            # `mark` carries two different intentions and both are honoured, because
+            # collapsing them loses information either way. A GLYPH (a string) is a
+            # per-cell symbol and renders as a badge: it distinguishes cells from each
+            # other, which is what a map needs. `true` is a whole-cell highlight and
+            # tints the box. A glyph deliberately does NOT also tint: a narrator marks
+            # every cell of a map with its own symbol, and tinting on any mark made all
+            # six cells identically purple — a highlight that highlights everything
+            # says nothing, and the symbols themselves were dropped on the floor.
+            #
+            # The glyph is escaped narrator TEXT, like a label or a note. `columns`
+            # (a validated int) and the tint class remain the only non-narrator values
+            # reaching markup, so no coordinate or class is ever author text.
+            mark = c.get("mark")
+            badge = ""
+            tint = ""
+            if isinstance(mark, str):
+                glyph = mark.strip()
+                # A mark is a symbol, not a sentence. Past the cap it is dropped
+                # WHOLE rather than cut: an emoji is a codepoint sequence, and
+                # truncating one renders a lone variation selector or joiner.
+                if glyph and len(glyph) <= MAX_MARK:
+                    badge = f'<span class="gmk">{_esc(glyph)}</span>'
+            elif mark:
+                tint = " gm"
+            out.append(f'<div class="gc{tint}">{badge}{label}{note_html}</div>')
         return (
             f'<div class="grid" style="grid-template-columns:repeat({cols},1fr)">'
             + "".join(out) + "</div>"
