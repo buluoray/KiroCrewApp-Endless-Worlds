@@ -171,6 +171,7 @@ from turn import (  # noqa: E402
 )
 from view import build_play_view, resolve_ending, world_detail  # noqa: E402
 from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
+from backdrop_timing import BackdropTimeline  # noqa: E402
 from widget import CSP, SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
@@ -187,6 +188,13 @@ _BACKDROP_RECOVERY_TASKS: dict[str, asyncio.Task[None]] = {}
 _BACKDROP_ILLUSTRATOR_ATTEMPTS = 2
 _BACKDROP_ATTEMPT_SECS = 180.0
 _BACKDROP_POLL_SECS = 0.25
+#: The whole-recovery budget for the MODEL to land art. When it elapses without a
+#: committed backdrop, the server publishes the traced underlay directly (a real
+#: photo/base image, no model call) instead of letting the illustrator keep
+#: running or the narrator hand-draw. Deliberately shorter than
+#: ``_BACKDROP_ATTEMPT_SECS`` × attempts: a scene page's underlay is already the
+#: bulk of the image, so a fast real image beats waiting minutes for the overlay.
+_BACKDROP_FALLBACK_SECS = 120.0
 #: How long one brief may withhold its committed page. Art is part of its page,
 #: but a request with no age bound violated the fail-soft principle in the one
 #: place it matters most: a pipeline that can never produce art (no renderer,
@@ -225,11 +233,12 @@ def _backdrop_is_pending(
 
 
 async def _wait_for_backdrop(
-    ctx: AppContext, store: RunStore, run_id: str, turn: int, spawn_id: str
+    ctx: AppContext, store: RunStore, run_id: str, turn: int, spawn_id: str,
+    deadline_secs: float = _BACKDROP_ATTEMPT_SECS,
 ) -> bool:
     """Wait for exact page art, or until this illustrator has ended."""
     spawn = getattr(ctx, "spawn", None)
-    deadline = asyncio.get_running_loop().time() + _BACKDROP_ATTEMPT_SECS
+    deadline = asyncio.get_running_loop().time() + deadline_secs
     while asyncio.get_running_loop().time() < deadline:
         if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
             store.clear_backdrop_request(run_id)
@@ -265,6 +274,10 @@ async def _recover_backdrop(
     server-gated direct fallback. The ordinary generation state stays on screen.
     """
     try:
+        # The model's whole-recovery budget. When it elapses, the server publishes
+        # the traced underlay directly rather than waiting longer or hand-drawing.
+        loop = asyncio.get_running_loop()
+        recovery_deadline = loop.time() + _BACKDROP_FALLBACK_SECS
         while True:
             request = store.read_backdrop_request(run_id)
             if not request:
@@ -276,9 +289,13 @@ async def _recover_backdrop(
 
             attempts = int(request.get("attempts") or 0)
             spawn = getattr(ctx, "spawn", None)
-            if attempts < _BACKDROP_ILLUSTRATOR_ATTEMPTS and spawn is not None:
+            within_budget = loop.time() < recovery_deadline
+            if attempts < _BACKDROP_ILLUSTRATOR_ATTEMPTS and spawn is not None and within_budget:
                 attempt = attempts + 1
                 store.update_backdrop_request(run_id, attempts=attempt)
+                BackdropTimeline(ctx.data_dir, run_id).mark(
+                    turn, "recover:illustrator-dispatched", attempt=attempt
+                )
                 task = (
                     "Paint the desktop/mobile backdrop pair for one page of a life. "
                     "Follow the ART BRIEF's declared lane exactly. In LANE: scene, "
@@ -309,12 +326,40 @@ async def _recover_backdrop(
                         exc,
                     )
                     continue
-                if await _wait_for_backdrop(ctx, store, run_id, turn, spawn_id):
+                # Wait only for what is left of the budget, so a slow illustrator
+                # cannot push the total past the server-fallback point.
+                remaining = max(_BACKDROP_POLL_SECS, recovery_deadline - loop.time())
+                if await _wait_for_backdrop(
+                    ctx, store, run_id, turn, spawn_id, deadline_secs=remaining
+                ):
+                    BackdropTimeline(ctx.data_dir, run_id).mark(
+                        turn, "recover:illustrator-committed", attempt=attempt
+                    )
                     return
+                BackdropTimeline(ctx.data_dir, run_id).mark(
+                    turn, "recover:illustrator-timeout", attempt=attempt
+                )
                 continue
 
-            # The workers could not land art. Ask the narrator that wrote this page
-            # to simplify the direction or use the exceptional direct fallback.
+            # The model's budget is spent (or it has no illustrator). Before asking
+            # the narrator to hand-draw, publish the traced underlay directly: for a
+            # SCENE page the illustrator has almost always already traced a photo or
+            # a base, and that underlay is itself a finished backdrop — a real image,
+            # no model call, no minutes-long hand-draw.
+            try:
+                from mcp_server import commit_underlay_only  # noqa: PLC0415
+
+                if commit_underlay_only(ctx.data_dir, store, run_id, turn):
+                    return
+            except Exception as exc:  # noqa: BLE001 — fall through to narrator
+                logger.warning(
+                    "endless-worlds: server underlay fallback failed for %s/%s: %s",
+                    run_id, turn, exc,
+                )
+
+            # No traced underlay to publish (a motif page, or the illustrator never
+            # traced). Ask the narrator that wrote this page to simplify the
+            # direction or use the exceptional direct fallback.
             if state_obj is None:
                 return  # a later real gateway GET restarts the durable request
             if int(request.get("recoveryCycles") or 0) >= _BACKDROP_NARRATOR_CYCLES:
@@ -2249,6 +2294,63 @@ def _heal_mcp_server_path() -> None:
         pass
 
 
+async def backdrop_timeline(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/backdrop-timeline?turn=N`` — audit where the backdrop
+    wait went for one page.
+
+    Diagnostic only. Returns the ordered events (each with ``serverMs`` for time
+    spent inside a tool and ``gapMs`` for the wait since the previous event — the
+    model's own thinking/generation), plus a summary naming the single longest gap
+    and the slowest server step. ``turn`` defaults to the life's current turn.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    if not any(r.get("runId") == run_id for r in store.read_index()):
+        return web.json_response({"error": "no such life"}, status=404)
+    raw_turn = request.query.get("turn")
+    if raw_turn is not None:
+        try:
+            turn = int(raw_turn)
+        except ValueError:
+            return web.json_response({"field": "turn", "expected": "an integer"}, status=422)
+    else:
+        turn = int(store.read_state(run_id).get("turn") or 0)
+
+    events = BackdropTimeline(ctx.data_dir, run_id).read(turn)
+    gaps = [
+        (int(e["gapMs"]), str(e.get("step") or ""))
+        for e in events
+        if e.get("gapMs") is not None
+    ]
+    slowest_gap_ms, slowest_gap_before = max(gaps, default=(0, ""))
+    server_steps = {
+        str(e.get("step") or ""): int(e["serverMs"])
+        for e in events
+        if isinstance(e.get("serverMs"), (int, float))
+    }
+    slowest_server = max(server_steps.items(), key=lambda kv: kv[1], default=("", 0))
+    total_ms = (
+        int((float(events[-1]["at"]) - float(events[0]["at"])) * 1000)
+        if len(events) >= 2
+        else 0
+    )
+    return web.json_response({
+        "turn": turn,
+        "events": events,
+        "summary": {
+            "totalMs": total_ms,
+            # The step that FOLLOWED the longest wait — i.e. what the model spent
+            # the most time thinking/generating before doing.
+            "slowestGapMs": slowest_gap_ms,
+            "slowestGapBefore": slowest_gap_before,
+            "slowestServerStep": slowest_server[0],
+            "slowestServerMs": slowest_server[1],
+        },
+    })
+
+
 def register_routes(ctx: AppContext) -> list[AppRoute]:
     """Declare this app's HTTP surface.
 
@@ -2274,6 +2376,11 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         AppRoute(method="POST", path="/runs/{run_id}/meta", handler=set_life_meta),
         AppRoute(method="GET", path="/runs/{run_id}/scenes/{scene_id}", handler=get_scene),
         AppRoute(method="GET", path="/runs/{run_id}/backdrop", handler=get_backdrop),
+        AppRoute(
+            method="GET",
+            path="/runs/{run_id}/backdrop-timeline",
+            handler=backdrop_timeline,
+        ),
         AppRoute(
             method="POST",
             path="/runs/{run_id}/scenes/{scene_id}/answer",

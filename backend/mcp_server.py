@@ -30,6 +30,7 @@ import math
 import os
 import re
 import sys
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
@@ -79,6 +80,7 @@ from scenes import (  # noqa: E402
     slugify_scene_id,
 )
 from widget import scene_warnings  # noqa: E402
+from backdrop_timing import BackdropTimeline  # noqa: E402
 from backdrop import (  # noqa: E402
     BackdropDraftStore,
     BackdropError,
@@ -105,7 +107,7 @@ from chapters import (  # noqa: E402
 )
 from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
 import memory_graph  # noqa: E402
-from store import RunStore, StoreError  # noqa: E402
+from store import RunStore, StoreError, brief_lane  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from systems import apply_systems  # noqa: E402
 from view import always_panels_empty, shape_panels  # noqa: E402
@@ -1863,6 +1865,7 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     run_id = args["runId"]
     turn = _backdrop_turn(run_id)
     _store().request_backdrop(run_id, turn=turn, brief=args["brief"])
+    BackdropTimeline(_DATA, run_id).mark(turn, "requested", lane=brief_lane(args["brief"]))
     return {"backdrop": "queued", "turn": turn}
 
 
@@ -1953,8 +1956,9 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
     """
     reason = str(search.get("reason") or "")
     tail = (
-        " Put one <g id=\"etr-underlay\"/> in each SVG and compose the scene over the "
-        "base if you would rather draw it yourself."
+        " Put one <g id=\"etr-underlay\"/> in each SVG with no other marks and commit "
+        "that — the base alone is a finished backdrop. Add a few sparse marks only if "
+        "they clearly help; never paint a full scene from scratch over it."
     )
     if reason == "no-candidates":
         return (
@@ -2217,6 +2221,79 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     return {"backdrop": "committed", "version": version, "turn": turn}
 
 
+#: Underlay-only shells: a valid backdrop that is nothing but the traced photo (or
+#: procedural base) spliced into the one placeholder. The overlay was always
+#: optional, so this is a complete page — used by the server-side timeout fallback.
+_UNDERLAY_ONLY_DESKTOP = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" '
+    'preserveAspectRatio="xMidYMid slice"><g id="etr-underlay"/></svg>'
+)
+_UNDERLAY_ONLY_MOBILE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 900" '
+    'preserveAspectRatio="xMidYMid slice"><g id="etr-underlay"/></svg>'
+)
+
+
+def commit_underlay_only(data_dir: Path, store: RunStore, run_id: str, turn: int) -> bool:
+    """Publish the traced underlay ALONE as the page's backdrop, with no model.
+
+    The server-side fallback for a page whose illustrator ran out of time: the
+    underlay (a traced photograph or a procedural tonal base) is already a complete
+    backdrop — the overlay was always optional — so composing it into a bare
+    placeholder shell and publishing it hands the player a real image instead of
+    the hand-drawn one the narrator recovery would otherwise produce.
+
+    Parameterized by ``data_dir``/``store`` rather than the module globals so the
+    route layer (which owns the RunStore and the real data dir) can call it. Returns
+    whether it published: ``False`` when no usable trace exists yet (the illustrator
+    never reached ``endless_trace_reference``), leaving the narrator recovery as the
+    last resort.
+    """
+    trace = TraceStore(data_dir, run_id).load(turn)
+    if not isinstance(trace, dict):
+        return False
+    desktop_frag = trace.get("desktop")
+    mobile_frag = trace.get("mobile")
+    if not (isinstance(desktop_frag, str) and desktop_frag):
+        return False
+    if not (isinstance(mobile_frag, str) and mobile_frag):
+        return False
+    source = trace.get("source") if isinstance(trace.get("source"), dict) else None
+    kind = trace.get("kind")
+    if kind not in {"reference", "base"}:
+        kind = "reference" if source else "base"
+    trace_audit = {
+        "pipeline": "trace",
+        "underlay": kind,
+        "fragmentId": str(trace.get("fragmentId") or ""),
+        "query": str(trace.get("query") or ""),
+        "used": True,
+        "serverFallback": True,
+    }
+    markup = compose_with_underlay(
+        _UNDERLAY_ONLY_DESKTOP, desktop_frag, require_placeholder=True
+    )
+    mobile = compose_with_underlay(
+        _UNDERLAY_ONLY_MOBILE, mobile_frag, require_placeholder=True
+    )
+    version = BackdropStore(data_dir, run_id).set(
+        markup, None, turn, mobile, source=source, trace=trace_audit
+    )
+    try:
+        TraceStore(data_dir, run_id).clear()
+        request = store.read_backdrop_request(run_id)
+        if request and int(request.get("turn") or 0) == turn:
+            store.clear_backdrop_request(run_id)
+    except (BackdropError, StoreError, OSError):
+        # The backdrop is already atomically published; cleanup debt is not a
+        # reason to report the fallback failed.
+        pass
+    BackdropTimeline(data_dir, run_id).mark(
+        turn, "server-fallback-commit", underlay=kind, version=version
+    )
+    return True
+
+
 def _commit_fallback_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     """Rare narrator-authored art, accepted only after worker recovery failed."""
     run_id = args["runId"]
@@ -2391,6 +2468,40 @@ def _lenient_json_array(raw: str) -> list[Any] | None:
     return None
 
 
+#: The tools whose wall-clock is worth auditing — the backdrop pipeline. Every
+#: other tool (reads, advance_turn) is timed by the turn loop already; recording
+#: them here would only bury the backdrop steps the audit is about.
+_BACKDROP_TIMED_TOOLS = frozenset({
+    "endless_paint_backdrop",
+    "endless_trace_reference",
+    "endless_select_reference",
+    "endless_submit_backdrop_draft",
+    "endless_commit_backdrop",
+    "endless_commit_fallback_backdrop",
+})
+
+
+def _record_backdrop_timing(run_id: Any, name: str, args: dict[str, Any], t0: float) -> None:
+    """Append one backdrop-pipeline timing event. Best-effort and non-raising.
+
+    ``serverMs`` is the time spent INSIDE the handler (the trace, the render); the
+    gap the reader computes between two events is the model's own thinking and
+    generation between calls. Together they say which half of the wait to fix.
+    """
+    if name not in _BACKDROP_TIMED_TOOLS or not isinstance(run_id, str) or not run_id:
+        return
+    try:
+        raw_turn = args.get("turn")
+        turn = int(raw_turn) if raw_turn is not None else int(
+            _store().read_state(run_id).get("turn") or 0
+        )
+        BackdropTimeline(_DATA, run_id).mark(
+            turn, f"tool:{name}", serverMs=int((time.monotonic() - t0) * 1000)
+        )
+    except Exception:  # noqa: BLE001 — timing must never break a tool
+        pass
+
+
 def call_tool(name: str, args: dict[str, Any]) -> str:
     """Validate, dispatch, and answer as JSON text.
 
@@ -2467,6 +2578,7 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
         except Exception:  # noqa: BLE001
             pass
 
+    _timer_start = time.monotonic()
     try:
         call_args = dict(args)
         if dropped_top_level:
@@ -2475,14 +2587,17 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
             call_args["_dropped_top_level"] = dropped_top_level
         result = handler(call_args)
     except ToolInputError as exc:
+        _record_backdrop_timing(run_id, name, args, _timer_start)
         return json.dumps(
             {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False},
             ensure_ascii=False,
         )
     except (StoreError, WorldError, SceneLedgerError, BackdropError, DraftError) as exc:
+        _record_backdrop_timing(run_id, name, args, _timer_start)
         return json.dumps(
             {"ok": False, "error": str(exc), "applied": False}, ensure_ascii=False
         )
+    _record_backdrop_timing(run_id, name, args, _timer_start)
     return json.dumps({"ok": True, **result}, ensure_ascii=False)
 
 
