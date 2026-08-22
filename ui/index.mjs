@@ -5401,15 +5401,28 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 			const h = barRef.current?.offsetHeight;
 			if (h) setSlotH(h);
 		};
+		let queued = 0;
+		const remeasure = () => {
+			if (queued) return;
+			queued = requestAnimationFrame(() => {
+				queued = 0;
+				measure();
+			});
+		};
 		measure();
-		window.addEventListener("resize", measure);
-		window.addEventListener("orientationchange", measure);
-		const ro = new ResizeObserver(measure);
+		const settle = requestAnimationFrame(() => requestAnimationFrame(measure));
+		window.addEventListener("resize", remeasure);
+		window.addEventListener("orientationchange", remeasure);
+		window.addEventListener("scroll", remeasure, true);
+		const ro = new ResizeObserver(remeasure);
 		if (node) ro.observe(node);
 		if (barRef.current) ro.observe(barRef.current);
 		return () => {
-			window.removeEventListener("resize", measure);
-			window.removeEventListener("orientationchange", measure);
+			cancelAnimationFrame(settle);
+			if (queued) cancelAnimationFrame(queued);
+			window.removeEventListener("resize", remeasure);
+			window.removeEventListener("orientationchange", remeasure);
+			window.removeEventListener("scroll", remeasure, true);
 			ro.disconnect();
 		};
 	}, [readerBar]);

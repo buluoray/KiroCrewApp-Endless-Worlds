@@ -608,3 +608,28 @@ def test_the_reading_bar_holds_the_top_through_a_bounce():
     assert "overscroll-behavior" not in css, (
         "the pane's bounce is not this app's to remove"
     )
+
+
+def test_the_pane_top_is_re_read_not_trusted_once():
+    """One reading at mount is not enough, and the failure is silent.
+
+    The row is fixed to the pane's top edge. A single early read can land while the
+    dashboard's own chrome has not been laid out: the pane's top is still 0, the row
+    is placed there, and when the chrome appears and pushes the pane down the row
+    stays — sitting ON TOP of the host's menu. A ResizeObserver does not catch it
+    either, because the pane's size never changed, only its position.
+
+    So the reading is repeated on the frames after mount and on every scroll frame,
+    where it is a cheap no-op that recovers any layout shift the observers cannot see.
+    """
+    play = module("play.tsx")
+    assert "requestAnimationFrame(() => requestAnimationFrame(measure))" in play, (
+        "nothing re-reads the pane's top on the frames after mount, so a chrome that "
+        "lays out late leaves the row over the host's menu"
+    )
+    assert "addEventListener('scroll', remeasure, true)" in play, (
+        "a layout shift with no resize and no scroll listener is unrecoverable"
+    )
+    # Coalesced, or a scroll turns into one layout read per event.
+    assert "if (queued) return" in play, "the re-read is not coalesced to one per frame"
+    assert "cancelAnimationFrame" in play, "the queued frame outlives the component"

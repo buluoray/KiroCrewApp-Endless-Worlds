@@ -227,9 +227,17 @@ export function PlayPage({
   const [viewTurn, setViewTurn] = useState<number | null>(null)
   // Where the pane's top edge is, and how tall the row actually is. Both are
   // measured rather than assumed: the top must survive a chrome of unknown height,
-  // and the slot must match the row exactly or the title slides under it. The pane's
-  // top only moves when the window or the chrome changes shape — never per scroll
-  // frame — so a resize observer is enough and costs nothing while reading.
+  // and the slot must match the row exactly or the title slides under it.
+  //
+  // The measurement must SELF-CORRECT, which one reading at mount does not. A single
+  // early read can land while the dashboard's own chrome has not been laid out yet:
+  // the pane's top is still 0, the row is placed there, and then the chrome appears
+  // and pushes the pane down — leaving the row sitting ON TOP of the host's menu with
+  // nothing to notice. A ResizeObserver does not save it either, because the pane's
+  // SIZE never changed; only its position did. So it is re-read on the frames after
+  // mount, on resize and rotation, and once per scroll frame — where it is a no-op
+  // that costs a rect read and is the thing that recovers any layout shift the
+  // observers cannot see.
   const barRef = useRef<HTMLDivElement>(null)
   const barSlotRef = useRef<HTMLDivElement>(null)
   const [paneTop, setPaneTop] = useState(0)
@@ -251,15 +259,28 @@ export function PlayPage({
       const h = barRef.current?.offsetHeight
       if (h) setSlotH(h)
     }
+    // Coalesced to one read per frame: `scroll` fires far faster than layout changes.
+    let queued = 0
+    const remeasure = () => {
+      if (queued) return
+      queued = requestAnimationFrame(() => { queued = 0; measure() })
+    }
     measure()
-    window.addEventListener('resize', measure)
-    window.addEventListener('orientationchange', measure)
-    const ro = new ResizeObserver(measure)
+    // The next two frames catch a chrome that lays out after this effect runs, which
+    // is the case that put the row over the host's menu.
+    const settle = requestAnimationFrame(() => requestAnimationFrame(measure))
+    window.addEventListener('resize', remeasure)
+    window.addEventListener('orientationchange', remeasure)
+    window.addEventListener('scroll', remeasure, true)
+    const ro = new ResizeObserver(remeasure)
     if (node) ro.observe(node)
     if (barRef.current) ro.observe(barRef.current)
     return () => {
-      window.removeEventListener('resize', measure)
-      window.removeEventListener('orientationchange', measure)
+      cancelAnimationFrame(settle)
+      if (queued) cancelAnimationFrame(queued)
+      window.removeEventListener('resize', remeasure)
+      window.removeEventListener('orientationchange', remeasure)
+      window.removeEventListener('scroll', remeasure, true)
       ro.disconnect()
     }
   }, [readerBar])
