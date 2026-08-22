@@ -81,6 +81,21 @@ guarantee.
   `test_the_shelf_drawer_rests_closed_and_unmounts_when_it_is`; the desktop having
   exactly one way back by `test_the_desktop_has_one_way_back_not_two`.
 
+- **Only bottom-of-screen furniture is portaled; the top of the screen renders in
+  place.** The app mounts onto the dashboard document, and that shell is a stacking
+  context — so a portaled element competes with the shell as a whole, never with
+  anything inside it. Since the app's own content and the host's chrome both live in
+  that shell, a top-of-screen row portaled to `document.body` has no workable layer:
+  measured on device, `z-index: 30` covered the host's top bar and menus while
+  `z-index: 2` disappeared behind the app's backdrop. The phone's reading row is
+  therefore `position: fixed` **in place**, below the chrome by the declared
+  `--ew-chrome-h`, where it cannot outrank the host at all. The tab bar stays
+  portaled because nothing of the host's lives at the bottom of the screen. The
+  layer ladder, the offset's rationale, who owns the scrolling, and the traps are in
+  [float-ui-in-the-dashboard-shell](../../skills/float-ui-in-the-dashboard-shell/SKILL.md);
+  pinned by `test_rail.py::test_the_reading_row_sits_below_the_host_and_above_the_story`
+  and `test_the_chrome_offset_is_declared_not_measured`.
+
 - **The reading column has a fixed cap lifted only by the reader; pages do not.**
   The reading measure does not grow with the window on its own, and only the
   reader's fluid/fixed choice lifts it. That cap and the closed-shell centring are
