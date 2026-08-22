@@ -229,27 +229,40 @@
   padding: 12px; margin-bottom: 10px;
   color: inherit; font: inherit;
   -webkit-tap-highlight-color: transparent;
-  /* Scope the life backdrop to the card and clip it to the rounded corners. */
-  position: relative; overflow: hidden;
+  /* Scope the life backdrop to the card. The CLIP is not here: `overflow: hidden`
+     rounded the backdrop but also cut off the row's action menu, which opens below
+     the kebab and is taller than the card. `.ew-card-bgclip` clips the backdrop
+     instead, so the menu is free to leave the card. */
+  position: relative;
 }
 /* The life's narrator backdrop behind the card, framed to the card (unlike the
  * full-page .ew-backdrop). A scrim over it keeps the title/meta readable; inert
  * image so it runs no script and needs no sandbox. */
-.ew-card-bg {
+/* The backdrop's own clipping box: inset to the card's padding box and rounded a
+   hair tighter than the card's 10px, which is what the 1px border leaves inside. */
+.ew-card-bgclip {
   position: absolute; inset: 0; z-index: 0;
+  border-radius: 9px; overflow: hidden; pointer-events: none;
+}
+.ew-card-bg {
+  position: absolute; inset: 0;
   width: 100%; height: 100%; object-fit: cover;
   opacity: .5; pointer-events: none;
 }
 .ew-card-bg-scrim {
-  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--card, #1f2030) 45%, transparent),
     color-mix(in srgb, var(--card, #1f2030) 72%, transparent)
   );
 }
-/* Lift the card's real content above the backdrop + scrim. */
-.ew-card > .ew-card-bg ~ *:not(.ew-card-bg-scrim) { position: relative; z-index: 1; }
+/* Lift the card's real content above the backdrop box. Deliberately NOT a z-index
+   here: `z-index: 1` on these wrappers created a stacking context, and the row's
+   action menu (z-index 30) was trapped inside it — no value could raise it above the
+   phone's bottom bars, which is why it appeared UNDER other UI. `position: relative`
+   alone paints them after the backdrop box, which is all the lift they needed. */
+.ew-card > .ew-card-bgclip ~ * { position: relative; }
 @media (min-width: 768px) { .ew-card { padding: 14px; } }
 .ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-card-broken { cursor: default; border-left: 3px solid var(--danger, #b91c1c); }
@@ -1295,25 +1308,41 @@
 }
 .ew-kebab {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: 8px; cursor: pointer;
+  /* 44px, the smallest target a finger hits reliably — it was 40 and "often
+     missed" was one of the two complaints about this control. */
+  width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   background: transparent; border: 1px solid var(--border, #2d2f3d);
   color: var(--muted, #6b7280); -webkit-tap-highlight-color: transparent;
 }
 @media (hover: hover) { .ew-kebab:hover { color: var(--text, #e2e8f0); } }
+.ew-kebab:active { background: color-mix(in oklab, var(--accent, #7c3aed) 18%, transparent); }
 /* Sits above every life row (rows are z-index auto) and just below the menu, so
    a tap anywhere but the menu is absorbed here and closes it — never reaching the
    row beneath. Transparent, but it MUST catch clicks, so no pointer-events:none. */
-.ew-menu-backdrop { position: fixed; inset: 0; z-index: 29; background: transparent; }
+/* Both live at body level now (see LifeRow), so these z-indexes finally mean what
+   they say. Above the phone's tab bar (30) and reading bar (29), because a menu the
+   player opened is the thing they are interacting with. */
+.ew-menu-backdrop { position: fixed; inset: 0; z-index: 40; background: transparent; }
 .ew-menu {
-  position: absolute; right: 0; top: 44px; z-index: 30; min-width: 160px;
+  position: fixed; z-index: 41; min-width: 176px;
   display: flex; flex-direction: column; gap: 2px; padding: 6px;
   background: var(--card, #1f2030); border: 1px solid var(--border, #2d2f3d);
   border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .45);
 }
 .ew-menu-item {
-  text-align: left; font: inherit; cursor: pointer; min-height: 42px;
-  padding: 10px 12px; border: none; border-radius: 6px;
+  text-align: left; font: inherit; cursor: pointer; min-height: 44px;
+  padding: 11px 14px; border: none; border-radius: 6px;
   background: transparent; color: var(--text, #e2e8f0);
+  -webkit-tap-highlight-color: transparent;
+  transition: background .12s ease;
+}
+/* Touch had NO feedback at all: the only state was a hover rule behind
+   `@media (hover: hover)`, so a finger got nothing back and a tap that did land felt
+   like one that had missed. `:active` covers touch and mouse alike. */
+.ew-menu-item:active { background: color-mix(in oklab, var(--accent, #7c3aed) 22%, var(--card, #1f2030)); }
+.ew-menu-item:focus-visible {
+  outline: 2px solid var(--accent, #7c3aed); outline-offset: -2px;
 }
 @media (hover: hover) { .ew-menu-item:hover { background: color-mix(in oklab, var(--accent, #7c3aed) 12%, var(--card, #1f2030)); } }
 
