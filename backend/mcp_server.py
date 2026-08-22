@@ -542,9 +542,14 @@ _TOOLS: list[dict[str, Any]] = [
             "focal X/Y move each crop from 0 (left/top) to 1 (right/bottom). Returns "
             "a `candidates` list, each with its own preview PNG paths (fragments "
             "never enter your context) — READ every candidate's previews, then call "
-            "endless_select_reference with the best `index`. When no usable photo "
-            "exists the tool instead returns a single procedural tonal base "
-            "(`underlay: base`) that is already active, with nothing to select."
+            "endless_select_reference with the best `index`. When a multi-word query "
+            "finds nothing the tool does NOT settle immediately: it returns "
+            "`underlay: none` and asks you to call it ONCE more with a single "
+            "most-relevant noun (the free-license slice is narrow, so a compound "
+            "subject misses while its head noun hits). Only after that retry, a "
+            "single-word miss, or a transient error does it return a procedural "
+            "tonal base (`underlay: base`) that is already active, with nothing to "
+            "select."
         ),
         "inputSchema": {
             "type": "object",
@@ -1944,12 +1949,12 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
     for a reason the Illustrator could fix in one call. The three reasons need three
     different answers, so this branches on the audit rather than saying one thing:
 
-    - ``no-candidates``: every source answered and holds nothing for these WORDS.
-      The words that would have matched are usually already in the brief — measured
-      on two real failing briefs, every mid-brief subject ("thatched roofs", "stone
-      keep", "walled town") returned a full set of candidates on its own, while the
-      whole 18-word brief returned none. So the useful instruction is to retry with
-      the subject alone, and the miss cache makes that retry nearly free.
+    - ``no-candidates``: the search is SPENT — the forced single-keyword retry (see
+      _trace_reference) already ran and still found nothing, so no free-license
+      photograph exists for this page. The base is a tonal GROUND, not the finished
+      image: the Illustrator authors a real hand-drawn scene over it, with the full
+      review pass. This is the intended degradation; committing the bare base is only
+      the timeout safety net (commit_underlay_only), never the instruction here.
     - ``search-failed``: the archive did not answer. Retrying the SAME query is the
       right move here, and rewording would be superstition.
     - ``fetch-failed`` / no query: nothing to retry — compose over the base.
@@ -1962,13 +1967,15 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
     )
     if reason == "no-candidates":
         return (
-            "no reference matched these words, and a quiet procedural tonal base is "
-            "ready as a fallback. The archives match EVERY word, so a long brief "
-            "matches nothing: call endless_trace_reference ONCE more with just the "
-            "subject — two or three of the commonest nouns for the thing itself "
-            "('thatched cottage', 'stone bridge', 'harvest wagon'), with no era, "
-            "weather or mood attached. If that misses too, this world's page has no "
-            "photograph and the base is the answer." + tail
+            "no free-license photograph exists for this page — the search is spent "
+            "(only the narrow CC0/public-domain slice is searched, so many subjects "
+            "have no usable photo even when the open web does). The procedural tonal "
+            "base is NOT the finished image; it is a tonal GROUND. Put one "
+            "<g id=\"etr-underlay\"/> in each SVG for that ground, then author a real "
+            "hand-drawn scene above it — architecture, light, and evidence composed "
+            "with the same care as any scene, never a few bars over bare tone — and "
+            "take it through the full review pass before committing. Do not settle "
+            "for the bare base."
         )
     if reason == "search-failed":
         return (
@@ -1981,6 +1988,14 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
         "no usable photographic reference exists for this page, so a quiet "
         "procedural tonal base is active." + tail
     )
+
+
+#: How many times a SCENE miss is handed back to the illustrator to retry with a
+#: better single keyword before the lane settles for a procedural base. One forced
+#: retry: the common failure is a multi-word subject that misses the narrow
+#: free-license slice while its head noun hits, and one re-search fixes it. A
+#: second miss settles rather than wedging the page.
+_TRACE_RETRY_CAP = 1
 
 
 def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
@@ -2076,7 +2091,44 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
-    # No usable reference: a single procedural base is the underlay, nothing to pick.
+    # No usable CC0/public-domain reference matched. The miss is almost always the
+    # QUERY, not the world: only the attribution-free slice is searched and it is
+    # narrow, so a multi-word subject rarely lands in it while a single common noun
+    # usually does (the images exist under CC BY-SA etc. and are dropped by the
+    # permit gate). Rather than silently settle for a procedural base — which the
+    # illustrator then decorates into a flat page — hand the miss back ONCE and make
+    # the illustrator pick its single most-relevant keyword and search again. The
+    # scene gate refuses a commit while no trace exists, so the retry is enforced,
+    # not merely advised. A single-word query has nothing left to simplify, and the
+    # retry is bounded by _TRACE_RETRY_CAP; either of those settles for the base
+    # instead of wedging the page.
+    retries = int(request.get("traceRetries") or 0)
+    if (
+        search_audit.get("reason") == "no-candidates"
+        and len(query.split()) > 1
+        and retries < _TRACE_RETRY_CAP
+    ):
+        _store().update_backdrop_request(run_id, traceRetries=retries + 1)
+        _candidate_store(run_id).clear()
+        _trace_store(run_id).clear()
+        return {
+            "underlay": "none",
+            "turn": turn,
+            "retry": retries + 1,
+            "next": (
+                f'No attribution-free (CC0/public-domain) reference matched '
+                f'"{query}". Only the free-license slice is searched and it is '
+                "narrow, so a multi-word subject usually misses while a single "
+                "common noun hits. Call endless_trace_reference ONCE more with the "
+                "SINGLE most-relevant noun for the thing itself — the commonest "
+                "word a photographer could have stood in front of (the core object "
+                "or place), with no qualifier, era, weather, or mood. Do not settle "
+                "for a base yet: the page cannot commit a scene without a trace."
+            ),
+        }
+
+    # Retry budget spent, a single-word miss, or a transient / absent-query miss:
+    # settle on a single procedural base so the page can still commit and never wedges.
     desktop = procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity)
     mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
     _candidate_store(run_id).clear()

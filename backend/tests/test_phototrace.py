@@ -820,7 +820,7 @@ def test_trace_tool_passes_a_custom_ramp_through_to_the_base(data, monkeypatch):
     _request_backdrop(data, run_id, 4)
     out = _call(
         "endless_trace_reference", runId=run_id, turn=4,
-        query="nothing findable", ramp=["#0a0d14", "#182030", "#2c3c55", "#9db4d4"],
+        query="unfindable", ramp=["#0a0d14", "#182030", "#2c3c55", "#9db4d4"],
     )
     assert out["ok"] is True and out["underlay"] == "base"
     stored = TraceStore(data, run_id).load(4)
@@ -834,7 +834,7 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
     )
     run_id = "b" * 32
     _request_backdrop(data, run_id, 2)
-    out = _call("endless_trace_reference", runId=run_id, turn=2, query="zombie at the door")
+    out = _call("endless_trace_reference", runId=run_id, turn=2, query="zombies")
     assert out["ok"] is True and out["underlay"] == "base" and out["source"] is None
 
     plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
@@ -864,7 +864,7 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
         "pipeline": "trace",
         "underlay": "base",
         "fragmentId": out["fragmentId"],
-        "query": "zombie at the door",
+        "query": "zombies",
         "used": True,
     }
     assert fb["reason"] == "no-candidates"
@@ -874,12 +874,10 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
 
 
 def test_a_total_miss_offers_a_way_back_and_names_the_subject_rule(data, monkeypatch):
-    """A base underlay used to be reported as a finished outcome, so the Illustrator
-    had no way back from a miss it could have fixed in one call. The words that would
-    have matched are usually already in the brief: measured live on the two real
-    failing briefs, every mid-brief subject ("thatched roofs", "stone keep", "walled
-    town", "river valley", "watermill") returned a full set of candidates alone,
-    while the whole 18-word brief returned none."""
+    """A multi-word SCENE miss is handed back ONCE for a single-keyword retry rather
+    than settled for a base: only the narrow free-license slice is searched, so a
+    compound subject misses while its head noun hits. The first miss creates NO base
+    (the scene gate then forces the retry), and the directive asks for one noun."""
     import mcp_server as srv
     monkeypatch.setattr(
         phototrace, "_FETCH",
@@ -890,24 +888,31 @@ def test_a_total_miss_offers_a_way_back_and_names_the_subject_rule(data, monkeyp
     out = _call("endless_trace_reference", runId=run_id, turn=2,
                 query="medieval European river-mill village timber granary dirt road")
 
-    assert out["ok"] is True and out["underlay"] == "base"
+    assert out["ok"] is True and out["underlay"] == "none", "a multi-word miss is not settled"
+    assert TraceStore(data, run_id).load(2) is None, "no base is created on the first miss"
     nxt = out["next"]
-    assert "no reference matched these words" in nxt
-    assert "ONCE more with just the subject" in nxt, "it must offer the retry"
-    assert "thatched cottage" in nxt, "and show what a subject looks like"
+    assert "SINGLE most-relevant noun" in nxt, "it must ask for one keyword"
+    assert "Do not settle for a base yet" in nxt
 
-    # A request that never answered is the OTHER reason, and rewording would be
-    # superstition — the instruction there is to retry the SAME words.
+    # The terminal base hint (used once the retry budget is spent) still names the
+    # three miss reasons distinctly. search-failed retries the SAME words; nothing
+    # to retry for fetch-failed / no-query.
     retry = srv._base_underlay_next({"reason": "search-failed"})
     assert "did not answer" in retry and "SAME words" in retry
     assert "just the subject" not in retry
-
-    # Nothing to retry when candidates existed and none traced, or when the page
-    # asked for no photograph at all.
     for reason in ("fetch-failed", "no-query"):
         quiet = srv._base_underlay_next({"reason": reason})
         assert "procedural tonal base is active" in quiet
         assert "once more" not in quiet.lower()
+
+    # A no-candidates miss is TERMINAL (the forced single-keyword retry already ran),
+    # so the base hint no longer asks for another search — it directs a hand-drawn
+    # scene over the tonal ground rather than committing bare tonal bars.
+    handdrawn = srv._base_underlay_next({"reason": "no-candidates"})
+    assert "hand-drawn scene" in handdrawn
+    assert "tonal GROUND" in handdrawn
+    assert "Do not settle for the bare base" in handdrawn
+    assert "once more" not in handdrawn.lower() and "just the subject" not in handdrawn
 
 
 def test_the_query_contract_asks_for_a_subject_not_a_scene():
@@ -980,7 +985,7 @@ def test_a_base_underlay_satisfies_the_scene_gate(data, monkeypatch):
     store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
     store.request_backdrop(run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\"")
 
-    traced = _call("endless_trace_reference", runId=run_id, turn=1, query="stone bridge")
+    traced = _call("endless_trace_reference", runId=run_id, turn=1, query="castle")
     assert traced["underlay"] == "base"
 
     scene = ('<svg xmlns="http://www.w3.org/2000/svg"><g id="etr-underlay"/>'
@@ -1108,7 +1113,7 @@ def test_the_server_publishes_the_base_underlay_when_the_model_never_commits(dat
         run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\""
     )
     assert _call(
-        "endless_trace_reference", runId=run_id, turn=1, query="stone bridge"
+        "endless_trace_reference", runId=run_id, turn=1, query="castle"
     )["underlay"] == "base"
 
     # The model never drafts or commits — it "timed out". The base underlay is in
@@ -1136,3 +1141,43 @@ def test_the_server_fallback_is_a_noop_when_nothing_was_traced(data):
 
     assert srv.commit_underlay_only(data, store, run_id, 1) is False
     assert BackdropStore(data, run_id).exact(1) is None
+
+
+def test_a_multiword_scene_miss_is_handed_back_then_settles(data, monkeypatch):
+    """A multi-word SCENE miss returns underlay:none with a single-keyword retry
+    directive and creates NO base (so the scene gate forces the retry); a SECOND
+    miss settles for the base rather than wedging the page."""
+    import mcp_server as srv
+    monkeypatch.setattr(
+        phototrace, "_FETCH",
+        lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
+    )
+    store = srv._store()
+    run_id = "f" * 32
+    _request_backdrop(data, run_id, 1)
+
+    first = _call("endless_trace_reference", runId=run_id, turn=1,
+                  query="stone forge workshop")
+    assert first["underlay"] == "none", "the first multi-word miss is handed back"
+    assert TraceStore(data, run_id).load(1) is None, "no base created on the first miss"
+    assert "SINGLE most-relevant noun" in first["next"]
+    assert int(store.read_backdrop_request(run_id).get("traceRetries") or 0) == 1
+
+    # The retry (still a miss here) now settles for the base — bounded, never wedged.
+    second = _call("endless_trace_reference", runId=run_id, turn=1, query="forge anvil")
+    assert second["underlay"] == "base"
+    assert TraceStore(data, run_id).load(1) is not None
+
+
+def test_a_single_word_scene_miss_settles_for_base_immediately(data, monkeypatch):
+    """A single-word query has nothing left to simplify, so a miss settles for the
+    base on the first call rather than asking for a pointless retry."""
+    monkeypatch.setattr(
+        phototrace, "_FETCH",
+        lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
+    )
+    run_id = "0" * 32
+    _request_backdrop(data, run_id, 1)
+    out = _call("endless_trace_reference", runId=run_id, turn=1, query="forge")
+    assert out["underlay"] == "base", "a single-word miss has no keyword to retry"
+    assert TraceStore(data, run_id).load(1) is not None
