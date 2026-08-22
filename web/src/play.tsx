@@ -7,11 +7,14 @@ import { api, API } from './api'
  *  this is about the page converging on its own rather than about latency. */
 const GENERATING_POLL_MS = 3000
 /** How many awaiting-only polls to allow before going quiet. Polling while a
- *  life merely AWAITS its opening exists to catch the `generating` mark landing
- *  a beat after begin() — that happens within seconds or never. A stranded
- *  unborn life (opening never fired) otherwise polls every 3s forever; after
- *  this many idle cycles the "continue birth" button is the way forward. */
-const AWAITING_POLL_CAP = 20
+ *  life merely AWAITS its opening catches the `generating` mark that begin()
+ *  fires in the background — but that turn runs against the backend's 300s
+ *  OPENING_DEADLINE_SECS, so the mark can land well after begin() (agent spin-up,
+ *  a queued slot, a slow model). Capped just past that deadline (110 × 3s ≈ 330s)
+ *  so the arranging screen keeps refreshing for the whole opening; only a life
+ *  whose opening genuinely never landed falls through to the "continue birth"
+ *  button. A shorter cap stranded the arranging screen at 60s on slow openings. */
+const AWAITING_POLL_CAP = 110
 
 /**
  * What the player has armed or committed.
