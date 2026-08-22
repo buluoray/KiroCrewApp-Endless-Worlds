@@ -1292,7 +1292,28 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 /* A shelf row that carries its own destructive control. The row is a div and the
    open action is a button INSIDE it, because a button cannot contain a button --
    and the delete has to be a sibling, not a nested child. */
-.ew-card-row { display: flex; align-items: stretch; gap: 0; padding: 0; overflow: visible; }
+/* A column, so the card can carry the delete ask as a second row beneath its
+   content; `.ew-card-rowmain` is the horizontal part that used to be this rule. */
+.ew-card-row { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: visible; }
+.ew-card-rowmain { display: flex; align-items: stretch; gap: 0; }
+
+/* The delete ask, attached UNDER the life it will end.
+   Inside the card on purpose: a page-level dialog for a per-row action has to be
+   told which row it means, and this one cannot be looked at without also seeing the
+   life's own title directly above it. */
+.ew-rowdoom {
+  border-top: 1px solid rgba(255, 255, 255, .09);
+  background: color-mix(in oklab, var(--danger, #e5484d) 12%, transparent);
+  padding: 12px;
+}
+.ew-rowdoom-say { font-size: 14px; line-height: 1.45; }
+.ew-rowdoom-note { margin-top: 4px; }
+.ew-rowdoom-bar {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px;
+}
+/* 44px, the smallest target a finger hits reliably — the same floor the row's own
+   menu uses, and this is the one row where a miss is expensive. */
+.ew-rowdoom-bar .ew-btn { min-height: 44px; }
 .ew-card-open {
   flex: 1 1 auto; min-width: 0; text-align: left; font: inherit;
   background: transparent; border: none; color: inherit; cursor: pointer;
