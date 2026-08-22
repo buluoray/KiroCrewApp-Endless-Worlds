@@ -1,7 +1,14 @@
 name: CI
 
-# Basic CI: run the full test suite (and typecheck/build the UI) on every push
-# to main and every PR into it. No agent/LLM review here — just the tests.
+# Basic CI: the full test suite, and a UI build that must reproduce the committed
+# bundle, on every push to main and every PR into it. No agent/LLM review here.
+#
+# There is deliberately NO version gate. `app.json`'s version says "this is worth
+# installing", which is a judgement about a body of work — not a side effect of
+# touching a shipped file. Requiring it per pull request made every branch edit the
+# same line (a guaranteed conflict between concurrent work) and, worse, marched the
+# version forward over commits nobody had decided to ship. Bump it deliberately
+# when cutting a version; day to day, reinstall the app instead.
 on:
   push:
     branches: [main]
@@ -57,18 +64,19 @@ jobs:
         working-directory: web
         run: npm run build
 
-  version-bump:
-    name: Version bump on shipped changes
-    # Pull requests only: a push to main has no branch point to compare against,
-    # and the rule is about what a pull request is proposing to ship.
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # The gate diffs against the merge base, so it needs real history
-          # rather than the default single-commit checkout.
-          fetch-depth: 0
-
-      - name: Shipped changes must raise app.json's version
-        run: python3 scripts/check_version_bump.py "origin/${{ github.base_ref }}"
+      # The half the pre-commit hook has always claimed CI enforces, and did not.
+      # `ui/index.mjs` is COMMITTED because a registry install copies the repo as
+      # it stands — nothing builds after checkout, so a stale artifact means the
+      # installed app runs older code than the commit claims. With no version gate
+      # left, this is the only thing standing between a merge and that silence.
+      #
+      # A byte comparison is sound here because `npm ci` pins every dependency
+      # from the lock file, and the bundle's bytes come from those (rollup,
+      # esbuild), not from the Node minor.
+      - name: The committed bundle must match a fresh build
+        run: |
+          if ! git diff --quiet -- ui/index.mjs; then
+            echo "::error::ui/index.mjs is stale. Run 'cd web && npm run build' and commit the result (or enable the hook: git config core.hooksPath .githooks)."
+            git diff --stat -- ui/index.mjs
+            exit 1
+          fi
