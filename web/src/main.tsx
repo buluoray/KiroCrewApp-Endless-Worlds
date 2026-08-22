@@ -793,7 +793,7 @@ export default function EndlessWorlds() {
   return (
     <LanguageContext.Provider value={applyLanguage}>
     <div
-      className={'ew-root ew-view-' + view + ' ew-w-' + readWidth
+      className={'ew-root ew-view-' + view + (narrowLive ? ' ew-root-flushtop' : '') + ' ew-w-' + readWidth
         + (view === 'library' ? ' ew-home' : '')}
       lang={lang}
       ref={rootRef}
@@ -815,6 +815,12 @@ export default function EndlessWorlds() {
         />
       ) : null}
 
+      {/* Inside a life on a phone the app's own name is dropped. It carries nothing a
+          reader needs mid-story — the language picker and Settings live on the shelf,
+          not here — and keeping it put a second, differently-coloured band above the
+          reading bar, which read as two unrelated headers stacked. Without it the bar
+          meets the dashboard's chrome directly and the page starts at the story. */}
+      {narrowLive ? null : (
       <div className="ew-head">
         <Glyph />
         <h2>{t('app.title')}</h2>
@@ -840,6 +846,7 @@ export default function EndlessWorlds() {
           </div>
         ) : null}
       </div>
+      )}
 
       {view === 'library' ? (
         <div className="ew-tagline">{t('app.tagline')}</div>

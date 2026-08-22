@@ -122,7 +122,14 @@ def test_non_reading_desktop_pages_fill_the_canvas_from_the_top_left():
     non-reading page owns the full main track and starts at its top-left instead.
     """
     src = module("main.tsx")
-    assert "ew-root ew-view-' + view + ' ew-w-' + readWidth" in src, (
+    # The invariant is that the root publishes BOTH the view and the read measure as
+    # classes, not that they are adjacent in one literal: other state (the phone's
+    # flush-top reading page) legitimately contributes a class between them, and an
+    # adjacency check fails on that while the stylesheet still works perfectly.
+    assert "'ew-root ew-view-' + view" in src, (
+        "the stylesheet cannot tell which view it is styling"
+    )
+    assert "' ew-w-' + readWidth" in src, (
         "the stylesheet cannot distinguish live prose from non-reading pages"
     )
 
