@@ -101,7 +101,7 @@
   "library.empty": "The shelf is empty. Your first world is waiting to be opened.",
   "library.lives": "Lives in progress",
   "library.newerSeed": "A newer version of {world} exists ({installed} → {available}). Your copy is left unchanged.",
-  "library.otherWorlds": "Other worlds",
+  "library.otherWorlds": "All worlds",
   "library.preparing": "Opening the shelf…",
   "library.removed": "You removed “{world}”.",
   "library.restore": "Put it back",
