@@ -56,6 +56,19 @@ def new_run_id() -> str:
     return uuid.uuid4().hex
 
 
+#: The brief's first line declares its lane. Parsed leniently — a lane the narrator
+#: spelled oddly, or omitted, becomes ``""`` rather than a refusal: the brief is art
+#: direction, and losing a page's art over a header is a worse outcome than not
+#: enforcing the lane on that one page.
+_LANE_RE = re.compile(r"^\s*LANE\s*:\s*(scene|motif)\b", re.IGNORECASE | re.MULTILINE)
+
+
+def brief_lane(brief: str) -> str:
+    """``"scene"``, ``"motif"``, or ``""`` when the brief declares no usable lane."""
+    match = _LANE_RE.search(brief or "")
+    return match.group(1).lower() if match else ""
+
+
 def _check_run_id(run_id: str) -> None:
     if not _RUN_ID_RE.match(run_id):
         raise StoreError(f"malformed run id: {run_id!r}")
@@ -383,6 +396,13 @@ class RunStore:
         the server keeps the fallback gate but resets illustrator attempts for the
         replacement direction. The record is cleared by a successful commit, never
         merely by dispatching an agent.
+
+        The brief's declared LANE is parsed once, here, and stored beside it. Reading
+        it at commit time instead would mean re-parsing prose at the gate, and the
+        record is the only place the narrator's intent survives — a page whose brief
+        asked for a SCENE and whose art arrived with no traced underlay was
+        indistinguishable from a MOTIF page, so nothing noticed and nothing could be
+        reconstructed afterwards (the brief is cleared on commit).
         """
         _check_run_id(run_id)
         prior = self.read_backdrop_request(run_id)
@@ -396,6 +416,7 @@ class RunStore:
             {
                 "turn": int(turn),
                 "brief": str(brief),
+                "lane": brief_lane(brief),
                 "askedAt": time.time(),
                 "attempts": 0,
                 "fallbackAllowed": recovering,
