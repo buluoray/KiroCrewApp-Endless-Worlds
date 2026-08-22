@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { LifeRowData, LoreEntry, OpeningGroup, WorldDetail, WorldRow } from './api'
-import { api, API } from './api'
+import type {
+  LifeDeletionFacts, LifeRowData, LoreEntry, OpeningGroup, WorldDetail, WorldRow,
+} from './api'
+import { ApiError, api, API } from './api'
 import { t } from './strings'
 import { Chip, Prose } from './ui'
 
@@ -110,20 +112,20 @@ export function WorldCard({
  * left it.
  */
 export function LifeRow({
-  run, onOpen, onDelete, onArchive, onRename,
+  run, onOpen, onDeleted, onArchive, onRename,
 }: {
   run: LifeRowData
   onOpen: (runId: string) => void
   /** Ending this life. On the SHELF rather than only inside the life, because a
    *  life whose world cannot be resolved answers 422 when opened — so the play page
-   *  can never offer a control for exactly the life most in need of one.
+   *  can never be where you go to be rid of it.
    *
-   *  OPTIONAL, and omitted on purpose by the "continue where you left off"
-   *  shortcut: that row exists to get the player back into a life in one tap, and a
-   *  destructive control sitting on the resume affordance is a different job on the
-   *  same surface. The managed list is where lives are managed. */
-  onDelete?: (runId: string) => void
-  /** Fold this life into or out of the archived group. Managed-list only. */
+   *  The card runs the whole flow itself and reports only the outcome. The ask is a
+   *  strip UNDER this card rather than a page-level dialog: it cannot be mistaken
+   *  for a different life, it needs no scrim, and it cannot be stranded away from
+   *  the thing it is about. Its presence is also what offers the action at all.
+   */
+  onDeleted?: (turn: number) => void
   onArchive?: (runId: string, archived: boolean) => void
   /** Give this life a player-chosen name. Managed-list only. */
   onRename?: (runId: string, label: string) => void
@@ -136,11 +138,52 @@ export function LifeRow({
   const [draft, setDraft] = useState('')
   const commit = () => { onRename?.(run.runId, draft.trim()); setEditing(false) }
 
+  // Ending this life: `null` until asked, then the strip under the card.
+  const [doom, setDoom] = useState<'asking' | 'working' | null>(null)
+  const [facts, setFacts] = useState<LifeDeletionFacts | null>(null)
+  const [problem, setProblem] = useState('')
+
+  // The month comes from the SERVER, never from this row: it is sent back as a
+  // precondition, and the row's copy can lag behind the life's own state. Asking
+  // costs one small request and is what lets the ask name a true number.
+  useEffect(() => {
+    if (doom !== 'asking' || facts) return
+    let alive = true
+    api.lifeDeletion(run.runId)
+      .then((f) => { if (alive) setFacts(f) })
+      .catch((e: Error) => { if (alive) setProblem(e.message) })
+    return () => { alive = false }
+  }, [doom, facts, run.runId])
+
+  const endThisLife = () => {
+    if (!facts || doom === 'working') return
+    setDoom('working'); setProblem('')
+    api.deleteLife(run.runId, facts.turn)
+      .then((out) => onDeleted?.(out.turn))
+      .catch((e: Error) => {
+        const code = e instanceof ApiError ? e.code : ''
+        // Both refusals mean the same thing: what we were about to describe is no
+        // longer what is there. Re-ask with the server's new numbers rather than
+        // retrying against the stale one.
+        if (code === 'turn_changed' || code === 'turn_in_flight') {
+          setProblem(t(code === 'turn_changed' ? 'life.delete.changed' : 'life.delete.inFlight'))
+          setFacts(null); setDoom('asking'); return
+        }
+        setProblem(e.message); setDoom('asking')
+      })
+  }
+
   // On a phone the three row actions wrapped into an ugly stack, so there they
   // collapse into a kebab menu (inline on desktop, unchanged). One list of actions
   // feeds both, so the two renderings can never drift apart.
   const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
+  // The ref must be on the PORTALLED panel, not on the card's menu container: once
+  // the panel moved to `document.body` it stopped being a descendant of the card, so
+  // a containment test against the container answered false for the panel's own
+  // items — the close handler fired on mousedown, React unmounted the item, and the
+  // click that would have run the action never landed on anything. Closing looked
+  // like working.
+  const panelRef = useRef<HTMLDivElement>(null)
   const kebabRef = useRef<HTMLButtonElement>(null)
   // Where to put the portalled menu: measured from the kebab, because once the menu
   // leaves the card it can no longer be positioned relative to it.
@@ -148,7 +191,7 @@ export function LifeRow({
   useEffect(() => {
     if (!menuOpen) return undefined
     const close = (e: MouseEvent) => {
-      const inMenu = menuRef.current?.contains(e.target as Node)
+      const inMenu = panelRef.current?.contains(e.target as Node)
       const onKebab = kebabRef.current?.contains(e.target as Node)
       if (!inMenu && !onKebab) setMenuOpen(false)
     }
@@ -183,10 +226,10 @@ export function LifeRow({
       onClick: () => onArchive(run.runId, !run.archived),
     })
   }
-  if (onDelete) {
+  if (onDeleted) {
     actions.push({
       key: 'delete', label: t('life.delete.short'), aria: t('life.delete.aria', { name }),
-      onClick: () => onDelete(run.runId),
+      onClick: () => { setProblem(''); setFacts(null); setDoom('asking') },
     })
   }
 
@@ -248,101 +291,140 @@ export function LifeRow({
           <div className="ew-card-bg-scrim" />
         </div>
       ) : null}
-      <button
-        className="ew-card-open"
-        type="button"
-        disabled={!!run.unreadable}
-        onClick={() => onOpen(run.runId)}
-      >
-        <div className="ew-titlerow">
-          {/* The life first, the world second. Four rows reading only the world's name
-              told the player nothing about which life they were choosing. */}
-          <span className="ew-title">{name}</span>
-          {run.awaitingOpening ? <Chip accent>{t('life.waiting')}</Chip> : null}
-        </div>
-        {name !== run.title ? <div className="ew-sub">{run.title}</div> : null}
-        <div className="ew-meta">{where}</div>
-      </button>
-      {actions.length ? (
-        <>
-          {/* Desktop: the actions inline, as before. */}
-          <div className="ew-life-actions">
-            {actions.map((a) => (
-              <button
-                key={a.key}
-                className="ew-btn ew-btn-quiet ew-card-drop"
-                type="button"
-                aria-label={a.aria}
-                onClick={a.onClick}
-              >
-                {a.label}
-              </button>
-            ))}
+      {/* The row proper. Wrapped so the card can hold a SECOND row beneath it —
+          the delete ask — without that strip landing beside the kebab in this
+          horizontal flex. */}
+      <div className="ew-card-rowmain">
+        <button
+          className="ew-card-open"
+          type="button"
+          disabled={!!run.unreadable}
+          onClick={() => onOpen(run.runId)}
+        >
+          <div className="ew-titlerow">
+            {/* The life first, the world second. Four rows reading only the world's name
+                told the player nothing about which life they were choosing. */}
+            <span className="ew-title">{name}</span>
+            {run.awaitingOpening ? <Chip accent>{t('life.waiting')}</Chip> : null}
           </div>
-          {/* Mobile: one kebab that opens the same actions as a menu. */}
-          <div className="ew-life-menu" ref={menuRef}>
-            <button
-              ref={kebabRef}
-              className="ew-kebab"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label={t('life.actions', { name })}
-              onClick={openMenu}
-            >
-              <MenuGlyph />
-            </button>
-            {menuOpen && menuAt ? createPortal((
-              <>
-                {/* Portalled to body, with the backdrop, for a reason no z-index could
-                    solve: inside the card these sat in a stacking context the content
-                    wrapper created, so the menu painted UNDER the phone's bottom bars
-                    however high its own z-index went. At body level it competes with
-                    them directly — and it also escapes the card's own box, which used
-                    to cut it off a few rows short.
-
-                    The backdrop absorbs a tap that lands outside the menu (and the
-                    iOS ghost click after choosing an item), which would otherwise
-                    fall through and open the life beneath. */}
-                <div
-                  className="ew-menu-backdrop"
-                  aria-hidden="true"
-                  onClick={() => setMenuOpen(false)}
-                />
-                <div
-                  className="ew-menu"
-                  role="menu"
-                  style={{ top: `${menuAt.top}px`, right: `${menuAt.right}px` }}
+          {name !== run.title ? <div className="ew-sub">{run.title}</div> : null}
+          <div className="ew-meta">{where}</div>
+        </button>
+        {actions.length ? (
+          <>
+            {/* Desktop: the actions inline, as before. */}
+            <div className="ew-life-actions">
+              {actions.map((a) => (
+                <button
+                  key={a.key}
+                  className="ew-btn ew-btn-quiet ew-card-drop"
+                  type="button"
+                  aria-label={a.aria}
+                  onClick={a.onClick}
                 >
-                  {actions.map((a) => (
-                    <button
-                      key={a.key}
-                      className="ew-menu-item"
-                      role="menuitem"
-                      type="button"
-                      aria-label={a.aria}
-                      onClick={(e) => { e.stopPropagation(); setMenuOpen(false); a.onClick() }}
-                      onTouchEnd={(e) => {
-                        // iOS/WKWebView: a tap that unmounts this item lets the
-                        // trailing synthetic click fall through to the life row's
-                        // open button beneath — the "click-through" bug. preventDefault
-                        // on touchend cancels that synthetic click sequence entirely
-                        // (touchend is not a React passive listener), so we run the
-                        // action here for touch and let onClick handle mouse.
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setMenuOpen(false)
-                        a.onClick()
-                      }}
-                    >
-                      {a.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ), document.body) : null}
+                  {a.label}
+                </button>
+              ))}
+            </div>
+            {/* Mobile: one kebab that opens the same actions as a menu. */}
+            <div className="ew-life-menu">
+              <button
+                ref={kebabRef}
+                className="ew-kebab"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-label={t('life.actions', { name })}
+                onClick={openMenu}
+              >
+                <MenuGlyph />
+              </button>
+              {menuOpen && menuAt ? createPortal((
+                <>
+                  {/* Portalled to body, with the backdrop, for a reason no z-index could
+                      solve: inside the card these sat in a stacking context the content
+                      wrapper created, so the menu painted UNDER the phone's bottom bars
+                      however high its own z-index went. At body level it competes with
+                      them directly — and it also escapes the card's own box, which used
+                      to cut it off a few rows short.
+
+                      The backdrop absorbs a tap that lands outside the menu (and the
+                      iOS ghost click after choosing an item), which would otherwise
+                      fall through and open the life beneath. */}
+                  <div
+                    className="ew-menu-backdrop"
+                    aria-hidden="true"
+                    onClick={() => setMenuOpen(false)}
+                  />
+                  <div
+                    className="ew-menu"
+                    role="menu"
+                    ref={panelRef}
+                    style={{ top: `${menuAt.top}px`, right: `${menuAt.right}px` }}
+                  >
+                    {actions.map((a) => (
+                      <button
+                        key={a.key}
+                        className="ew-menu-item"
+                        role="menuitem"
+                        type="button"
+                        aria-label={a.aria}
+                        onClick={(e) => { e.stopPropagation(); setMenuOpen(false); a.onClick() }}
+                        onTouchEnd={(e) => {
+                          // iOS/WKWebView: a tap that unmounts this item lets the
+                          // trailing synthetic click fall through to the life row's
+                          // open button beneath — the "click-through" bug. preventDefault
+                          // on touchend cancels that synthetic click sequence entirely
+                          // (touchend is not a React passive listener), so we run the
+                          // action here for touch and let onClick handle mouse.
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setMenuOpen(false)
+                          a.onClick()
+                        }}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ), document.body) : null}
+            </div>
+          </>
+        ) : null}
+      </div>
+      {doom ? (
+        <div className="ew-rowdoom" role="group" aria-label={t('life.delete.title')}>
+          <div className="ew-rowdoom-say">
+            {!facts
+              ? t('life.delete.reading')
+              : facts.unreadable
+                ? t('life.delete.unreadable')
+                : facts.turn > 0
+                  ? t(facts.turn === 1 ? 'life.delete.monthsOne' : 'life.delete.months',
+                      { name, n: facts.turn })
+                  : t('life.delete.unborn', { name })}
           </div>
-        </>
+          <div className="ew-meta ew-rowdoom-note">{t('life.delete.forever')}</div>
+          {problem ? <div className="ew-modal-problem">{problem}</div> : null}
+          <div className="ew-rowdoom-bar">
+            <button
+              className="ew-btn ew-btn-sm"
+              type="button"
+              onClick={() => { setDoom(null); setProblem('') }}
+            >
+              {t('delete.cancel')}
+            </button>
+            <button
+              className="ew-btn ew-btn-sm ew-btn-danger"
+              type="button"
+              disabled={!facts || doom === 'working'}
+              onClick={endThisLife}
+            >
+              {doom === 'working' ? t('delete.working') : t('life.delete.go')}
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   )
