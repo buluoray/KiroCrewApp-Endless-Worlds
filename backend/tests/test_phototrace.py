@@ -873,6 +873,59 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
     }
 
 
+def test_a_total_miss_offers_a_way_back_and_names_the_subject_rule(data, monkeypatch):
+    """A base underlay used to be reported as a finished outcome, so the Illustrator
+    had no way back from a miss it could have fixed in one call. The words that would
+    have matched are usually already in the brief: measured live on the two real
+    failing briefs, every mid-brief subject ("thatched roofs", "stone keep", "walled
+    town", "river valley", "watermill") returned a full set of candidates alone,
+    while the whole 18-word brief returned none."""
+    import mcp_server as srv
+    monkeypatch.setattr(
+        phototrace, "_FETCH",
+        lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
+    )
+    run_id = "e" * 32
+    _request_backdrop(data, run_id, 2)
+    out = _call("endless_trace_reference", runId=run_id, turn=2,
+                query="medieval European river-mill village timber granary dirt road")
+
+    assert out["ok"] is True and out["underlay"] == "base"
+    nxt = out["next"]
+    assert "no reference matched these words" in nxt
+    assert "ONCE more with just the subject" in nxt, "it must offer the retry"
+    assert "thatched cottage" in nxt, "and show what a subject looks like"
+
+    # A request that never answered is the OTHER reason, and rewording would be
+    # superstition — the instruction there is to retry the SAME words.
+    retry = srv._base_underlay_next({"reason": "search-failed"})
+    assert "did not answer" in retry and "SAME words" in retry
+    assert "just the subject" not in retry
+
+    # Nothing to retry when candidates existed and none traced, or when the page
+    # asked for no photograph at all.
+    for reason in ("fetch-failed", "no-query"):
+        quiet = srv._base_underlay_next({"reason": reason})
+        assert "procedural tonal base is active" in quiet
+        assert "once more" not in quiet.lower()
+
+
+def test_the_query_contract_asks_for_a_subject_not_a_scene():
+    """`query` is the page's SUBJECT. Both archives match every word, so the schema
+    the Illustrator reads must say that plainly — it is the only machine-readable
+    instruction it gets, and the old wording ('concrete English keywords for a place
+    or structure, e.g. "stone bridge river mist"') invited exactly the four-word-plus
+    query that returns nothing."""
+    import mcp_server as srv
+    desc = next(
+        t["description"] for t in srv._TOOLS if t["name"] == "endless_trace_reference"
+    )
+    assert "SUBJECT" in desc
+    assert "NOT the era, region, weather, time of day or mood" in desc
+    assert "each extra word removes results" in desc
+    assert "river mist" not in desc, "the old scene-shaped example must be gone"
+
+
 def test_a_placeholder_without_a_stored_trace_is_refused_at_draft_time(data):
     run_id = "c" * 32
     _request_backdrop(data, run_id, 3)

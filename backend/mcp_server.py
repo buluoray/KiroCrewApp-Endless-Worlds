@@ -524,8 +524,15 @@ _TOOLS: list[dict[str, Any]] = [
             "'photo' (default) searches Openverse — a CC aggregator spanning "
             "Wikimedia Commons, Flickr and museums, far larger than Commons alone — "
             "then Commons; 'art' searches the Met (public-domain artworks) then the "
-            "Smithsonian. Pass `query` (concrete English keywords for a place or "
-            "structure, e.g. 'stone bridge river mist'); optional desktop/mobile "
+            "Smithsonian. `query` is the page's SUBJECT and nothing else: two or "
+            "three of the commonest English nouns for the thing a photographer "
+            "could have stood in front of — 'thatched cottage', 'stone bridge', "
+            "'walled town'. NOT the era, region, weather, time of day or mood. Both "
+            "archives match every word, so each extra word removes results: "
+            "measured live, 'thatched roofs' returns a full set of candidates while "
+            "the same subject inside an 18-word brief returns NONE. Put the era and "
+            "the atmosphere in the brief's own context, which is never searched; "
+            "optional desktop/mobile "
             "focal X/Y move each crop from 0 (left/top) to 1 (right/bottom). Returns "
             "a `candidates` list, each with its own preview PNG paths (fragments "
             "never enter your context) — READ every candidate's previews, then call "
@@ -1881,6 +1888,52 @@ def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
     return compose_with_underlay(svg, None)
 
 
+def _base_underlay_next(search: dict[str, Any]) -> str:
+    """What to tell the Illustrator when the lane produced a procedural base.
+
+    A base underlay used to be reported as a finished outcome — "here is a tonal
+    base, compose over it" — which left no way back even when the search had failed
+    for a reason the Illustrator could fix in one call. The three reasons need three
+    different answers, so this branches on the audit rather than saying one thing:
+
+    - ``no-candidates``: every source answered and holds nothing for these WORDS.
+      The words that would have matched are usually already in the brief — measured
+      on two real failing briefs, every mid-brief subject ("thatched roofs", "stone
+      keep", "walled town") returned a full set of candidates on its own, while the
+      whole 18-word brief returned none. So the useful instruction is to retry with
+      the subject alone, and the miss cache makes that retry nearly free.
+    - ``search-failed``: the archive did not answer. Retrying the SAME query is the
+      right move here, and rewording would be superstition.
+    - ``fetch-failed`` / no query: nothing to retry — compose over the base.
+    """
+    reason = str(search.get("reason") or "")
+    tail = (
+        " Put one <g id=\"etr-underlay\"/> in each SVG and compose the scene over the "
+        "base if you would rather draw it yourself."
+    )
+    if reason == "no-candidates":
+        return (
+            "no reference matched these words, and a quiet procedural tonal base is "
+            "ready as a fallback. The archives match EVERY word, so a long brief "
+            "matches nothing: call endless_trace_reference ONCE more with just the "
+            "subject — two or three of the commonest nouns for the thing itself "
+            "('thatched cottage', 'stone bridge', 'harvest wagon'), with no era, "
+            "weather or mood attached. If that misses too, this world's page has no "
+            "photograph and the base is the answer." + tail
+        )
+    if reason == "search-failed":
+        return (
+            "the image archive did not answer (a network error or a rate limit), so "
+            "a procedural tonal base is ready. This says nothing about your query: "
+            "call endless_trace_reference once more with the SAME words before "
+            "changing them." + tail
+        )
+    return (
+        "no usable photographic reference exists for this page, so a quiet "
+        "procedural tonal base is active." + tail
+    )
+
+
 def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     """Trace the top reference candidates for the Illustrator to choose among.
 
@@ -1989,11 +2042,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         "turn": turn,
         "source": None,
         "previews": previews,
-        "next": (
-            "no photographic reference matched, so a quiet procedural tonal base is "
-            "ready. Put one <g id=\"etr-underlay\"/> in each SVG and compose the scene "
-            "over it yourself."
-        ),
+        "next": _base_underlay_next(search_audit),
     }
 
 
