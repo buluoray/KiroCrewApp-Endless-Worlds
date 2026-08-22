@@ -6,11 +6,15 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
     "watch": "vite build --watch"
   },
   "devDependencies": {
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.1",
+    "@typescript-eslint/parser": "8.67.0",
+    "eslint": "10.9.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "typescript": "5.9.3",
