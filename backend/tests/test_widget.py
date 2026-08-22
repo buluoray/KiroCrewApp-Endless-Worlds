@@ -126,6 +126,9 @@ def test_a_grid_row_is_sized_by_its_content_not_by_the_room_around_it():
     grid = style.split(".grid {", 1)[1].split("}", 1)[0]
     assert "align-content: start" in grid
     assert "grid-auto-rows: min-content" in grid
+    # Third latch: iOS WebKit still stretched cells to a mis-sized track with only
+    # the first two, so cells must not stretch — each takes its own content height.
+    assert "align-items: start" in grid
 
 
 def test_the_documents_canvas_is_painted_not_just_its_body():

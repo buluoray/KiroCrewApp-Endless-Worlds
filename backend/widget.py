@@ -190,17 +190,20 @@ button {
   font: inherit; color: inherit; cursor: pointer;
   background: #1f2030; border: 1px solid #2d2f3d; border-radius: 8px;
 }
-/* Rows are sized by what is IN them and never by the room around them. Two
-   independent latches, because what hands this box a height larger than its rows on
-   a phone is not reproducible off-device: `align-content` otherwise defaults to
-   stretch and shares any surplus out among the auto rows, and `grid-auto-rows` pins
-   each track to its content even if something still does. Measured: a grid box
-   forced to 464px turned six short labels into 236px boxes holding 57px of text,
-   which is the shape a real phone showed; with these, 95px and 82px.
-   Cells still stretch to their own row, so a row's boxes stay equal height. */
+/* Rows are sized by what is IN them and never by the room around them. THREE
+   latches now, because iOS WebKit still ballooned cells with the first two: it
+   stretches the implicit row's TRACK past min-content and then, under the default
+   `align-items: stretch`, stretches every cell to fill it — turning short map
+   labels into tall empty boxes on a phone (not reproducible off-device). Two pin
+   the track (`align-content: start` stops the surplus being shared out among auto
+   rows; `grid-auto-rows: min-content` pins each track to its content), and
+   `align-items: start` decouples a CELL's height from the track so a cell is its
+   own content height even when WebKit mis-sizes the track. A row's cells are then
+   content-height rather than force-equalised, which for a map of independent
+   places reads fine. */
 .grid {
   display: grid; gap: 6px; margin: 8px 0;
-  align-content: start; grid-auto-rows: min-content;
+  align-content: start; grid-auto-rows: min-content; align-items: start;
 }
 /* A map cell is a label, not prose: the body's reading line-height turns six short
    cells into a tall airy block, and at phone width a column is ~100px wide, so a
