@@ -1877,6 +1877,34 @@ def _render_trace_previews(run_id: str, tag: str, desktop: str, mobile: str) -> 
     return previews
 
 
+def _require_scene_underlay(run_id: str, turn: int, request: dict[str, Any]) -> None:
+    """A brief that asked for a SCENE must have gone through the trace tool.
+
+    Nothing used to check this. `_apply_underlay` requires the `etr-underlay`
+    placeholder only when a trace record EXISTS, so an Illustrator that skipped
+    `endless_trace_reference` entirely and hand-drew the page committed cleanly and
+    was stored as an ordinary motif — no underlay, no receipt, no trace of the
+    intent. A real page did exactly that, and afterwards nothing could tell whether
+    the narrator had asked for a motif or the scene lane had been quietly abandoned,
+    because the brief is cleared the moment art commits.
+
+    A base underlay satisfies this: the gate is "the lane ran", not "a photograph was
+    found". The refusal names the one call that fixes it, and it fires at draft time
+    as well as commit so the Illustrator learns before it renders previews.
+    """
+    if str(request.get("lane") or "") != "scene":
+        return
+    if isinstance(_trace_store(run_id).load(turn), dict):
+        return
+    raise BackdropError(
+        "this brief declared LANE: scene, so the page must be built on a traced "
+        "underlay: call endless_trace_reference first (then endless_select_reference "
+        "if it offers candidates) and put one <g id=\"etr-underlay\"/> in each SVG. "
+        "If the search finds nothing it hands you a procedural base, which also "
+        "satisfies this — what is refused is skipping the lane silently."
+    )
+
+
 def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
     """Splice a stored underlay, failing closed when a traced scene omits it."""
     trace = _trace_store(run_id).load(turn)
@@ -2089,6 +2117,7 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     request = _store().read_backdrop_request(run_id)
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
+    _require_scene_underlay(run_id, turn, request)
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     draft = _backdrop_draft_store(run_id).submit(
@@ -2110,6 +2139,14 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     draft_id = args["draftId"]
     drafts = _backdrop_draft_store(run_id)
     drafts.require(draft_id, turn)
+    # Enforced at publication too, not only at draft: the draft store survives a
+    # gateway restart, so a draft accepted before this gate existed must not walk
+    # through it. `endless_commit_fallback_backdrop` is deliberately NOT gated — it
+    # is the repair path for a page whose illustrators already failed, and refusing
+    # it would leave the page with no art at all.
+    _live = _store().read_backdrop_request(run_id)
+    if isinstance(_live, dict) and int(_live.get("turn") or 0) == turn:
+        _require_scene_underlay(run_id, turn, _live)
     trace = _trace_store(run_id).load(turn)
     source = trace.get("source") if isinstance(trace, dict) else None
     trace_audit = None

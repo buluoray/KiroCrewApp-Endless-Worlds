@@ -926,6 +926,82 @@ def test_the_query_contract_asks_for_a_subject_not_a_scene():
     assert "river mist" not in desc, "the old scene-shaped example must be gone"
 
 
+def test_a_scene_brief_cannot_be_published_as_a_hand_drawn_motif(data, monkeypatch):
+    """Nothing used to check that a SCENE brief actually ran the trace lane.
+    `_apply_underlay` requires the placeholder only when a trace record EXISTS, so an
+    Illustrator that skipped `endless_trace_reference` and hand-drew the page
+    committed cleanly and was stored as an ordinary motif — no underlay, no receipt,
+    no trace of the intent. A real page did exactly that, and afterwards nothing could
+    tell whether the narrator had asked for a motif or the scene lane had been quietly
+    abandoned, because the brief is cleared the moment art commits."""
+    import mcp_server as srv
+    store = srv._store()
+    run_id = "a" * 32
+    store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\"")
+
+    # The lane is parsed once, at request time, and kept beside the brief.
+    assert store.read_backdrop_request(run_id)["lane"] == "scene"
+
+    plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1,
+                markup=plain, mobile=plain)
+    assert out["ok"] is False
+    assert "declared LANE: scene" in out["error"]
+    assert "endless_trace_reference" in out["error"], "the refusal names the fix"
+
+
+def test_a_motif_brief_is_still_free_to_be_hand_drawn(data, monkeypatch):
+    """The gate is scoped to the lane the brief declared: a motif page must stay
+    exactly as cheap and unconstrained as it was."""
+    import mcp_server as srv
+    store = srv._store()
+    run_id = "b" * 32
+    store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(run_id, turn=1, brief="LANE: motif\nTHESIS: a vow hardening")
+    assert store.read_backdrop_request(run_id)["lane"] == "motif"
+
+    plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1,
+                markup=plain, mobile=plain)
+    assert out["ok"] is True, out
+
+
+def test_a_base_underlay_satisfies_the_scene_gate(data, monkeypatch):
+    """The gate is "the lane RAN", not "a photograph was found". A search that finds
+    nothing hands back a procedural base, and that page is a legitimate scene."""
+    import mcp_server as srv
+    monkeypatch.setattr(
+        phototrace, "_FETCH",
+        lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
+    )
+    store = srv._store()
+    run_id = "c" * 32
+    store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\"")
+
+    traced = _call("endless_trace_reference", runId=run_id, turn=1, query="stone bridge")
+    assert traced["underlay"] == "base"
+
+    scene = ('<svg xmlns="http://www.w3.org/2000/svg"><g id="etr-underlay"/>'
+             '<rect width="10" height="10"/></svg>')
+    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1,
+                markup=scene, mobile=scene)
+    assert out["ok"] is True, out
+
+
+def test_an_undeclared_lane_is_not_enforced(data):
+    """`brief_lane` is lenient on purpose: a brief whose header the narrator spelled
+    oddly, or omitted, is still art direction. Losing a page's art over a header is a
+    worse outcome than not enforcing the lane on that page."""
+    from store import brief_lane
+    assert brief_lane("LANE: scene\nx") == "scene"
+    assert brief_lane("lane:  MOTIF  \nx") == "motif"
+    assert brief_lane("REFERENCE: subject=\"bridge\"") == ""
+    assert brief_lane("a scene of a bridge") == "", "prose is not a declaration"
+    assert brief_lane("") == ""
+
+
 def test_a_placeholder_without_a_stored_trace_is_refused_at_draft_time(data):
     run_id = "c" * 32
     _request_backdrop(data, run_id, 3)

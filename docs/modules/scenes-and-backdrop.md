@@ -244,6 +244,52 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_the_query_contract_asks_for_a_subject_not_a_scene`; the illustrator prompt's
   half by `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
 
+- **A brief that declared SCENE cannot be published as a hand-drawn motif.** The
+  request record now stores the `lane` parsed from the brief's first line
+  (`store.brief_lane`, parsed once at request time), and `_require_scene_underlay`
+  refuses a draft or a commit for a `scene` brief when no trace record exists.
+
+  Nothing checked this before, and the hole was invisible by construction:
+  `_apply_underlay` requires the `etr-underlay` placeholder only when a trace record
+  EXISTS, so an Illustrator that skipped `endless_trace_reference` entirely and
+  hand-drew the page committed cleanly and was stored as an ordinary motif — no
+  underlay, no receipt, nothing recording the intent. A real page did exactly that,
+  and afterwards nothing could tell whether the narrator had asked for a motif or the
+  scene lane had been quietly abandoned, because the brief is cleared the moment art
+  commits. The receipt could not help either: a motif page correctly has none.
+
+  Three deliberate edges. A **base** underlay satisfies the gate — it asks whether
+  the lane RAN, not whether a photograph was found, so a search that legitimately
+  found nothing still publishes. `brief_lane` is **lenient**: an odd or absent header
+  yields `""` and is not enforced, because losing a page's art over a header is worse
+  than not enforcing the lane on that page. And `endless_commit_fallback_backdrop` is
+  **not** gated: it is the repair path for a page whose illustrators already failed,
+  and refusing it would leave the page with no art at all. The gate runs at draft
+  submit (so the Illustrator learns before rendering previews) and again at commit,
+  because the draft store survives a restart and a draft accepted before the gate
+  existed must not walk through it. Pinned by
+  `test_a_scene_brief_cannot_be_published_as_a_hand_drawn_motif`,
+  `test_a_motif_brief_is_still_free_to_be_hand_drawn`,
+  `test_a_base_underlay_satisfies_the_scene_gate`, and
+  `test_an_undeclared_lane_is_not_enforced`.
+
+- **The MOTIF second pass is earned, not owed.** It was unconditional — "the first
+  rendered draft is diagnosis, never the final" — which made MOTIF the most expensive
+  lane in the app: two complete SVG sets (desktop 800×600 + mobile 450×900, four
+  documents) and two rounds of preview `read`s on every page, whether or not the
+  first draft had anything wrong with it. Measured against a real page, the
+  illustrator took ~3 minutes where the narrator's text turn took ~60 seconds, and
+  SCENE was already the cheaper lane because it permits a first-draft final.
+
+  The review itself is unchanged: name the single weakest or most generic decision.
+  What changed is that a revision now requires that weakness to be **real** — when
+  the first draft already carries a specific authored idea and the review finds
+  nothing structural to fix, it commits. A revision made because the process expects
+  one adds elaboration rather than authorship. Still never a third draft. This is a
+  deliberate trade of a quality guarantee for latency; the guarantee it replaces was
+  a process rule, not a measurement. Pinned by
+  `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
+
 - **Cost: a source is asked once per subject, and only when it might answer.**
   Wikimedia rate-limits a burst — an unbounded probe earned a 429 inside about
   twenty calls — and every request also costs the player latency, so three

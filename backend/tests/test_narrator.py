@@ -535,15 +535,19 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "a world-specific artistic concept rather than a generic effect",
         "calm prose reading fields",
         "clipping or dead space",
-        "For MOTIF, the first rendered draft is diagnosis, never the final",
+        # The MOTIF second pass is EARNED, not owed. It used to be unconditional,
+        # which cost two more SVGs and another preview read on every page whose
+        # first draft was already good — the dominant latency in the whole lane.
+        "review the first rendered draft as diagnosis before you treat it as final",
         "single weakest or most generic artistic decision",
         "exactly ONE structural revision",
         "not merely a color adjustment or additional effects",
         "as a SECOND draft",
         "call `read` once more with ALL second-draft previews together",
-        "Commit only that second `draftId`",
-        "never make a third draft",
-        "mandatory second pass must make the idea more specific and authored",
+        "commit only that second `draftId`",
+        "Never make a third draft",
+        "A second pass is earned by a named weakness, not owed by default",
+        "the review finds nothing structural to fix, commit it",
         "For SCENE, the first reviewed draft may be final",
         "submit the complete revision as a second draft",
         "never publish revised markup that was not rendered and inspected",
@@ -555,7 +559,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "built-in `read` tool once"
     ) < prompt.index("as a SECOND draft") < prompt.index(
         "call `read` once more"
-    ) < prompt.index("Commit only that second `draftId`")
+    ) < prompt.index("commit only that second `draftId`")
 
     trace_tool = OWN_SERVER_REF + "/endless_trace_reference"
     select_tool = OWN_SERVER_REF + "/endless_select_reference"
