@@ -495,7 +495,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         # The subject half only: the context half must never reach the archive,
         # because every word in a query removes results.
         "REFERENCE `subject=`",
-        "retry once with the bare subject",
+        "SINGLE most-relevant noun",
         "its hex stops as `ramp`",
         'one `<g id="etr-underlay"/>` '
         "in EACH SVG",

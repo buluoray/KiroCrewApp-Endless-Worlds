@@ -387,9 +387,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   candidate's previews and calls `endless_select_reference` with the chosen
   `index`, which promotes that candidate into the active `TraceStore` underlay and
   clears the rest — so the curation of which reference best fits the brief is the
-  drawing agent's, not a blind "first that traced". When no usable reference exists
-  the tool skips the choice and sets a single procedural tonal base active
-  directly. The active fragments live in `TraceStore` keyed to the run and turn;
+  drawing agent's, not a blind "first that traced". When a MULTI-WORD query matches
+  nothing, the tool does NOT settle immediately: it returns `underlay: none` with a
+  directive to call `endless_trace_reference` once more with the single most-relevant
+  noun (only the narrow CC0/PD slice is searched, so a compound subject misses while
+  its head noun hits), and creates no base — the scene gate then refuses a commit
+  until a trace exists, so the retry is enforced, not merely advised. A single-word
+  miss, a transient error, or a second miss (bounded by `_TRACE_RETRY_CAP`) settles a
+  single procedural tonal base active directly. The active fragments live in
+  `TraceStore` keyed to the run and turn;
   the Illustrator places one
   `<g id="etr-underlay"/>` per SVG (single or double XML quotes are accepted),
   which the server splices at draft AND commit time (`compose_with_underlay`). Once
