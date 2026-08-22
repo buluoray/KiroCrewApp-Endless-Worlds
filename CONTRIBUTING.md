@@ -56,19 +56,22 @@ kirocrew app enable endless-worlds
 Every PR into `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 1. **Backend tests** — `cd backend && python -m pytest`.
-2. **Frontend lint** — `cd web && npm run lint`. A narrow ESLint gate
-   (`web/eslint.config.js`): `react-hooks/rules-of-hooks` is an **error** and
-   nothing else is enabled, so a hook after an early return (React #310) fails
-   CI instead of shipping. Run it locally with `npm run lint`.
-3. **Frontend typecheck + build** — `cd web && npm run build`.
-4. **The committed bundle must match a fresh build** — CI fails if
+2. **Backend lint + types** (the `backend-lint` job) — `ruff check backend`,
+   `ruff format --check backend`, and `mypy` (config in `backend/pyproject.toml`).
+3. **Frontend lint** — `cd web && npm run lint`. ESLint (`web/eslint.config.js`)
+   with `typescript-eslint` recommended plus `react-hooks/rules-of-hooks` as an
+   **error**, so a hook after an early return (React #310) fails CI instead of
+   shipping.
+4. **Frontend format** — `cd web && npm run format:check` (Prettier).
+5. **Frontend typecheck + build** — `cd web && npm run build`.
+6. **The committed bundle must match a fresh build** — CI fails if
    `ui/index.mjs` differs from what `npm run build` produces.
 
 Run all of them locally before you push:
 
 ```bash
-cd backend && python3 -m pytest
-cd ../web && npm run lint && npm run build
+cd backend && ruff check . && ruff format --check . && mypy . && python3 -m pytest
+cd ../web && npm run lint && npm run format:check && npm run build
 git diff --quiet -- ui/index.mjs || echo "bundle is stale — commit the rebuild"
 ```
 
@@ -126,21 +129,22 @@ version.
   `main`, take the newer version, bump if you are shipping, and rebuild the
   bundle before merging.
 
-## Linters (current and recommended)
+## Linters and formatters
 
-Current: the frontend `react-hooks/rules-of-hooks` gate above, plus `tsc`
-strict typechecking through the build.
+These gates run in CI (see Quality gates above); run them locally before pushing.
 
-The backend currently has **no linter or formatter** — only pytest. If you want
-to raise the floor, the recommended additions (see the discussion this file was
-introduced with) are, in priority order:
+- **Backend — [Ruff](https://docs.astral.sh/ruff/) + mypy.** Ruff lints
+  (`ruff check`, rule set `E,F,I,UP,B` at 100 cols) and enforces formatting
+  (`ruff format`); config in `backend/pyproject.toml`. `ruff format .` fixes
+  formatting. mypy runs **lenient/incremental** (`ignore_missing_imports`, no
+  strict flags, `tests/` excluded) — green over the reachable app modules and
+  meant to widen over time.
+- **Frontend — ESLint + Prettier.** ESLint (`web/eslint.config.js`) runs
+  `typescript-eslint` recommended plus `react-hooks/rules-of-hooks` as an error;
+  Prettier formats (`npm run format` to fix, `npm run format:check` in CI).
+  `src/styles.css` is excluded from Prettier because Vite inlines it verbatim into
+  the committed bundle.
 
-- **Ruff** (`ruff check` + `ruff format`) — one fast tool that replaces
-  flake8 + isort + black; start with a small rule set and widen deliberately.
-- **mypy** — type checking for the backend, ideally gated per-module rather than
-  repo-wide so it can be adopted incrementally.
-- Frontend, later: widen ESLint from hooks-only toward `typescript-eslint`
-  recommended rules, and add **Prettier** for formatting.
-
-Adopt each behind its own PR and CI step, scoped narrowly at first (like the
-hooks gate) so it never floods existing code with findings.
+When adding or widening a rule, scope it narrowly first (like the original
+hooks-only gate), keep the gate green, and adopt it behind its own PR so it never
+floods existing code with findings.
