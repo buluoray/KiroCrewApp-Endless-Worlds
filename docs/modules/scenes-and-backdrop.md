@@ -415,18 +415,48 @@ sees is produced locally from a closed, code-owned vocabulary.
   stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py` and
   `backend/tests/test_backdrop.py`.
 
-- **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
-  successful commit, not on dispatch, so a dropped request or gateway restart can
-  resume recovery. The backend tries two fresh illustrators; if both finish without
-  an exact commit, it queues an internal repair message in the same narrator slot.
-  The narrator may send a simpler brief or draw directly through the separate
-  `endless_commit_fallback_backdrop` capability. That handler requires a persisted
-  same-run/same-turn fallback gate, so merely possessing the tool cannot bypass the
-  illustrator during an ordinary turn. The player sees only the existing generation
-  state, never an implementation failure or retry control. Pinned by
+- **Backdrop-agent failure stays behind the curtain, and a scene never degrades to
+  a hand-drawn one.** The brief is cleared on successful commit, not on dispatch, so
+  a dropped request or gateway restart can resume recovery. The backend gives the
+  model a whole-recovery budget of `_BACKDROP_FALLBACK_SECS` (120s) across its
+  illustrator attempts. When that budget elapses without an exact commit, the server
+  publishes the traced underlay ALONE as the page's backdrop — `commit_underlay_only`
+  composes the stored desktop/mobile fragment (a traced photo, or the procedural
+  base) into a bare `etr-underlay` placeholder shell and writes it through the normal
+  `BackdropStore.set`, with a `serverFallback: true` receipt. The overlay was always
+  optional, so this is a complete, real image produced with NO model call — it
+  replaces the old path where a timed-out scene fell through to the narrator
+  hand-drawing one. Only a page with no traced underlay at all (a motif page, or an
+  illustrator that never reached the trace tool) still queues the internal repair
+  message in the same narrator slot, which may send a simpler brief or draw directly
+  through the separate `endless_commit_fallback_backdrop` capability. That handler
+  requires a persisted same-run/same-turn fallback gate, so merely possessing the
+  tool cannot bypass the illustrator during an ordinary turn. The player sees only
+  the existing generation state, never an implementation failure or retry control.
+  Pinned by `test_the_server_publishes_the_base_underlay_when_the_model_never_commits`,
+  `test_the_server_fallback_is_a_noop_when_nothing_was_traced`,
   `test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate`,
   `test_successful_illustrator_commit_clears_the_waiting_request`, and
   `test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate`.
+
+- **A base underlay is a finished backdrop, not a canvas to paint over.** When the
+  trace returns `underlay: base` (no usable photo), the illustrator is told to commit
+  the base as-is (one placeholder, no other marks) rather than composing a full scene
+  onto it; sparse marks are allowed only when they clearly earn their place. This is
+  the from-source half of the timeout fix: the base case no longer invites the slow
+  hand-draw that most often blew the recovery budget. The instruction lives in
+  `agents/illustrator.json` and `_base_underlay_next`.
+
+- **The backdrop pipeline is timed for audit.** `backdrop_timing.py`'s
+  `BackdropTimeline` appends one event per pipeline step to
+  `runs/<id>/backdrop-timeline.jsonl` — `requested`, each backdrop tool call (with its
+  server-side `serverMs`), the recovery attempts, and the server fallback. `call_tool`
+  records the tool events centrally, so the GAP between two events is the model's own
+  thinking/generation time, told apart from measured server work. `GET
+  /runs/{runId}/backdrop-timeline?turn=N` returns the ordered events plus a summary
+  naming the single longest gap and the slowest server step, so "which step stuck the
+  longest" is answerable after the fact. Diagnostic only — nothing reads it to make a
+  decision. Pinned by `backend/tests/test_backdrop_timing.py`.
 
 - **One turn in flight, across every surface.** A scene answer dispatches from
   `main.tsx` (`onSceneChoice`), not from the play page, so the page's own `busy`

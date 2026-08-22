@@ -1089,3 +1089,50 @@ def test_trace_art_lane_routes_to_the_met(data, monkeypatch):
     out = _call("endless_trace_reference", runId=run_id, turn=3, query="angel", source="art")
     assert out["ok"] is True and out["underlay"] == "reference"
     assert out["candidates"][0]["source"]["title"] == "PD Painting"
+
+
+def test_the_server_publishes_the_base_underlay_when_the_model_never_commits(data, monkeypatch):
+    """The 120s server fallback: when a SCENE page's illustrator runs out of time but
+    the lane already produced an underlay (here a procedural base), the server
+    publishes that underlay ALONE as the page's backdrop — a real image, with no
+    model call and no hand-drawn recovery."""
+    import mcp_server as srv
+    monkeypatch.setattr(
+        phototrace, "_FETCH",
+        lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
+    )
+    store = srv._store()
+    run_id = "d" * 32
+    store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(
+        run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\""
+    )
+    assert _call(
+        "endless_trace_reference", runId=run_id, turn=1, query="stone bridge"
+    )["underlay"] == "base"
+
+    # The model never drafts or commits — it "timed out". The base underlay is in
+    # the trace store but is NOT yet the page's backdrop.
+    assert BackdropStore(data, run_id).exact(1) is None
+
+    assert srv.commit_underlay_only(data, store, run_id, 1) is True
+    assert BackdropStore(data, run_id).exact(1) is not None, (
+        "the base underlay is now the page's backdrop"
+    )
+    assert store.read_backdrop_request(run_id) is None, "the request clears once art lands"
+
+
+def test_the_server_fallback_is_a_noop_when_nothing_was_traced(data):
+    """A page whose illustrator never reached the trace tool has no underlay to
+    publish; the fallback declines (returns False) and commits nothing, leaving the
+    narrator recovery as the last resort."""
+    import mcp_server as srv
+    store = srv._store()
+    run_id = "e" * 32
+    store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(
+        run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\""
+    )
+
+    assert srv.commit_underlay_only(data, store, run_id, 1) is False
+    assert BackdropStore(data, run_id).exact(1) is None

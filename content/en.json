@@ -7,6 +7,7 @@
   "opening.chosen.line": "{label}: {value}",
   "opening.chosen.none": "(Nothing has been settled.)",
   "opening.chosen.rolled": "{label}: {value} (settled by the world; the player had no say)",
+  "opening.firstBackdrop": "For this first page's backdrop, favour LANE: scene — an establishing shot of the concrete place this life opens in, with REFERENCE subject nouns the setting can be recognised by — whenever a real photograph of that kind of place could plausibly exist. A traced establishing scene lands faster than a hand-drawn one and gives the player a real place to open their eyes in. Fall back to LANE: motif only when the opening is not a physical place, or is a setting no real-world photograph could exist of.",
   "opening.left": "The player leaves these to you. Settle them by this world's own logic, and do not explain how you decided:",
   "opening.pull": "This is the opening of a new life — turn one. Nothing about the world or this life's choices is in this message. Call endless_read_runtime first: it returns the world's rules, this life's opening choices (and which of them the world settled rather than the player), and the shape of the state to record. Then write the first turn — the circumstances they are born into and what the world around them is doing — and declare the state in full. Do not name any of the setup fields.",
   "opening.rulebook": "The rulebook of this world:",
