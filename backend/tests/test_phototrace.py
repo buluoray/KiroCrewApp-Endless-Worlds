@@ -719,6 +719,46 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
     assert TraceStore(data, run_id).load(1) is None, "trace cleared after publication"
 
 
+def test_a_transient_fetch_failure_is_retried_before_settling_for_base(data, monkeypatch):
+    """A backdrop is never re-fetched on a later turn, so a transient fetch blip (a
+    network hiccup or a 429 on the image host) that fails every candidate on the first
+    pass would cost the page its photo forever. The server retries the fetch pass a
+    bounded number of times before settling for the base, so a candidate that fetches
+    only on the second try still becomes a reference underlay rather than a base."""
+    photo = _photo_bytes(bright=True)
+    img_url = "https://upload.wikimedia.org/forge.jpg"
+    calls = {"img": 0}
+
+    def flaky_fetch(url: str) -> bytes:
+        if "api.php" in url:
+            return json.dumps({"query": {"pages": {"1": {
+                "title": "File:Forge.jpg",
+                "imageinfo": [{
+                    "mime": "image/jpeg",
+                    "thumburl": img_url,
+                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Forge.jpg",
+                    "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                }],
+            }}}}).encode("utf-8")
+        if url == img_url:
+            calls["img"] += 1
+            if calls["img"] <= 1:
+                return b"not-a-real-image"  # first pass: decode fails -> BackdropError
+            return photo  # second pass: the transient blip is gone
+        return json.dumps({"results": []}).encode("utf-8")  # openverse: empty
+
+    monkeypatch.setattr(phototrace, "_FETCH", flaky_fetch)
+    monkeypatch.setattr(srv.time, "sleep", lambda *a, **k: None)  # no real backoff wait
+    run_id = "b" * 32
+    _request_backdrop(data, run_id, 1)
+
+    out = _call("endless_trace_reference", runId=run_id, turn=1, query="workshop")
+    assert out["ok"] is True and out["underlay"] == "reference", (
+        "a candidate that fetched on the retry must become a reference, not a base"
+    )
+    assert calls["img"] >= 2, "the fetch pass must have been retried after the blip"
+
+
 @pytest.mark.parametrize(
     ("source", "expected_underlay"),
     [

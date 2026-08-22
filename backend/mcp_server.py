@@ -1997,6 +1997,15 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
 #: second miss settles rather than wedging the page.
 _TRACE_RETRY_CAP = 1
 
+#: A transient fetch failure or a rate-limit (429) on the image host can fail EVERY
+#: candidate even though the search FOUND them, and a backdrop is never re-fetched on
+#: a later turn — so a one-second blip would cost that page its photo permanently.
+#: When the search returned candidates but none traced, the fetch/trace pass is
+#: repeated up to this many times (total, including the first) with a short backoff —
+#: the search itself is not repeated — before settling for the procedural base.
+_FETCH_RETRY_ATTEMPTS = 2
+_FETCH_RETRY_BACKOFF_SECS = 0.75
+
 
 def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     """Trace the top reference candidates for the Illustrator to choose among.
@@ -2037,28 +2046,37 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         candidates, search_audit = search_candidates(
             query, lane, misses=MissCache(_DATA)
         )
-        for candidate in candidates:
-            try:
-                photo = fetch_photo(candidate["url"])
-                desktop = build_underlay_fragment_bounded(
-                    photo, view=(800, 600), ramp=ramp, opacity=opacity,
-                    focal=desktop_focal,
-                )
-                mobile = build_underlay_fragment_bounded(
-                    photo, view=(450, 900), ramp=ramp, opacity=opacity,
-                    focal=mobile_focal,
-                )
-            except BackdropError:
-                continue
-            traced.append({
-                "desktop": desktop, "mobile": mobile,
-                "source": {k: candidate[k] for k in ("title", "pageUrl", "license")},
-            })
-            if len(traced) >= TRACE_CANDIDATE_COUNT:
+        # Candidates existed but the fetch/trace can transiently fail every one (a
+        # network blip or a 429 on the image host). Retry the fetch pass a bounded
+        # number of times with a short backoff — the search is not repeated — before
+        # settling for the base. The happy path breaks on the first success and the
+        # backoff sleep never runs.
+        for fetch_attempt in range(_FETCH_RETRY_ATTEMPTS):
+            for candidate in candidates:
+                try:
+                    photo = fetch_photo(candidate["url"])
+                    desktop = build_underlay_fragment_bounded(
+                        photo, view=(800, 600), ramp=ramp, opacity=opacity,
+                        focal=desktop_focal,
+                    )
+                    mobile = build_underlay_fragment_bounded(
+                        photo, view=(450, 900), ramp=ramp, opacity=opacity,
+                        focal=mobile_focal,
+                    )
+                except BackdropError:
+                    continue
+                traced.append({
+                    "desktop": desktop, "mobile": mobile,
+                    "source": {k: candidate[k] for k in ("title", "pageUrl", "license")},
+                })
+                if len(traced) >= TRACE_CANDIDATE_COUNT:
+                    break
+            if traced or fetch_attempt + 1 >= _FETCH_RETRY_ATTEMPTS:
                 break
-        # Candidates existed and not one of them became an underlay — a different
-        # failure from "nothing matched", and the only one a wider search or a
-        # retry would not fix, so it must not be recorded as either.
+            time.sleep(_FETCH_RETRY_BACKOFF_SECS)
+        # Candidates existed and not one of them became an underlay even after the
+        # bounded re-fetch — a different failure from "nothing matched", recorded so
+        # it is not mistaken for a query miss.
         if not traced and candidates:
             search_audit = {**search_audit, "reason": "fetch-failed"}
 
