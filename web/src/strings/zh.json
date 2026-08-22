@@ -101,7 +101,7 @@
   "library.empty": "书架还是空的。第一个世界，正等你推门。",
   "library.lives": "你正在过的人生",
   "library.newerSeed": "「{world}」有了新版本（{installed} → {available}）。你手上的版本不会改变。",
-  "library.otherWorlds": "别的世界",
+  "library.otherWorlds": "世界列表",
   "library.preparing": "书架正在打开…",
   "library.removed": "「{world}」已从书架移除。",
   "library.restore": "装回书架",

@@ -1413,7 +1413,11 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 
 .ew-topbar-float {
   position: sticky; top: 0; z-index: 12;
-  margin: 0 calc(-1 * var(--ew-gutter, 16px));
+  /* The negative side margins let the band span the app's gutter; the bottom one is
+     the only gap between the bar and the title under it. It belongs on the bar rather
+     than the title because it must NOT show while the bar is stuck — the story is
+     meant to pass directly beneath it there, and layout margin does exactly that. */
+  margin: 0 calc(-1 * var(--ew-gutter, 16px)) 10px;
   padding: 8px var(--ew-gutter, 16px);
   /* Frosted, not a black slab. A near-opaque dark band sat on top of the world's
      own art as a foreign rectangle; letting the page's colour through and leaning on
