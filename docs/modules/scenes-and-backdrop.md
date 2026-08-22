@@ -101,6 +101,25 @@ sees is produced locally from a closed, code-owned vocabulary.
   inline avoids covering dashboard chrome on desktop and colliding with the
   portalled tab bar on mobile.
 
+- **The frame is as tall as its picture, and the picture paints its own canvas.**
+  One fixed height for every spec was wrong in both directions: a three-row ledger
+  sat in a dead band, and a map taller than the frame lost its last row to
+  `overflow: hidden` with nothing to scroll. The frame has an opaque origin, so the
+  host cannot measure inside it — `SCENE_SCRIPT` reports `document.body`'s own
+  height (never `documentElement`, whose height tracks the frame's viewport and so
+  can never report a shrink) on load and through a `ResizeObserver`, and `SceneSlot`
+  applies it clamped between `MIN_SCENE_H` and `MAX_SCENE_H`; the stylesheet's
+  `.ew-slot-on` height stands in until the first report. A height message is not an
+  answer: it is handled before the answer guards, so it neither fires a turn nor
+  trips the first-result latch. `_STYLE` colours `html` as well as `body`, because
+  the part of a frame a short document does not cover is painted by the canvas —
+  left transparent, it showed the host page through. Pinned by
+  `test_widget.py::test_the_frame_reports_its_own_content_height`,
+  `test_the_documents_canvas_is_painted_not_just_its_body`,
+  `test_scene_slot.py::test_the_frame_is_sized_from_the_documents_own_report`,
+  `test_a_height_report_is_not_an_answer`, and
+  `test_the_slot_surface_does_not_follow_the_dashboard_theme`.
+
 - **The sandbox never gains `allow-same-origin`, and content loads through `src`.**
   The frame is `sandbox="allow-scripts allow-forms"`
   (`test_same_origin_is_never_granted`), so the scene document has an opaque origin

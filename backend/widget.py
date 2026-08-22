@@ -104,24 +104,43 @@ CSP = (
 #: escaping above stops being the boundary it claims to be.
 #:
 #: It reads a choice's id from a data attribute rather than from generated code,
-#: and posts it to the parent. The parent side is the app's own frame host.
+#: and posts it to the parent. It also reports the document's own content height,
+#: which is the only way the host can size the frame to the picture: the frame has
+#: an opaque origin, so the parent cannot measure inside it. The parent side is the
+#: app's own frame host.
 SCENE_SCRIPT = """<script>
 (function () {
+  function envelope(extra) {
+    extra.source = 'endless-scene';
+    extra.sceneId = document.documentElement.dataset.scene || '';
+    extra.nonce = document.documentElement.dataset.nonce || '';
+    return extra;
+  }
   document.addEventListener('click', function (e) {
     var el = e.target.closest('[data-choice]');
     if (!el) return;
-    parent.postMessage({
-      source: 'endless-scene',
-      sceneId: document.documentElement.dataset.scene || '',
-      nonce: document.documentElement.dataset.nonce || '',
-      choice: el.dataset.choice
-    }, '*');
+    parent.postMessage(envelope({ choice: el.dataset.choice }), '*');
   });
+  var last = 0;
+  function report() {
+    var h = Math.ceil(document.body.getBoundingClientRect().height);
+    if (!h || h === last) return;
+    last = h;
+    parent.postMessage(envelope({ height: h }), '*');
+  }
+  report();
+  window.addEventListener('load', report);
+  if (window.ResizeObserver) new ResizeObserver(report).observe(document.body);
 })();
 </script>"""
 
 _STYLE = """<style>
 :root { color-scheme: dark light; }
+/* On the canvas as well as the body: a document shorter than its frame leaves the
+   rest of the frame painted by the CANVAS, and an unpainted canvas shows the host
+   page through it — which is how a scene came to sit on a pale slab under a light
+   dashboard theme. */
+html { background: #0b0c10; }
 body {
   margin: 0; padding: 12px;
   font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -146,12 +165,16 @@ button {
   background: #1f2030; border: 1px solid #2d2f3d; border-radius: 8px;
 }
 .grid { display: grid; gap: 6px; margin: 8px 0; }
+/* A map cell is a label, not prose: the body's reading line-height turns six short
+   cells into a tall airy block, and at phone width a column is ~100px wide, so a
+   name that does not break lands outside its own box. */
 .gc {
   background: #1f2030; border: 1px solid #2d2f3d; border-radius: 6px;
   padding: 8px; min-height: 44px; font-size: 12px; box-sizing: border-box;
+  line-height: 1.3; min-width: 0; overflow-wrap: anywhere;
 }
 .gc.gm { border-color: #7c3aed; background: #241d3a; }
-.gn { display: block; color: #6b7280; font-size: 11px; margin-top: 2px; }
+.gn { display: block; color: #6b7280; font-size: 11px; line-height: 1.3; margin-top: 3px; }
 .lkwrap { margin: 8px 0; }
 svg.lk { width: 100%; height: auto; display: block; }
 .lke { stroke: #2d2f3d; stroke-width: 1.2; }

@@ -97,6 +97,69 @@ def test_the_slot_never_becomes_the_scrolling_element() -> None:
     assert "overflow: hidden" in slot_css
 
 
+# -- the frame is as tall as its picture --------------------------------
+
+
+def test_the_frame_is_sized_from_the_documents_own_report(slot: str) -> None:
+    """One fixed height for every spec is wrong in both directions: a short ledger
+    sits in a dead band, and a map taller than the frame has its last row clipped
+    with no way to reach it (the slot never scrolls, by the rule above).
+
+    The frame has an opaque origin, so the host cannot measure inside it — the
+    document reports its own height and the host applies it, clamped.
+    """
+    assert re.search(r"typeof d\.height === 'number'", slot)
+    assert "Number.isFinite(d.height)" in slot
+    assert "setFitH(" in slot
+    # Applied to the element, and clamped rather than trusted.
+    assert re.search(r"height: `\$\{fitH\}px`", slot)
+    assert "MIN_SCENE_H" in slot and "MAX_SCENE_H" in slot
+    assert re.search(r"Math\.min\(MAX_SCENE_H, Math\.max\(MIN_SCENE_H,", slot)
+    # The stylesheet keeps a fallback for the frame that has not reported yet.
+    assert re.search(r"\.ew-slot-on \{[^}]*height: \d+px", uisrc.styles())
+
+
+def test_a_height_report_is_not_an_answer(slot: str) -> None:
+    """A height message carries no choice and must not travel the answer path: it
+    arrives whenever the picture resizes, including while a turn is in flight, so
+    treating it as an answer would either fire a turn or trip the local
+    first-result latch and leave the slot stuck on "sending…"."""
+    body = slot.split("const onMessage", 1)[1]
+    height_at = body.index("d.height")
+    choice_at = body.index("typeof d.choice")
+    assert height_at < choice_at, "the height branch must precede the answer guards"
+    latch_at = body.index("answered.current")
+    assert height_at < latch_at, "a height report must not reach the answer latch"
+
+
+def test_the_slot_surface_does_not_follow_the_dashboard_theme() -> None:
+    """The frame sits on the world's own dark canvas. Resolved against a LIGHT
+    dashboard theme, `var(--card)`/`var(--border)` are white, which painted a pale
+    slab behind the scene — visible wherever the document did not cover the frame.
+    """
+    slot_css = uisrc.styles().split(".ew-slot {", 1)[1].split("}", 1)[0]
+    # Comments stripped first: the comment that explains this rule necessarily
+    # names the forbidden variables, so a raw substring check fails on its own prose
+    # (the same trap `test_same_origin_is_never_granted` documents).
+    decls = re.sub(r"/\*.*?\*/", "", slot_css, flags=re.S)
+    assert "var(--card" not in decls and "var(--border" not in decls
+    assert "background: #0b0c10" in decls
+
+
+def test_the_scene_frames_clear_the_phones_tab_bar() -> None:
+    """The frames render after the shell, outside it, so the shell's own bottom
+    padding does not reach them and the bar (fixed, portalled) covered the last
+    frame. The clearance goes to whatever the page ENDS with: when frames follow the
+    region pane the pane drops its own, or the gap merely opens between the panels
+    and the map.
+    """
+    root = uisrc.module("main.tsx")
+    css = uisrc.styles()
+    assert re.search(r"\.ew-scenes-clear \{[^}]*padding-bottom: 72px", css)
+    assert "scenesShown ? 'ew-scenes-clear'" in root
+    assert "paddingBottom: scenesShown ? undefined : '72px'" in root
+
+
 # -- the sandbox ---------------------------------------------------------
 
 

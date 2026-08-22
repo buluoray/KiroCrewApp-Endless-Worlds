@@ -84,6 +84,35 @@ def test_the_only_script_is_the_apps_own_constant():
     assert SCENE_SCRIPT in out
 
 
+def test_the_frame_reports_its_own_content_height():
+    """The host cannot measure inside the frame — it has an opaque origin — so a
+    scene that is not exactly the stylesheet's fallback height can only be sized
+    from the document's own report. Without it every scene is one fixed height: a
+    short ledger sits in a dead band, and a map's last row is clipped off with no
+    way to scroll to it.
+
+    Measured on ``body``, not ``documentElement``: the latter's height tracks the
+    frame's viewport when content is shorter, so it can never report a shrink.
+    """
+    out = compile_scene("map", SIMPLE, STATE)
+    assert "height:" in SCENE_SCRIPT and "ResizeObserver" in SCENE_SCRIPT
+    assert "document.body.getBoundingClientRect().height" in SCENE_SCRIPT
+    assert "documentElement.getBoundingClientRect" not in SCENE_SCRIPT
+    assert SCENE_SCRIPT in out
+
+
+def test_the_documents_canvas_is_painted_not_just_its_body():
+    """A document shorter than its frame leaves the remainder painted by the CANVAS.
+    With only ``body`` coloured, that remainder is transparent and the host page
+    shows through — which under a light dashboard theme put the scene on a pale
+    slab. The canvas has to carry the colour too."""
+    out = compile_scene("map", SIMPLE, STATE)
+    style = out.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert re.search(r"html\s*\{[^}]*background:\s*#0b0c10", style), (
+        "the scene's canvas has no background of its own"
+    )
+
+
 def test_narrator_text_never_reaches_script_context():
     spec = {
         "title": "</script><script>alert(1)</script>",
