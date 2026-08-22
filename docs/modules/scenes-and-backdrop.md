@@ -191,6 +191,68 @@ sees is produced locally from a closed, code-owned vocabulary.
   stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py` and
   `backend/tests/test_backdrop.py`.
 
+- **The reference search is precision-first, widened in a bounded ladder, and it
+  reports why it ended where it did.** Three facts about live Commons drive the
+  shape, each measured rather than assumed:
+
+  1. Its `generator=search` is CONJUNCTIVE, so a brief written the way the
+     illustrator is asked to write one — a `REFERENCE:` line of concrete keywords —
+     matches *nothing*. The 18-word river-mill brief returns zero search hits;
+     its first two words return several. A specific brief therefore failed
+     **because** it was specific, on every good-faith attempt, which is why one run
+     after another silently arrived at `underlay: base`.
+  2. Its attribution-free material skews to scanned BOOKS. A four-word village
+     query returned ten pages whose every public-domain hit was a PDF or DjVu page
+     scan and whose every actual photograph was CC BY-SA — nothing survived the
+     license and format gates, on a query that had matched. `filetype:bitmap` now
+     goes into the search itself, and the page sample is `_RAW_SEARCH_ROWS` rather
+     than a small multiple of the wanted count, because the surviving intersection
+     is thin: widening that one request turned a night-castle query from zero
+     usable rows into ten. Same single request either way.
+  3. It rate-limits a burst — an unbounded probe earned a 429 inside about twenty
+     calls. So `search_reference_ladder` is capped at `_MAX_SEARCH_STEPS` (the full
+     query plus the `_LADDER_RUNGS` truncations, front words first because a brief
+     leads with its subject and trails into atmosphere), stops at the first rung
+     that matches, and never walks every truncation.
+
+  **Two guards keep the widening from buying a worse picture than the base**, and
+  both come from what the widened search actually returned:
+
+  - **The ladder floors at four words.** Two words stop being about the brief's
+    subject: the river-mill brief's two-word rung matched an amphora and a
+    manuscript page. Below the floor the lane declines, because an unrelated
+    photograph traced as the place is worse than the honest procedural base — it is
+    confidently wrong rather than merely plain.
+  - **A rephotographed document is not a reference photograph.** `_is_document`
+    drops it. The MIME gate cannot: a live castle query returned two handwritten
+    letters ABOVE the one real castle, as ordinary JPEGs, and the caller traces the
+    FIRST candidate that fetches. Neither letter carried a document category — what
+    named them was the description, which opened "Manuscript letter" — so the
+    judgement reads the categories, the object name, and only the LEAD of the
+    description (`_DESCRIPTION_LEAD`), since the object names itself at the front
+    and an incidental mention further down ("carved letters above the arch") must
+    not drop a real scene.
+
+  The receipt carries the outcome, because a fallback that records nothing reads as
+  a deliberate choice: a base underlay gains `fallback.reason` —
+  `no-candidates` (this subject has no attribution-free photograph),
+  `search-failed` (Commons did not answer; try again) or `fetch-failed` (candidates
+  existed and none became an underlay, the one a wider search would not fix) —
+  plus the rungs attempted, and a reference underlay gains `matched`, the rung that
+  won, so a brief that only ever matches after widening is visible as a brief to
+  rewrite. `search-failed` and `no-candidates` are deliberately not merged; the
+  earlier code returned `[]` for both. `_clean_trace_audit` rebuilds the receipt
+  field by field, so a caller cannot widen it by handing over extra keys. Pinned by
+  `test_the_search_ladder_widens_a_specific_brief_and_stops_at_the_first_hit`,
+  `test_the_search_excludes_book_scans_and_samples_wide_enough_to_survive_filtering`,
+  `test_the_ladder_is_bounded_and_never_walks_every_truncation`,
+  `test_a_rate_limited_search_is_not_filed_as_a_world_without_photographs`,
+  `test_a_rephotographed_document_is_not_a_reference_photograph`,
+  `test_the_search_itself_drops_a_rephotographed_document`,
+  `test_an_incidental_word_deep_in_a_caption_keeps_a_real_photograph`, and the
+  receipt asserts in
+  `test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty`.
+
 - **Backdrop-agent failure stays behind the curtain.** The brief is cleared on
   successful commit, not on dispatch, so a dropped request or gateway restart can
   resume recovery. The backend tries two fresh illustrators; if both finish without

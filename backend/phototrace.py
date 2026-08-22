@@ -82,6 +82,38 @@ _REUSABLE_LICENSE_RE = re.compile(
 #: tiff page scans — a live query for a night street returned a 1918 novel's
 #: cover scan, which traced into legible title lettering.
 _PHOTO_MIMES = frozenset({"image/jpeg", "image/png", "image/webp"})
+
+#: The MIME gate cannot catch a document REPHOTOGRAPHED as a JPEG or PNG, and
+#: Commons' attribution-free corpus is full of them: a live castle query returned
+#: two handwritten letters and an illuminated manuscript folio above the one actual
+#: castle. Traced, those become pages of legible handwriting standing in for a
+#: place — the same failure the MIME gate was added for, arriving by another route,
+#: and worse than the procedural base because it is confidently wrong rather than
+#: merely plain.
+_DOCUMENT_RE = re.compile(
+    r"letters?\b|correspondence|manuscript|folio|codex|incunab|title pages?\b"
+    r"|book scans?\b|scanned (?:book|page|document)|sheet music|musical scores?\b"
+    r"|maps?\b|atlas|charters?\b|newspapers?\b|handwriting",
+    re.IGNORECASE,
+)
+
+#: How much of the description to judge. The object names ITSELF at the front (the
+#: letters above began "Manuscript letter"), and those files carried no telling
+#: category at all — so categories alone are not enough. Reading only the lead
+#: keeps an incidental mention further down ("carved letters above the gate") from
+#: dropping a real photograph.
+_DESCRIPTION_LEAD = 160
+
+
+def _is_document(meta: dict[str, Any]) -> bool:
+    """True when the file is a reproduction of a document rather than a photograph
+    of a place. Judged on the file's own categories plus the fields that NAME the
+    object, since the two live examples had no document category."""
+    def field(key: str) -> str:
+        return str((meta.get(key) or {}).get("value", ""))
+
+    lead = re.sub(r"<[^>]+>", " ", field("ImageDescription"))[:_DESCRIPTION_LEAD]
+    return bool(_DOCUMENT_RE.search(f"{field('Categories')} {field('ObjectName')} {lead}"))
 _PIL_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 _MAX_PHOTO_BYTES = 12_000_000
 
@@ -124,17 +156,48 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
     Only bitmap files whose license short-name reads as CC0 or public domain are
     returned; everything else is dropped so attribution/share-alike obligations
     can never be silently lost from the composed backdrop.
+
+    Two things make the raw result set much wider than the ``limit`` asked for, and
+    both were measured against live Commons rather than guessed. ``filetype:bitmap``
+    is added to the search itself because Commons' public-domain material skews to
+    scanned BOOKS: a four-word village query returned ten pages of which every
+    public-domain hit was a PDF or DjVu page scan and every actual photograph was
+    CC BY-SA, so nothing survived the filters and the lane degraded on a query that
+    had matched. And the page sample is `_RAW_SEARCH_ROWS`, not a small multiple of
+    ``limit``, because the surviving intersection is thin: widening the same single
+    request turned a night-castle query from zero usable rows into ten.
     """
+    rows, _ = _search_page(query, limit)
+    return rows
+
+
+#: How many search hits to sample before filtering. The photo ∩ attribution-free
+#: intersection is a small fraction of any result page, so a sample sized to the
+#: number of candidates WANTED yields none — one request either way.
+_RAW_SEARCH_ROWS = 50
+
+#: Added to every search: Commons' attribution-free material is largely scanned
+#: books, and excluding them at the source leaves the sample for real photographs.
+_BITMAP_ONLY = "filetype:bitmap"
+
+
+def _search_page(query: str, limit: int) -> tuple[list[dict[str, str]], str]:
+    """One search request. Returns ``(rows, reason)`` where reason is ``ok``,
+    ``search-failed`` (the request itself did not answer — a network error or a 429,
+    which must NOT be reported as "this world has no reference photo") or
+    ``no-candidates`` (it answered and nothing survived the license/format gate)."""
+    search = query if _BITMAP_ONLY in query else f"{query} {_BITMAP_ONLY}"
     params = urllib.parse.urlencode({
         "action": "query", "format": "json",
-        "generator": "search", "gsrsearch": query, "gsrnamespace": 6, "gsrlimit": limit * 2,
+        "generator": "search", "gsrsearch": search, "gsrnamespace": 6,
+        "gsrlimit": _RAW_SEARCH_ROWS,
         "prop": "imageinfo", "iiprop": "url|mime|extmetadata", "iiurlwidth": 1200,
     })
     try:
         data = json.loads(_http_get(f"{_COMMONS_API}?{params}").decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 — the caller degrades to the base lane
         logger.warning("commons search failed: %s", exc)
-        return []
+        return [], "search-failed"
     rows: list[dict[str, str]] = []
     for page in (data.get("query", {}).get("pages", {}) or {}).values():
         info = (page.get("imageinfo") or [{}])[0]
@@ -143,6 +206,8 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
         if info.get("mime", "") not in _PHOTO_MIMES:
             continue
         if not _REUSABLE_LICENSE_RE.search(license_name):
+            continue
+        if _is_document(meta):
             continue
         url = info.get("thumburl") or info.get("url")
         if not url:
@@ -155,7 +220,63 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
         })
         if len(rows) >= limit:
             break
-    return rows
+    return rows, ("ok" if rows else "no-candidates")
+
+
+#: How many words a rung keeps. Commons' generator search is CONJUNCTIVE, so a
+#: brief written the way the illustrator is asked to write one — "medieval European
+#: river-mill village timber granary dirt road low stone bridge dawn mist farmland
+#: distant walled town horizon" — matches literally nothing: measured live, that
+#: query returns ZERO search hits, while its first two words return several. So a
+#: specific brief failed BECAUSE it was specific, on every good-faith attempt.
+#: Front words first, because a brief leads with its subject and trails into
+#: atmosphere.
+#:
+#: The ladder stops at FOUR words rather than bottoming out at two, and that floor
+#: is the whole judgement: two words stop being about the brief's subject, and the
+#: measured result was an amphora and a manuscript page standing in for a
+#: river-mill village. An unrelated photograph traced as the place is worse than
+#: the honest procedural base, so below the floor the lane declines and the receipt
+#: says the subject has no attribution-free photograph.
+_LADDER_RUNGS = (6, 4)
+
+#: The ladder is bounded at three requests per turn. Wikimedia rate-limits a burst
+#: (an unbounded probe earned a 429 within ~20 calls), and a 429 is indistinguishable
+#: from an honest miss from the caller's side — so recall is bought in a few steps,
+#: never by walking every truncation.
+_MAX_SEARCH_STEPS = 1 + len(_LADDER_RUNGS)
+
+
+def search_reference_ladder(
+    query: str, limit: int = 5
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    """Search precision-first, then widen, and REPORT what happened.
+
+    Returns ``(rows, audit)``. The audit is the part that matters when nothing is
+    found: the receipt on the page then says whether this world has no
+    attribution-free photograph (``no-candidates``) or whether Commons simply did
+    not answer (``search-failed``), instead of recording the fallback as though it
+    had been a choice.
+    """
+    words = query.split()
+    tried: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    reason = "no-candidates"
+    for rung in (len(words), *_LADDER_RUNGS):
+        step = " ".join(words[:rung]).strip()
+        if not step or step in tried:
+            continue
+        tried.append(step)
+        rows, outcome = _search_page(step, limit)
+        attempts.append({"query": step, "words": min(rung, len(words)), "outcome": outcome})
+        if rows:
+            return rows, {"reason": "ok", "matched": step, "attempts": attempts}
+        # A request that never answered says nothing about the NEXT rung, so the
+        # ladder keeps going — but the reason it reports is the harder failure, so a
+        # rate-limited turn is never filed as "this world has no photograph".
+        if outcome == "search-failed":
+            reason = "search-failed"
+    return [], {"reason": reason, "matched": "", "attempts": attempts}
 
 
 def fetch_photo(url: str) -> bytes:
@@ -402,6 +523,7 @@ class TraceStore:
     def save(
         self, *, turn: int, desktop: str, mobile: str,
         source: dict[str, str] | None, kind: str, query: str,
+        search: dict[str, Any] | None = None,
     ) -> str:
         if kind not in {"reference", "base"}:
             raise BackdropError("a trace underlay kind must be reference or base")
@@ -412,6 +534,10 @@ class TraceStore:
             "fragmentId": fragment_id, "turn": int(turn),
             "desktop": desktop, "mobile": mobile, "source": source or None,
             "kind": kind, "query": str(query)[:500],
+            # Why the lane ended where it did. Carried so the committed receipt can
+            # say whether a base underlay was a miss, a rate-limited request, or a
+            # page that asked for no photograph at all.
+            "search": search or None,
         }, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self._path)
         return fragment_id

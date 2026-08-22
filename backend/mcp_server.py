@@ -91,7 +91,7 @@ from phototrace import (  # noqa: E402
     compose_with_underlay,
     fetch_photo,
     procedural_base_fragment,
-    search_reference,
+    search_reference_ladder,
 )
 from chapters import (  # noqa: E402
     ChapterError,
@@ -1858,8 +1858,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     source: dict[str, str] | None = None
     kind = "base"
     desktop = mobile = None
+    search_audit: dict[str, Any] = {"reason": "no-query", "matched": "", "attempts": []}
     if query:
-        for candidate in search_reference(query):
+        candidates, search_audit = search_reference_ladder(query)
+        for candidate in candidates:
             try:
                 photo = fetch_photo(candidate["url"])
                 desktop = build_underlay_fragment_bounded(
@@ -1875,6 +1877,11 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             source = {k: candidate[k] for k in ("title", "pageUrl", "license")}
             kind = "reference"
             break
+        # Candidates existed and every one of them failed to become an underlay —
+        # a different failure from "nothing matched", and the only one a wider
+        # search would not fix.
+        if kind == "base" and candidates:
+            search_audit = {**search_audit, "reason": "fetch-failed"}
     if desktop is None or mobile is None:
         desktop = procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity)
         mobile = procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity)
@@ -1882,7 +1889,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     store = _trace_store(run_id)
     fragment_id = store.save(
         turn=turn, desktop=desktop, mobile=mobile, source=source,
-        kind=kind, query=query,
+        kind=kind, query=query, search=search_audit,
     )
     preview_dir = _DATA / "runs" / run_id / "backdrop-previews"
     previews: dict[str, str] = {}
@@ -1952,6 +1959,27 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
             "query": str(trace.get("query") or ""),
             "used": True,
         }
+        # WHY a base underlay was used. Without it the receipt records the
+        # fallback as indistinguishable from a deliberate choice, and a lane that
+        # missed on every good-faith brief read as one nobody had asked for.
+        search = trace.get("search")
+        if kind == "base" and isinstance(search, dict):
+            trace_audit["fallback"] = {
+                "reason": str(search.get("reason") or "no-candidates"),
+                "attempts": [
+                    {
+                        "query": str(a.get("query") or "")[:200],
+                        "words": int(a.get("words") or 0),
+                        "outcome": str(a.get("outcome") or ""),
+                    }
+                    for a in (search.get("attempts") or [])[:4]
+                    if isinstance(a, dict)
+                ],
+            }
+        elif kind == "reference" and isinstance(search, dict) and search.get("matched"):
+            # Which rung won, so a brief that only ever matches after widening is
+            # visible as a brief to rewrite rather than a silent success.
+            trace_audit["matched"] = str(search.get("matched"))[:200]
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     version = _backdrop_store(run_id).set(

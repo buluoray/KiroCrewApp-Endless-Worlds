@@ -78,7 +78,16 @@ class BackdropError(ValueError):
 
 
 def _clean_trace_audit(raw: Any) -> dict[str, Any] | None:
-    """Keep only a conclusive receipt that a trace underlay was composed."""
+    """Keep only a conclusive receipt that a trace underlay was composed.
+
+    Rebuilt field by field rather than passed through, so a caller cannot widen the
+    receipt by handing over extra keys. Two optional fields say WHY the lane ended
+    where it did: ``fallback`` on a base underlay (a miss, a rate-limited request,
+    or a page that asked for no photograph) and ``matched`` on a reference underlay
+    (which search rung actually won). Without them a base underlay is
+    indistinguishable from a deliberate choice, and a lane that missed on every
+    good-faith brief read as one nobody had asked for.
+    """
     if not isinstance(raw, dict):
         return None
     pipeline = str(raw.get("pipeline") or "")
@@ -91,13 +100,31 @@ def _clean_trace_audit(raw: Any) -> dict[str, Any] | None:
         or raw.get("used") is not True
     ):
         return None
-    return {
+    clean: dict[str, Any] = {
         "pipeline": "trace",
         "underlay": underlay,
         "fragmentId": fragment_id,
         "query": str(raw.get("query") or "")[:500],
         "used": True,
     }
+    fallback = raw.get("fallback")
+    if underlay == "base" and isinstance(fallback, dict):
+        clean["fallback"] = {
+            "reason": str(fallback.get("reason") or "")[:40],
+            "attempts": [
+                {
+                    "query": str(a.get("query") or "")[:200],
+                    "words": int(a.get("words") or 0),
+                    "outcome": str(a.get("outcome") or "")[:40],
+                }
+                for a in (fallback.get("attempts") or [])[:4]
+                if isinstance(a, dict)
+            ],
+        }
+    matched = raw.get("matched")
+    if underlay == "reference" and isinstance(matched, str) and matched.strip():
+        clean["matched"] = matched[:200]
+    return clean
 
 
 def compile_backdrop(svg: str) -> str:

@@ -152,6 +152,177 @@ def test_search_reference_keeps_only_attribution_free_bitmaps(monkeypatch):
     assert [r["license"] for r in rows] == ["CC0", "Public domain"]
 
 
+def test_the_search_excludes_book_scans_and_samples_wide_enough_to_survive_filtering(
+    monkeypatch,
+):
+    """Both halves were measured against live Commons. Attribution-free material
+    there skews to scanned BOOKS: a four-word village query returned ten pages whose
+    every public-domain hit was a PDF or DjVu scan and whose every photograph was
+    CC BY-SA, so nothing survived and the lane degraded on a query that had matched.
+    `filetype:bitmap` removes the scans at the source, and sampling `_RAW_SEARCH_ROWS`
+    rather than a small multiple of the wanted count leaves the thin surviving
+    intersection something to be drawn from — the same single request either way
+    (widening it turned a night-castle query from zero usable rows into ten)."""
+    seen: list[str] = []
+
+    def fake(url: str) -> bytes:
+        seen.append(url)
+        return json.dumps({"query": {"pages": {}}}).encode("utf-8")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    search_reference("castle tower night")
+
+    assert len(seen) == 1
+    assert "filetype%3Abitmap" in seen[0], "book scans must be excluded at the source"
+    assert f"gsrlimit={phototrace._RAW_SEARCH_ROWS}" in seen[0]
+
+
+def test_the_search_ladder_widens_a_specific_brief_and_stops_at_the_first_hit(
+    monkeypatch,
+):
+    """Commons' generator search is CONJUNCTIVE, so a brief written the way the
+    illustrator is ASKED to write one matches nothing: measured live, the 18-word
+    river-mill brief returns zero search hits while its first two words return
+    several. A specific brief therefore failed BECAUSE it was specific, on every
+    good-faith attempt. The ladder buys recall in a bounded number of requests and
+    stops the moment something matches."""
+    brief = (
+        "medieval European river-mill village timber granary dirt road low stone "
+        "bridge dawn mist farmland distant walled town horizon"
+    )
+    hit = {"query": {"pages": {"1": {"title": "File:Mill.jpg", "imageinfo": [{
+        "mime": "image/jpeg", "thumburl": "https://upload.wikimedia.org/mill.jpg",
+        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Mill.jpg",
+        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+    }]}}}}
+    asked: list[str] = []
+
+    def fake(url: str) -> bytes:
+        asked.append(url)
+        # Only the narrowest rung matches, exactly as live Commons behaved.
+        body = hit if len(asked) == phototrace._MAX_SEARCH_STEPS else {"query": {"pages": {}}}
+        return json.dumps(body).encode("utf-8")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows, audit = phototrace.search_reference_ladder(brief)
+
+    assert [r["title"] for r in rows] == ["File:Mill.jpg"]
+    assert audit["reason"] == "ok"
+    assert audit["matched"] == "medieval European river-mill village", "the rung is named"
+    assert len(asked) == phototrace._MAX_SEARCH_STEPS, "bounded, and it used the bound"
+    assert [a["words"] for a in audit["attempts"]] == [18, 6, 4]
+
+
+def test_the_ladder_is_bounded_and_never_walks_every_truncation(monkeypatch):
+    """Wikimedia rate-limits a burst — an unbounded probe earned a 429 inside about
+    twenty calls, and a 429 is indistinguishable from an honest miss from the
+    caller's side. So recall is bought in a few steps, never by trying every
+    truncation of a long brief."""
+    calls: list[str] = []
+
+    def fake(url: str) -> bytes:
+        calls.append(url)
+        return json.dumps({"query": {"pages": {}}}).encode("utf-8")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows, audit = phototrace.search_reference_ladder(" ".join(f"w{i}" for i in range(40)))
+
+    assert rows == []
+    assert len(calls) <= phototrace._MAX_SEARCH_STEPS == 3
+    assert audit["reason"] == "no-candidates"
+
+
+def test_a_rate_limited_search_is_not_filed_as_a_world_without_photographs(monkeypatch):
+    """`search-failed` and `no-candidates` are different facts and the receipt must
+    not merge them: one says try again, the other says this subject has no
+    attribution-free photograph. The old code returned `[]` for both."""
+    def boom(url: str) -> bytes:
+        raise OSError("HTTP Error 429: Too Many Requests")
+
+    monkeypatch.setattr(phototrace, "_FETCH", boom)
+    rows, audit = phototrace.search_reference_ladder("castle tower night")
+
+    assert rows == []
+    assert audit["reason"] == "search-failed"
+    assert all(a["outcome"] == "search-failed" for a in audit["attempts"])
+
+
+def test_a_rephotographed_document_is_not_a_reference_photograph():
+    """Widening the search surfaced this: a live castle query returned two
+    handwritten letters ABOVE the one actual castle, and taking the first fetchable
+    candidate would have traced a page of handwriting as the place — worse than the
+    procedural base, because it is confidently wrong rather than merely plain.
+    Neither letter carried a document CATEGORY; what named them was the description,
+    which opened "Manuscript letter". Both fields are judged, with the real metadata
+    shapes below copied from those files."""
+    letter = {
+        "Categories": {"value": (
+            "PD US expired|Images from NPGallery|Frances (Appleton) Longfellow to "
+            "Emmeline (Austin) Wadsworth, 1840s"
+        )},
+        "ObjectName": {"value": "Frances (Appleton) Longfellow to Emmeline Wadsworth"},
+        "ImageDescription": {"value": "<p>Manuscript letter</p>\n<p>Archives Number: 1011</p>"},
+    }
+    castle = {
+        "Categories": {"value": (
+            "CC-Zero|Urquhart Castle|Flickr images reviewed by FlickreviewR 2|"
+            "Digitally manipulated photographs with artistic effects"
+        )},
+        "ObjectName": {"value": "Urquhart Castle on Loch Ness"},
+        "ImageDescription": {"value": "<p>The castle above the loch at dusk.</p>"},
+    }
+    assert phototrace._is_document(letter) is True
+    assert phototrace._is_document(castle) is False
+
+
+def test_the_search_itself_drops_a_rephotographed_document(monkeypatch):
+    """Pins the CALL SITE, not just the predicate: a document that ranks above the
+    real subject must never reach the caller, because the caller traces the FIRST
+    candidate that fetches."""
+    payload = {"query": {"pages": {
+        "1": {"title": "File:Letter.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/letter.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Letter.jpg",
+            "extmetadata": {
+                "LicenseShortName": {"value": "Public domain"},
+                "ImageDescription": {"value": "<p>Manuscript letter</p>"},
+            },
+        }]},
+        "2": {"title": "File:Castle.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/castle.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Castle.jpg",
+            "extmetadata": {
+                "LicenseShortName": {"value": "CC0"},
+                "ImageDescription": {"value": "<p>The castle above the loch.</p>"},
+            },
+        }]},
+    }}}
+    monkeypatch.setattr(
+        phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8")
+    )
+
+    rows = search_reference("castle tower night stone")
+
+    assert [r["title"] for r in rows] == ["File:Castle.jpg"]
+
+
+def test_an_incidental_word_deep_in_a_caption_keeps_a_real_photograph():
+    """Only the LEAD of the description names the object, so a photograph whose
+    caption mentions a document further down is still a photograph. Judging the
+    whole caption would drop real scenes."""
+    photo = {
+        "Categories": {"value": "CC-Zero|Castles in Wales"},
+        "ObjectName": {"value": "Gate tower at dawn"},
+        "ImageDescription": {"value": (
+            "<p>The gate tower seen from the causeway at first light.</p>" + "x" * 200
+            + " carved letters above the arch record the mason's name"
+        )},
+    }
+    assert phototrace._is_document(photo) is False
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -366,6 +537,9 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
         "fragmentId": out["fragmentId"],
         "query": "stone bridge",
         "used": True,
+        # Which search rung won. A brief that only ever matches after widening is
+        # then visible as a brief to rewrite rather than a silent success.
+        "matched": "stone bridge",
     }
     assert TraceStore(data, run_id).load(1) is None, "trace cleared after publication"
 
@@ -514,6 +688,17 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
         "fragmentId": out["fragmentId"],
         "query": "zombie at the door",
         "used": True,
+        # A base underlay now says WHY, so the fallback is never mistaken for a
+        # deliberate choice: this run searched, was answered, and nothing survived.
+        # One attempt, not three: every rung of a four-word brief truncates to the
+        # same words, and a repeated request would only spend the rate limit.
+        "fallback": {
+            "reason": "no-candidates",
+            "attempts": [
+                {"query": "zombie at the door", "words": 4,
+                 "outcome": "no-candidates"},
+            ],
+        },
     }
 
 
