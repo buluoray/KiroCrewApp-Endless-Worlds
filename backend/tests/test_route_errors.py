@@ -214,3 +214,119 @@ def test_live_and_chronicle_metadata_report_mobile_and_trace_audit(app):
     assert by_turn[1]["backdrop"]["trace"] is None
     assert by_turn[5]["backdrop"]["mobile"] is False
     assert by_turn[5]["backdrop"]["trace"] == trace
+
+
+# -- fail-soft boundaries found by the UX audit ----------------------------
+
+
+def test_a_stale_backdrop_request_stops_withholding_the_page(app):
+    """A brief with no age bound withheld a committed month forever when art
+    could never be produced. Past the ceiling the page is released; the art
+    degrades to arrives-whenever, like every other enrichment."""
+    import time as _time
+
+    run_id = app["store"].create_run(
+        {"turn": 2, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 2},
+    )
+    app["store"].request_backdrop(run_id, turn=2, brief="LANE: motif\ngold arches")
+
+    assert routes_mod._backdrop_is_pending(app["ctx"], app["store"], run_id) is True
+
+    app["store"].update_backdrop_request(
+        run_id, askedAt=_time.time() - (routes_mod._BACKDROP_STALE_SECS + 60)
+    )
+    assert routes_mod._backdrop_is_pending(app["ctx"], app["store"], run_id) is False
+
+
+def test_backdrop_recovery_stops_after_the_narrator_cycle_budget(app, monkeypatch):
+    """With the illustrator attempts spent and the narrator budget consumed,
+    recovery must RETURN rather than dispatch yet another narrator turn every
+    three minutes forever."""
+    import asyncio
+
+    run_id = app["store"].create_run(
+        {"turn": 2, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 2},
+    )
+    app["store"].request_backdrop(run_id, turn=2, brief="LANE: motif\ngold arches")
+    app["store"].update_backdrop_request(
+        run_id,
+        attempts=routes_mod._BACKDROP_ILLUSTRATOR_ATTEMPTS,
+        recoveryCycles=routes_mod._BACKDROP_NARRATOR_CYCLES,
+    )
+
+    asked = []
+    monkeypatch.setattr(
+        routes_mod, "ensure_narrator_slot_ex",
+        lambda *a, **k: asked.append(1) or (_ for _ in ()).throw(AssertionError),
+    )
+
+    asyncio.run(routes_mod._recover_backdrop(
+        app["ctx"], app["store"], object(), run_id,
+        painter_model="", narrator_model="", reasoning_effort="",
+    ))
+
+    assert not asked, "recovery kept dispatching past its narrator budget"
+
+
+def test_a_retried_opening_of_a_legacy_life_answers_its_real_first_month(app):
+    """A legacy life's chronicle starts with the turn-0 bridge record (empty
+    prose); the already-opened retry must answer with the committed turn's
+    prose, not chronicle[0]'s blank line."""
+    run_id = app["store"].create_run(
+        {"turn": 1, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    app["store"].append_turn(run_id, {"turn": 0, "prose": "", "events": []})
+    app["store"].append_turn(
+        run_id, {"turn": 1, "prose": "Born under the harvest moon.", "events": []}
+    )
+
+    import asyncio
+
+    req = FakeRequest(match={"run_id": run_id}, body={})
+    req.app = {"state": object()}
+    res = asyncio.run(routes_mod.open_run(req, app["ctx"]))
+
+    assert res.status == 200
+    out = body_of(res)
+    assert out["reason"] == "already"
+    assert out["prose"] == "Born under the harvest moon."
+
+
+def test_a_scene_vanishing_mid_read_answers_404_not_500(app, monkeypatch):
+    """`ledger.spec`/`ledger.nonce` can raise SceneLedgerError if the narrator
+    dismisses the scene between the mounted-set check and compilation; that
+    race must answer as gone, not escape as a 500."""
+    from scenes import SceneLedgerError
+
+    run_id = app["store"].create_run(
+        {"turn": 1, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    SceneLedger(app["data"], run_id).mount(
+        "map", {"elements": [{"kind": "text", "text": "safe"}]}
+    )
+
+    def vanished(self, scene_id):
+        raise SceneLedgerError("no record of that scene")
+
+    monkeypatch.setattr(SceneLedger, "spec", vanished)
+
+    res = call(
+        routes_mod.get_scene, app["ctx"],
+        match={"run_id": run_id, "scene_id": "map"},
+    )
+    assert res.status == 404
+
+
+def test_a_malformed_answers_payload_is_rejected_not_discarded(app):
+    """`answers` as a non-object used to be silently coerced to {} — the
+    player's own picks became "the world decides everything" with no signal."""
+    res = call(
+        routes_mod.create_run, app["ctx"],
+        body={"worldId": "any-world", "answers": "bogus"},
+    )
+    assert res.status == 422
+    assert body_of(res)["field"] == "answers"

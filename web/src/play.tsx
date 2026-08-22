@@ -6,6 +6,15 @@ import { api, API } from './api'
 /** How often a life mid-generation is re-read. A month takes tens of seconds, so
  *  this is about the page converging on its own rather than about latency. */
 const GENERATING_POLL_MS = 3000
+/** How many awaiting-only polls to allow before going quiet. Polling while a
+ *  life merely AWAITS its opening catches the `generating` mark that begin()
+ *  fires in the background — but that turn runs against the backend's 300s
+ *  OPENING_DEADLINE_SECS, so the mark can land well after begin() (agent spin-up,
+ *  a queued slot, a slow model). Capped just past that deadline (110 × 3s ≈ 330s)
+ *  so the arranging screen keeps refreshing for the whole opening; only a life
+ *  whose opening genuinely never landed falls through to the "continue birth"
+ *  button. A shorter cap stranded the arranging screen at 60s on slow openings. */
+const AWAITING_POLL_CAP = 110
 
 /**
  * What the player has armed or committed.
@@ -75,15 +84,23 @@ function EchoMark({
 }) {
   const [open, setOpen] = useState(false)
   const [kept, setKept] = useState(false)
+  const [keepFailed, setKeepFailed] = useState(false)
   const keep = async () => {
     // One tap keeps the WHOLE declared path (§8.2): the answering event and
     // the source it echoes, cited by their canonical ids.
-    await api.createKeepsake(runId, {
-      kind: 'echo',
-      title: e.title || e.sourceTitle,
-      cites: [e.sourceId, e.currentId].filter(Boolean),
-    })
-    setKept(true)
+    setKeepFailed(false)
+    try {
+      await api.createKeepsake(runId, {
+        kind: 'echo',
+        title: e.title || e.sourceTitle,
+        cites: [e.sourceId, e.currentId].filter(Boolean),
+      })
+      setKept(true)
+    } catch {
+      // A swallowed failure left the tap looking inert — no confirmation, no
+      // error. Say it failed so the (still enabled) button reads as retryable.
+      setKeepFailed(true)
+    }
   }
   return (
     <div className="ew-echo">
@@ -129,10 +146,13 @@ function EchoMark({
               className="ew-btn ew-btn-sm"
               type="button"
               disabled={kept}
-              onClick={() => void keep().catch(() => {})}
+              onClick={() => void keep()}
             >
               {mt(lang, kept ? 'star.keep.kept' : 'star.keep.this')}
             </button>
+            {keepFailed ? (
+              <span className="ew-meta" role="alert">{mt(lang, 'star.keep.failed')}</span>
+            ) : null}
             <button
               className="ew-btn ew-btn-sm"
               type="button"
@@ -219,8 +239,10 @@ export function PlayPage({
   // The ref distinguishes the first load of this run from subsequent refreshes.
   const loadedRun = useRef<string | null>(null)
   const [recapOpen, setRecapOpen] = useState(false)
-  // The same scroll signal the phone tab bar rides, so the two move together.
-  const barHidden = useScrollHide(readerBar)
+  // The same scroll signal the phone tab bar rides, so the two move together —
+  // including the 70px pin, without which the bar flickers on small swipes near
+  // the top of a page (the exact bug READER_BAR_PIN_PX was written to prevent).
+  const barHidden = useScrollHide(readerBar, READER_BAR_PIN_PX)
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
@@ -236,6 +258,27 @@ export function PlayPage({
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, v?.turn])
+  // The chronicle call above returns only the newest window of turns. Paging (or
+  // a star-map/echo jump) to a month outside it must FETCH that page — without
+  // this, the lookup below misses and the pager label says "Page 7" over the
+  // latest month's prose. Fetched pages merge into `chron` so re-visits are free.
+  const pageFetchRef = useRef(0)
+  useEffect(() => {
+    if (!v || viewTurn === null || viewTurn >= v.turn) return undefined
+    if (chron.some((c) => c.turn === viewTurn)) return undefined
+    if (pageFetchRef.current === viewTurn) return undefined
+    pageFetchRef.current = viewTurn
+    let alive = true
+    // `before` is exclusive, so viewTurn+1 lands the page ON viewTurn.
+    api.chronicle(runId, viewTurn + 1).then((c) => {
+      if (!alive) return
+      setChron((have) => {
+        const seen = new Set(have.map((p) => p.turn))
+        return [...have, ...c.turns.filter((p) => !seen.has(p.turn))]
+      })
+    }).catch(() => {}).finally(() => { pageFetchRef.current = 0 })
+    return () => { alive = false }
+  }, [runId, v, viewTurn, chron])
   // Advancing to a new turn, or paging to another one, returns to the top. Scroll
   // the app root (which starts at the "Endless Worlds" header) into view, NOT the
   // play column below it — aligning the column to the top scrolled the header out
@@ -287,7 +330,19 @@ export function PlayPage({
   useEffect(() => {
     if (!generating && !awaiting) return undefined
     if (generating) setPhrase((p) => p || pick('play.waiting'))
-    const timer = window.setInterval(() => { void load() }, GENERATING_POLL_MS)
+    // While a month is genuinely being written, poll until it lands. In the
+    // awaiting-only state the poll exists just to catch a late `generating`
+    // mark, so it stops after AWAITING_POLL_CAP idle cycles instead of
+    // draining a phone forever on a stranded birth screen.
+    let ticks = 0
+    const timer = window.setInterval(() => {
+      ticks += 1
+      if (!generating && ticks > AWAITING_POLL_CAP) {
+        window.clearInterval(timer)
+        return
+      }
+      void load()
+    }, GENERATING_POLL_MS)
     return () => window.clearInterval(timer)
   }, [generating, awaiting, load])
 
@@ -333,9 +388,16 @@ export function PlayPage({
   // and display-only scenes (a map, a ledger) that stay visible — including after
   // they are answered — until the narrator dismisses them. The order is never
   // re-sorted: moving a frame in the DOM reloads it.
+  //
+  // Keyed by CONTENT, not by reference: each 3s poll returns fresh objects, and
+  // pushing a new array ref into root state every poll re-rendered the whole
+  // shell for the length of a generation. Same guard on panels and the backdrop
+  // below.
+  const scenesSig = JSON.stringify(v?.scenes ?? [])
   useEffect(() => {
     onScenes(v?.scenes ?? [])
-  }, [v, onScenes])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenesSig, onScenes])
 
   // Drive the star map from the 星图 tab on a phone; the desktop control still owns
   // it when no external tab is wired (openStar undefined).
@@ -348,16 +410,22 @@ export function PlayPage({
     if (v && v.turn) onLiveTurn?.(v.turn)
   }, [v?.turn, onLiveTurn])
 
-  // Report panels upward so the phone bar can build region tabs from them.
+  // Report panels upward so the phone bar can build region tabs from them —
+  // content-keyed for the same reason as the scenes report above.
+  const panelsSig = JSON.stringify(v?.panels ?? [])
   useEffect(() => {
     onPanels?.(v?.panels ?? [])
-  }, [v?.panels, onPanels])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelsSig, onPanels])
 
   // Same reason as the scenes above: the backdrop is mounted by the root, so this
   // page reports which version the view is asking for rather than rendering it. It
   // follows the SHOWN page: the live turn's backdrop on the newest page, or the
   // backdrop that was effective on a past page (by `turn`) when the pager steps
   // back — so re-reading an old page restores its scene, not the latest one.
+  // Content-keyed like the scenes/panels reports: `v` is a fresh object every
+  // poll, but the backdrop only matters when its version/turn/variant move.
+  const backdropSig = JSON.stringify([v?.backdrop, v?.turn, viewTurn])
   useEffect(() => {
     if (!v) { onBackdrop(null); return }
     const latest = v.turn
@@ -376,7 +444,8 @@ export function PlayPage({
         version: past.version, turn: shown, mobile: past.mobile,
       } : (v.backdrop ?? null))
     }
-  }, [v, viewTurn, chron, onBackdrop])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backdropSig, chron, onBackdrop])
 
   const take = async (payload: { turn?: number; action?: string }, what: string) => {
     setTapped(what)
@@ -569,10 +638,13 @@ export function PlayPage({
   const latest = v.turn
   const shownTurn = viewTurn ?? latest
   const isLive = shownTurn >= latest
-  const shownProse = isLive
-    ? v.prose
-    : (chron.find((c) => c.turn === shownTurn)?.prose ?? v.prose)
-  const pastAction = isLive ? '' : (chron.find((c) => c.turn === shownTurn)?.action ?? '')
+  const shownEntry = isLive ? undefined : chron.find((c) => c.turn === shownTurn)
+  // A past page not yet in the window is BEING FETCHED (effect above): render a
+  // reading placeholder rather than the live turn's prose under a past page
+  // number, which silently lied about which month was on screen.
+  const pageLoading = !isLive && !shownEntry
+  const shownProse = isLive ? v.prose : (shownEntry?.prose ?? '')
+  const pastAction = isLive ? '' : (shownEntry?.action ?? '')
   // Forward when the turn number grew (a new page or a step right), back otherwise.
   const pageDir = shownTurn >= prevTurnRef.current ? 'fwd' : 'back'
   const pager = latest >= 1 ? (
@@ -695,7 +767,9 @@ export function PlayPage({
       ) : null}
 
       <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
-        <Prose text={shownProse} />
+        {pageLoading
+          ? <div className="ew-meta">{t('history.reading')}</div>
+          : <Prose text={shownProse} />}
       </div>
 
       {/* After the prose, never before it (design §8.1): the story is the
