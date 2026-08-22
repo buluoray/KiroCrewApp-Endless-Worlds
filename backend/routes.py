@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +187,21 @@ _BACKDROP_RECOVERY_TASKS: dict[str, asyncio.Task[None]] = {}
 _BACKDROP_ILLUSTRATOR_ATTEMPTS = 2
 _BACKDROP_ATTEMPT_SECS = 180.0
 _BACKDROP_POLL_SECS = 0.25
+#: How long one brief may withhold its committed page. Art is part of its page,
+#: but a request with no age bound violated the fail-soft principle in the one
+#: place it matters most: a pipeline that can never produce art (no renderer,
+#: an uncooperative narrator) withheld the committed month FOREVER, while every
+#: other enrichment drops with a warning. A replacement brief refreshes
+#: ``askedAt`` and buys a fresh window; the recovery-cycle cap below bounds how
+#: many silent narrator re-notifications can extend the wait. Mirrors
+#: ``turn.PENDING_STALE_SECS`` (900), the same judgement for the prose itself.
+_BACKDROP_STALE_SECS = 900.0
+#: How many silent narrator recovery cycles one brief may spend. Each cycle
+#: dispatches a real model turn every ``_BACKDROP_ATTEMPT_SECS``; without a cap
+#: an uncooperative narrator burned tokens indefinitely (the illustrator side
+#: has ``_BACKDROP_ILLUSTRATOR_ATTEMPTS``; this is its narrator twin). A
+#: replacement brief writes a fresh record, so real progress resets the budget.
+_BACKDROP_NARRATOR_CYCLES = 3
 
 
 def _backdrop_is_pending(
@@ -198,6 +214,12 @@ def _backdrop_is_pending(
     current = state or store.read_state(run_id)
     turn = int(current.get("turn") or 0)
     if int(request.get("turn") or 0) != turn:
+        return False
+    # A brief older than the ceiling stops withholding: the committed month is
+    # released and the art degrades to "arrives whenever it lands" — the same
+    # fail-soft every other enrichment already gets.
+    asked_at = request.get("askedAt")
+    if isinstance(asked_at, (int, float)) and time.time() - float(asked_at) > _BACKDROP_STALE_SECS:
         return False
     return BackdropStore(ctx.data_dir, run_id).exact(turn) is None
 
@@ -295,6 +317,17 @@ async def _recover_backdrop(
             # to simplify the direction or use the exceptional direct fallback.
             if state_obj is None:
                 return  # a later real gateway GET restarts the durable request
+            if int(request.get("recoveryCycles") or 0) >= _BACKDROP_NARRATOR_CYCLES:
+                # Budget spent: stop re-dispatching. The request stays for a
+                # possible late commit, and staleness releases the page.
+                logger.warning(
+                    "endless-worlds: backdrop recovery for %s/%s stopped after "
+                    "%s narrator cycles",
+                    run_id,
+                    turn,
+                    _BACKDROP_NARRATOR_CYCLES,
+                )
+                return
             request = store.update_backdrop_request(
                 run_id, fallbackAllowed=True, narratorNotified=True
             ) or request
@@ -331,7 +364,14 @@ async def _recover_backdrop(
                     break
                 await asyncio.sleep(_BACKDROP_POLL_SECS)
             else:
-                store.update_backdrop_request(run_id, narratorNotified=False)
+                # A silent stall: no art, no replacement brief. Spend one cycle
+                # of the narrator budget before asking again — this counter is
+                # what makes the loop above finite.
+                store.update_backdrop_request(
+                    run_id,
+                    narratorNotified=False,
+                    recoveryCycles=int(request.get("recoveryCycles") or 0) + 1,
+                )
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — GET can resume the durable request
@@ -1168,7 +1208,15 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
 
     store = _store(ctx)
     world_id = body.get("worldId")
-    answers = body.get("answers") if isinstance(body.get("answers"), dict) else {}
+    raw_answers = body.get("answers")
+    if raw_answers is not None and not isinstance(raw_answers, dict):
+        # Silently coercing this to {} turned "the player chose" into "the world
+        # decides everything" with no signal — the one drop the fail-soft rule
+        # says must be loud, because it is the player's own input.
+        return web.json_response(
+            {"field": "answers", "expected": "an object"}, status=422
+        )
+    answers = raw_answers if isinstance(raw_answers, dict) else {}
     style = str(body.get("style") or "")
     role = str(body.get("role") or "")
     language = body.get("language") if isinstance(body.get("language"), str) else None
@@ -1323,11 +1371,18 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
 
     if int(run_state.get("turn") or 0) >= 1:
         # Already opened. A retry after a slow success must not narrate a second
-        # first turn.
+        # first turn. Answer with the entry FOR the committed turn: a legacy
+        # life's chronicle starts with the turn-0 bridge record (empty prose),
+        # so ``chronicle[0]`` handed a retried opening a blank first month.
+        wanted = int(run_state["turn"])
         chronicle = store.read_chronicle(run_id)
+        entry = next(
+            (e for e in reversed(chronicle) if int(e.get("turn") or 0) == wanted),
+            {},
+        )
         return web.json_response({
-            "advanced": False, "reason": "already", "turn": int(run_state["turn"]),
-            "prose": chronicle[0].get("prose", "") if chronicle else "",
+            "advanced": False, "reason": "already", "turn": wanted,
+            "prose": entry.get("prose", ""),
             "state": run_state,
         })
 
@@ -1610,12 +1665,19 @@ async def get_scene(request: web.Request, ctx: AppContext) -> web.Response:
     if scene_id not in mounted:
         return web.json_response({"error": "no such scene"}, status=404)
 
-    spec = ledger.spec(scene_id)
+    # Read the spec and nonce under the same error contract as the mounted
+    # check: a scene dismissed or remounted between that check and here raises
+    # SceneLedgerError, which must answer as "gone" rather than escape as a 500.
+    try:
+        spec = ledger.spec(scene_id)
+        nonce = ledger.nonce(scene_id)
+    except SceneLedgerError:
+        return web.json_response({"error": "no such scene"}, status=404)
     try:
         html_text, cached = compile_cached(
             ctx.data_dir, run_id, scene_id, spec, state,
             bound_slice=bound_values(spec, state),
-            nonce=ledger.nonce(scene_id),
+            nonce=nonce,
         )
     except SceneSpecError as exc:
         # Named field, no partial mount: the page shows nothing rather than half
