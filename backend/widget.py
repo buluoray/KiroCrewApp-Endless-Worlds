@@ -343,6 +343,24 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         return f'<p class="n">{body}</p>' if kind == "note" else f"<p>{body}</p>"
 
     if kind == "keyvalue":
+        # Two shapes: a single {label, value}, OR a {pairs: [{key, value}, ...]}
+        # block of rows. The narrator naturally reaches for `pairs` for a labelled
+        # ledger (食物/饮水/药品 with several rows each); before this it was ignored
+        # and the element rendered one empty row, so the whole ledger looked blank.
+        pairs = el.get("pairs")
+        if isinstance(pairs, list) and pairs:
+            pair_rows: list[str] = []
+            for pn, pr in enumerate(pairs[:MAX_ROWS]):
+                if not isinstance(pr, dict):
+                    continue  # drop a malformed pair, keep the rest
+                k = _esc(_text(pr.get("key", pr.get("label")), f"{where}.pairs[{pn}].key", cap=64))
+                v = _esc(_text(pr.get("value"), f"{where}.pairs[{pn}].value"))
+                pair_rows.append(
+                    f'<div class="r"><div class="k">{k}</div><div class="v">{v}</div></div>'
+                )
+            if not pair_rows:
+                raise SceneSpecError(f"{where}.pairs", "at least one usable pair")
+            return "".join(pair_rows)
         label = _esc(_text(el.get("label"), f"{where}.label"))
         raw = _valued(el, where, bound, bind_failed, "value")
         value = _esc(_text(raw, f"{where}.value"))
