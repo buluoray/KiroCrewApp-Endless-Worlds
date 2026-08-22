@@ -545,6 +545,39 @@ def test_a_birth_does_not_borrow_the_phrase_for_a_passing_month():
     )
 
 
+def test_the_reading_row_stays_inside_the_app():
+    """The row is sticky, in the flow — and that is a correctness choice, not a style.
+
+    Fixed was tried and cost three regressions on a real device. It needs an offset
+    below the dashboard's chrome, and a reading taken before that chrome lays out puts
+    the row ON the menu. Worse, at body level ANY positive z-index outranks the whole
+    shell: the shell's own transform scopes the host chrome's z-index (45) to itself,
+    so a portalled row at 2 or at 30 painted over the host's menu, its furniture and
+    its top bar alike.
+
+    In the flow the row cannot leave the pane, cannot outrank the host, and needs no
+    measured number — so this test pins the absence of all three.
+    """
+    css = styles()
+    assert re.search(r"\.ew-topbar-float\s*\{[^}]*position:\s*sticky", css), (
+        "the row left the flow again, where it can cover the host's own chrome"
+    )
+    assert "ew-topbar-fixed" not in css, "the fixed variant is back"
+    assert "--ew-chrome-h" not in css, (
+        "an offset below the host's chrome is back, and it is the value that goes stale"
+    )
+
+    play = module("play.tsx")
+    assert "createPortal" not in play, (
+        "the row is portalled again; at body level any positive z-index beats the shell"
+    )
+    assert "getBoundingClientRect" not in play, "the pane's top is measured again"
+    assert "ResizeObserver" not in play, "a stale observer is back"
+    assert "ew-topbar-slot" not in play, (
+        "a slot only exists to replace flow the row gave up; in the flow it is dead"
+    )
+
+
 def test_the_reading_bar_is_pinned_at_both_ends_of_the_page():
     """A 40px threshold let the bar slide away before the reader had passed the text
     it sits over, and a swipe back down slid it in again, so a small gesture near the
@@ -572,64 +605,3 @@ def test_the_reading_bar_is_pinned_at_both_ends_of_the_page():
     )
 
 
-def test_the_reading_bar_holds_the_top_through_a_bounce():
-    """Sticky pins inside the SCROLLPORT, so a pane rubber-banding past its own top
-    carried the row down and left it below a band of bare canvas. The row is fixed to
-    the pane's measured top edge instead, and the bounce itself is left alone — it
-    belongs to the dashboard's pane, not to this app, and switching it off cost the
-    bottom bar its only way back at the end of a page.
-
-    Two things this pins beyond `position: fixed`: the row is PORTALLED (fixed
-    resolves against a transformed ancestor in the dashboard shell, not the viewport),
-    and the scroll container is DISCOVERED rather than named, since a hardcoded
-    selector fails silently the day the shell changes shape.
-    """
-    play = module("play.tsx")
-    assert "ew-topbar-fixed" in play, "the row is no longer held at the pane's top"
-    assert "createPortal" in play and "document.body" in play, (
-        "a fixed row inside the shell resolves against a transformed ancestor, so it "
-        "must be portalled"
-    )
-    assert "querySelector('main')" not in play and 'querySelector("main")' not in play, (
-        "the scroll container must be discovered, not hardcoded to the host's DOM"
-    )
-    assert "overflowY" in play, "the walk-up never inspects what actually scrolls"
-    assert "getBoundingClientRect().top" in play, "the pane's top edge is never measured"
-    # The row leaves the flow, so something must hold its place or the world's name
-    # slides under it — and that height is measured, never assumed.
-    assert "ew-topbar-slot" in play, "nothing holds the row's place in the flow"
-    assert "offsetHeight" in play, "the slot's height is assumed rather than measured"
-
-    css = styles()
-    assert re.search(r"\.ew-topbar-fixed\s*\{[^}]*position:\s*fixed", css), (
-        "the row is not fixed, so a bounce still carries it off the top"
-    )
-    # And the app must not reach onto the host to stop the bounce.
-    assert "overscroll-behavior" not in css, (
-        "the pane's bounce is not this app's to remove"
-    )
-
-
-def test_the_pane_top_is_re_read_not_trusted_once():
-    """One reading at mount is not enough, and the failure is silent.
-
-    The row is fixed to the pane's top edge. A single early read can land while the
-    dashboard's own chrome has not been laid out: the pane's top is still 0, the row
-    is placed there, and when the chrome appears and pushes the pane down the row
-    stays — sitting ON TOP of the host's menu. A ResizeObserver does not catch it
-    either, because the pane's size never changed, only its position.
-
-    So the reading is repeated on the frames after mount and on every scroll frame,
-    where it is a cheap no-op that recovers any layout shift the observers cannot see.
-    """
-    play = module("play.tsx")
-    assert "requestAnimationFrame(() => requestAnimationFrame(measure))" in play, (
-        "nothing re-reads the pane's top on the frames after mount, so a chrome that "
-        "lays out late leaves the row over the host's menu"
-    )
-    assert "addEventListener('scroll', remeasure, true)" in play, (
-        "a layout shift with no resize and no scroll listener is unrecoverable"
-    )
-    # Coalesced, or a scroll turns into one layout read per event.
-    assert "if (queued) return" in play, "the re-read is not coalesced to one per frame"
-    assert "cancelAnimationFrame" in play, "the queued frame outlives the component"

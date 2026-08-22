@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 
 import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
 import { api, API } from './api'
@@ -225,65 +224,6 @@ export function PlayPage({
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
-  // Where the pane's top edge is, and how tall the row actually is. Both are
-  // measured rather than assumed: the top must survive a chrome of unknown height,
-  // and the slot must match the row exactly or the title slides under it.
-  //
-  // The measurement must SELF-CORRECT, which one reading at mount does not. A single
-  // early read can land while the dashboard's own chrome has not been laid out yet:
-  // the pane's top is still 0, the row is placed there, and then the chrome appears
-  // and pushes the pane down — leaving the row sitting ON TOP of the host's menu with
-  // nothing to notice. A ResizeObserver does not save it either, because the pane's
-  // SIZE never changed; only its position did. So it is re-read on the frames after
-  // mount, on resize and rotation, and once per scroll frame — where it is a no-op
-  // that costs a rect read and is the thing that recovers any layout shift the
-  // observers cannot see.
-  const barRef = useRef<HTMLDivElement>(null)
-  const barSlotRef = useRef<HTMLDivElement>(null)
-  const [paneTop, setPaneTop] = useState(0)
-  const [slotH, setSlotH] = useState(READER_BAR_PIN_PX)
-  useEffect(() => {
-    if (!readerBar) return undefined
-    // The scroll container is DISCOVERED, not named: hardcoding the dashboard's own
-    // element breaks silently the day the shell changes shape, and the only symptom
-    // is the bar drifting again.
-    let node: HTMLElement | null = barSlotRef.current?.parentElement ?? null
-    while (node) {
-      const flow = getComputedStyle(node).overflowY
-      if (flow === 'auto' || flow === 'scroll') break
-      node = node.parentElement
-    }
-    const measure = () => {
-      const top = node ? node.getBoundingClientRect().top : 0
-      setPaneTop(Math.max(0, Math.round(top)))
-      const h = barRef.current?.offsetHeight
-      if (h) setSlotH(h)
-    }
-    // Coalesced to one read per frame: `scroll` fires far faster than layout changes.
-    let queued = 0
-    const remeasure = () => {
-      if (queued) return
-      queued = requestAnimationFrame(() => { queued = 0; measure() })
-    }
-    measure()
-    // The next two frames catch a chrome that lays out after this effect runs, which
-    // is the case that put the row over the host's menu.
-    const settle = requestAnimationFrame(() => requestAnimationFrame(measure))
-    window.addEventListener('resize', remeasure)
-    window.addEventListener('orientationchange', remeasure)
-    window.addEventListener('scroll', remeasure, true)
-    const ro = new ResizeObserver(remeasure)
-    if (node) ro.observe(node)
-    if (barRef.current) ro.observe(barRef.current)
-    return () => {
-      cancelAnimationFrame(settle)
-      if (queued) cancelAnimationFrame(queued)
-      window.removeEventListener('resize', remeasure)
-      window.removeEventListener('orientationchange', remeasure)
-      window.removeEventListener('scroll', remeasure, true)
-      ro.disconnect()
-    }
-  }, [readerBar])
 
   const [chron, setChron] = useState<PastTurn[]>([])
   useEffect(() => {
@@ -1062,31 +1002,32 @@ export function PlayPage({
           }}
         />
       ) : null}
-      {/* One row at the top of the page, where a reader looks for "back" and for
-          which page they are on. On a phone it is FIXED to the pane's top edge rather
-          than sticky: sticky pins inside the scrollport, so a pane rubber-banding past
-          its own top carried the bar down with it and left it under a band of bare
-          canvas. Fixed keeps it at the top through the bounce, and the bounce itself is
-          left alone — it belongs to the dashboard's pane, not to this app.
-          Portalled because `position: fixed` resolves against a transformed ancestor
-          in the dashboard shell, not the viewport. `paneTop` is the pane's own top
-          edge, which does not move when its CONTENT is overscrolled. */}
-      {readerBar ? <div className="ew-topbar-slot" ref={barSlotRef} style={{ height: slotH }} /> : null}
-      {readerBar ? createPortal((
-        <div
-          className={'ew-topbar ew-topbar-fixed' + (barHidden ? ' ew-topbar-hidden' : '')}
-          style={{ top: `${paneTop}px` }}
-          ref={barRef}
-        >
-          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-          {pager}
-        </div>
-      ), document.body) : (
-        <div className="ew-topbar">
-          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-          {pager}
-        </div>
-      )}
+      {/* One row at the top of the page, where a reader looks for "back" and for which
+          page they are on. On a phone it STICKS to the top of the reading pane and gets
+          out of the way while you read downward, returning on the first upward swipe.
+          Sticky, in the flow — not fixed at a measured offset. Fixed cost three real
+          regressions on a real device and bought one gesture-time artifact: it needs an
+          offset below the host's chrome that goes stale (a reading taken before that
+          chrome lays out puts the row ON the menu), and at body level ANY positive
+          z-index outranks the whole dashboard shell, because the shell's transform
+          makes its own chrome's z-index local to it. In the flow none of that can
+          happen: the row cannot leave the pane, cannot outrank the host, and needs no
+          number at all.
+          What it gives up is staying put while the pane rubber-bands past its own top,
+          since a sticky row is pinned inside the SCROLLPORT and travels with it. That
+          bounce belongs to the pane, and switching it off (the only in-app way to hold
+          the row through it) took the bottom bar's only way back at the end of a
+          page. */}
+      <div
+        className={
+          'ew-topbar'
+          + (readerBar ? ' ew-topbar-float' : '')
+          + (readerBar && barHidden ? ' ew-topbar-hidden' : '')
+        }
+      >
+        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        {pager}
+      </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
         // the story readable. The next successful poll clears it (M0.5).

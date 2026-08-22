@@ -1407,34 +1407,31 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 .ew-tabbar-hidden { transform: translateY(96px); }
 
-/* The phone's reading controls, held at the pane's top edge.
-   FIXED, not sticky: sticky pins inside the scrollport, so a pane rubber-banding past
-   its own top carried the row down with it and left it below a band of bare canvas —
-   the one place it must never leave. Fixed rides out the bounce, and the bounce is
-   left to the dashboard's pane rather than switched off, since it is not this app's
-   to remove. `top` is set inline from the measured pane edge.
-   They belong at the top, but a row that only lives at the top of the DOCUMENT is a
-   full swipe away at the foot of a long month — so it rides the scroll: away while
-   reading downward, back on the first upward swipe, and pinned at both ends of the
-   page where hiding uncovers nothing.
-   Near-opaque is wrong here (a black slab over the world's own art); frosted lets the
-   page's colour through and the blur is what separates the prose sliding underneath,
-   so a hairline is the only edge needed. */
-.ew-topbar-fixed {
-  position: fixed; left: 0; right: 0; z-index: 30;
+/* The phone's reading controls, stuck to the top of the reading pane.
+   In the FLOW on purpose. A fixed row needs an offset below the dashboard's chrome
+   which goes stale — a reading taken before that chrome lays out puts the row ON its
+   menu — and at body level ANY positive z-index outranks the whole shell, because the
+   shell's transform scopes the host chrome's own z-index to itself. Both were measured
+   on a real device: the row covered the host's menu, its furniture, and its top bar.
+   Sticky can do none of that. It never leaves the pane, never outranks the host, needs
+   no number, and holds its place with no slot.
+   They ride the scroll — away while reading downward, back on the first upward swipe,
+   pinned at both ends of the page where hiding uncovers nothing.
+   Frosted rather than a black slab, since the world's own art sits behind it; the blur
+   is what separates the prose sliding underneath, so a hairline is the only edge. */
+.ew-topbar-float {
+  position: sticky; top: 0; z-index: 2;
+  margin: 0 calc(-1 * var(--ew-gutter, 16px)) 10px;
   padding: 8px var(--ew-gutter, 16px);
   background: rgba(8, 9, 18, .52);
   backdrop-filter: blur(16px) saturate(1.15);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   transition: transform .28s ease, opacity .28s ease;
 }
-/* Holds the row's place in the flow, sized from the row's measured height so the
-   world's name can never slide under it. */
-.ew-topbar-slot { flex: none; }
 /* Slides UP out of the pane, far enough to take its hairline with it. */
 .ew-topbar-hidden { transform: translateY(-115%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
-  .ew-topbar-fixed { transition: none; }
+  .ew-topbar-float { transition: none; }
 }
 .ew-tab {
   flex: 1; display: flex; flex-direction: column; align-items: center;
