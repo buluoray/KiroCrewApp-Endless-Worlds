@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 
 import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
 import { api, API } from './api'
@@ -992,27 +991,23 @@ export function PlayPage({
           }}
         />
       ) : null}
-      {/* On a phone these same two controls ride at the foot of the screen instead
-          (see `readerBar`), so rendering both would put the pager on screen twice. */}
-      {readerBar ? null : (
-        <div className="ew-topbar">
-          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-          {pager}
-        </div>
-      )}
-      {readerBar ? createPortal(
-        // Portalled for the same reason the tab bar is: `position: fixed` resolves
-        // against a transformed ancestor in the dashboard shell, not the viewport.
-        // Hidden on scroll-down and brought back on scroll-up by the SAME signal the
-        // tab bar uses, so one upward swipe returns every control at once — which is
-        // the point: at the bottom of a long month, paging on used to mean scrolling
-        // all the way back to the top.
-        <div className={`ew-readerbar${barHidden ? ' ew-readerbar-hidden' : ''}`}>
-          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-          {pager}
-        </div>,
-        document.body,
-      ) : null}
+      {/* One row, in one place: the top of the page, where a reader looks for "back"
+          and for which page they are on. On a phone it STICKS there and gets out of
+          the way while you read downward, returning on the first upward swipe — which
+          is what makes paging on possible from the foot of a long month without
+          scrolling all the way back up. Sticky rather than fixed: it needs no portal,
+          cannot be captured by a transformed ancestor, and settles under the
+          dashboard's own chrome instead of over it. */}
+      <div
+        className={
+          'ew-topbar'
+          + (readerBar ? ' ew-topbar-float' : '')
+          + (readerBar && barHidden ? ' ew-topbar-hidden' : '')
+        }
+      >
+        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        {pager}
+      </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
         // the story readable. The next successful poll clears it (M0.5).
