@@ -250,8 +250,9 @@ def test_search_candidates_photo_lane_lists_openverse_before_commons(monkeypatch
                     "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]}}}}).encode("utf-8")
         raise AssertionError(url)
     monkeypatch.setattr(phototrace, "_FETCH", fake)
-    rows = search_candidates("village", "photo")
+    rows, audit = search_candidates("village", "photo")
     assert [r["title"] for r in rows] == ["OV", "File:C.jpg"]
+    assert audit["reason"] == "ok" and audit["matched"] == "village"
 
 
 def test_search_candidates_art_lane_uses_the_met(monkeypatch):
@@ -265,8 +266,231 @@ def test_search_candidates_art_lane_uses_the_met(monkeypatch):
         raise AssertionError(url)
     monkeypatch.delenv("SI_API_KEY", raising=False)
     monkeypatch.setattr(phototrace, "_FETCH", fake)
-    rows = search_candidates("angel", "art")
+    rows, audit = search_candidates("angel", "art")
     assert [r["title"] for r in rows] == ["Met art"]
+    assert audit["reason"] == "ok"
+
+
+# -- recall: the ladder, the sample, and what is not a photograph ---------
+
+
+def test_the_commons_search_excludes_book_scans_and_samples_wide(monkeypatch):
+    """Measured live: Commons' attribution-free material skews to scanned BOOKS. A
+    four-word village query returned ten pages whose every public-domain hit was a
+    PDF or DjVu scan and whose every actual photograph was CC BY-SA, so nothing
+    survived the gates on a query that HAD matched. `filetype:bitmap` removes the
+    scans at the source and the sample is wide enough for the thin surviving
+    intersection — the same single request either way."""
+    seen: list[str] = []
+
+    def fake(url: str) -> bytes:
+        seen.append(url)
+        return json.dumps({"query": {"pages": {}}}).encode("utf-8")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    search_reference("castle tower night")
+
+    assert len(seen) == 1
+    assert "filetype%3Abitmap" in seen[0]
+    assert f"gsrlimit={phototrace._RAW_SEARCH_ROWS}" in seen[0]
+
+
+def test_the_ladder_widens_a_specific_brief_and_stops_at_the_first_rung(monkeypatch):
+    """Both backends match CONJUNCTIVELY, so a brief written the way the Illustrator
+    is ASKED to write one matches nothing: measured live, the 18-word river-mill
+    brief returns zero Commons hits while its first two words return several. The
+    ladder buys recall in a bounded number of rungs and stops at the first that
+    matches."""
+    brief = (
+        "medieval European river-mill village timber granary dirt road low stone "
+        "bridge dawn mist farmland distant walled town horizon"
+    )
+    asked: list[str] = []
+
+    def fake(url: str) -> bytes:
+        asked.append(url)
+        # Only the narrowest rung matches, and only on the second source, exactly as
+        # live Commons behaved for this brief.
+        if "api.php" in url and "granary" not in url and "timber" not in url:
+            return json.dumps({"query": {"pages": {"1": {"title": "File:Mill.jpg",
+                "imageinfo": [{"mime": "image/jpeg",
+                    "thumburl": "https://upload.wikimedia.org/mill.jpg",
+                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Mill.jpg",
+                    "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]}}}}).encode()
+        return json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows, audit = search_candidates(brief, "photo")
+
+    assert [r["title"] for r in rows] == ["File:Mill.jpg"]
+    assert audit["reason"] == "ok"
+    assert audit["matched"] == "medieval European river-mill village", "the rung is named"
+    # Front words first, floored at four: never a two-word rung, which measured out
+    # as an amphora and a manuscript page standing in for a river-mill village.
+    assert {len(a["query"].split()) for a in audit["attempts"]} == {18, 6, 4}
+
+
+def test_a_rephotographed_document_is_not_a_reference_photograph():
+    """Widening the search surfaced this: a live castle query returned two
+    handwritten letters ABOVE the one real castle, and the caller traces the FIRST
+    candidate that fetches — so it would have traced a page of handwriting as the
+    place. Neither letter carried a document CATEGORY; what named them was the
+    description, which opened "Manuscript letter". The real metadata shapes are
+    copied from those files."""
+    assert phototrace._looks_like_document(
+        "PD US expired|Images from NPGallery",
+        "Frances (Appleton) Longfellow to Emmeline Wadsworth",
+        phototrace._description_lead("<p>Manuscript letter</p>\n<p>Archives 1011</p>"),
+    ) is True
+    assert phototrace._looks_like_document(
+        "CC-Zero|Urquhart Castle|Flickr images reviewed by FlickreviewR 2",
+        "Urquhart Castle on Loch Ness",
+        phototrace._description_lead("<p>The castle above the loch at dusk.</p>"),
+    ) is False
+    # Only the LEAD of a description names the object, so an incidental mention
+    # further down still keeps a real photograph.
+    assert phototrace._looks_like_document(
+        "CC-Zero|Castles in Wales", "Gate tower at dawn",
+        phototrace._description_lead(
+            "<p>The gate tower from the causeway.</p>" + "x" * 200
+            + " carved letters above the arch record the mason's name"
+        ),
+    ) is False
+
+
+def test_the_search_itself_drops_a_document_that_outranks_the_subject(monkeypatch):
+    """Pins the CALL SITE, not just the predicate."""
+    payload = {"query": {"pages": {
+        "1": {"title": "File:Letter.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/letter.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Letter.jpg",
+            "extmetadata": {"LicenseShortName": {"value": "Public domain"},
+                            "ImageDescription": {"value": "<p>Manuscript letter</p>"}},
+        }]},
+        "2": {"title": "File:Castle.jpg", "imageinfo": [{
+            "mime": "image/jpeg",
+            "thumburl": "https://upload.wikimedia.org/castle.jpg",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Castle.jpg",
+            "extmetadata": {"LicenseShortName": {"value": "CC0"},
+                            "ImageDescription": {"value": "<p>The castle.</p>"}},
+        }]},
+    }}}
+    monkeypatch.setattr(
+        phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8")
+    )
+    assert [r["title"] for r in search_reference("castle")] == ["File:Castle.jpg"]
+
+
+# -- cost: stop early, and remember a miss --------------------------------
+
+
+def test_a_satisfied_lane_does_not_pay_for_the_next_source(monkeypatch):
+    """The loop used to query EVERY source even with enough candidates in hand, so a
+    photo query always cost two requests. Wikimedia rate-limits a burst, and the
+    second request buys candidates nobody reaches."""
+    asked: list[str] = []
+
+    def fake(url: str) -> bytes:
+        asked.append(url)
+        if "openverse" in url:
+            return json.dumps({"results": [
+                {"title": f"OV{i}", "license": "cc0",
+                 "thumbnail": f"https://api.openverse.org/v1/images/{i}/thumb/",
+                 "foreign_landing_url": "x"} for i in range(3)
+            ]}).encode("utf-8")
+        raise AssertionError(f"commons must not be asked: {url}")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    rows, audit = search_candidates("castle tower night", "photo", limit=3)
+
+    assert len(rows) == 3
+    assert len(asked) == 1, "one request, not one per source"
+    assert [a["source"] for a in audit["attempts"]] == ["openverse"]
+
+
+def test_a_source_that_answered_with_nothing_is_not_asked_again(tmp_path, monkeypatch):
+    """The miss cache: a subject with no attribution-free photograph is discovered
+    once, not once per page. Keyed per SOURCE, because Openverse missing while
+    Commons hits is the normal case."""
+    calls: list[str] = []
+
+    def fake(url: str) -> bytes:
+        calls.append(url)
+        return json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8")
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake)
+    cache = phototrace.MissCache(tmp_path)
+
+    first, audit1 = search_candidates("a windmill on a salt flat", "photo", misses=cache)
+    assert first == [] and audit1["reason"] == "no-candidates"
+    spent = len(calls)
+    assert spent > 0
+
+    second, audit2 = search_candidates("a windmill on a salt flat", "photo", misses=cache)
+    assert second == []
+    assert len(calls) == spent, "a known miss must not spend a request"
+    assert {a["outcome"] for a in audit2["attempts"]} == {"cached-miss"}
+    # A conjunctive match does not depend on word ORDER, so the same words in
+    # another order are the same negative fact and hit the same entry. This holds
+    # per query; the LADDER is deliberately order-dependent (it keeps front words,
+    # which carry the subject), so a reordered brief still explores its own rungs.
+    assert cache.missed("commons", "salt flat windmill a on a")
+    assert cache.missed("openverse", "FLAT  salt  a on  windmill a")
+
+
+def test_a_rate_limited_search_is_never_cached_as_a_world_without_photographs(
+    tmp_path, monkeypatch
+):
+    """The distinction the whole cache rests on. One 429 would otherwise mark a
+    subject imageless for a fortnight."""
+    def boom(url: str) -> bytes:
+        raise OSError("HTTP Error 429: Too Many Requests")
+
+    monkeypatch.setattr(phototrace, "_FETCH", boom)
+    cache = phototrace.MissCache(tmp_path)
+    rows, audit = search_candidates("castle tower night", "photo", misses=cache)
+
+    assert rows == []
+    assert audit["reason"] == "search-failed", "not a statement about the subject"
+    assert not cache.missed("openverse", "castle tower night")
+    assert not cache.missed("commons", "castle tower night")
+
+
+def test_a_recorded_miss_expires_and_does_not_outlive_a_filter_change(
+    tmp_path, monkeypatch
+):
+    """Two ways a negative stops being true: time (the corpora grow) and a change to
+    the gates that produced it. The second is the dangerous one — without the
+    fingerprint, fixing a filter would keep answering "no image" from a cache built
+    under the old rules, and the fix would look like it had not worked."""
+    clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(phototrace, "_NOW", lambda: clock["t"])
+    cache = phototrace.MissCache(tmp_path)
+    cache.record("commons", "a windmill on a salt flat")
+    assert cache.missed("commons", "a windmill on a salt flat")
+
+    clock["t"] += phototrace._MISS_TTL_SECS + 1
+    assert not cache.missed("commons", "a windmill on a salt flat"), "TTL expired"
+
+    clock["t"] = 1_000_000.0
+    cache.record("commons", "a windmill on a salt flat")
+    assert cache.missed("commons", "a windmill on a salt flat")
+    monkeypatch.setattr(phototrace, "_RAW_SEARCH_ROWS", phototrace._RAW_SEARCH_ROWS + 1)
+    assert not cache.missed("commons", "a windmill on a salt flat"), "config changed"
+
+
+def test_the_miss_cache_is_bounded_and_evicts_the_oldest(tmp_path, monkeypatch):
+    clock = {"t": 1.0}
+    monkeypatch.setattr(phototrace, "_NOW", lambda: clock["t"])
+    monkeypatch.setattr(phototrace, "_MISS_CACHE_CAP", 5)
+    cache = phototrace.MissCache(tmp_path)
+    for i in range(8):
+        clock["t"] += 1
+        cache.record("commons", f"subject {i}")
+    assert len(cache._read()) == 5
+    assert not cache.missed("commons", "subject 0"), "the oldest went first"
+    assert cache.missed("commons", "subject 7")
 
 
 @pytest.mark.parametrize(
@@ -488,6 +712,9 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
         "fragmentId": picked["fragmentId"],
         "query": "stone bridge",
         "used": True,
+        # Which ladder rung won. A brief that only matches after widening is then
+        # visible as a brief to rewrite rather than a silent success.
+        "matched": "stone bridge",
     }
     assert TraceStore(data, run_id).load(1) is None, "trace cleared after publication"
 
@@ -630,12 +857,19 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
     committed = BackdropStore(data, run_id).current()
     assert "etr-underlay" not in committed["markup"]
     assert committed["source"] is None
+    # A base underlay now says WHY, per source, so the fallback is never mistaken
+    # for a deliberate choice: both photo sources answered and held nothing usable.
+    fb = committed["trace"].pop("fallback")
     assert committed["trace"] == {
         "pipeline": "trace",
         "underlay": "base",
         "fragmentId": out["fragmentId"],
         "query": "zombie at the door",
         "used": True,
+    }
+    assert fb["reason"] == "no-candidates"
+    assert {(a["source"], a["outcome"]) for a in fb["attempts"]} == {
+        ("openverse", "no-candidates"), ("commons", "no-candidates"),
     }
 
 

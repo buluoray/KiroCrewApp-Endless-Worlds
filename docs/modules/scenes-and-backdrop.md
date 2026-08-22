@@ -166,6 +166,84 @@ sees is produced locally from a closed, code-owned vocabulary.
   durable `BackdropStore` history entry as the final SVG before the private trace
   is cleared, preserving provenance without requiring player-facing attribution UI.
 
+- **Recall: a specific brief used to match nothing, so the lane missed on every
+  good-faith attempt.** Both backends match CONJUNCTIVELY, and the Illustrator is
+  asked to write a `REFERENCE` line of concrete keywords — so the better the brief,
+  the more certainly it returned zero. Measured live: an 18-word river-mill brief
+  returns **0** hits on Commons *and* **0** on Openverse, while its first two words
+  return several. `search_candidates` therefore walks a bounded ladder — the full
+  query, then `_LADDER_RUNGS` truncations, front words first because a brief leads
+  with its subject and trails into atmosphere — and stops at the first rung that
+  matches, reporting which rung won.
+
+  The ladder **floors at four words**, and that floor is the judgement: two words
+  stop being about the subject (the river-mill brief's two-word rung matched an
+  amphora and a manuscript page), and an unrelated photograph traced *as the place*
+  is worse than the honest procedural base — confidently wrong rather than merely
+  plain. Below the floor the lane declines.
+
+  Two more gates were measured into place. Commons adds `filetype:bitmap` and
+  samples `_RAW_SEARCH_ROWS` rather than twice the wanted count, because its
+  attribution-free material skews to scanned BOOKS: a four-word village query
+  returned ten pages whose every public-domain hit was a PDF or DjVu scan and whose
+  every photograph was CC BY-SA, so nothing survived the gates on a query that HAD
+  matched — widening the same single request took a night-castle query from zero
+  usable rows to ten. And `_looks_like_document` drops a *rephotographed* document,
+  which no MIME gate can catch: a live castle query returned two handwritten letters
+  ABOVE the one real castle, as ordinary JPEGs, and the caller traces the FIRST
+  candidate that fetches. Neither letter carried a document category — what named
+  them was the description, which opened "Manuscript letter" — so the judgement
+  reads categories, object name, and only the description's LEAD
+  (`_DESCRIPTION_LEAD`), since an incidental "carved letters above the arch" further
+  down must not drop a real scene. Openverse and the Met expose only a title, so
+  that is what they pass.
+
+  **Openverse's own `category=photograph` filter is deliberately NOT used.** It
+  exists (`{digitized_artwork, photograph, illustration}`) and looks like the
+  structural version of the same gate, but the field is sparsely populated: measured
+  live, `gothic cathedral nave vaulted` returns 15 results plain and **0** with the
+  filter. It converts hits into misses, so the client-side gate stays.
+
+- **Cost: a source is asked once per subject, and only when it might answer.**
+  Wikimedia rate-limits a burst — an unbounded probe earned a 429 inside about
+  twenty calls — and every request also costs the player latency, so three
+  mechanisms bound them. The source loop STOPS once `limit` candidates are in hand
+  instead of always querying every source (it previously spent a Commons request
+  even when Openverse had already returned enough, buying candidates nobody would
+  reach). The ladder stops at the first rung that matches. And `MissCache` records
+  which `(source, query)` pairs answered with nothing usable, so a subject with no
+  attribution-free photograph is discovered once rather than once per page.
+
+  The cache is only safe because of three deliberate constraints:
+
+  1. **A `SearchUnavailable` is never recorded.** Every source used to collapse a
+     failed REQUEST and a genuine miss into `[]`; they are now different facts,
+     because one rate-limited minute would otherwise mark a subject imageless for a
+     fortnight.
+  2. **The key carries a `_search_fingerprint()`** over the license gate, format
+     gate, document gate, sample width and rungs. Changing any of them retires every
+     stale negative — without it, fixing a filter would keep answering "no image"
+     from a cache built under the old rules, and the fix would look like it had not
+     worked. This is the nastiest shape the feature could take.
+  3. **Entries expire (`_MISS_TTL_SECS`) and the file is capped
+     (`_MISS_CACHE_CAP`, oldest evicted).** The corpora grow, so "this subject has no
+     photograph" is true of a moment, not forever.
+
+  The key is a query's lowercased word SET, not its string: a conjunctive match does
+  not depend on word order, so the same words in another order are the same negative
+  fact. Per SOURCE rather than per query, because Openverse missing while Commons
+  hits is the normal case and a composite negative would throw that away.
+
+  Pinned by `test_the_ladder_widens_a_specific_brief_and_stops_at_the_first_rung`,
+  `test_the_commons_search_excludes_book_scans_and_samples_wide`,
+  `test_a_rephotographed_document_is_not_a_reference_photograph`,
+  `test_the_search_itself_drops_a_document_that_outranks_the_subject`,
+  `test_a_satisfied_lane_does_not_pay_for_the_next_source`,
+  `test_a_source_that_answered_with_nothing_is_not_asked_again`,
+  `test_a_rate_limited_search_is_never_cached_as_a_world_without_photographs`,
+  `test_a_recorded_miss_expires_and_does_not_outlive_a_filter_change`, and
+  `test_the_miss_cache_is_bounded_and_evicts_the_oldest`.
+
   The same photo is cover-cropped separately for desktop and mobile. The first
   attempt uses `(0.5, 0.5)` for both; if a preview clips decisive structure, the
   illustrator may spend its single retry on independent `desktopFocalX/Y` and
