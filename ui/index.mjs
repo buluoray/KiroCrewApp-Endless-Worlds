@@ -6079,16 +6079,8 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 				}
 			}) : null,
 			readerBar ? /* @__PURE__ */ jsx("div", { className: "ew-topbar-slot" }) : null,
-			readerBar ? createPortal(/* @__PURE__ */ jsxs("div", {
-				className: "ew-topbar ew-topbar-fixed" + (barHidden ? " ew-topbar-hidden" : ""),
-				children: [/* @__PURE__ */ jsx("button", {
-					className: "ew-back",
-					type: "button",
-					onClick: onBack,
-					children: t("play.back")
-				}), pager]
-			}), document.body) : /* @__PURE__ */ jsxs("div", {
-				className: "ew-topbar",
+			/* @__PURE__ */ jsxs("div", {
+				className: "ew-topbar" + (readerBar ? " ew-topbar-fixed" : "") + (readerBar && barHidden ? " ew-topbar-hidden" : ""),
 				children: [/* @__PURE__ */ jsx("button", {
 					className: "ew-back",
 					type: "button",
