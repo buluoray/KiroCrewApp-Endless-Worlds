@@ -87,6 +87,7 @@ from backdrop import (  # noqa: E402
 )
 from phototrace import (  # noqa: E402
     TRACE_CANDIDATE_COUNT,
+    MissCache,
     CandidateStore,
     TraceStore,
     build_underlay_fragment_bounded,
@@ -1914,8 +1915,12 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     )
 
     traced: list[dict[str, Any]] = []
+    search_audit: dict[str, Any] = {"reason": "no-query", "matched": "", "attempts": []}
     if query:
-        for candidate in search_candidates(query, lane):
+        candidates, search_audit = search_candidates(
+            query, lane, misses=MissCache(_DATA)
+        )
+        for candidate in candidates:
             try:
                 photo = fetch_photo(candidate["url"])
                 desktop = build_underlay_fragment_bounded(
@@ -1934,11 +1939,18 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             })
             if len(traced) >= TRACE_CANDIDATE_COUNT:
                 break
+        # Candidates existed and not one of them became an underlay — a different
+        # failure from "nothing matched", and the only one a wider search or a
+        # retry would not fix, so it must not be recorded as either.
+        if not traced and candidates:
+            search_audit = {**search_audit, "reason": "fetch-failed"}
 
     if traced:
         # Offer the choice: stash candidates and clear any stale active underlay so a
         # leftover from an earlier trace cannot be spliced before the Illustrator picks.
-        _candidate_store(run_id).save(turn=turn, query=query, candidates=traced)
+        _candidate_store(run_id).save(
+            turn=turn, query=query, candidates=traced, search=search_audit,
+        )
         _trace_store(run_id).clear()
         options = [
             {
@@ -1968,6 +1980,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     _candidate_store(run_id).clear()
     fragment_id = _trace_store(run_id).save(
         turn=turn, desktop=desktop, mobile=mobile, source=None, kind="base", query=query,
+        search=search_audit,
     )
     previews = _render_trace_previews(run_id, fragment_id, desktop, mobile)
     return {
@@ -2003,6 +2016,9 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
         turn=turn, desktop=chosen["desktop"], mobile=chosen["mobile"],
         source=chosen.get("source"), kind="reference",
         query=str(candidates.get("query") or ""),
+        # Carried from the trace that produced these candidates, so the committed
+        # receipt can name which ladder rung actually matched.
+        search=candidates.get("search"),
     )
     _candidate_store(run_id).clear()
     return {
@@ -2059,6 +2075,17 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
             "query": str(trace.get("query") or ""),
             "used": True,
         }
+        search = trace.get("search")
+        if isinstance(search, dict):
+            if kind == "base":
+                trace_audit["fallback"] = {
+                    "reason": str(search.get("reason") or "no-candidates"),
+                    "attempts": search.get("attempts") or [],
+                }
+            elif search.get("matched"):
+                # Which ladder rung won, so a brief that only ever matches after
+                # widening is visible as a brief to rewrite, not a silent success.
+                trace_audit["matched"] = str(search.get("matched"))
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     version = _backdrop_store(run_id).set(
