@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any
 
 from aiohttp import web
-
 from kiro_crew.apps.context import AppContext
 from kiro_crew.apps.route_registry import AppRoute
 
@@ -94,20 +93,20 @@ async def get_star(request: web.Request, ctx: AppContext) -> web.Response:
         return web.json_response({"error": "no such life"}, status=404)
 
     chronicle = store.read_chronicle(run_id)
-    keepsake_rows = KeepsakeStore(ctx.data_dir, run_id).list()
-    payload = memory_graph.star_payload(
-        memory_graph.build_index(chronicle), keepsake_rows
-    )
+    keepsake_rows = KeepsakeStore(ctx.data_dir, run_id).entries()
+    payload = memory_graph.star_payload(memory_graph.build_index(chronicle), keepsake_rows)
 
     row = _life_row(store, run_id) or {}
     view = row.get("memoryView")
-    return web.json_response({
-        **payload,
-        "runId": run_id,
-        "turn": int(state.get("turn") or 0),
-        "keepsakes": keepsake_rows,
-        "view": view if view in MEMORY_VIEWS else "life",
-    })
+    return web.json_response(
+        {
+            **payload,
+            "runId": run_id,
+            "turn": int(state.get("turn") or 0),
+            "keepsakes": keepsake_rows,
+            "view": view if view in MEMORY_VIEWS else "life",
+        }
+    )
 
 
 async def set_memory_view(request: web.Request, ctx: AppContext) -> web.Response:
@@ -171,8 +170,7 @@ async def create_keepsake(request: web.Request, ctx: AppContext) -> web.Response
         ev = index["events"].get(cid)
         if ev is None or ev["disclosure"] != "known":
             return web.json_response(
-                {"field": "cites",
-                 "expected": f"a known event of this life, got {cid!r}"},
+                {"field": "cites", "expected": f"a known event of this life, got {cid!r}"},
                 status=422,
             )
 
@@ -181,9 +179,7 @@ async def create_keepsake(request: web.Request, ctx: AppContext) -> web.Response
     turn = body.get("turn")
     turn = turn if isinstance(turn, int) and not isinstance(turn, bool) else 0
     if kind == "excerpt":
-        entry = next(
-            (e for e in chronicle if int(e.get("turn") or 0) == turn), None
-        )
+        entry = next((e for e in chronicle if int(e.get("turn") or 0) == turn), None)
         if entry is None:
             return web.json_response(
                 {"field": "turn", "expected": "a turn this life has lived"},
@@ -201,7 +197,8 @@ async def create_keepsake(request: web.Request, ctx: AppContext) -> web.Response
             # Anchor the passage to that turn's own known events, so the
             # excerpt participates in the keepsake map instead of floating.
             cites = [
-                cid for cid, ev in index["events"].items()
+                cid
+                for cid, ev in index["events"].items()
                 if ev["turn"] == turn and ev["disclosure"] == "known"
             ]
 
@@ -225,9 +222,7 @@ async def create_keepsake(request: web.Request, ctx: AppContext) -> web.Response
             spoiler=bool(body.get("spoiler")),
         )
     except KeepsakeError as exc:
-        return web.json_response(
-            {"field": exc.field, "expected": exc.expected}, status=422
-        )
+        return web.json_response({"field": exc.field, "expected": exc.expected}, status=422)
     return web.json_response(kp)
 
 
@@ -248,9 +243,7 @@ async def update_keepsake(request: web.Request, ctx: AppContext) -> web.Response
             {k: body[k] for k in ("title", "thought", "spoiler") if k in body},
         )
     except KeepsakeError as exc:
-        return web.json_response(
-            {"field": exc.field, "expected": exc.expected}, status=422
-        )
+        return web.json_response({"field": exc.field, "expected": exc.expected}, status=422)
     if kp is None:
         return web.json_response({"error": "no such keepsake"}, status=404)
     return web.json_response(kp)
@@ -300,14 +293,13 @@ async def preview_story_card(request: web.Request, ctx: AppContext) -> web.Respo
     ended = int(state.get("turn") or 0) if state.get("ended") else 0
     try:
         card = build_draft(
-            index, kp,
+            index,
+            kp,
             ended_turn=ended,
             language=str(state.get("language") or "en"),
         )
     except StoryCardError as exc:
-        return web.json_response(
-            {"field": exc.field, "expected": exc.expected}, status=422
-        )
+        return web.json_response({"field": exc.field, "expected": exc.expected}, status=422)
     StoryCardStore(ctx.data_dir, run_id).put(card)
     return web.json_response({"card": card, "preview": resolve(card)})
 
@@ -329,9 +321,7 @@ async def edit_story_card(request: web.Request, ctx: AppContext) -> web.Response
     try:
         card = apply_edits(card, await _body(request))
     except StoryCardError as exc:
-        return web.json_response(
-            {"field": exc.field, "expected": exc.expected}, status=422
-        )
+        return web.json_response({"field": exc.field, "expected": exc.expected}, status=422)
     cards.put(card)
     return web.json_response({"card": card, "preview": resolve(card)})
 
@@ -366,9 +356,7 @@ async def export_story_card(request: web.Request, ctx: AppContext) -> web.Respon
         text=text,
         content_type=content_type.split(";")[0],
         charset="utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="story-card-{card_id}.{fmt}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="story-card-{card_id}.{fmt}"'},
     )
 
 
@@ -421,11 +409,13 @@ async def get_legacy_candidates(request: web.Request, ctx: AppContext) -> web.Re
             status=409,
         )
     index = memory_graph.build_index(store.read_chronicle(run_id))
-    return web.json_response({
-        "runId": run_id,
-        "worldId": state.get("worldId") or "",
-        "candidates": legacy_candidates(index),
-    })
+    return web.json_response(
+        {
+            "runId": run_id,
+            "worldId": state.get("worldId") or "",
+            "candidates": legacy_candidates(index),
+        }
+    )
 
 
 def memory_routes() -> list[AppRoute]:

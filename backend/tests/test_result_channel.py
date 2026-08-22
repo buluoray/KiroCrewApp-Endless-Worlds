@@ -133,9 +133,11 @@ def test_the_nonce_is_never_handed_to_the_narrator():
     import mcp_server as srv
 
     src = inspect.getsource(srv._mount_scene)
-    assert "nonce" not in src.replace("# The nonce is NOT returned", "").replace(
-        "# click could forge", ""
-    ) or "return {\"mounted\"" in src
+    assert (
+        "nonce"
+        not in src.replace("# The nonce is NOT returned", "").replace("# click could forge", "")
+        or 'return {"mounted"' in src
+    )
     # The tool result carries only the id.
     result_line = [ln for ln in src.splitlines() if "return {" in ln][0]
     assert "nonce" not in result_line

@@ -103,7 +103,8 @@ def test_compile_refuses_the_empty_and_the_oversized():
     with pytest.raises(BackdropError):
         compile_backdrop(
             '<svg xmlns="http://www.w3.org/2000/svg"><!--'
-            + "x" * (MAX_BACKDROP_BYTES + 1_000) + "--></svg>"
+            + "x" * (MAX_BACKDROP_BYTES + 1_000)
+            + "--></svg>"
         )
 
 
@@ -210,6 +211,7 @@ def _call(name, **args):
 
 def _submit_draft(data: Path, run_id: str, turn: int, markup: str, mobile: str):
     from kiro_crew.apps.app_storage import AppStorage
+
     from store import RunStore
 
     runs = RunStore(AppStorage("endless-worlds", data), data)
@@ -402,6 +404,7 @@ def test_an_xlink_attr_without_its_namespace_is_repaired_not_broken():
     out = compile_backdrop(art)
     assert "xmlns:xlink" in out
     import xml.etree.ElementTree as ET
+
     ET.fromstring(out)  # well-formed now — would raise before the fix
 
 
@@ -418,15 +421,15 @@ def test_backdrop_is_bound_to_the_turn_and_restores_per_page(tmp_path):
     b = BackdropStore(tmp_path, "r")
     b.set(OK_SVG, turn=1)
     v2 = b.set(OK_SVG, turn=5)
-    assert b.current()["version"] == v2      # latest (home / live page)
-    assert b.at(3)["version"] == 1           # persists from turn 1 until 5
+    assert b.current()["version"] == v2  # latest (home / live page)
+    assert b.at(3)["version"] == 1  # persists from turn 1 until 5
     assert b.at(5)["version"] == v2
-    assert b.at(0) is None                   # a page before any backdrop
+    assert b.at(0) is None  # a page before any backdrop
     assert b.version_at(2) == 1 and b.version_at(0) == 0
     b.clear(turn=7)
-    assert b.current() is None               # cleared from now on
-    assert b.at(6)["version"] == v2          # an earlier page keeps its scene
-    assert b.at(8) is None                   # after the clear
+    assert b.current() is None  # cleared from now on
+    assert b.at(6)["version"] == v2  # an earlier page keeps its scene
+    assert b.at(8) is None  # after the clear
 
 
 def test_a_second_backdrop_on_the_same_turn_replaces_that_pages_entry(tmp_path):
@@ -449,6 +452,7 @@ def test_exact_requires_art_committed_for_that_page(tmp_path):
 
 def test_successful_illustrator_commit_clears_the_waiting_request(data):
     from kiro_crew.apps.app_storage import AppStorage
+
     from store import RunStore
 
     run_id = "a" * 32
@@ -469,22 +473,24 @@ def test_successful_illustrator_commit_clears_the_waiting_request(data):
 
 def test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate(data):
     from kiro_crew.apps.app_storage import AppStorage
+
     from store import RunStore
 
     run_id = "b" * 32
     runs = RunStore(AppStorage("endless-worlds", data), data)
     runs.request_backdrop(run_id, turn=1, brief="a closed red gate")
 
-    refused = _call(
-        "endless_commit_fallback_backdrop", runId=run_id, turn=1, markup=_svg("#111")
-    )
+    refused = _call("endless_commit_fallback_backdrop", runId=run_id, turn=1, markup=_svg("#111"))
     assert refused["ok"] is False
     assert BackdropStore(data, run_id).exact(1) is None
 
     runs.update_backdrop_request(run_id, fallbackAllowed=True)
     accepted = _call(
-        "endless_commit_fallback_backdrop", runId=run_id, turn=1,
-        markup=_svg("#222"), mobile=_svg("#abc"),
+        "endless_commit_fallback_backdrop",
+        runId=run_id,
+        turn=1,
+        markup=_svg("#222"),
+        mobile=_svg("#abc"),
     )
     assert accepted["ok"] is True
     committed = BackdropStore(data, run_id).exact(1)

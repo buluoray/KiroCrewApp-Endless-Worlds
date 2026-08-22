@@ -56,9 +56,7 @@ def _python_code_only(src: str) -> str:
 
     spans: list[tuple[int, int]] = []
     for node in ast.walk(tree):
-        if not isinstance(
-            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-        ):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if not node.body:
             continue

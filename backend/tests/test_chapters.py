@@ -31,9 +31,10 @@ import pytest
 _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
-from chapters import PREAMBLE, ChapterError, bodies, brief, contents, read_chapter  # noqa: E402
 from srcguard import code_only  # noqa: E402
-from template import Chapter, TemplateError, parse_template  # noqa: E402
+
+from chapters import PREAMBLE, ChapterError, bodies, brief, contents, read_chapter  # noqa: E402
+from template import TemplateError, parse_template  # noqa: E402
 from world import read_world  # noqa: E402
 
 FLAGSHIP = _BACKEND.parent / "seeds" / "age-of-sword-and-flame.md"
@@ -138,9 +139,7 @@ def test_a_chapter_keeps_its_own_heading(pack):
     """A body arriving without its title reads as an excerpt from nowhere."""
     texts = bodies(pack.template)
     for chapter in pack.template.chapters:
-        assert texts[chapter.id].startswith(chapter.heading), (
-            f"{chapter.id} lost its heading"
-        )
+        assert texts[chapter.id].startswith(chapter.heading), f"{chapter.id} lost its heading"
 
 
 # ── a gate is law ───────────────────────────────────────────────────────────
@@ -183,15 +182,11 @@ def test_an_ungated_chapter_is_readable_without_being_briefed(pack):
     """The third kind, and the reason the brief is small: ordinary life is texture the
     narrator reaches for when a month touches it, not law it must hold at all times.
     """
-    on_request = [
-        c for c in pack.template.chapters if not c.always and c.when is None
-    ]
+    on_request = [c for c in pack.template.chapters if not c.always and c.when is None]
     assert on_request, "the pack declares nothing as available-on-request"
     body = read_chapter(pack.template, {"turn": 1}, on_request[0].id)
     assert body.strip()
-    assert body not in brief(pack.template), (
-        "a chapter meant to be fetched is already in the brief"
-    )
+    assert body not in brief(pack.template), "a chapter meant to be fetched is already in the brief"
 
 
 def test_asking_for_a_chapter_this_world_does_not_have_is_refused(pack):
@@ -233,9 +228,7 @@ def test_the_contents_is_not_sent_every_turn(pack):
     assert "if baseline is None:" in read, (
         "the contents is sent unconditionally; on a delta turn it should not be"
     )
-    assert "chaptersOpened" in read, (
-        "a delta turn never learns that the world opened a chapter"
-    )
+    assert "chaptersOpened" in read, "a delta turn never learns that the world opened a chapter"
 
 
 def test_a_chapter_the_world_just_opened_is_announced(pack):
@@ -341,21 +334,19 @@ def test_a_brief_that_is_most_of_the_book_is_reported(pack):
         pack.template,
         chapters=[replace(c, always=True, when=None) for c in pack.template.chapters],
     )
-    warnings = _chapter_warnings(
-        type(pack)(template=greedy), set()
-    )
+    warnings = _chapter_warnings(type(pack)(template=greedy), set())
     assert any("opening brief is" in w for w in warnings), (
         f"briefing the whole book drew no warning (threshold {BRIEF_SHARE_WARN}%)"
     )
 
     # And the real pack, which does choose, draws none.
     panel_paths = {
-        p for panel in pack.template.panels if panel.when is not None
+        p
+        for panel in pack.template.panels
+        if panel.when is not None
         for p in panel.when.referenced_paths()
     }
-    assert not any(
-        "opening brief is" in w for w in _chapter_warnings(pack, panel_paths)
-    )
+    assert not any("opening brief is" in w for w in _chapter_warnings(pack, panel_paths))
 
 
 def test_a_gate_on_a_flag_nothing_sets_is_reported(pack):

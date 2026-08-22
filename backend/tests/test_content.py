@@ -77,9 +77,7 @@ def test_every_keyword_at_a_route_call_site_exists_in_the_callee():
             sig = inspect.signature(target)
         except (TypeError, ValueError):  # pragma: no cover - builtins
             continue
-        if any(
-            p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        ):
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             continue  # **kwargs accepts anything
         for kw in node.keywords:
             if kw.arg is None:
@@ -121,9 +119,7 @@ def _string_literals(path: Path) -> list[tuple[int, str]]:
     docstrings = {
         id(node.body[0].value)
         for node in ast.walk(tree)
-        if isinstance(
-            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-        )
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
         and node.body
         and isinstance(node.body[0], ast.Expr)
         and isinstance(node.body[0].value, ast.Constant)
@@ -154,9 +150,7 @@ def test_no_prompt_module_carries_language_in_a_string_literal():
         for line, value in _string_literals(BACKEND / name):
             if CJK.search(value):
                 problems.append(f"{name}:{line}: {value[:60]!r}")
-    assert not problems, (
-        "language belongs in content/*.json, not in code:\n" + "\n".join(problems)
-    )
+    assert not problems, "language belongs in content/*.json, not in code:\n" + "\n".join(problems)
 
 
 def test_the_scan_would_catch_a_bare_separator():
@@ -194,8 +188,7 @@ def test_a_placeholder_missing_from_one_table_is_a_failure():
     first, second = LANGUAGES[0], LANGUAGES[1]
     for key in slots[first]:
         assert slots[first][key] == slots[second].get(key), (
-            f"{key} takes {slots[first][key]} in {first} but "
-            f"{slots[second].get(key)} in {second}"
+            f"{key} takes {slots[first][key]} in {first} but {slots[second].get(key)} in {second}"
         )
 
 

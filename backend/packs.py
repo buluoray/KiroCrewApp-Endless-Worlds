@@ -26,7 +26,8 @@ Two invariants shape everything below:
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from template import FIELD_PRIMITIVES
 from world import CONTRACT
@@ -57,7 +58,7 @@ def resolve_path(state: dict[str, Any], path: str) -> Any:
     if path == "state":
         return state
     if path.startswith("state."):
-        path = path[len("state."):]
+        path = path[len("state.") :]
     return _walk(state, [seg for seg in path.split(".") if seg])
 
 
@@ -147,13 +148,15 @@ def _render_one(
         as_ = entry.get("as") or entry.get("from") or primitive
         raw = resolve_path(state, str(entry.get("from") or ""))
         shaped = shape(str(primitive), raw, entry.get("options"))
-        fields.append({
-            "id": str(as_),
-            "label": str(as_),
-            "primitive": str(primitive),
-            "options": entry.get("options") or {},
-            **shaped,
-        })
+        fields.append(
+            {
+                "id": str(as_),
+                "label": str(as_),
+                "primitive": str(primitive),
+                "options": entry.get("options") or {},
+                **shaped,
+            }
+        )
 
     return {
         "id": str(pack_id),
@@ -203,13 +206,15 @@ def _degrade(pack: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
             raw = resolve_path(state, path)
         except Exception:  # noqa: BLE001 — degradation cannot itself fail
             raw = None
-        fields.append({
-            "id": path,
-            "label": _leaf(path),
-            "primitive": "field",
-            "kind": "gap" if raw is None else "field",
-            "value": "" if raw is None else _readable(raw),
-        })
+        fields.append(
+            {
+                "id": path,
+                "label": _leaf(path),
+                "primitive": "field",
+                "kind": "gap" if raw is None else "field",
+                "value": "" if raw is None else _readable(raw),
+            }
+        )
 
     return {
         "id": str(pack_id) if isinstance(pack_id, str) and pack_id else "pack",

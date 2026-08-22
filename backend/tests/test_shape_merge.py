@@ -23,7 +23,6 @@ the same shape under a different name.
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -33,6 +32,7 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
 from srcguard import code_only  # noqa: E402
+
 from view import _shape, build_play_view  # noqa: E402
 from world import read_world  # noqa: E402
 
@@ -45,7 +45,14 @@ DECLARED_KEYS = ("id", "label", "primitive", "options")
 
 #: Every primitive a world may declare.
 PRIMITIVES = (
-    "field", "stat", "rank", "people", "trend", "resource", "inventory", "threads",
+    "field",
+    "stat",
+    "rank",
+    "people",
+    "trend",
+    "resource",
+    "inventory",
+    "threads",
 )
 
 

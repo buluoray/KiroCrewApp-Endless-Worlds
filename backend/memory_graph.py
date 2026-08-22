@@ -76,42 +76,94 @@ DEFAULT_RELATION_CHANGE = "set"
 #: the vocabularies closed for every consumer WITHOUT costing the narrator a
 #: memory over a synonym: repair first, fall back to the DEFAULT_* above.
 _DISCLOSURE_WORDS: tuple[tuple[str, str], ...] = (
-    ("foreshadow", "foreshadowed"), ("portent", "foreshadowed"),
-    ("omen", "foreshadowed"), ("hint", "foreshadowed"), ("presage", "foreshadowed"),
-    ("rumour", "rumoured"), ("rumor", "rumoured"), ("hearsay", "rumoured"),
-    ("gossip", "rumoured"), ("whisper", "rumoured"),
-    ("hidden", "hidden"), ("secret", "hidden"), ("conceal", "hidden"),
-    ("private", "hidden"), ("unseen", "hidden"), ("unknown", "hidden"),
-    ("undisclosed", "hidden"), ("covert", "hidden"),
-    ("known", "known"), ("public", "known"), ("open", "known"),
-    ("witness", "known"), ("seen", "known"), ("told", "known"),
+    ("foreshadow", "foreshadowed"),
+    ("portent", "foreshadowed"),
+    ("omen", "foreshadowed"),
+    ("hint", "foreshadowed"),
+    ("presage", "foreshadowed"),
+    ("rumour", "rumoured"),
+    ("rumor", "rumoured"),
+    ("hearsay", "rumoured"),
+    ("gossip", "rumoured"),
+    ("whisper", "rumoured"),
+    ("hidden", "hidden"),
+    ("secret", "hidden"),
+    ("conceal", "hidden"),
+    ("private", "hidden"),
+    ("unseen", "hidden"),
+    ("unknown", "hidden"),
+    ("undisclosed", "hidden"),
+    ("covert", "hidden"),
+    ("known", "known"),
+    ("public", "known"),
+    ("open", "known"),
+    ("witness", "known"),
+    ("seen", "known"),
+    ("told", "known"),
 )
 _IMPORTANCE_WORDS: tuple[tuple[str, str], ...] = (
-    ("major", "major"), ("critical", "major"), ("pivotal", "major"),
-    ("huge", "major"), ("大", "major"),
-    ("minor", "minor"), ("small", "minor"), ("trivial", "minor"),
-    ("slight", "minor"), ("小", "minor"),
-    ("notable", "notable"), ("normal", "notable"), ("medium", "notable"),
-    ("moderate", "notable"), ("中", "notable"),
+    ("major", "major"),
+    ("critical", "major"),
+    ("pivotal", "major"),
+    ("huge", "major"),
+    ("大", "major"),
+    ("minor", "minor"),
+    ("small", "minor"),
+    ("trivial", "minor"),
+    ("slight", "minor"),
+    ("小", "minor"),
+    ("notable", "notable"),
+    ("normal", "notable"),
+    ("medium", "notable"),
+    ("moderate", "notable"),
+    ("中", "notable"),
 )
 _THREAD_EFFECT_WORDS: tuple[tuple[str, str], ...] = (
-    ("open", "opened"), ("start", "opened"), ("begin", "opened"),
-    ("create", "opened"), ("new", "opened"),
-    ("resolv", "resolved"), ("close", "resolved"), ("finish", "resolved"),
-    ("complete", "resolved"), ("settle", "resolved"), ("ended", "resolved"),
-    ("advance", "advanced"), ("progress", "advanced"), ("continue", "advanced"),
-    ("deepen", "advanced"), ("touch", "advanced"),
+    ("open", "opened"),
+    ("start", "opened"),
+    ("begin", "opened"),
+    ("create", "opened"),
+    ("new", "opened"),
+    ("resolv", "resolved"),
+    ("close", "resolved"),
+    ("finish", "resolved"),
+    ("complete", "resolved"),
+    ("settle", "resolved"),
+    ("ended", "resolved"),
+    ("advance", "advanced"),
+    ("progress", "advanced"),
+    ("continue", "advanced"),
+    ("deepen", "advanced"),
+    ("touch", "advanced"),
 )
 _RELATION_CHANGE_WORDS: tuple[tuple[str, str], ...] = (
-    ("increas", "increase"), ("rais", "increase"), ("rise", "increase"),
-    ("grow", "increase"), ("gain", "increase"), ("improve", "increase"),
-    ("strengthen", "increase"), ("deepen", "increase"), ("warm", "increase"),
-    ("decreas", "decrease"), ("lower", "decrease"), ("fall", "decrease"),
-    ("drop", "decrease"), ("lose", "decrease"), ("loss", "decrease"),
-    ("weaken", "decrease"), ("worsen", "decrease"), ("cool", "decrease"),
-    ("clear", "cleared"), ("sever", "cleared"), ("break", "cleared"),
-    ("broke", "cleared"), ("remove", "cleared"), ("cut", "cleared"),
-    ("set", "set"), ("establish", "set"), ("becom", "set"),
+    ("increas", "increase"),
+    ("rais", "increase"),
+    ("rise", "increase"),
+    ("grow", "increase"),
+    ("gain", "increase"),
+    ("improve", "increase"),
+    ("strengthen", "increase"),
+    ("deepen", "increase"),
+    ("warm", "increase"),
+    ("decreas", "decrease"),
+    ("lower", "decrease"),
+    ("fall", "decrease"),
+    ("drop", "decrease"),
+    ("lose", "decrease"),
+    ("loss", "decrease"),
+    ("weaken", "decrease"),
+    ("worsen", "decrease"),
+    ("cool", "decrease"),
+    ("clear", "cleared"),
+    ("sever", "cleared"),
+    ("break", "cleared"),
+    ("broke", "cleared"),
+    ("remove", "cleared"),
+    ("cut", "cleared"),
+    ("set", "set"),
+    ("establish", "set"),
+    ("becom", "set"),
 )
 
 #: The player is an entity every life has without declaring it.
@@ -182,8 +234,7 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
       ``echoedAt``  source event id → [turns that echoed it]
     """
     entities: dict[str, dict[str, Any]] = {
-        PLAYER: {"kind": "character", "name": PLAYER, "aliases": [], "summary": "",
-                 "firstTurn": 0},
+        PLAYER: {"kind": "character", "name": PLAYER, "aliases": [], "summary": "", "firstTurn": 0},
     }
     events: dict[str, dict[str, Any]] = {}
     threads: dict[str, dict[str, Any]] = {}
@@ -248,9 +299,7 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
             }
             for th in ev.get("threads") or []:
                 tid = str(th.get("id") or "")
-                rec = threads.setdefault(
-                    tid, {"opened": 0, "resolved": 0, "lastTouched": 0}
-                )
+                rec = threads.setdefault(tid, {"opened": 0, "resolved": 0, "lastTouched": 0})
                 effect = str(th.get("effect") or "")
                 # The FIRST record of a thread opens it, whatever the effect says.
                 # A narrator that advances a thread it never explicitly opened has
@@ -271,15 +320,17 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
             # kept as-is. Validation guaranteed one of the two holds.
             if reason and not is_event_id(reason):
                 reason = event_id(turn, reason)
-            relations.append({
-                "turn": turn,
-                "from": str(rel.get("from") or ""),
-                "type": str(rel.get("type") or ""),
-                "to": str(rel.get("to") or ""),
-                "change": str(rel.get("change") or ""),
-                "value": str(rel.get("value") or ""),
-                "reasonEvent": reason,
-            })
+            relations.append(
+                {
+                    "turn": turn,
+                    "from": str(rel.get("from") or ""),
+                    "type": str(rel.get("type") or ""),
+                    "to": str(rel.get("to") or ""),
+                    "change": str(rel.get("change") or ""),
+                    "value": str(rel.get("value") or ""),
+                    "reasonEvent": reason,
+                }
+            )
 
     return {
         "entities": entities,
@@ -304,12 +355,23 @@ def project_relations(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
         key = f"{rec['from']}\u241f{rec['type']}\u241f{rec['to']}"
         slot = out.setdefault(
             key,
-            {"from": rec["from"], "type": rec["type"], "to": rec["to"],
-             "level": 0, "value": "", "active": True, "changes": []},
+            {
+                "from": rec["from"],
+                "type": rec["type"],
+                "to": rec["to"],
+                "level": 0,
+                "value": "",
+                "active": True,
+                "changes": [],
+            },
         )
         slot["changes"].append(
-            {"turn": rec["turn"], "change": rec["change"],
-             "value": rec["value"], "reasonEvent": rec["reasonEvent"]}
+            {
+                "turn": rec["turn"],
+                "change": rec["change"],
+                "value": rec["value"],
+                "reasonEvent": rec["reasonEvent"],
+            }
         )
         change = rec["change"]
         if change == "increase":
@@ -497,8 +559,11 @@ def sanitize_memory(
         # ("character-lin-shuang"), which only the graph's own knowledge can spot.
         eid = _repair_ref(raw_id, lambda c: c in declared or c in index["entities"])
         if not eid:
-            drop(f"{path}.id", "a non-empty id without ':' or spaces",
-                 f"Dropped an entity at {path}: its id has nothing usable in it.")
+            drop(
+                f"{path}.id",
+                "a non-empty id without ':' or spaces",
+                f"Dropped an entity at {path}: its id has nothing usable in it.",
+            )
             continue
         if eid != raw_id:
             repaired(f"{path}.id", f"read {raw_id!r} as {eid!r}")
@@ -527,8 +592,12 @@ def sanitize_memory(
             for alias in ent.get("aliases") or []:
                 if str(alias) not in aliases:
                     aliases.append(str(alias))
-            merged = {**prior, **{k: v for k, v in ent.items() if v}, "id": eid,
-                      "kind": prior["kind"]}
+            merged = {
+                **prior,
+                **{k: v for k, v in ent.items() if v},
+                "id": eid,
+                "kind": prior["kind"],
+            }
             if aliases:
                 merged["aliases"] = aliases
             kept_entities[slot] = merged
@@ -589,9 +658,12 @@ def sanitize_memory(
         title = str(ev.get("title") or "").strip()
         summary = str(ev.get("summary") or "").strip()
         if not title and not summary:
-            drop(f"{path}.title", "a short title",
-                 f"Dropped the event at {path}: it has neither a title nor a summary, "
-                 "so there is nothing to record.")
+            drop(
+                f"{path}.title",
+                "a short title",
+                f"Dropped the event at {path}: it has neither a title nor a summary, "
+                "so there is nothing to record.",
+            )
             continue
         if not title:
             title = _lead(summary)
@@ -645,10 +717,12 @@ def sanitize_memory(
             if resolve(ref):
                 good_parts.append(ref)
             else:
-                drop(ppath,
-                     f"a known entity or one declared this turn, got {str(part)!r}",
-                     f"Kept the event at {path} but dropped its unknown participant "
-                     f"{str(part)!r}; re-declare that entity to record it.")
+                drop(
+                    ppath,
+                    f"a known entity or one declared this turn, got {str(part)!r}",
+                    f"Kept the event at {path} but dropped its unknown participant "
+                    f"{str(part)!r}; re-declare that entity to record it.",
+                )
         if "participants" in clean_ev:
             clean_ev["participants"] = good_parts
 
@@ -660,10 +734,16 @@ def sanitize_memory(
                 clean_ev["place"] = place
             else:
                 clean_ev.pop("place", None)
-                reason = (f"{place} is a {pkind}, not a place" if pkind
-                          else f"a known place, got {raw_place!r}")
-                drop(f"{path}.place", reason,
-                     f"Kept the event at {path} but dropped its place ({reason}).")
+                reason = (
+                    f"{place} is a {pkind}, not a place"
+                    if pkind
+                    else f"a known place, got {raw_place!r}"
+                )
+                drop(
+                    f"{path}.place",
+                    reason,
+                    f"Kept the event at {path} but dropped its place ({reason}).",
+                )
 
         good_threads: list[Any] = []
         for j, th in enumerate(ev.get("threads") or []):
@@ -671,13 +751,14 @@ def sanitize_memory(
             raw_tid = str(th.get("id") or "")
             tid = raw_tid
             if not _id_ok(tid):
-                tid = _repair_ref(
-                    raw_tid, lambda c: c in known_threads or c in opened_threads
-                )
+                tid = _repair_ref(raw_tid, lambda c: c in known_threads or c in opened_threads)
                 if not tid:
-                    drop(f"{tpath}.id", "a non-empty id without ':' or spaces",
-                         f"Kept the event at {path} but dropped a thread whose id has "
-                         "nothing usable in it.")
+                    drop(
+                        f"{tpath}.id",
+                        "a non-empty id without ':' or spaces",
+                        f"Kept the event at {path} but dropped a thread whose id has "
+                        "nothing usable in it.",
+                    )
                     continue
                 repaired(f"{tpath}.id", f"read {raw_tid!r} as {tid!r}")
 
@@ -704,11 +785,13 @@ def sanitize_memory(
                     repaired(f"{path}.echoes[{j}]", f"read {str(target)!r} as {cid!r}")
                 good_echoes.append(cid)
             else:
-                drop(f"{path}.echoes[{j}]",
-                     "the canonical id of an event that exists in this life "
-                     f"(like event-3-some-key), got {target!r}",
-                     f"Kept the event at {path} but dropped an echo to {str(target)!r}, which "
-                     "names no event in this life.")
+                drop(
+                    f"{path}.echoes[{j}]",
+                    "the canonical id of an event that exists in this life "
+                    f"(like event-3-some-key), got {target!r}",
+                    f"Kept the event at {path} but dropped an echo to {str(target)!r}, which "
+                    "names no event in this life.",
+                )
         if "echoes" in clean_ev:
             clean_ev["echoes"] = good_echoes
 
@@ -721,11 +804,12 @@ def sanitize_memory(
                 clean_ev["corrects"] = cid
             else:
                 clean_ev.pop("corrects", None)
-                drop(f"{path}.corrects",
-                     f"the canonical id of an event that exists in this life, got "
-                     f"{raw_corrects!r}",
-                     f"Kept the event at {path} but dropped a correction of "
-                     f"{raw_corrects!r}, which names no event in this life.")
+                drop(
+                    f"{path}.corrects",
+                    f"the canonical id of an event that exists in this life, got {raw_corrects!r}",
+                    f"Kept the event at {path} but dropped a correction of "
+                    f"{raw_corrects!r}, which names no event in this life.",
+                )
 
         kept_keys.add(key)
         kept_events.append(clean_ev)
@@ -744,14 +828,18 @@ def sanitize_memory(
             clean_rel[end] = ref
         if bad_end is not None:
             ref = str(rel.get(bad_end) or "")
-            drop(f"{path}.{bad_end}",
-                 f"a known entity or one declared this turn, got {ref!r}",
-                 f"Dropped the relation at {path}: its {bad_end} {ref!r} does not resolve.")
+            drop(
+                f"{path}.{bad_end}",
+                f"a known entity or one declared this turn, got {ref!r}",
+                f"Dropped the relation at {path}: its {bad_end} {ref!r} does not resolve.",
+            )
             continue
         if not str(rel.get("type") or "").strip():
-            drop(f"{path}.type", "the relation's name, in the world's own word",
-                 f"Dropped the relation at {path}: it has no type, so there is no edge "
-                 "to record.")
+            drop(
+                f"{path}.type",
+                "the relation's name, in the world's own word",
+                f"Dropped the relation at {path}: it has no type, so there is no edge to record.",
+            )
             continue
         change = str(rel.get("change") or "")
         if change not in RELATION_CHANGES:
@@ -773,11 +861,13 @@ def sanitize_memory(
                 # The reason was always optional, so a dangling one costs the reason,
                 # never the relation the narrator actually declared.
                 clean_rel.pop("reasonEvent", None)
-                drop(f"{path}.reasonEvent",
-                     "an event key declared this turn, or the canonical id of an existing "
-                     f"event, got {raw_reason!r}",
-                     f"Kept the relation at {path} but dropped its reasonEvent "
-                     f"{raw_reason!r}, which names no event kept this turn or in this life.")
+                drop(
+                    f"{path}.reasonEvent",
+                    "an event key declared this turn, or the canonical id of an existing "
+                    f"event, got {raw_reason!r}",
+                    f"Kept the relation at {path} but dropped its reasonEvent "
+                    f"{raw_reason!r}, which names no event kept this turn or in this life.",
+                )
         kept_relations.append(clean_rel)
 
     clean: dict[str, Any] = {}
@@ -823,8 +913,7 @@ def recall_candidates(
             recent_entities.update(th["id"] for th in ev["threads"])
 
     open_threads = {
-        tid for tid, rec in index["threads"].items()
-        if rec["opened"] and not rec["resolved"]
+        tid for tid, rec in index["threads"].items() if rec["opened"] and not rec["resolved"]
     }
     action_lower = action.lower()
 
@@ -905,20 +994,21 @@ def recall_candidates(
 
     out: list[dict[str, Any]] = []
     for _, _, cid, ev, reasons in picked:
-        out.append({
-            "id": cid,
-            "turn": ev["turn"],
-            "title": ev["title"],
-            "summary": ev["summary"],
-            "entities": sorted(
-                (set(ev["participants"]) | ({ev["place"]} if ev["place"] else set()))
-                - {PLAYER}
-            ),
-            "threads": [th["id"] for th in ev["threads"]],
-            "action": ev["action"],
-            "reasons": reasons,
-            "lastEchoedTurn": last_echo(cid),
-        })
+        out.append(
+            {
+                "id": cid,
+                "turn": ev["turn"],
+                "title": ev["title"],
+                "summary": ev["summary"],
+                "entities": sorted(
+                    (set(ev["participants"]) | ({ev["place"]} if ev["place"] else set())) - {PLAYER}
+                ),
+                "threads": [th["id"] for th in ev["threads"]],
+                "action": ev["action"],
+                "reasons": reasons,
+                "lastEchoedTurn": last_echo(cid),
+            }
+        )
     return out
 
 
@@ -937,14 +1027,23 @@ def event_neighbourhood(index: dict[str, Any], ids: list[str]) -> list[dict[str,
         refs = set(ev["participants"]) | {th["id"] for th in ev["threads"]}
         if ev["place"]:
             refs.add(ev["place"])
-        out.append({
-            **ev,
-            "involved": [
-                {"id": r, **{k: v for k, v in index["entities"][r].items()
-                             if k in ("kind", "name", "aliases")}}
-                for r in sorted(refs) if r in index["entities"]
-            ],
-        })
+        out.append(
+            {
+                **ev,
+                "involved": [
+                    {
+                        "id": r,
+                        **{
+                            k: v
+                            for k, v in index["entities"][r].items()
+                            if k in ("kind", "name", "aliases")
+                        },
+                    }
+                    for r in sorted(refs)
+                    if r in index["entities"]
+                ],
+            }
+        )
     return out
 
 
@@ -981,9 +1080,9 @@ def life_centre(index: dict[str, Any]) -> dict[str, Any]:
     """
     events = index["events"]
     entities = index["entities"]
-    referenced = any(
-        PLAYER in ev["participants"] for ev in events.values()
-    ) or any(PLAYER in (rec["from"], rec["to"]) for rec in index["relations"])
+    referenced = any(PLAYER in ev["participants"] for ev in events.values()) or any(
+        PLAYER in (rec["from"], rec["to"]) for rec in index["relations"]
+    )
 
     chosen = PLAYER
     if not referenced and events:
@@ -1034,8 +1133,7 @@ def star_payload(
 
     echo_sources: set[str] = set(index["echoedAt"])
     open_threads = {
-        tid for tid, rec in index["threads"].items()
-        if rec["opened"] and not rec["resolved"]
+        tid for tid, rec in index["threads"].items() if rec["opened"] and not rec["resolved"]
     }
 
     picked_events: dict[str, dict[str, Any]] = {}
@@ -1065,20 +1163,31 @@ def star_payload(
     nodes: list[dict[str, Any]] = []
     for cid in sorted(picked_events, key=lambda c: (picked_events[c]["turn"], c)):
         ev = picked_events[cid]
-        nodes.append({
-            "id": cid, "kind": "event", "turn": ev["turn"],
-            "title": ev["title"], "summary": ev["summary"],
-            "importance": ev["importance"], "action": ev["action"],
-        })
+        nodes.append(
+            {
+                "id": cid,
+                "kind": "event",
+                "turn": ev["turn"],
+                "title": ev["title"],
+                "summary": ev["summary"],
+                "importance": ev["importance"],
+                "action": ev["action"],
+            }
+        )
     for eid in sorted(picked_entities - {PLAYER}):
         ent = index["entities"].get(eid)
         if ent is None:
             continue
-        nodes.append({
-            "id": eid, "kind": ent["kind"], "name": ent["name"],
-            "aliases": ent["aliases"], "summary": ent["summary"],
-            "open": eid in open_threads if ent["kind"] == "thread" else None,
-        })
+        nodes.append(
+            {
+                "id": eid,
+                "kind": ent["kind"],
+                "name": ent["name"],
+                "aliases": ent["aliases"],
+                "summary": ent["summary"],
+                "open": eid in open_threads if ent["kind"] == "thread" else None,
+            }
+        )
 
     edges: list[dict[str, Any]] = []
     for cid, ev in sorted(picked_events.items(), key=lambda kv: (kv[1]["turn"], kv[0])):
@@ -1096,21 +1205,25 @@ def star_payload(
 
     projection = project_relations(index)
     relations = [
-        {"from": slot["from"], "type": slot["type"], "to": slot["to"],
-         "level": slot["level"], "value": slot["value"],
-         # The evidence trail (§4.3): the current reading must be able to open
-         # into the events that produced it. Only sources the player may see.
-         "sources": [c["reasonEvent"] for c in slot["changes"]
-                     if c["reasonEvent"] in picked_events]}
+        {
+            "from": slot["from"],
+            "type": slot["type"],
+            "to": slot["to"],
+            "level": slot["level"],
+            "value": slot["value"],
+            # The evidence trail (§4.3): the current reading must be able to open
+            # into the events that produced it. Only sources the player may see.
+            "sources": [
+                c["reasonEvent"] for c in slot["changes"] if c["reasonEvent"] in picked_events
+            ],
+        }
         for slot in projection.values()
         if slot["active"]
         and slot["from"] in (picked_entities | {PLAYER})
         and slot["to"] in (picked_entities | {PLAYER})
     ]
 
-    return {"nodes": nodes, "edges": edges, "relations": relations,
-            "centre": life_centre(index)}
-
+    return {"nodes": nodes, "edges": edges, "relations": relations, "centre": life_centre(index)}
 
 
 # ── the player-facing echo markers (design §7.3, §8.1) ──────────────────
@@ -1140,16 +1253,18 @@ def echo_markers(chronicle: list[dict[str, Any]]) -> list[dict[str, Any]]:
             src = index["events"].get(str(target))
             if src is None or src["disclosure"] != "known":
                 continue
-            out.append({
-                "sourceId": src["id"],
-                "sourceTurn": src["turn"],
-                "sourceTitle": src["title"],
-                "sourceSummary": src["summary"],
-                "sourceAction": src["action"],
-                # The answering event's own canonical id, so "collect this echo"
-                # can cite the WHOLE path (§8.2) rather than only its source.
-                "currentId": event_id(turn, str(ev.get("key") or "")),
-                "title": str(ev.get("title") or ""),
-                "summary": str(ev.get("summary") or ""),
-            })
+            out.append(
+                {
+                    "sourceId": src["id"],
+                    "sourceTurn": src["turn"],
+                    "sourceTitle": src["title"],
+                    "sourceSummary": src["summary"],
+                    "sourceAction": src["action"],
+                    # The answering event's own canonical id, so "collect this echo"
+                    # can cite the WHOLE path (§8.2) rather than only its source.
+                    "currentId": event_id(turn, str(ev.get("key") or "")),
+                    "title": str(ev.get("title") or ""),
+                    "summary": str(ev.get("summary") or ""),
+                }
+            )
     return out

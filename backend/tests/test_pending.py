@@ -176,8 +176,7 @@ def test_a_dropped_request_leaves_the_record_standing(store, run):
     assert out.advanced is False
     assert out.reason == "timeout"
     assert store.read_pending(run) is not None, (
-        "clearing the record on timeout throws away the only evidence the month is "
-        "being written"
+        "clearing the record on timeout throws away the only evidence the month is being written"
     )
 
 
@@ -284,9 +283,7 @@ def test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous(stor
         return True
 
     async def scenario():
-        task = asyncio.ensure_future(
-            _advance(store, run, half_committed, deadline_secs=2.5)
-        )
+        task = asyncio.ensure_future(_advance(store, run, half_committed, deadline_secs=2.5))
         # Long enough that polls land in the gap first (poll tick is 0.25s),
         # generous enough not to flake on a slow runner.
         await asyncio.sleep(0.6)
@@ -410,9 +407,7 @@ def test_marking_a_turn_in_flight_does_not_spend_the_rollback_point(store, run):
 
     store.mark_pending(run, turn=3, slot="endless-run-x")
 
-    assert store.rollback(run)["turn"] == 1, (
-        "the in-flight record moved the rollback target"
-    )
+    assert store.rollback(run)["turn"] == 1, "the in-flight record moved the rollback target"
 
 
 def test_the_record_lives_outside_the_state(store, run):

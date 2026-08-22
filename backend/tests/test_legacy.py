@@ -18,8 +18,8 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
 import legacy as lg  # noqa: E402
-import memory_graph as mg  # noqa: E402
 import mcp_server as srv  # noqa: E402
+import memory_graph as mg  # noqa: E402
 
 WORLD = """---
 {"id": "w", "title": "W", "version": "1.0", "language": "en", "lineage": true,
@@ -48,8 +48,14 @@ def call(name, **args):
 
 
 def turn_entry(turn, memory=None, action="", prose="p"):
-    entry = {"turn": turn, "prose": prose, "action": action,
-             "choices": [], "events": [], "gains": []}
+    entry = {
+        "turn": turn,
+        "prose": prose,
+        "action": action,
+        "choices": [],
+        "events": [],
+        "gains": [],
+    }
     if memory is not None:
         entry["memory"] = memory
     return entry
@@ -59,36 +65,66 @@ def ancestor_chronicle():
     """A finished life: a sword, a friend with trust, a rival left behind,
     and a secret the player never learned."""
     return [
-        turn_entry(1, {
-            "entities": [
-                {"id": "elin", "kind": "character", "name": "艾琳"},
-                {"id": "rival", "kind": "character", "name": "对头"},
-                {"id": "sword", "kind": "object", "name": "祖传的剑"},
-            ],
-            "events": [
-                {"key": "meet", "title": "相遇", "summary": "s",
-                 "participants": ["player", "elin", "rival"],
-                 "disclosure": "known"},
-                {"key": "sword-found", "title": "得剑", "summary": "s",
-                 "importance": "major", "participants": ["player", "sword"],
-                 "disclosure": "known"},
-            ],
-            "relations": [
-                {"from": "elin", "type": "trust", "to": "player",
-                 "change": "increase", "reasonEvent": "meet"},
-                {"from": "rival", "type": "grudge", "to": "player",
-                 "change": "increase", "reasonEvent": "meet"},
-            ],
-        }),
-        turn_entry(2, {
-            "entities": [
-                {"id": "watcher", "kind": "character", "name": "暗中的人"},
-            ],
-            "events": [
-                {"key": "shadow", "title": "无人知晓的注视", "summary": "s",
-                 "participants": ["watcher"], "disclosure": "hidden"},
-            ],
-        }),
+        turn_entry(
+            1,
+            {
+                "entities": [
+                    {"id": "elin", "kind": "character", "name": "艾琳"},
+                    {"id": "rival", "kind": "character", "name": "对头"},
+                    {"id": "sword", "kind": "object", "name": "祖传的剑"},
+                ],
+                "events": [
+                    {
+                        "key": "meet",
+                        "title": "相遇",
+                        "summary": "s",
+                        "participants": ["player", "elin", "rival"],
+                        "disclosure": "known",
+                    },
+                    {
+                        "key": "sword-found",
+                        "title": "得剑",
+                        "summary": "s",
+                        "importance": "major",
+                        "participants": ["player", "sword"],
+                        "disclosure": "known",
+                    },
+                ],
+                "relations": [
+                    {
+                        "from": "elin",
+                        "type": "trust",
+                        "to": "player",
+                        "change": "increase",
+                        "reasonEvent": "meet",
+                    },
+                    {
+                        "from": "rival",
+                        "type": "grudge",
+                        "to": "player",
+                        "change": "increase",
+                        "reasonEvent": "meet",
+                    },
+                ],
+            },
+        ),
+        turn_entry(
+            2,
+            {
+                "entities": [
+                    {"id": "watcher", "kind": "character", "name": "暗中的人"},
+                ],
+                "events": [
+                    {
+                        "key": "shadow",
+                        "title": "无人知晓的注视",
+                        "summary": "s",
+                        "participants": ["watcher"],
+                        "disclosure": "hidden",
+                    },
+                ],
+            },
+        ),
     ]
 
 
@@ -97,9 +133,7 @@ SOURCE_RUN = "a" * 32
 
 def bridge(selected):
     index = mg.build_index(ancestor_chronicle())
-    return lg.build_bridge_record(
-        index, source_run_id=SOURCE_RUN, selected=selected, language="zh"
-    )
+    return lg.build_bridge_record(index, source_run_id=SOURCE_RUN, selected=selected, language="zh")
 
 
 # ── candidates (§9 step 1) ───────────────────────────────────────────────
@@ -145,9 +179,7 @@ def test_an_unlived_or_unknown_selection_is_refused_whole():
 def test_relations_cross_only_when_everything_they_touch_did():
     record = bridge(["elin"])
     rels = record["memory"]["relations"]
-    assert [r["from"] for r in rels] == ["elin"], (
-        "the rival's grudge crossed without the rival"
-    )
+    assert [r["from"] for r in rels] == ["elin"], "the rival's grudge crossed without the rival"
     assert rels[0]["reasonEvent"] == lg.BRIDGE_KEY
 
 
@@ -208,13 +240,14 @@ def test_the_source_life_is_never_modified_by_the_bridge_or_the_heir(app):
 
     heir = store.create_run({"turn": 0, "worldId": "w", "language": "en"}, {"runId": ""})
     index = mg.build_index(store.read_chronicle(source))
-    store.append_turn(heir, lg.build_bridge_record(
-        index, source_run_id=source, selected=["elin"], language="zh"
-    ))
+    store.append_turn(
+        heir, lg.build_bridge_record(index, source_run_id=source, selected=["elin"], language="zh")
+    )
     # The heir lives on; the ancestor's record stays byte-identical (§9:
     # 上一代后续不会被下一代反向修改).
-    call("endless_advance_turn", runId=heir, turn=1, prose="新的一生开始了。",
-         state={"alive": True})
+    call(
+        "endless_advance_turn", runId=heir, turn=1, prose="新的一生开始了。", state={"alive": True}
+    )
     assert src_path.read_bytes() == before
 
 
@@ -234,11 +267,23 @@ def test_the_tool_schema_refuses_a_narrator_declared_inheritance(app):
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w", "language": "en"}, {"runId": ""})
     out = call(
-        "endless_advance_turn", runId=run, turn=1, prose="p", state={},
-        memory={"entities": [{
-            "id": "fake", "kind": "object", "name": "伪造的传家宝",
-            "inheritsFrom": {"runId": "b" * 32, "nodeId": "fake", "turn": 1},
-        }], "events": [], "relations": []},
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        state={},
+        memory={
+            "entities": [
+                {
+                    "id": "fake",
+                    "kind": "object",
+                    "name": "伪造的传家宝",
+                    "inheritsFrom": {"runId": "b" * 32, "nodeId": "fake", "turn": 1},
+                }
+            ],
+            "events": [],
+            "relations": [],
+        },
     )
     assert out["ok"] is False and out["applied"] is False
     assert "inheritsFrom" in out["field"]

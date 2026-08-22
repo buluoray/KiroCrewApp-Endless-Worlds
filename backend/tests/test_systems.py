@@ -15,13 +15,15 @@ def _apply(systems, state, prev, gains):
 
 def test_accrual_adds_matched_gains_and_derives_the_tier() -> None:
     xp = System(
-        id="xp", kind="accrual", into="state.hero.xp",
+        id="xp",
+        kind="accrual",
+        into="state.hero.xp",
         tiers=[{"at": 0.0, "name": "novice"}, {"at": 100.0, "name": "veteran"}],
         tier_into="state.hero.rank",
     )
     st: dict = {}
     _apply([xp], st, {"hero": {"xp": 90}}, [{"field": "xp", "amount": "15"}])
-    assert _get(st, "state.hero.xp") == 105        # 90 + 15
+    assert _get(st, "state.hero.xp") == 105  # 90 + 15
     assert _get(st, "state.hero.rank") == "veteran"  # crossed the 100 threshold
 
 
@@ -49,7 +51,9 @@ def test_decay_drifts_each_turn_within_bounds() -> None:
 
 def test_unlock_is_monotonic() -> None:
     s = System(
-        id="awakened", kind="unlock", into="state.magic.awakened",
+        id="awakened",
+        kind="unlock",
+        into="state.magic.awakened",
         when=Condition.parse("state.trials.passed == true"),
     )
     # condition not yet met → not unlocked

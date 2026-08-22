@@ -162,9 +162,7 @@ def test_the_narrators_standing_orders_survive_a_compaction():
     standing configuration, which survives the very event it is about, rather than in
     a per-turn prompt that a compaction can condense away.
     """
-    agent = json.loads(
-        (_BACKEND.parent / "agents" / "narrator.json").read_text(encoding="utf-8")
-    )
+    agent = json.loads((_BACKEND.parent / "agents" / "narrator.json").read_text(encoding="utf-8"))
     prompt = agent["prompt"]
     assert "endless_read_runtime" in prompt, "nothing tells it to look before writing"
     assert "compact" in prompt.lower(), (
@@ -270,7 +268,7 @@ def test_the_refusal_explains_itself_without_leaking_implementation():
     import mcp_server as srv
 
     src = inspect.getsource(srv._advance_turn)
-    detail = src[src.index("read-runtime-first"):]
+    detail = src[src.index("read-runtime-first") :]
     detail = detail[: detail.index("}")]
     assert "endless_read_runtime" in detail, "the fix is not named"
     for leak in ("store", "pending", "kv", ".py"):
@@ -293,7 +291,9 @@ def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_
     (data / "worlds" / "age-of-sword-and-flame.md").write_text(
         flagship.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    run = store.create_run({"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"})
+    run = store.create_run(
+        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"}
+    )
     monkeypatch.setattr(srv, "_store", lambda: store)
     monkeypatch.setattr(srv, "_DATA", data)
 
@@ -355,22 +355,30 @@ def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, m
     store.mark_pending(run, turn=1, slot="s")
     store.note_runtime_read(run, turn=1)
 
-    bad = srv._advance_turn({
-        "runId": run, "turn": 1, "prose": "p",
-        "choices": [{"id": "look", "label": "look around"}],
-        "state": {"worldId": "age-of-sword-and-flame", "Made Up Section": {"whatever": "x"}},
-    })
+    bad = srv._advance_turn(
+        {
+            "runId": run,
+            "turn": 1,
+            "prose": "p",
+            "choices": [{"id": "look", "label": "look around"}],
+            "state": {"worldId": "age-of-sword-and-flame", "Made Up Section": {"whatever": "x"}},
+        }
+    )
     assert bad["committed"] is True, "the month lands regardless"
     warned = bad.get("warnings") or []
     assert any(w["panel"] == "status" for w in warned), "the empty always-panel is flagged"
     assert "time" in warned[0]["declareById"], "and the correct ids are offered"
 
     # A status keyed correctly (even partially) does not warn.
-    ok = srv._advance_turn({
-        "runId": run, "turn": 2, "prose": "p",
-        "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Year 1"}},
-        "choices": [{"id": "go", "label": "go on"}],
-    })
+    ok = srv._advance_turn(
+        {
+            "runId": run,
+            "turn": 2,
+            "prose": "p",
+            "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Year 1"}},
+            "choices": [{"id": "go", "label": "go on"}],
+        }
+    )
     assert ok["committed"] is True
     assert "warnings" not in ok
 
@@ -387,18 +395,24 @@ def test_a_living_turn_with_no_choices_is_refused(store, tmp_path, monkeypatch):
     data = tmp_path / "data"
     (data / "worlds").mkdir(parents=True, exist_ok=True)
     (data / "worlds" / "age-of-sword-and-flame.md").write_text(
-        flagship.read_text(encoding="utf-8"), encoding="utf-8")
+        flagship.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     run = store.create_run(
-        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"})
+        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"}
+    )
     monkeypatch.setattr(srv, "_store", lambda: store)
     monkeypatch.setattr(srv, "_DATA", data)
     store.mark_pending(run, turn=1, slot="s")
     store.note_runtime_read(run, turn=1)
 
-    out = srv._advance_turn({
-        "runId": run, "turn": 1, "prose": "p",
-        "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
-    })
+    out = srv._advance_turn(
+        {
+            "runId": run,
+            "turn": 1,
+            "prose": "p",
+            "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
+        }
+    )
     assert out["committed"] is False and out["reason"] == "choices-required"
     # The refusal must also teach the way out for a character who CANNOT act. Turn 1
     # is a birth, and a live narrator stalled here reasoning about whether a newborn
@@ -407,10 +421,15 @@ def test_a_living_turn_with_no_choices_is_refused(store, tmp_path, monkeypatch):
     assert int(store.read_state(run).get("turn") or 0) == 0, "nothing committed"
     assert store.read_chronicle(run) == []
 
-    done = srv._advance_turn({
-        "runId": run, "turn": 1, "prose": "the end", "ending": True,
-        "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
-    })
+    done = srv._advance_turn(
+        {
+            "runId": run,
+            "turn": 1,
+            "prose": "the end",
+            "ending": True,
+            "state": {"worldId": "age-of-sword-and-flame", "status": {"time": "Y1"}},
+        }
+    )
     assert done["committed"] is True
     assert store.read_chronicle(run)[0]["choices"] == []
 
@@ -426,19 +445,28 @@ def test_a_declared_ending_lets_a_turn_omit_choices(store, tmp_path, monkeypatch
     data = tmp_path / "data"
     (data / "worlds").mkdir(parents=True, exist_ok=True)
     (data / "worlds" / "age-of-sword-and-flame.md").write_text(
-        flagship.read_text(encoding="utf-8"), encoding="utf-8")
+        flagship.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     run = store.create_run(
-        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"})
+        {"turn": 0, "worldId": "age-of-sword-and-flame"}, {"worldId": "age-of-sword-and-flame"}
+    )
     monkeypatch.setattr(srv, "_store", lambda: store)
     monkeypatch.setattr(srv, "_DATA", data)
     store.mark_pending(run, turn=1, slot="s")
     store.note_runtime_read(run, turn=1)
 
-    out = srv._advance_turn({
-        "runId": run, "turn": 1, "prose": "she dies with no heir",
-        "state": {"worldId": "age-of-sword-and-flame",
-                  "alive": False, "lineage": {"hasHeir": False}},
-    })
+    out = srv._advance_turn(
+        {
+            "runId": run,
+            "turn": 1,
+            "prose": "she dies with no heir",
+            "state": {
+                "worldId": "age-of-sword-and-flame",
+                "alive": False,
+                "lineage": {"hasHeir": False},
+            },
+        }
+    )
     assert out["committed"] is True, "a terminal state may omit choices without a marker"
 
 
@@ -456,7 +484,11 @@ def test_a_full_read_surfaces_the_players_opening_answers(store, tmp_path, monke
         flagship.read_text(encoding="utf-8"), encoding="utf-8"
     )
     run = store.create_run(
-        {"turn": 0, "worldId": "age-of-sword-and-flame", "opening": {"sex": "Female", "name": "Aria"}},
+        {
+            "turn": 0,
+            "worldId": "age-of-sword-and-flame",
+            "opening": {"sex": "Female", "name": "Aria"},
+        },
         {"worldId": "age-of-sword-and-flame"},
     )
     monkeypatch.setattr(srv, "_store", lambda: store)

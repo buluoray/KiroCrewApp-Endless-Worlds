@@ -16,18 +16,23 @@ def test_defaults_when_nothing_saved(tmp_path: Path) -> None:
 
 
 def test_round_trip(tmp_path: Path) -> None:
-    write_settings(tmp_path, model="some-model", reasoning_effort="high",
-                   painter_model="paint-model")
+    write_settings(
+        tmp_path, model="some-model", reasoning_effort="high", painter_model="paint-model"
+    )
     assert read_settings(tmp_path) == {
-        "model": "some-model", "reasoningEffort": "high", "painterModel": "paint-model"
+        "model": "some-model",
+        "reasoningEffort": "high",
+        "painterModel": "paint-model",
     }
 
 
 def test_the_painter_model_defaults_to_empty_and_round_trips(tmp_path: Path) -> None:
     # Chosen separately from the narrator's model; omitting it keeps the default.
     assert write_settings(tmp_path, model="m", reasoning_effort="")["painterModel"] == ""
-    assert write_settings(tmp_path, model="m", reasoning_effort="",
-                          painter_model="p")["painterModel"] == "p"
+    assert (
+        write_settings(tmp_path, model="m", reasoning_effort="", painter_model="p")["painterModel"]
+        == "p"
+    )
     assert read_settings(tmp_path)["painterModel"] == "p"
 
 

@@ -46,9 +46,7 @@ def _global_reads(src: str, filename: str) -> dict[str, set[str]]:
     def walk(table: symtable.SymbolTable, path: str) -> None:
         if table.get_type() == "function":
             names = {
-                s.get_name()
-                for s in table.get_symbols()
-                if s.is_global() and not s.is_assigned()
+                s.get_name() for s in table.get_symbols() if s.is_global() and not s.is_assigned()
             }
             if names:
                 out[path] = names
@@ -107,9 +105,7 @@ def test_a_module_from_this_app_is_dropped(routes_mod, tmp_path):
     assert "scenes" not in modules
 
 
-def test_a_foreign_module_squatting_on_a_name_this_app_owns_is_evicted(
-    routes_mod, tmp_path
-):
+def test_a_foreign_module_squatting_on_a_name_this_app_owns_is_evicted(routes_mod, tmp_path):
     """The bug that shipped, as a test.
 
     After this app was renamed and reinstalled under a new id, the new install
@@ -140,9 +136,7 @@ def test_a_foreign_module_squatting_on_a_name_this_app_owns_is_evicted(
     )
 
 
-def test_a_module_under_a_name_this_app_does_not_own_is_left_alone(
-    routes_mod, tmp_path
-):
+def test_a_module_under_a_name_this_app_does_not_own_is_left_alone(routes_mod, tmp_path):
     """The half of the old rule that is still right, and load-bearing.
 
     Eviction is scoped to the names this app has files for. Without that scope the

@@ -174,7 +174,9 @@ def test_an_unowned_slot_under_our_key_is_refused_too():
     """An unscoped slot with our key is somebody's own chat session that happens
     to be named this. Adopting it would pull their transcript into the game."""
     state = FakeState()
-    state.slots["endless-run-run-1"] = FakeSlot("endless-run-run-1", app="", memory_mode="temporary")
+    state.slots["endless-run-run-1"] = FakeSlot(
+        "endless-run-run-1", app="", memory_mode="temporary"
+    )
     with pytest.raises(SlotOwnedByAnother):
         ensure_narrator_slot(state, "run-1")
 
@@ -185,9 +187,7 @@ def test_an_unsealed_slot_is_refused_rather_than_narrated_into(mode):
     player's memory (state.py:2039 — only ``temporary`` blocks reads), so it
     would leak their real life into the story while looking private."""
     state = FakeState()
-    state.slots["endless-run-run-1"] = FakeSlot(
-        "endless-run-run-1", app=APP_NAME, memory_mode=mode
-    )
+    state.slots["endless-run-run-1"] = FakeSlot("endless-run-run-1", app=APP_NAME, memory_mode=mode)
     with pytest.raises(MemoryModeConflict) as exc:
         ensure_narrator_slot(state, "run-1")
     assert mode in str(exc.value)
@@ -197,9 +197,11 @@ def test_there_is_no_fallback_to_an_unsealed_slot():
     """The whole point: a conflict must not degrade into playing anyway."""
     src = inspect.getsource(narrator)
     for banned in ('memory_mode="persistent"', "memory_mode='persistent'", '"incognito"'):
-        assert banned not in src.replace(
-            '#: player\'s real life, and ``incognito`` still READS memory', ""
-        ) or banned == '"incognito"', f"{banned} suggests a fallback path"
+        assert (
+            banned
+            not in src.replace("#: player's real life, and ``incognito`` still READS memory", "")
+            or banned == '"incognito"'
+        ), f"{banned} suggests a fallback path"
     # MEMORY_MODE is the only mode ever passed to a create call.
     assert src.count("MEMORY_MODE") >= 3
 
@@ -212,7 +214,9 @@ def test_core_guard_is_a_second_independent_enforcement_point():
     )
     with pytest.raises(ValueError):
         state.get_or_create_slot(
-            name="endless-run-run-1", agent=NARRATOR_AGENT, app=APP_NAME,
+            name="endless-run-run-1",
+            agent=NARRATOR_AGENT,
+            app=APP_NAME,
             memory_mode=MEMORY_MODE,
         )
 
@@ -274,9 +278,17 @@ def test_the_narrator_can_reach_nothing_but_this_apps_own_tools():
             f"{ref} is not one of this app's own tools"
         )
     for forbidden in (
-        "learn_add", "learn_list", "search_chat_history", "get_chat_session",
-        "local_knowledge_search", "execute_bash", "fs_write", "fs_read",
-        "web_fetch", "@kirocrew-core", "@builder-mcp",
+        "learn_add",
+        "learn_list",
+        "search_chat_history",
+        "get_chat_session",
+        "local_knowledge_search",
+        "execute_bash",
+        "fs_write",
+        "fs_read",
+        "web_fetch",
+        "@kirocrew-core",
+        "@builder-mcp",
         # Scoped OUT of the narrator: these belong to the illustrator and the
         # worldsmith. Per-tool scoping keeps their descriptions out of the
         # narrator's every-turn context.
@@ -331,9 +343,7 @@ def test_the_tool_ref_uses_the_namespaced_key_registration_actually_writes():
         assert app_part == manifest["name"], f"{ref} namespaces the wrong app"
         # A per-tool ref is "<app>:<server>/<tool>"; membership is by server key.
         server_only = server_part.split("/", 1)[0]
-        assert server_only in declared, (
-            f"{ref} resolves to nothing in app.json mcpServers"
-        )
+        assert server_only in declared, f"{ref} resolves to nothing in app.json mcpServers"
 
 
 def test_the_apps_own_server_is_launchable_as_an_external_app():
@@ -386,7 +396,6 @@ def test_the_apps_own_server_is_launchable_as_an_external_app():
     assert _absolutized_mcp_spec(healed, backend_dir) is None
 
 
-
 def test_no_unresolvable_placeholder_token_in_the_agent_file():
     """Placeholder rendering is hard-coded to one app (`pptx-maker`), and an
     unresolved ``{TOKEN}`` makes ``_render_shipped_agent`` return None — the agent
@@ -429,9 +438,7 @@ def test_the_narrators_prompt_leaks_no_implementation_vocabulary_to_the_player()
     them. Checked as: every occurrence sits inside the prohibition sentence."""
     agent = json.loads(AGENT_JSON.read_text(encoding="utf-8"))
     prompt = agent["prompt"]
-    prohibition = next(
-        (line for line in prompt.split("\n") if "never mention" in line), ""
-    )
+    prohibition = next((line for line in prompt.split("\n") if "never mention" in line), "")
     assert prohibition, "the prompt must carry an explicit no-implementation-words rule"
     for word in ("schemas", "templates", "contracts", "panels"):
         assert prompt.count(word) == prohibition.count(word), (
@@ -470,11 +477,9 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "Prefer curved, flowing forms",
         "Work with SVG's strengths",
         "motif-first and architecture-first",
-        "first "
-        "line declares the lane",
+        "first line declares the lane",
         "`LANE: motif` or `LANE: scene`",
-        "The storyteller already made "
-        "this choice; never re-route it",
+        "The storyteller already made this choice; never re-route it",
         "If no lane line is present, work in the motif lane",
         "In the MOTIF lane",
         "without calling endless_trace_reference",
@@ -488,8 +493,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "No technique is mandatory",
         "only when this page's chosen concept earns them",
         "must not read as an icon, diagram, UI ornament, stock particle effect, or decorative filler",
-        "in "
-        "either lane",
+        "in either lane",
         "In the SCENE lane",
         "call endless_trace_reference",
         # The subject half only: the context half must never reach the archive,
@@ -497,8 +501,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "REFERENCE `subject=`",
         "SINGLE most-relevant noun",
         "its hex stops as `ramp`",
-        'one `<g id="etr-underlay"/>` '
-        "in EACH SVG",
+        'one `<g id="etr-underlay"/>` in EACH SVG',
         "never draw the underlay yourself",
         "returns several traced CANDIDATES",
         "call endless_select_reference with the `index`",
@@ -511,8 +514,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "restraint is a finished decision",
         "three to six decisive spatial facts",
         "draw only the sparse marks traceable to them",
-        "Organic "
-        "forms (trees, fog, water, foliage) stay in the underlay",
+        "Organic forms (trees, fog, water, foliage) stay in the underlay",
         "`underlay: base`",
         "an abstract or evocative rendering of the place is welcome",
         "at most ONE trace retry total",
@@ -558,21 +560,25 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     ):
         assert required in prompt, f"illustrator prompt missing: {required!r}"
 
-    assert prompt.index("First call endless_submit_backdrop_draft") < prompt.index(
-        "built-in `read` tool once"
-    ) < prompt.index("as a SECOND draft") < prompt.index(
-        "call `read` once more"
-    ) < prompt.index("commit only that second `draftId`")
+    assert (
+        prompt.index("First call endless_submit_backdrop_draft")
+        < prompt.index("built-in `read` tool once")
+        < prompt.index("as a SECOND draft")
+        < prompt.index("call `read` once more")
+        < prompt.index("commit only that second `draftId`")
+    )
 
     trace_tool = OWN_SERVER_REF + "/endless_trace_reference"
     select_tool = OWN_SERVER_REF + "/endless_select_reference"
     draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
     commit_tool = OWN_SERVER_REF + "/endless_commit_backdrop"
-    assert illustrator_agent["tools"] == [
-        trace_tool, select_tool, draft_tool, commit_tool, "read"
-    ]
+    assert illustrator_agent["tools"] == [trace_tool, select_tool, draft_tool, commit_tool, "read"]
     assert illustrator_agent["allowedTools"] == [
-        trace_tool, select_tool, draft_tool, commit_tool, "read"
+        trace_tool,
+        select_tool,
+        draft_tool,
+        commit_tool,
+        "read",
     ]
     assert illustrator_agent["toolsSettings"]["read"]["allowedPaths"] == [
         "**/runs/*/backdrop-previews/backdrop-preview-*.png"
@@ -609,8 +615,12 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     # The lane decision lives with the storyteller: MOTIF briefs name one abstract
     # phenomenon, while SCENE briefs carry photo-search keywords.
     for lane_pin in (
-        "LANE: motif", "LANE: scene", "THESIS:", "MOTION:",
-        "REFERENCE:", "PALETTE:",
+        "LANE: motif",
+        "LANE: scene",
+        "THESIS:",
+        "MOTION:",
+        "REFERENCE:",
+        "PALETTE:",
         "if the image's point is what a place physically looks like, choose SCENE",
         "naming the invisible dramatic fact or emotional logic the art should make felt",
         "Never prescribe geometry, objects, placement, SVG techniques, or a visual solution",
@@ -629,8 +639,10 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         assert removed_recipe not in narrator
     assert "endless_set_backdrop" not in narrator
     for recipe in (
-        "viewBox='0 0 800 600'", "viewBox='0 0 450 900'",
-        "feTurbulence", "<animateTransform>",
+        "viewBox='0 0 800 600'",
+        "viewBox='0 0 450 900'",
+        "feTurbulence",
+        "<animateTransform>",
     ):
         assert recipe not in narrator, f"narrator still carries SVG recipe: {recipe!r}"
 

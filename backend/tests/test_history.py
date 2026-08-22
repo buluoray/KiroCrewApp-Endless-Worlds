@@ -26,11 +26,12 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from srcguard import code_only  # noqa: E402
+from uisrc import WEB_SRC, module, styles  # noqa: E402
+
 import routes as routes_mod  # noqa: E402
 from narrator import APP_NAME  # noqa: E402
 from store import RunStore  # noqa: E402
-from srcguard import code_only  # noqa: E402
-from uisrc import WEB_SRC, module, styles  # noqa: E402
 
 BREAKPOINT = 1100
 
@@ -76,9 +77,7 @@ def test_paging_is_by_turn_number_not_by_offset():
     """An offset shifts under a turn committed between two pages, which silently
     skips or repeats a month. A turn number cannot."""
     src = (_BACKEND / "routes.py").read_text(encoding="utf-8")
-    fn = code_only(
-        src[src.index("async def get_chronicle") : src.index("CHRONICLE_PAGE = ")]
-    )
+    fn = code_only(src[src.index("async def get_chronicle") : src.index("CHRONICLE_PAGE = ")])
     assert '"before"' in fn, "there is no way to ask for earlier months"
     # Searched in the CODE: the comment above this route explains why an offset is
     # wrong, and therefore contains the word.
@@ -112,8 +111,7 @@ def test_the_players_action_is_recorded_with_the_month(store):
     pending = store.read_pending(run)
     assert pending is not None
     assert pending["action"] == "go down to the marsh", (
-        "the in-flight record is the only place the action exists when the narrator "
-        "commits"
+        "the in-flight record is the only place the action exists when the narrator commits"
     )
 
 
@@ -123,9 +121,7 @@ def test_the_commit_folds_the_action_into_the_chronicle():
     end = src.index("\ndef ", start)  # the whole function, not a fixed window
     commit = src[start:end]
     assert "read_pending" in commit, "the commit never recovers what was asked for"
-    assert re.search(r'"action":\s*action', commit), (
-        "the chronicle entry does not carry the action"
-    )
+    assert re.search(r'"action":\s*action', commit), "the chronicle entry does not carry the action"
     # And only for the turn it belongs to: a leftover record from an earlier month
     # must not attribute the wrong choice.
     assert 'int(asked.get("turn") or 0) == turn' in commit
@@ -154,7 +150,6 @@ def test_a_past_page_carries_the_summary_it_ended_on(tmp_path):
     happening".
     """
     from kiro_crew.apps.app_storage import AppStorage
-
     from test_delete_world import FakeCtx, FakeRequest, body_of
 
     data = tmp_path / "data"
@@ -162,12 +157,17 @@ def test_a_past_page_carries_the_summary_it_ended_on(tmp_path):
     storage = AppStorage(APP_NAME, data)
     st = RunStore(storage, data)
     run = st.create_run({"turn": 2, "worldId": "w"}, {"worldId": "w", "title": "t"})
-    st.append_turn(run, {
-        "turn": 1,
-        "prose": "the first month",
-        "digest": [{"category": "国家", "text": "the court is silent", "rumour": False}],
-        "panels": [{"id": "status", "label": "身份", "always": True, "fields": [], "empty": True}],
-    })
+    st.append_turn(
+        run,
+        {
+            "turn": 1,
+            "prose": "the first month",
+            "digest": [{"category": "国家", "text": "the court is silent", "rumour": False}],
+            "panels": [
+                {"id": "status", "label": "身份", "always": True, "fields": [], "empty": True}
+            ],
+        },
+    )
     st.append_turn(run, {"turn": 2, "prose": "a month from before snapshots"})
 
     ctx = FakeCtx(data, storage)
@@ -189,10 +189,10 @@ def test_the_summary_and_the_panels_come_from_one_shaper():
     commit writes. Computing the panels twice is how the page a player re-reads
     drifts from the page they lived.
     """
+    from test_delete_world import HEADER, world_file
+
     from template import parse_template
     from view import build_play_view, shape_panels
-
-    from test_delete_world import HEADER, world_file
 
     # The suite's own known-good world header, so this test cannot fail over an
     # unrelated required field it forgot to declare.
@@ -220,10 +220,8 @@ def test_the_commit_snapshots_the_page_it_wrote():
         "the snapshot runs before the world pack is loaded, so every commit raises"
     )
     # Snapshotting must never cost a narrated month.
-    snap = commit[commit.index('entry["digest"]'):]
-    assert "except Exception" in snap[:400], (
-        "a failed snapshot must not lose a committed turn"
-    )
+    snap = commit[commit.index('entry["digest"]') :]
+    assert "except Exception" in snap[:400], "a failed snapshot must not lose a committed turn"
 
 
 def test_a_page_without_a_snapshot_falls_back_to_the_live_standing():
@@ -243,13 +241,11 @@ def test_the_shelf_list_is_hidden_where_the_rail_shows_it():
     though — the world COVER tiles stay in the main column, because a name in the
     rail is not the cover, and the landing's job is to invite you into a world."""
     css = styles()
-    wide = re.search(
-        rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S
-    )
+    wide = re.search(rf"@media \(min-width: {BREAKPOINT}px\)\s*\{{(.*?)\n\}}", css, re.S)
     assert wide, "no rule block at the rail's breakpoint"
-    assert re.search(
-        r"\.ew-shell-open \.ew-shelf-lives\s*\{[^}]*display:\s*none", wide.group(1)
-    ), "the life rows are still rendered beside the rail that already lists them"
+    assert re.search(r"\.ew-shell-open \.ew-shelf-lives\s*\{[^}]*display:\s*none", wide.group(1)), (
+        "the life rows are still rendered beside the rail that already lists them"
+    )
     # The world covers must NOT be hidden — they are the landing, not a duplicate.
     assert not re.search(
         r"\.ew-shell-open \.ew-shelf-worlds\s*\{[^}]*display:\s*none", wide.group(1)
@@ -284,21 +280,24 @@ def test_the_desktop_landing_offers_something_the_rail_cannot():
     space it takes."""
     src = module("main.tsx")
     assert "shelf.continue" in src, "the landing offers no way to carry on"
-    assert re.search(r"\.find\(", src), (
-        "the landing does not identify which life to continue"
-    )
+    assert re.search(r"\.find\(", src), "the landing does not identify which life to continue"
     assert "!r.ended" in src, "a finished life must not be offered as the one to resume"
 
 
 def test_both_languages_carry_the_new_text():
-    import json
 
     root = WEB_SRC / "strings"
     zh = json.loads((root / "zh.json").read_text(encoding="utf-8"))
     en = json.loads((root / "en.json").read_text(encoding="utf-8"))
     for key in (
-        "shelf.continue", "shelf.pick", "history.open", "history.close",
-        "history.earlier", "history.beginning", "history.none", "history.chose",
+        "shelf.continue",
+        "shelf.pick",
+        "history.open",
+        "history.close",
+        "history.earlier",
+        "history.beginning",
+        "history.none",
+        "history.chose",
     ):
         assert key in zh, f"missing from zh.json: {key}"
         assert key in en, f"missing from en.json: {key}"

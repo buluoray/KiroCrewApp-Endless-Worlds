@@ -39,17 +39,23 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from backdrop import BackdropError, _ID_RE, compile_backdrop
+from backdrop import _ID_RE, BackdropError, compile_backdrop
 
 logger = logging.getLogger(__name__)
 
 #: The nocturne ramp: near-black to dim gold, darkest first. Callers may pass a
 #: world-specific ramp of the same shape (5-8 stops, darkest first).
 NOCTURNE_RAMP: tuple[tuple[int, int, int], ...] = (
-    (7, 8, 13), (11, 14, 23), (26, 28, 38), (58, 50, 28), (120, 95, 32), (201, 162, 39),
+    (7, 8, 13),
+    (11, 14, 23),
+    (26, 28, 38),
+    (58, 50, 28),
+    (120, 95, 32),
+    (201, 162, 39),
 )
 
 #: A composed backdrop (underlay + hand-drawn overlay) may reach this size; the
@@ -74,21 +80,24 @@ MAX_PHOTO_DIMENSION = 8_000
 #: raw third-party CDN: Openverse hands back a thumbnail on its OWN host
 #: (api.openverse.org) even when the original lives on Flickr, and the Met serves
 #: images from images.metmuseum.org — so the SSRF surface stays this fixed set.
-_ALLOWED_FETCH_HOSTS = frozenset({
-    "commons.wikimedia.org", "upload.wikimedia.org",        # Wikimedia Commons
-    "api.openverse.org",                                    # Openverse search + thumbnail proxy
-    "collectionapi.metmuseum.org", "images.metmuseum.org",  # Met Museum API + image bytes
-    "api.si.edu", "ids.si.edu",                             # Smithsonian Open Access API + bytes
-})
+_ALLOWED_FETCH_HOSTS = frozenset(
+    {
+        "commons.wikimedia.org",
+        "upload.wikimedia.org",  # Wikimedia Commons
+        "api.openverse.org",  # Openverse search + thumbnail proxy
+        "collectionapi.metmuseum.org",
+        "images.metmuseum.org",  # Met Museum API + image bytes
+        "api.si.edu",
+        "ids.si.edu",  # Smithsonian Open Access API + bytes
+    }
+)
 
 #: Below this median luminance a photo's pixels crowd the darkest bands and the
 #: traced layer vanishes against a dark page; lift midtones first.
 _DARK_MEDIAN = 90
 _DARK_GAMMA = 0.55
 
-_PLACEHOLDER_RE = re.compile(
-    r"<g\s+id=(?P<quote>[\"'])etr-underlay(?P=quote)\s*(?:/>|>\s*</g>)"
-)
+_PLACEHOLDER_RE = re.compile(r"<g\s+id=(?P<quote>[\"'])etr-underlay(?P=quote)\s*(?:/>|>\s*</g>)")
 
 _COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 #: Only attribution-free material enters a backdrop. CC BY/SA would require a
@@ -209,12 +218,19 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
     Raises :class:`SearchUnavailable` when the request itself does not answer.
     """
     search = query if _BITMAP_ONLY in query else f"{query} {_BITMAP_ONLY}"
-    params = urllib.parse.urlencode({
-        "action": "query", "format": "json",
-        "generator": "search", "gsrsearch": search, "gsrnamespace": 6,
-        "gsrlimit": _RAW_SEARCH_ROWS,
-        "prop": "imageinfo", "iiprop": "url|mime|extmetadata", "iiurlwidth": 1200,
-    })
+    params = urllib.parse.urlencode(
+        {
+            "action": "query",
+            "format": "json",
+            "generator": "search",
+            "gsrsearch": search,
+            "gsrnamespace": 6,
+            "gsrlimit": _RAW_SEARCH_ROWS,
+            "prop": "imageinfo",
+            "iiprop": "url|mime|extmetadata",
+            "iiurlwidth": 1200,
+        }
+    )
     try:
         data = json.loads(_http_get(f"{_COMMONS_API}?{params}").decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 — reported as unavailable, not as empty
@@ -238,12 +254,14 @@ def search_reference(query: str, limit: int = 5) -> list[dict[str, str]]:
         url = info.get("thumburl") or info.get("url")
         if not url:
             continue
-        rows.append({
-            "title": str(page.get("title", "")),
-            "url": str(url),
-            "pageUrl": str(info.get("descriptionurl", "")),
-            "license": license_name,
-        })
+        rows.append(
+            {
+                "title": str(page.get("title", "")),
+                "url": str(url),
+                "pageUrl": str(info.get("descriptionurl", "")),
+                "license": license_name,
+            }
+        )
         if len(rows) >= limit:
             break
     return rows
@@ -264,9 +282,14 @@ def search_openverse(query: str, limit: int = 5) -> list[dict[str, str]]:
     (``api.openverse.org``), the single host we allowlist for it — image bytes
     never come from an un-vetted third-party CDN even when the original does.
     """
-    params = urllib.parse.urlencode({
-        "q": query, "license": "cc0,pdm", "page_size": max(1, limit), "mature": "false",
-    })
+    params = urllib.parse.urlencode(
+        {
+            "q": query,
+            "license": "cc0,pdm",
+            "page_size": max(1, limit),
+            "mature": "false",
+        }
+    )
     try:
         data = json.loads(_http_get(f"{_OPENVERSE_API}?{params}").decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 — reported as unavailable, not as empty
@@ -285,12 +308,14 @@ def search_openverse(query: str, limit: int = 5) -> list[dict[str, str]]:
             _require_allowed_url(thumb)  # never fetch bytes off a raw CDN
         except BackdropError:
             continue
-        rows.append({
-            "title": str(r.get("title") or r.get("id") or ""),
-            "url": thumb,
-            "pageUrl": str(r.get("foreign_landing_url", "")),
-            "license": "CC0" if lic == "cc0" else "Public domain",
-        })
+        rows.append(
+            {
+                "title": str(r.get("title") or r.get("id") or ""),
+                "url": thumb,
+                "pageUrl": str(r.get("foreign_landing_url", "")),
+                "license": "CC0" if lic == "cc0" else "Public domain",
+            }
+        )
         if len(rows) >= limit:
             break
     return rows
@@ -327,12 +352,14 @@ def search_met(query: str, limit: int = 5, probe: int = 12) -> list[dict[str, st
             _require_allowed_url(img)
         except BackdropError:
             continue
-        rows.append({
-            "title": str(obj.get("title", "")),
-            "url": img,
-            "pageUrl": str(obj.get("objectURL", "")),
-            "license": "Public domain",
-        })
+        rows.append(
+            {
+                "title": str(obj.get("title", "")),
+                "url": img,
+                "pageUrl": str(obj.get("objectURL", "")),
+                "license": "Public domain",
+            }
+        )
         if len(rows) >= limit:
             break
     return rows
@@ -350,17 +377,20 @@ def search_smithsonian(query: str, limit: int = 5) -> list[dict[str, str]]:
     key = os.environ.get("SI_API_KEY")
     if not key:
         return []
-    params = urllib.parse.urlencode({
-        "q": f"{query} AND online_media_type:Images", "rows": max(1, limit),
-        "api_key": key,
-    })
+    params = urllib.parse.urlencode(
+        {
+            "q": f"{query} AND online_media_type:Images",
+            "rows": max(1, limit),
+            "api_key": key,
+        }
+    )
     try:
         data = json.loads(_http_get(f"{_SI_SEARCH}?{params}").decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 — reported as unavailable, not as empty
         logger.warning("smithsonian search failed: %s", exc)
         raise SearchUnavailable(f"smithsonian search failed: {exc}") from exc
     rows: list[dict[str, str]] = []
-    for row in ((data.get("response") or {}).get("rows") or []):
+    for row in (data.get("response") or {}).get("rows") or []:
         dnr = ((row.get("content") or {}).get("descriptiveNonRepeating")) or {}
         usage = str(((dnr.get("metadata_usage") or {}).get("access")) or "")
         if usage.upper() != "CC0":
@@ -368,7 +398,7 @@ def search_smithsonian(query: str, limit: int = 5) -> list[dict[str, str]]:
         if _looks_like_document(str(row.get("title") or "")):
             continue
         img = ""
-        for m in ((dnr.get("online_media") or {}).get("media") or []):
+        for m in (dnr.get("online_media") or {}).get("media") or []:
             if str(m.get("type")) == "Images" and m.get("content"):
                 img = str(m["content"])
                 break
@@ -378,12 +408,14 @@ def search_smithsonian(query: str, limit: int = 5) -> list[dict[str, str]]:
             _require_allowed_url(img)
         except BackdropError:
             continue
-        rows.append({
-            "title": str(row.get("title", "")),
-            "url": img,
-            "pageUrl": str(dnr.get("record_link", "")),
-            "license": "CC0",
-        })
+        rows.append(
+            {
+                "title": str(row.get("title", "")),
+                "url": img,
+                "pageUrl": str(dnr.get("record_link", "")),
+                "license": "CC0",
+            }
+        )
         if len(rows) >= limit:
             break
     return rows
@@ -413,6 +445,7 @@ def search_smithsonian(query: str, limit: int = 5) -> list[dict[str, str]]:
 #: photograph traced as the place is worse than the honest procedural base.
 _LADDER_RUNGS = (6, 4)
 
+
 #: A cached miss is only ever a miss for the CONFIGURATION that produced it. Fold
 #: the license gate, the format gate, the document gate, the sample width, the rungs
 #: and whether the key-gated art source is configured into one short digest, so
@@ -420,16 +453,18 @@ _LADDER_RUNGS = (6, 4)
 #: "no image" from a cache built under the old rules — the nastiest shape this
 #: feature could take, because a fix would look like it had not worked.
 def _search_fingerprint() -> str:
-    material = "|".join((
-        _REUSABLE_LICENSE_RE.pattern,
-        ",".join(sorted(_PHOTO_MIMES)),
-        _DOCUMENT_RE.pattern,
-        str(_DESCRIPTION_LEAD),
-        str(_RAW_SEARCH_ROWS),
-        _BITMAP_ONLY,
-        ",".join(str(r) for r in _LADDER_RUNGS),
-        "si" if os.environ.get("SI_API_KEY") else "no-si",
-    ))
+    material = "|".join(
+        (
+            _REUSABLE_LICENSE_RE.pattern,
+            ",".join(sorted(_PHOTO_MIMES)),
+            _DOCUMENT_RE.pattern,
+            str(_DESCRIPTION_LEAD),
+            str(_RAW_SEARCH_ROWS),
+            _BITMAP_ONLY,
+            ",".join(str(r) for r in _LADDER_RUNGS),
+            "si" if os.environ.get("SI_API_KEY") else "no-si",
+        )
+    )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
 
 
@@ -490,9 +525,7 @@ class MissCache:
         return at is not None and (_NOW() - at) < _MISS_TTL_SECS
 
     def record(self, source: str, query: str) -> None:
-        entries = {
-            k: v for k, v in self._read().items() if (_NOW() - v) < _MISS_TTL_SECS
-        }
+        entries = {k: v for k, v in self._read().items() if (_NOW() - v) < _MISS_TTL_SECS}
         entries[self._key(source, query)] = _NOW()
         if len(entries) > _MISS_CACHE_CAP:
             for k, _ in sorted(entries.items(), key=lambda kv: kv[1])[
@@ -509,7 +542,10 @@ class MissCache:
 
 
 def search_candidates(
-    query: str, lane: str = "photo", limit: int = 5, misses: MissCache | None = None,
+    query: str,
+    lane: str = "photo",
+    limit: int = 5,
+    misses: MissCache | None = None,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     """Ordered, deduplicated candidates for a lane, plus an audit of how it went.
 
@@ -531,7 +567,8 @@ def search_candidates(
     """
     cache = misses
     sources: tuple[tuple[str, Callable[[str, int], list[dict[str, str]]]], ...] = (
-        (("met", search_met), ("smithsonian", search_smithsonian)) if lane == "art"
+        (("met", search_met), ("smithsonian", search_smithsonian))
+        if lane == "art"
         else (("openverse", search_openverse), ("commons", search_reference))
     )
     words = query.split()
@@ -558,10 +595,13 @@ def search_candidates(
                 continue
             if not rows and cache is not None:
                 cache.record(name, step)
-            attempts.append({
-                "query": step, "source": name,
-                "outcome": "ok" if rows else "no-candidates",
-            })
+            attempts.append(
+                {
+                    "query": step,
+                    "source": name,
+                    "outcome": "ok" if rows else "no-candidates",
+                }
+            )
             for cand in rows:
                 if cand["url"] in seen:
                     continue
@@ -606,8 +646,12 @@ def _parse_ramp(ramp: list[str] | None) -> tuple[tuple[int, int, int], ...]:
 
 
 def build_underlay_fragment(
-    photo: bytes, *, view: tuple[int, int], ramp: list[str] | None = None,
-    opacity: float = 0.65, focal: tuple[float, float] = (0.5, 0.5),
+    photo: bytes,
+    *,
+    view: tuple[int, int],
+    ramp: list[str] | None = None,
+    opacity: float = 0.65,
+    focal: tuple[float, float] = (0.5, 0.5),
 ) -> str:
     """Trace one photo into a ``<g>`` fragment sized exactly to ``view``.
 
@@ -617,9 +661,8 @@ def build_underlay_fragment(
     Illustrator's overlay. The full-canvas background blob vtracer emits is
     dropped — the page's own sky sits beneath.
     """
-    from PIL import Image, ImageFilter, ImageOps  # local: motif lane needs no PIL
-
     import vtracer  # local: motif lane needs no vtracer
+    from PIL import Image, ImageFilter, ImageOps  # local: motif lane needs no PIL
 
     stops = _parse_ramp(ramp)
     fx, fy = float(focal[0]), float(focal[1])
@@ -638,7 +681,7 @@ def build_underlay_fragment(
         ):
             raise BackdropError("the reference photo dimensions are too large to trace")
         img = opened.convert("RGB")
-    img = ImageOps.fit(img, view, method=Image.LANCZOS, centering=(fx, fy))
+    img = ImageOps.fit(img, view, method=Image.Resampling.LANCZOS, centering=(fx, fy))
     g = ImageOps.autocontrast(img.convert("L")).filter(ImageFilter.GaussianBlur(1.6))
     median = sorted(g.getdata())[view[0] * view[1] // 2]
     if median < _DARK_MEDIAN:
@@ -657,9 +700,17 @@ def build_underlay_fragment(
         out = Path(tmp) / "trace.svg"
         banded.convert("RGB").save(pre)
         vtracer.convert_image_to_svg_py(
-            str(pre), str(out), colormode="color", hierarchical="stacked",
-            mode="spline", filter_speckle=6, color_precision=6, layer_difference=32,
-            corner_threshold=60, length_threshold=4.0, splice_threshold=45,
+            str(pre),
+            str(out),
+            colormode="color",
+            hierarchical="stacked",
+            mode="spline",
+            filter_speckle=6,
+            color_precision=6,
+            layer_difference=32,
+            corner_threshold=60,
+            length_threshold=4.0,
+            splice_threshold=45,
             path_precision=0,
         )
         paths = re.findall(r"<path [^>]*/>", out.read_text(encoding="utf-8"))
@@ -692,8 +743,12 @@ def _trace_fragment_child(job_path: Path, output_path: Path) -> int:
 
 
 def build_underlay_fragment_bounded(
-    photo: bytes, *, view: tuple[int, int], ramp: list[str] | None = None,
-    opacity: float = 0.65, focal: tuple[float, float] = (0.5, 0.5),
+    photo: bytes,
+    *,
+    view: tuple[int, int],
+    ramp: list[str] | None = None,
+    opacity: float = 0.65,
+    focal: tuple[float, float] = (0.5, 0.5),
 ) -> str:
     """Trace one variant in a killable child and validate its bounded output."""
     if len(photo) > _MAX_PHOTO_BYTES:
@@ -704,15 +759,20 @@ def build_underlay_fragment_bounded(
         job_path = root / "job.json"
         output_path = root / "fragment.svg"
         photo_path.write_bytes(photo)
-        job_path.write_text(json.dumps({
-            "photoPath": str(photo_path),
-            "width": int(view[0]),
-            "height": int(view[1]),
-            "ramp": ramp,
-            "opacity": float(opacity),
-            "focalX": float(focal[0]),
-            "focalY": float(focal[1]),
-        }), encoding="utf-8")
+        job_path.write_text(
+            json.dumps(
+                {
+                    "photoPath": str(photo_path),
+                    "width": int(view[0]),
+                    "height": int(view[1]),
+                    "ramp": ramp,
+                    "opacity": float(opacity),
+                    "focalX": float(focal[0]),
+                    "focalY": float(focal[1]),
+                }
+            ),
+            encoding="utf-8",
+        )
         try:
             proc = subprocess.run(
                 [
@@ -751,7 +811,10 @@ def build_underlay_fragment_bounded(
 
 
 def procedural_base_fragment(
-    *, view: tuple[int, int], ramp: list[str] | None = None, opacity: float = 0.65,
+    *,
+    view: tuple[int, int],
+    ramp: list[str] | None = None,
+    opacity: float = 0.65,
 ) -> str:
     """A quiet tonal base for scenes with no photographic reference.
 
@@ -797,9 +860,7 @@ def compose_with_underlay(
             )
         return svg
     if count != 1:
-        raise BackdropError(
-            "a traced scene needs exactly one etr-underlay placeholder in each SVG"
-        )
+        raise BackdropError("a traced scene needs exactly one etr-underlay placeholder in each SVG")
     if not fragment:
         raise BackdropError(
             "this SVG carries an etr-underlay placeholder but no traced reference "
@@ -825,8 +886,14 @@ class TraceStore:
         self._path = data_dir / "runs" / run_id / "trace-underlay.json"
 
     def save(
-        self, *, turn: int, desktop: str, mobile: str,
-        source: dict[str, str] | None, kind: str, query: str,
+        self,
+        *,
+        turn: int,
+        desktop: str,
+        mobile: str,
+        source: dict[str, str] | None,
+        kind: str,
+        query: str,
         search: dict[str, Any] | None = None,
     ) -> str:
         if kind not in {"reference", "base"}:
@@ -834,15 +901,25 @@ class TraceStore:
         fragment_id = secrets.token_hex(8)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({
-            "fragmentId": fragment_id, "turn": int(turn),
-            "desktop": desktop, "mobile": mobile, "source": source or None,
-            "kind": kind, "query": str(query)[:500],
-            # Why the lane ended where it did, so the committed receipt can say
-            # whether a base underlay was a miss, a rate-limited request, or a page
-            # that asked for no photograph at all.
-            "search": search or None,
-        }, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(
+                {
+                    "fragmentId": fragment_id,
+                    "turn": int(turn),
+                    "desktop": desktop,
+                    "mobile": mobile,
+                    "source": source or None,
+                    "kind": kind,
+                    "query": str(query)[:500],
+                    # Why the lane ended where it did, so the committed receipt can say
+                    # whether a base underlay was a miss, a rate-limited request, or a page
+                    # that asked for no photograph at all.
+                    "search": search or None,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         os.replace(tmp, self._path)
         return fragment_id
 
@@ -877,15 +954,27 @@ class CandidateStore:
         self._path = data_dir / "runs" / run_id / "trace-candidates.json"
 
     def save(
-        self, *, turn: int, query: str, candidates: list[dict[str, Any]],
+        self,
+        *,
+        turn: int,
+        query: str,
+        candidates: list[dict[str, Any]],
         search: dict[str, Any] | None = None,
     ) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({
-            "turn": int(turn), "query": str(query)[:500], "candidates": candidates,
-            "search": search or None,
-        }, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(
+                {
+                    "turn": int(turn),
+                    "query": str(query)[:500],
+                    "candidates": candidates,
+                    "search": search or None,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         os.replace(tmp, self._path)
 
     def load(self, turn: int) -> dict[str, Any] | None:

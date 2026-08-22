@@ -42,21 +42,33 @@ GOOD = {
     "styles": [{"id": "standard", "label": "标准", "default": True}],
     "opening": [
         {"id": "name", "label": "姓名", "kind": "text"},
-        {"id": "race", "label": "种族", "kind": "pick",
-         "options": ["人类", "精灵"], "custom": True},
+        {
+            "id": "race",
+            "label": "种族",
+            "kind": "pick",
+            "options": ["人类", "精灵"],
+            "custom": True,
+        },
     ],
     "panels": [
-        {"id": "status", "always": True, "fields": [
-            {"id": "age", "label": "年龄", "primitive": "field"},
-            {"id": "renown", "label": "声望", "primitive": "stat", "min": 0, "max": 100},
-        ]},
-        {"id": "magic", "when": "state.magic.awakened == true", "fields": [
-            {"id": "mana", "label": "魔力", "primitive": "stat"},
-        ]},
+        {
+            "id": "status",
+            "always": True,
+            "fields": [
+                {"id": "age", "label": "年龄", "primitive": "field"},
+                {"id": "renown", "label": "声望", "primitive": "stat", "min": 0, "max": 100},
+            ],
+        },
+        {
+            "id": "magic",
+            "when": "state.magic.awakened == true",
+            "fields": [
+                {"id": "mana", "label": "魔力", "primitive": "stat"},
+            ],
+        },
     ],
     "endings": [
-        {"id": "line-ended",
-         "when": "state.alive == false and state.lineage.hasHeir == false"},
+        {"id": "line-ended", "when": "state.alive == false and state.lineage.hasHeir == false"},
     ],
     "digest": {"categories": ["国家", "战争"], "rumours": True},
     "save": ["角色", "世界变量"],
@@ -78,8 +90,7 @@ def test_a_good_header_is_accepted_and_becomes_a_world() -> None:
 def test_provenance_is_stamped_by_the_backend_not_the_agent() -> None:
     """The digest must be of the prose the backend holds, so a compiler that
     reports a digest of something else cannot make a stale world look fresh."""
-    lying = {**GOOD, "compiledFrom": {
-        "proseSha256": "0" * 64, "compiler": "hand", "contract": 1}}
+    lying = {**GOOD, "compiledFrom": {"proseSha256": "0" * 64, "compiler": "hand", "contract": 1}}
     res = accept_compiled_header(PROSE, lying)
     assert res.ok
     assert res.pack.provenance.prose_sha256 != "0" * 64
@@ -145,8 +156,11 @@ def test_an_invented_primitive_is_coerced_to_field_not_left_dead() -> None:
 
 def test_two_always_panels_are_refused() -> None:
     bad = json.loads(json.dumps(GOOD))
-    bad["panels"][1] = {"id": "magic", "always": True,
-                        "fields": [{"id": "mana", "label": "魔力", "primitive": "stat"}]}
+    bad["panels"][1] = {
+        "id": "magic",
+        "always": True,
+        "fields": [{"id": "mana", "label": "魔力", "primitive": "stat"}],
+    }
     res = accept_compiled_header(PROSE, bad)
     assert res.ok is False
     assert res.field == "panels"
@@ -154,8 +168,11 @@ def test_two_always_panels_are_refused() -> None:
 
 def test_no_always_panel_is_refused() -> None:
     bad = json.loads(json.dumps(GOOD))
-    bad["panels"][0] = {"id": "status", "when": "state.x == 1",
-                        "fields": [{"id": "age", "label": "年龄", "primitive": "field"}]}
+    bad["panels"][0] = {
+        "id": "status",
+        "when": "state.x == 1",
+        "fields": [{"id": "age", "label": "年龄", "primitive": "field"}],
+    }
     res = accept_compiled_header(PROSE, bad)
     assert res.ok is False
     assert res.field == "panels"
@@ -193,7 +210,9 @@ def test_compiling_with_no_prose_is_refused() -> None:
 def test_referenced_paths_are_reported() -> None:
     res = accept_compiled_header(PROSE, GOOD)
     assert res.referenced_paths == [
-        "state.alive", "state.lineage.hasHeir", "state.magic.awakened",
+        "state.alive",
+        "state.lineage.hasHeir",
+        "state.magic.awakened",
     ]
 
 
@@ -287,11 +306,13 @@ def test_camelcase_ids_are_normalized_and_when_references_follow() -> None:
     path segment AND (for a matching literal) as a string — so nothing dangles."""
     header = json.loads(json.dumps(GOOD))
     header["opening"].append({"id": "birthCity", "label": "出生城", "kind": "text"})
-    header["panels"].append({
-        "id": "cityPanel",
-        "when": 'state.birthCity == "riverport"',
-        "fields": [{"id": "cityMood", "label": "民心", "primitive": "stat"}],
-    })
+    header["panels"].append(
+        {
+            "id": "cityPanel",
+            "when": 'state.birthCity == "riverport"',
+            "fields": [{"id": "cityMood", "label": "民心", "primitive": "stat"}],
+        }
+    )
     result = accept_compiled_header(PROSE, header)
     assert result.ok, result.problem
     t = result.pack.template
@@ -334,12 +355,19 @@ def test_a_header_of_clean_slugs_is_left_untouched() -> None:
 @pytest.mark.parametrize(
     "given,expected",
     [
-        ("text", "field"), ("string", "field"), ("name", "field"),
-        ("date", "field"), ("bool", "field"),
-        ("number", "stat"), ("int", "stat"), ("counter", "stat"),
+        ("text", "field"),
+        ("string", "field"),
+        ("name", "field"),
+        ("date", "field"),
+        ("bool", "field"),
+        ("number", "stat"),
+        ("int", "stat"),
+        ("counter", "stat"),
         ("float", "stat"),
-        ("list", "inventory"), ("items", "inventory"),
-        ("ladder", "rank"), ("roster", "people"),
+        ("list", "inventory"),
+        ("items", "inventory"),
+        ("ladder", "rank"),
+        ("roster", "people"),
         ("totally-unknown", "field"),
     ],
 )
@@ -372,7 +400,7 @@ def test_a_conditional_panel_with_a_bad_when_is_dropped_never_the_always() -> No
 def test_a_chapter_heading_absent_from_prose_is_dropped_not_fatal() -> None:
     h = json.loads(json.dumps(GOOD))
     h["chapters"] = [
-        {"id": "intro", "heading": "第一章", "always": True},        # present in PROSE
+        {"id": "intro", "heading": "第一章", "always": True},  # present in PROSE
         {"id": "ghost", "heading": "no such heading", "always": True},  # not present
     ]
     res = accept_compiled_header(PROSE, h)

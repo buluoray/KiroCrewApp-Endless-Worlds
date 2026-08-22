@@ -55,8 +55,11 @@ def test_the_csp_precedes_every_generated_byte():
 
 def test_the_policy_closes_every_route_out():
     for clause in (
-        "default-src 'none'", "connect-src 'none'",
-        "form-action 'none'", "base-uri 'none'", "img-src data:",
+        "default-src 'none'",
+        "connect-src 'none'",
+        "form-action 'none'",
+        "base-uri 'none'",
+        "img-src data:",
     ):
         assert clause in CSP
     assert "http" not in CSP, "no host is ever allowed"
@@ -67,7 +70,7 @@ def test_nothing_is_loaded_from_anywhere():
     """Inline everything, load nothing — so there is no request to intercept and
     no third party to trust."""
     out = compile_scene("map", SIMPLE, STATE)
-    assert "src=" not in out.replace('data-scene=', '')
+    assert "src=" not in out.replace("data-scene=", "")
     assert "href=" not in out
     assert "//" not in out.replace("<!DOCTYPE", "")
 
@@ -102,9 +105,12 @@ def test_the_frame_reports_its_own_content_height():
     assert "b.children" in SCENE_SCRIPT, "the report does not measure the content"
     assert "marginBottom" in SCENE_SCRIPT, "a child's own bottom margin is content too"
     assert "paddingBottom" in SCENE_SCRIPT
-    for box in ("body.getBoundingClientRect().height",
-                "documentElement.getBoundingClientRect",
-                "body.scrollHeight", "documentElement.scrollHeight"):
+    for box in (
+        "body.getBoundingClientRect().height",
+        "documentElement.getBoundingClientRect",
+        "body.scrollHeight",
+        "documentElement.scrollHeight",
+    ):
         assert box not in SCENE_SCRIPT, f"{box} tracks the frame, not the content"
     assert SCENE_SCRIPT in out
 
@@ -197,16 +203,17 @@ def test_a_spec_carrying_markup_fields_is_refused_outright():
 def test_an_unknown_kind_is_dropped_and_the_rest_of_the_scene_renders():
     """Fail-soft: an unknown kind emits no markup (the closed set still holds) but
     the element is dropped and recorded, rather than blanking the whole scene."""
-    spec = {"elements": [
-        {"kind": "text", "text": "留下来的"},
-        {"kind": "iframe", "src": "http://evil"},
-    ]}
+    spec = {
+        "elements": [
+            {"kind": "text", "text": "留下来的"},
+            {"kind": "iframe", "src": "http://evil"},
+        ]
+    }
     out = compile_scene("map", spec, STATE)
-    assert "留下来的" in out          # the good element survived
-    assert "<iframe" not in out       # the unknown kind produced no tag
+    assert "留下来的" in out  # the good element survived
+    assert "<iframe" not in out  # the unknown kind produced no tag
     warnings = scene_warnings("map", spec, STATE)
-    assert warnings == [{"index": 1, "field": "elements[1].kind",
-                         "reason": warnings[0]["reason"]}]
+    assert warnings == [{"index": 1, "field": "elements[1].kind", "reason": warnings[0]["reason"]}]
     assert "iframe" in warnings[0]["reason"]
 
 
@@ -225,10 +232,15 @@ def test_every_declared_kind_actually_compiles():
         "choice": {"kind": "choice", "id": "go", "label": "走"},
         "divider": {"kind": "divider"},
         "grid": {"kind": "grid", "columns": 2, "cells": [{"label": "王庭"}, {"label": "矿脉"}]},
-        "links": {"kind": "links", "nodes": [{"id": "a", "label": "王"}, {"id": "b", "label": "臣"}],
-                  "edges": [{"from": "a", "to": "b"}]},
-        "tree": {"kind": "tree", "nodes": [{"id": "r", "label": "祖"},
-                 {"id": "c", "label": "子", "parent": "r"}]},
+        "links": {
+            "kind": "links",
+            "nodes": [{"id": "a", "label": "王"}, {"id": "b", "label": "臣"}],
+            "edges": [{"from": "a", "to": "b"}],
+        },
+        "tree": {
+            "kind": "tree",
+            "nodes": [{"id": "r", "label": "祖"}, {"id": "c", "label": "子", "parent": "r"}],
+        },
     }
     assert set(samples) == set(ELEMENT_KINDS), "a kind has no sample here"
     for kind, el in samples.items():
@@ -249,9 +261,11 @@ def test_a_bind_reads_the_same_state_the_panels_read():
 def test_an_unresolvable_bind_falls_back_to_the_literal():
     """A typo'd bind is no longer fatal: it falls back to the element's own literal
     value/text so the scene still shows something truthful the narrator wrote."""
-    spec = {"elements": [
-        {"kind": "stat", "label": "x", "bind": "magic.nope", "value": "40"},
-    ]}
+    spec = {
+        "elements": [
+            {"kind": "stat", "label": "x", "bind": "magic.nope", "value": "40"},
+        ]
+    }
     out = compile_scene("map", spec, STATE)
     assert "40" in out
 
@@ -259,10 +273,12 @@ def test_an_unresolvable_bind_falls_back_to_the_literal():
 def test_an_unresolvable_bind_with_no_literal_drops_only_that_element():
     """No bind and no literal means nothing to show — that one element is dropped
     (and recorded), the rest of the scene survives."""
-    spec = {"elements": [
-        {"kind": "text", "text": "还在"},
-        {"kind": "stat", "label": "x", "bind": "magic.nope"},
-    ]}
+    spec = {
+        "elements": [
+            {"kind": "text", "text": "还在"},
+            {"kind": "stat", "label": "x", "bind": "magic.nope"},
+        ]
+    }
     out = compile_scene("map", spec, STATE)
     assert "还在" in out
     warnings = scene_warnings("map", spec, STATE)
@@ -309,8 +325,9 @@ def test_an_empty_spec_is_refused():
 def test_a_ragged_table_row_is_padded_and_truncated_to_the_columns():
     """A short row is padded, a long row is truncated — the table still renders
     rather than 422-ing the whole scene."""
-    spec = {"elements": [{"kind": "table", "columns": ["a", "b"],
-                          "rows": [["1"], ["2", "3", "4"]]}]}
+    spec = {
+        "elements": [{"kind": "table", "columns": ["a", "b"], "rows": [["1"], ["2", "3", "4"]]}]
+    }
     out = compile_scene("map", spec, STATE)
     # Two body rows, each with exactly two cells (2 columns).
     rows = re.findall(r"<tr>(.*?)</tr>", out.split("<tbody>", 1)[1], re.S)
@@ -323,11 +340,13 @@ def test_a_ragged_table_row_is_padded_and_truncated_to_the_columns():
 def test_one_bad_element_is_dropped_and_the_good_ones_render():
     """A legible partial beats a blank frame: a bad element is dropped and the
     surrounding elements still render, unlike the old whole-scene refusal."""
-    spec = {"elements": [
-        {"kind": "text", "text": "好的"},
-        {"kind": "nope"},
-        {"kind": "text", "text": "也好"},
-    ]}
+    spec = {
+        "elements": [
+            {"kind": "text", "text": "好的"},
+            {"kind": "nope"},
+            {"kind": "text", "text": "也好"},
+        ]
+    }
     out = compile_scene("map", spec, STATE)
     assert "好的" in out and "也好" in out
     assert [w["index"] for w in scene_warnings("map", spec, STATE)] == [1]
@@ -343,7 +362,7 @@ def test_a_bar_over_its_cap_does_not_overflow():
 
 def test_a_zero_cap_draws_no_bar_rather_than_dividing_by_zero():
     spec = {"elements": [{"kind": "bar", "label": "x", "value": 5, "max": 0}]}
-    assert "class=\"t\"" not in compile_scene("map", spec, STATE)
+    assert 'class="t"' not in compile_scene("map", spec, STATE)
 
 
 # -- caching, under the run --------------------------------------------
@@ -433,12 +452,19 @@ def _body(out: str) -> str:
 
 
 def test_grid_lays_cells_into_columns_and_escapes_labels():
-    out = _scene({"kind": "grid", "columns": 3, "cells": [
-        {"label": "王庭", "mark": True}, {"label": "<b>矿脉</b>", "note": "危险"},
-    ]})
+    out = _scene(
+        {
+            "kind": "grid",
+            "columns": 3,
+            "cells": [
+                {"label": "王庭", "mark": True},
+                {"label": "<b>矿脉</b>", "note": "危险"},
+            ],
+        }
+    )
     assert "grid-template-columns:repeat(3,1fr)" in out
-    assert "gc gm" in out                      # the marked cell
-    assert "<b>矿脉</b>" not in out             # label escaped
+    assert "gc gm" in out  # the marked cell
+    assert "<b>矿脉</b>" not in out  # label escaped
     assert "&lt;b&gt;矿脉&lt;/b&gt;" in out
     assert "危险" in out
 
@@ -449,11 +475,17 @@ def test_a_cells_symbol_mark_is_rendered_and_does_not_tint_every_cell():
     every cell of a map, tinted all of them identically — a highlight that highlights
     everything says nothing.
     """
-    out = _scene({"kind": "grid", "columns": 3, "cells": [
-        {"label": "市区", "mark": "⚠"},
-        {"label": "据点", "mark": "🏠", "note": "楼梯已封"},
-        {"label": "安置点", "mark": "🔥"},
-    ]})
+    out = _scene(
+        {
+            "kind": "grid",
+            "columns": 3,
+            "cells": [
+                {"label": "市区", "mark": "⚠"},
+                {"label": "据点", "mark": "🏠", "note": "楼梯已封"},
+                {"label": "安置点", "mark": "🔥"},
+            ],
+        }
+    )
     for glyph in ("⚠", "🏠", "🔥"):
         assert f'<span class="gmk">{glyph}</span>' in out
     assert "gc gm" not in _body(out), "a symbol must not also tint the cell"
@@ -472,8 +504,13 @@ def test_a_symbol_mark_passes_the_same_stripper_as_any_narrator_text():
 def test_a_true_mark_still_tints_the_cell_and_draws_no_badge():
     """The other intention `mark` carries, kept separable: one cell called out of
     several, with no symbol to show."""
-    out = _scene({"kind": "grid", "columns": 2,
-                  "cells": [{"label": "据点", "mark": True}, {"label": "巷子"}]})
+    out = _scene(
+        {
+            "kind": "grid",
+            "columns": 2,
+            "cells": [{"label": "据点", "mark": True}, {"label": "巷子"}],
+        }
+    )
     assert "gc gm" in _body(out)
     assert "gmk" not in _body(out)
 
@@ -489,8 +526,7 @@ def test_a_mark_that_is_not_a_symbol_draws_nothing_rather_than_a_cut_one(mark):
 
 
 def test_a_symbol_mark_is_escaped_like_any_other_narrator_text():
-    out = _scene({"kind": "grid", "columns": 1,
-                  "cells": [{"label": "巷子", "mark": "<b>!"}]})
+    out = _scene({"kind": "grid", "columns": 1, "cells": [{"label": "巷子", "mark": "<b>!"}]})
     assert "<b>!" not in _body(out)
     assert "&lt;b&gt;!" in out
 
@@ -503,17 +539,26 @@ def test_grid_clamps_out_of_range_columns_into_range():
 
 
 def test_grid_drops_a_bad_cell_and_keeps_the_rest():
-    out = _scene({"kind": "grid", "columns": 2,
-                  "cells": [{"label": "王庭"}, "not-an-object", {"label": "矿脉"}]})
+    out = _scene(
+        {
+            "kind": "grid",
+            "columns": 2,
+            "cells": [{"label": "王庭"}, "not-an-object", {"label": "矿脉"}],
+        }
+    )
     assert "王庭" in out and "矿脉" in out
     assert "not-an-object" not in out
 
 
 def test_links_draws_svg_from_nodes_and_edges_with_no_author_coordinates():
-    out = _scene({"kind": "links",
-                  "nodes": [{"id": "a", "label": "国王"}, {"id": "b", "label": "叛军"}],
-                  "edges": [{"from": "a", "to": "b", "label": "敌对"}]})
-    assert "<svg" in out and "class=\"lk\"" in out
+    out = _scene(
+        {
+            "kind": "links",
+            "nodes": [{"id": "a", "label": "国王"}, {"id": "b", "label": "叛军"}],
+            "edges": [{"from": "a", "to": "b", "label": "敌对"}],
+        }
+    )
+    assert "<svg" in out and 'class="lk"' in out
     assert "<line" in out and "<circle" in out
     assert "国王" in out and "敌对" in out
     # geometry is the app's: the spec carried no x/y, and coordinates appear anyway
@@ -521,28 +566,45 @@ def test_links_draws_svg_from_nodes_and_edges_with_no_author_coordinates():
 
 
 def test_links_drops_an_edge_to_an_unknown_node_and_still_draws():
-    out = _scene({"kind": "links", "nodes": [{"id": "a", "label": "A"}],
-                  "edges": [{"from": "a", "to": "ghost"}]})
+    out = _scene(
+        {
+            "kind": "links",
+            "nodes": [{"id": "a", "label": "A"}],
+            "edges": [{"from": "a", "to": "ghost"}],
+        }
+    )
     assert "<svg" in out and "<circle" in out  # the node still draws
-    assert "<line" not in out                   # the dangling edge was dropped
+    assert "<line" not in out  # the dangling edge was dropped
 
 
 def test_links_de_dups_repeated_node_ids_keeping_the_first():
-    out = _scene({"kind": "links", "nodes": [
-        {"id": "a", "label": "第一"}, {"id": "a", "label": "第二"},
-        {"id": "b", "label": "乙"},
-    ], "edges": [{"from": "a", "to": "b"}]})
+    out = _scene(
+        {
+            "kind": "links",
+            "nodes": [
+                {"id": "a", "label": "第一"},
+                {"id": "a", "label": "第二"},
+                {"id": "b", "label": "乙"},
+            ],
+            "edges": [{"from": "a", "to": "b"}],
+        }
+    )
     assert "第一" in out and "第二" not in out
     assert out.count("<circle") == 2
 
 
 def test_tree_nests_children_under_parents_and_escapes():
-    out = _scene({"kind": "tree", "nodes": [
-        {"id": "root", "label": "始祖"},
-        {"id": "kid", "label": "<i>长子</i>", "parent": "root", "note": "储君"},
-    ]})
+    out = _scene(
+        {
+            "kind": "tree",
+            "nodes": [
+                {"id": "root", "label": "始祖"},
+                {"id": "kid", "label": "<i>长子</i>", "parent": "root", "note": "储君"},
+            ],
+        }
+    )
     assert 'class="tree"' in out
-    assert out.count("<ul") >= 2               # root list + one nested
+    assert out.count("<ul") >= 2  # root list + one nested
     assert "<i>长子</i>" not in out
     assert "储君" in out
 
@@ -551,12 +613,17 @@ def test_tree_survives_a_cycle_by_promoting_a_root_and_dropping_the_back_edge():
     """A cycle no longer 422s the scene. A real root renders normally; a separate
     pair that only points at each other is stranded, so it is promoted as its own
     root and the back-edge that would loop back is dropped rather than raising."""
-    out = _scene({"kind": "tree", "nodes": [
-        {"id": "root", "label": "始祖"},
-        {"id": "kid", "label": "长子", "parent": "root"},
-        {"id": "a", "label": "甲", "parent": "b"},
-        {"id": "b", "label": "乙", "parent": "a"},
-    ]})
+    out = _scene(
+        {
+            "kind": "tree",
+            "nodes": [
+                {"id": "root", "label": "始祖"},
+                {"id": "kid", "label": "长子", "parent": "root"},
+                {"id": "a", "label": "甲", "parent": "b"},
+                {"id": "b", "label": "乙", "parent": "a"},
+            ],
+        }
+    )
     assert 'class="tree"' in out
     for name in ("始祖", "长子", "甲", "乙"):
         assert name in out
@@ -569,11 +636,16 @@ def test_tree_treats_an_unknown_parent_as_a_root():
 
 
 def test_tree_drops_a_node_with_no_usable_id_but_keeps_the_rest():
-    out = _scene({"kind": "tree", "nodes": [
-        {"id": "root", "label": "始祖"},
-        {"id": "Bad Id", "label": "无效"},
-        {"id": "kid", "label": "长子", "parent": "root"},
-    ]})
+    out = _scene(
+        {
+            "kind": "tree",
+            "nodes": [
+                {"id": "root", "label": "始祖"},
+                {"id": "Bad Id", "label": "无效"},
+                {"id": "kid", "label": "长子", "parent": "root"},
+            ],
+        }
+    )
     assert "始祖" in out and "长子" in out
     assert "无效" not in out
 
@@ -643,19 +715,22 @@ def test_a_mangled_choice_id_is_coherent_across_button_and_answer_channel(tmp_pa
     from scenes import SceneLedger
 
     ledger = SceneLedger(tmp_path, "run-1")
-    spec = {"elements": [
-        {"kind": "text", "text": "岔路"},
-        {"kind": "choice", "id": "Go North!", "label": "往北"},
-    ]}
+    spec = {
+        "elements": [
+            {"kind": "text", "text": "岔路"},
+            {"kind": "choice", "id": "Go North!", "label": "往北"},
+        ]
+    }
     nonce = ledger.mount("fork", spec, asks=True)
-    stored = ledger.spec("fork")                        # (a) the stored spec
+    stored = ledger.spec("fork")  # (a) the stored spec
 
     out = compile_scene("fork", stored, {}, nonce=nonce)
-    button_ids = re.findall(r'data-choice="([^"]+)"', out)   # (b) the button
+    button_ids = re.findall(r'data-choice="([^"]+)"', out)  # (b) the button
     assert len(button_ids) == 1
 
-    offered = {                                          # (c) the answer channel
-        el.get("id") for el in stored["elements"]
+    offered = {  # (c) the answer channel
+        el.get("id")
+        for el in stored["elements"]
         if isinstance(el, dict) and el.get("kind") == "choice"
     }
     assert button_ids[0] in offered, "button id and offered set disagree"
@@ -669,10 +744,12 @@ def test_two_choices_that_slugify_to_the_same_id_stay_distinct(tmp_path):
     from scenes import SceneLedger
 
     ledger = SceneLedger(tmp_path, "run-1")
-    spec = {"elements": [
-        {"kind": "choice", "id": "go!", "label": "一"},
-        {"kind": "choice", "id": "go?", "label": "二"},
-    ]}
+    spec = {
+        "elements": [
+            {"kind": "choice", "id": "go!", "label": "一"},
+            {"kind": "choice", "id": "go?", "label": "二"},
+        ]
+    }
     ledger.mount("fork", spec)
     ids = [el["id"] for el in ledger.spec("fork")["elements"]]
     assert len(set(ids)) == 2, "colliding slugs were not disambiguated"

@@ -60,15 +60,22 @@ _ID = "0123456789abcdef" * 2
 
 def test_the_surface_is_exactly_the_declared_tools():
     assert {t["name"] for t in srv.list_tools()} == {
-        "endless_advance_turn", "endless_read_runtime", "endless_mount_scene",
-        "endless_update_scene", "endless_await_scene", "endless_dismiss_scene",
-        "endless_paint_backdrop", "endless_trace_reference",
+        "endless_advance_turn",
+        "endless_read_runtime",
+        "endless_mount_scene",
+        "endless_update_scene",
+        "endless_await_scene",
+        "endless_dismiss_scene",
+        "endless_paint_backdrop",
+        "endless_trace_reference",
         "endless_select_reference",
         "endless_submit_backdrop_draft",
         "endless_commit_backdrop",
-        "endless_commit_fallback_backdrop", "endless_clear_backdrop",
+        "endless_commit_fallback_backdrop",
+        "endless_clear_backdrop",
         "endless_export_world",
-        "endless_read_draft", "endless_submit_world_draft",
+        "endless_read_draft",
+        "endless_submit_world_draft",
     }
     assert set(srv._HANDLERS) == {t["name"] for t in srv.list_tools()}
 
@@ -92,9 +99,11 @@ def test_every_published_constraint_is_one_the_validator_enforces():
     run-id", and a narrator duly sent `run-id-<hex>`), while `minItems` and
     `minLength` were advertised and never checked at all. A constraint the narrator
     is shown and the server ignores is as much a lie as one it is refused for."""
-    enforced = set(
-        re.findall(r'schema\.get\("([a-zA-Z]+)"', inspect.getsource(srv._check))
-    ) | {"type", "properties", "items"}
+    enforced = set(re.findall(r'schema\.get\("([a-zA-Z]+)"', inspect.getsource(srv._check))) | {
+        "type",
+        "properties",
+        "items",
+    }
 
     published: dict[str, str] = {}
 
@@ -163,10 +172,17 @@ def test_the_salvaged_arrays_publish_their_shape_without_arming_a_refusal():
 def test_backdrop_visual_review_schemas_require_the_complete_pair_and_draft_id():
     schemas = {tool["name"]: tool["inputSchema"] for tool in srv.list_tools()}
     assert schemas["endless_submit_backdrop_draft"]["required"] == [
-        "runId", "turn", "markup", "mobile",
+        "runId",
+        "turn",
+        "markup",
+        "mobile",
     ]
     assert schemas["endless_commit_backdrop"]["required"] == [
-        "runId", "turn", "draftId", "markup", "mobile",
+        "runId",
+        "turn",
+        "draftId",
+        "markup",
+        "mobile",
     ]
 
 
@@ -281,7 +297,10 @@ def test_a_turn_commits_prose_state_and_choices(app):
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
 
     out = call(
-        "endless_advance_turn", runId=run, turn=2, prose="冬天来了。",
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="冬天来了。",
         state={"worldId": "w", "age": 15},
         choices=[{"id": "stay", "label": "留在村里"}],
     )
@@ -295,11 +314,23 @@ def test_a_replayed_turn_changes_nothing(app):
     mistake, so it is a no-op rather than a double-apply or a scolding."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=2, prose="a", state={"v": 1},
-         choices=[{"id": "go", "label": "go on"}])
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="a",
+        state={"v": 1},
+        choices=[{"id": "go", "label": "go on"}],
+    )
 
-    again = call("endless_advance_turn", runId=run, turn=2, prose="b", state={"v": 999},
-                 choices=[{"id": "go", "label": "go on"}])
+    again = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="b",
+        state={"v": 999},
+        choices=[{"id": "go", "label": "go on"}],
+    )
 
     assert again["committed"] is False
     assert store.read_state(run)["v"] == 1
@@ -309,8 +340,14 @@ def test_a_replayed_turn_changes_nothing(app):
 def test_the_turn_number_is_stamped_by_the_server_not_trusted_from_state(app):
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=2, prose="a", state={"turn": 87},
-         choices=[{"id": "go", "label": "go on"}])
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="a",
+        state={"turn": 87},
+        choices=[{"id": "go", "label": "go on"}],
+    )
     assert store.read_state(run)["turn"] == 2
 
 
@@ -362,7 +399,10 @@ def test_advance_turn_recovers_a_double_encoded_state_with_a_bad_escape(app):
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
     out = call(
         "endless_advance_turn",
-        runId=run, turn=2, prose="the tower fell", ending=True,
+        runId=run,
+        turn=2,
+        prose="the tower fell",
+        ending=True,
         state='{"alive": false, "path": "C:\\Users"}',  # invalid \\U escape
     )
     assert out["ok"] is True, out
@@ -598,8 +638,7 @@ def test_stdout_is_never_written_to_outside_the_protocol():
         if not (isinstance(func, ast.Name) and func.id == "print"):
             continue
         to_stderr = any(
-            kw.arg == "file" and "stderr" in ast.unparse(kw.value)
-            for kw in node.keywords
+            kw.arg == "file" and "stderr" in ast.unparse(kw.value) for kw in node.keywords
         )
         if not to_stderr:
             pytest.fail(f"print without stderr on line {node.lineno}")
@@ -616,15 +655,26 @@ def test_a_commit_keeps_the_keys_the_narrator_never_declares(app):
     longer find its world, so the world vanished from the page."""
     store = srv._store()
     run = store.create_run(
-        {"turn": 0, "worldId": "w", "style": "classic", "language": "zh",
-         "opening": {"name": "艾琳"}, "status": "awaiting-opening"},
+        {
+            "turn": 0,
+            "worldId": "w",
+            "style": "classic",
+            "language": "zh",
+            "opening": {"name": "艾琳"},
+            "status": "awaiting-opening",
+        },
         {"runId": "r1"},
     )
 
     # Exactly what the narrator sent: story state, keyed its own way, no worldId.
-    call("endless_advance_turn", runId=run, turn=1, prose="他出生了。",
-         state={"时间": "312年·狼月", "年龄": "0岁"},
-         choices=[{"id": "go", "label": "去看看"}])
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="他出生了。",
+        state={"时间": "312年·狼月", "年龄": "0岁"},
+        choices=[{"id": "go", "label": "去看看"}],
+    )
 
     after = store.read_state(run)
     assert after["worldId"] == "w", "the life lost its world"
@@ -637,10 +687,17 @@ def test_a_commit_keeps_the_keys_the_narrator_never_declares(app):
 def test_the_narrator_can_still_change_a_reserved_key_by_declaring_it(app):
     """Carried forward is not frozen: a narrator that DOES declare one means it."""
     store = srv._store()
-    run = store.create_run({"turn": 0, "worldId": "w", "status": "awaiting-opening"},
-                           {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=1, prose="p", state={"status": "alive"},
-         choices=[{"id": "go", "label": "go on"}])
+    run = store.create_run(
+        {"turn": 0, "worldId": "w", "status": "awaiting-opening"}, {"runId": "r1"}
+    )
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        state={"status": "alive"},
+        choices=[{"id": "go", "label": "go on"}],
+    )
     assert store.read_state(run)["status"] == "alive"
 
 
@@ -662,14 +719,26 @@ def test_digest_and_relations_merge_forward_only_what_changed(app):
     ones persist rather than vanishing — so it stops re-sending the whole block."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=1, prose="p",
-         choices=[{"id": "go", "label": "go"}],
-         state={"digest": {"war": "帝国宣战", "trade": "商路如常"},
-                "relations": {"mother": "alive", "mentor": "trusted"}})
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={
+            "digest": {"war": "帝国宣战", "trade": "商路如常"},
+            "relations": {"mother": "alive", "mentor": "trusted"},
+        },
+    )
     # Turn 2 touches only one entry in each; the rest must survive.
-    call("endless_advance_turn", runId=run, turn=2, prose="p",
-         choices=[{"id": "go", "label": "go"}],
-         state={"digest": {"war": "战事平息"}, "relations": {"mentor": "exiled"}})
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"digest": {"war": "战事平息"}, "relations": {"mentor": "exiled"}},
+    )
     after = store.read_state(run)
     assert after["digest"] == {"war": "战事平息", "trade": "商路如常"}
     assert after["relations"] == {"mother": "alive", "mentor": "exiled"}
@@ -680,12 +749,22 @@ def test_a_null_sub_value_retires_a_merged_entry(app):
     retires just that entry, leaving the rest of the cumulative block intact."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=1, prose="p",
-         choices=[{"id": "go", "label": "go"}],
-         state={"digest": {"war": "帝国宣战", "trade": "商路如常"}})
-    call("endless_advance_turn", runId=run, turn=2, prose="p",
-         choices=[{"id": "go", "label": "go"}],
-         state={"digest": {"war": None}})
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"digest": {"war": "帝国宣战", "trade": "商路如常"}},
+    )
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"digest": {"war": None}},
+    )
     assert store.read_state(run)["digest"] == {"trade": "商路如常"}
 
 
@@ -694,11 +773,22 @@ def test_omitting_a_merge_key_carries_the_whole_block_forward(app):
     turn is kept whole, not cleared."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    call("endless_advance_turn", runId=run, turn=1, prose="p",
-         choices=[{"id": "go", "label": "go"}],
-         state={"digest": {"war": "帝国宣战"}, "年龄": "0岁"})
-    call("endless_advance_turn", runId=run, turn=2, prose="p",
-         choices=[{"id": "go", "label": "go"}], state={"年龄": "1岁"})
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"digest": {"war": "帝国宣战"}, "年龄": "0岁"},
+    )
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"年龄": "1岁"},
+    )
     after = store.read_state(run)
     assert after["digest"] == {"war": "帝国宣战"}, "the cumulative block persisted"
     assert after["年龄"] == "1岁"
@@ -758,9 +848,15 @@ def test_a_memory_event_missing_a_field_is_repaired_not_dropped(app):
     summary the narrator did write, so it is recorded with no warning at all."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
-               choices=[{"id": "go", "label": "go"}], state={"alive": True},
-               memory={"events": [{"key": "k", "summary": "s", "disclosure": "known"}]})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"alive": True},
+        memory={"events": [{"key": "k", "summary": "s", "disclosure": "known"}]},
+    )
     assert out.get("committed") is True and out.get("ok") is not False
     (entry,) = store.read_chronicle(run)
     (ev,) = entry["memory"]["events"]
@@ -775,11 +871,27 @@ def test_a_null_optional_field_is_absent_not_a_type_error(app):
     field now means what omitting it means."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
-               choices=[{"id": "go", "label": "go"}], state={"alive": True},
-               memory={"events": [{"key": "k", "title": "t", "summary": "s",
-                                   "place": None, "importance": None,
-                                   "participants": None, "disclosure": "known"}]})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"alive": True},
+        memory={
+            "events": [
+                {
+                    "key": "k",
+                    "title": "t",
+                    "summary": "s",
+                    "place": None,
+                    "importance": None,
+                    "participants": None,
+                    "disclosure": "known",
+                }
+            ]
+        },
+    )
     assert out.get("ok") is not False, f"the turn was refused: {out}"
     assert out.get("committed") is True
     (entry,) = store.read_chronicle(run)
@@ -793,10 +905,15 @@ def test_a_null_entry_in_a_list_is_a_hole_not_a_refusal(app):
     list — refusing would cost the turn over nothing at all."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
-               choices=[{"id": "go", "label": "go"}], state={"alive": True},
-               memory={"entities": [None,
-                                    {"id": "elin", "kind": "character", "name": "Elin"}]})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"alive": True},
+        memory={"entities": [None, {"id": "elin", "kind": "character", "name": "Elin"}]},
+    )
     assert out.get("ok") is not False and out.get("committed") is True
     (entry,) = store.read_chronicle(run)
     assert [e["id"] for e in entry["memory"]["entities"]] == ["elin"]
@@ -807,8 +924,14 @@ def test_a_null_REQUIRED_field_is_still_refused(app):
     committing a blank page would be worse than refusing the call."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=1, prose=None,
-               choices=[{"id": "go", "label": "go"}], state={"alive": True})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose=None,
+        choices=[{"id": "go", "label": "go"}],
+        state={"alive": True},
+    )
     assert out.get("ok") is False and out.get("applied") is False
     assert out.get("field") == "arguments.prose"
 
@@ -827,20 +950,36 @@ def test_the_reported_warning_batch_now_repairs_to_zero_warnings(app):
             {"id": "place:old stone bridge", "kind": "place", "name": "老石桥"},
             {"id": "concept:resonant-notation", "kind": "concept", "name": "共鸣符记法"},
         ],
-        "events": [{"key": "event:1:met-hui-ya", "summary": "他在桥上遇见灰鸦。",
-                    "participants": ["character:hui-ya"], "place": "place:old stone bridge",
-                    "disclosure": "known"}],
+        "events": [
+            {
+                "key": "event:1:met-hui-ya",
+                "summary": "他在桥上遇见灰鸦。",
+                "participants": ["character:hui-ya"],
+                "place": "place:old stone bridge",
+                "disclosure": "known",
+            }
+        ],
     }
-    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
-               choices=[{"id": "go", "label": "go"}], state={"alive": True},
-               memory=memory)
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"alive": True},
+        memory=memory,
+    )
     assert out.get("committed") is True
     assert not [w for w in out.get("warnings") or [] if w.get("panel") == "memory"], (
         "every piece of the reported batch is repairable"
     )
     (entry,) = store.read_chronicle(run)
     assert [e["id"] for e in entry["memory"]["entities"]] == [
-        "lin-shuang", "hui-ya", "darkflame-court", "old-stone-bridge", "resonant-notation",
+        "lin-shuang",
+        "hui-ya",
+        "darkflame-court",
+        "old-stone-bridge",
+        "resonant-notation",
     ]
     (ev,) = entry["memory"]["events"]
     assert ev["key"] == "met-hui-ya" and ev["title"] == "他在桥上遇见灰鸦。"
@@ -851,13 +990,22 @@ def test_milestones_are_reached_once_and_then_permanent(app):
     """An achievement is recorded the turn its condition first holds, and stays
     recorded afterwards even if the condition later goes false (app-owned)."""
     from compile import accept_compiled_header
+
     header = {
-        "id": "m", "title": "M", "version": "1.0", "language": "en",
+        "id": "m",
+        "title": "M",
+        "version": "1.0",
+        "language": "en",
         "clock": {"unit": "month", "label": "{year}"},
         "styles": [{"id": "s", "label": "S", "default": True}],
         "opening": [{"id": "name", "label": "Name", "kind": "text"}],
-        "panels": [{"id": "status", "always": True,
-                    "fields": [{"id": "age", "label": "Age", "primitive": "field"}]}],
+        "panels": [
+            {
+                "id": "status",
+                "always": True,
+                "fields": [{"id": "age", "label": "Age", "primitive": "field"}],
+            }
+        ],
         "endings": [{"id": "died", "when": "state.dead == true"}],
         "milestones": [{"id": "adult", "label": "Came of age", "when": "state.age >= 18"}],
     }
@@ -890,10 +1038,10 @@ def test_resolve_handoff_selects_named_entries_and_stars() -> None:
         roles=[Role(id="r1", name="R1")],
     )
     out = srv._resolve_handoff(tmpl)
-    assert [e["id"] for e in out["lore"]] == ["keep"]      # only the named lore
+    assert [e["id"] for e in out["lore"]] == ["keep"]  # only the named lore
     assert out["lore"][0]["summary"] == "a fort"
-    assert [s["id"] for s in out["systems"]] == ["xp"]     # systems.* = all
-    assert "roles" not in out                               # roles not referenced
+    assert [s["id"] for s in out["systems"]] == ["xp"]  # systems.* = all
+    assert "roles" not in out  # roles not referenced
 
 
 # -- per-turn tool calls are fail-soft (Tier 1) ---------------------------
@@ -902,26 +1050,32 @@ def test_resolve_handoff_selects_named_entries_and_stars() -> None:
 def test_sanitize_read_runtime_args_clamps_and_coerces():
     """The optional read args are model-manglable, so they are normalized rather
     than allowed to refuse the mandatory first read."""
-    a = {"runId": "x", "recentTurns": 9999, "since": 123,
-         "memoryEvents": "nope", "chapters": [1, 2], "includeProse": "yes"}
+    a = {
+        "runId": "x",
+        "recentTurns": 9999,
+        "since": 123,
+        "memoryEvents": "nope",
+        "chapters": [1, 2],
+        "includeProse": "yes",
+    }
     srv._sanitize_read_runtime_args(a)
-    assert a["recentTurns"] == 50            # clamped into [0, 50]
-    assert "since" not in a                  # a non-string since is dropped
-    assert a["memoryEvents"] == []           # a non-list becomes empty
-    assert a["chapters"] == ["1", "2"]       # coerced to bounded strings
-    assert a["includeProse"] is True         # coerced to a bool
+    assert a["recentTurns"] == 50  # clamped into [0, 50]
+    assert "since" not in a  # a non-string since is dropped
+    assert a["memoryEvents"] == []  # a non-list becomes empty
+    assert a["chapters"] == ["1", "2"]  # coerced to bounded strings
+    assert a["includeProse"] is True  # coerced to a bool
 
     b = {"recentTurns": -3}
     srv._sanitize_read_runtime_args(b)
-    assert b["recentTurns"] == 0             # negative clamps to 0
+    assert b["recentTurns"] == 0  # negative clamps to 0
 
     c = {"recentTurns": "nope"}
     srv._sanitize_read_runtime_args(c)
-    assert "recentTurns" not in c            # a non-int is dropped, not clamped
+    assert "recentTurns" not in c  # a non-int is dropped, not clamped
 
     d = {"since": "z" * 100}
     srv._sanitize_read_runtime_args(d)
-    assert len(d["since"]) == 64             # over-long since is truncated
+    assert len(d["since"]) == 64  # over-long since is truncated
 
 
 def test_read_runtime_is_never_refused_over_a_bad_optional_arg(app):
@@ -929,8 +1083,15 @@ def test_read_runtime_is_never_refused_over_a_bad_optional_arg(app):
     instead of a schema refusal that would leave the narrator unable to look."""
     store = srv._store()
     run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_read_runtime", runId=run, recentTurns=9999, since=123,
-               memoryEvents="not-a-list", chapters=[1, 2], includeProse="yes")
+    out = call(
+        "endless_read_runtime",
+        runId=run,
+        recentTurns=9999,
+        since=123,
+        memoryEvents="not-a-list",
+        chapters=[1, 2],
+        includeProse="yes",
+    )
     assert out["ok"] is True, out
     assert out["turn"] == 4
 
@@ -940,9 +1101,15 @@ def test_a_stray_top_level_arg_is_dropped_and_warned_not_refused(app):
     dropped-and-warned; the prose/choices/state the narrator DID send still commit."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w", "age": 1},
-               choices=[{"id": "go", "label": "go on"}], nonsense={"x": 1})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w", "age": 1},
+        choices=[{"id": "go", "label": "go on"}],
+        nonsense={"x": 1},
+    )
     assert out["ok"] is True and out["committed"] is True
     assert "nonsense" in {w["field"] for w in out.get("warnings") or []}
     assert store.read_state(run)["age"] == 1
@@ -953,9 +1120,15 @@ def test_gains_without_a_field_are_dropped_and_warned(app):
     warned and unknown keys are stripped, rather than refusing the turn."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w"}, choices=[{"id": "go", "label": "go on"}],
-               gains=[{"amount": "5"}, {"field": "gold", "amount": "5", "junk": 1}])
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices=[{"id": "go", "label": "go on"}],
+        gains=[{"amount": "5"}, {"field": "gold", "amount": "5", "junk": 1}],
+    )
     assert out["ok"] is True and out["committed"] is True
     gain_fields = {w["field"] for w in out.get("warnings") or [] if w.get("panel") == "gains"}
     assert "gains[0].field" in gain_fields
@@ -967,11 +1140,18 @@ def test_choices_are_salvaged_labelless_dropped_id_synthesized(app):
     synthesized, and unknown keys are stripped — the schema only bounds the array."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w"},
-               choices=[{"label": "no id here", "junk": 9},
-                        {"id": ""},
-                        {"id": "keep", "label": "keep me"}])
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices=[
+            {"label": "no id here", "junk": 9},
+            {"id": ""},
+            {"id": "keep", "label": "keep me"},
+        ],
+    )
     assert out["ok"] is True and out["committed"] is True
     assert store.read_chronicle(run)[-1]["choices"] == [
         {"label": "no id here", "id": "c0"},
@@ -984,8 +1164,14 @@ def test_a_living_turn_left_with_no_usable_choice_is_still_refused(app):
     only choice was unusable is refused, exactly as an empty choices array is."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w", "alive": True}, choices=[{"id": "x"}])
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w", "alive": True},
+        choices=[{"id": "x"}],
+    )
     assert out["committed"] is False
     assert out["reason"] == "choices-required"
     # The refusal must name the TRUE failure — entries were sent but unusable —
@@ -1001,14 +1187,18 @@ def test_choice_effects_are_vocabulary_gated_and_tints_validated(app):
     refused turn, and never a model-authored value reaching the DOM as code."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w"},
-               choices=[
-                   {"label": "接过王剑", "fateful": True,
-                    "effect": "embers", "tint": "#c9a227"},
-                   {"label": "退后一步", "effect": "sparkle-explosion"},
-                   {"label": "沉默", "effect": "aura", "tint": "red"},
-               ])
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices=[
+            {"label": "接过王剑", "fateful": True, "effect": "embers", "tint": "#c9a227"},
+            {"label": "退后一步", "effect": "sparkle-explosion"},
+            {"label": "沉默", "effect": "aura", "tint": "red"},
+        ],
+    )
     assert out["ok"] is True and out["committed"] is True
     committed = store.read_chronicle(run)[-1]["choices"]
     assert committed[0]["effect"] == "embers" and committed[0]["tint"] == "#c9a227"
@@ -1022,9 +1212,14 @@ def test_a_double_encoded_choices_array_is_recovered_not_refused(app):
     lose the whole turn: the same courtesy state/memory already get."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w"},
-               choices='[{"id": "flee", "label": "逃跑"}, {"label": "反击"}]')
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices='[{"id": "flee", "label": "逃跑"}, {"label": "反击"}]',
+    )
     assert out["ok"] is True and out["committed"] is True
     committed = store.read_chronicle(run)[-1]["choices"]
     assert [c["label"] for c in committed] == ["逃跑", "反击"]
@@ -1036,12 +1231,14 @@ def test_choice_captions_are_salvaged_from_common_alias_keys(app):
     The caption is the content; the key spelling is not."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w"},
-               choices=[{"text": "逃跑"},
-                        {"title": "反击", "id": "fight"},
-                        "大声呼救",
-                        {"junk": 9}])
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices=[{"text": "逃跑"}, {"title": "反击", "id": "fight"}, "大声呼救", {"junk": 9}],
+    )
     assert out["ok"] is True and out["committed"] is True
     committed = store.read_chronicle(run)[-1]["choices"]
     assert [c["label"] for c in committed] == ["逃跑", "反击", "大声呼救"]
@@ -1054,9 +1251,15 @@ def test_events_are_coerced_to_bounded_strings(app):
     truncated, and the list capped at 12 — a mangled entry never refuses the turn."""
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=2, prose="p",
-               state={"worldId": "w"}, choices=[{"id": "go", "label": "go on"}],
-               events=[123, "x" * 500] + ["e"] * 20)
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices=[{"id": "go", "label": "go on"}],
+        events=[123, "x" * 500] + ["e"] * 20,
+    )
     assert out["ok"] is True and out["committed"] is True
     stored = store.read_chronicle(run)[-1]["events"]
     assert len(stored) == 12

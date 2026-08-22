@@ -83,8 +83,19 @@ def test_thirteen_declared_opening_groups_plus_the_style_chooser(flagship) -> No
     `styles` so it is not defined twice."""
     assert len(flagship.opening) == 13
     assert [g.id for g in flagship.opening] == [
-        "era", "race", "birth", "name", "age", "sex", "birthplace",
-        "family", "skills", "aptitude", "faith", "personality", "goal",
+        "era",
+        "race",
+        "birth",
+        "name",
+        "age",
+        "sex",
+        "birthplace",
+        "family",
+        "skills",
+        "aptitude",
+        "faith",
+        "personality",
+        "goal",
     ]
 
 
@@ -106,9 +117,23 @@ def test_status_panel_is_the_seventeen_field_bar(flagship) -> None:
     assert status.always is True
     assert len(status.fields) == 17
     assert [f.label for f in status.fields] == [
-        "时间", "年龄", "种族", "身份", "所在地", "职业", "财富", "家庭",
-        "社会地位", "魔法能力", "战斗能力", "神术/信仰", "技能", "声望",
-        "重要关系", "所属势力", "当前目标",
+        "时间",
+        "年龄",
+        "种族",
+        "身份",
+        "所在地",
+        "职业",
+        "财富",
+        "家庭",
+        "社会地位",
+        "魔法能力",
+        "战斗能力",
+        "神术/信仰",
+        "技能",
+        "声望",
+        "重要关系",
+        "所属势力",
+        "当前目标",
     ]
 
 
@@ -122,14 +147,15 @@ def test_all_panel_labels_are_localized(flagship) -> None:
         ("family", "家族"),
     ]
 
+
 def test_the_five_conditional_panels_match_chapters_148_to_152(flagship) -> None:
     """R5.2 — each appears only when its trigger is met."""
     conditional = {p.id: p for p in flagship.panels if not p.always}
     assert set(conditional) == {"magic", "relations", "nation", "academy", "family"}
-    assert len(conditional["magic"].fields) == 8      # 第一百四十八章
-    assert len(conditional["nation"].fields) == 12    # 第一百五十章
-    assert len(conditional["academy"].fields) == 9    # 第一百五十一章
-    assert len(conditional["family"].fields) == 10    # 第一百五十二章
+    assert len(conditional["magic"].fields) == 8  # 第一百四十八章
+    assert len(conditional["nation"].fields) == 12  # 第一百五十章
+    assert len(conditional["academy"].fields) == 9  # 第一百五十一章
+    assert len(conditional["family"].fields) == 10  # 第一百五十二章
     for panel in conditional.values():
         assert panel.when is not None
 
@@ -158,7 +184,15 @@ def test_panels_appear_as_the_life_opens_up(flagship) -> None:
 def test_nine_digest_categories_with_rumour(flagship) -> None:
     """第一百四十六章 · 月度世界演化 (R6.1)."""
     assert flagship.digest_categories == [
-        "国家", "战争", "教会", "学院", "经济", "魔兽", "魔族", "冒险者", "你所在地区",
+        "国家",
+        "战争",
+        "教会",
+        "学院",
+        "经济",
+        "魔兽",
+        "魔族",
+        "冒险者",
+        "你所在地区",
     ]
     assert flagship.digest_rumours is True
 

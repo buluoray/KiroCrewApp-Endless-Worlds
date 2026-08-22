@@ -59,8 +59,7 @@ def test_rolling_is_not_the_same_as_choosing(tpl):
     """Across many seeds a rolled group must actually vary — a "roll" that always
     returns the same value would be a default wearing a costume."""
     seen = {
-        build_initial_state(tpl, {}, rng=random.Random(s))["opening"]["aptitude"]
-        for s in range(60)
+        build_initial_state(tpl, {}, rng=random.Random(s))["opening"]["aptitude"] for s in range(60)
     }
     assert len(seen) > 1
 
@@ -178,7 +177,7 @@ def test_the_opening_prompt_carries_no_setup_only_a_pull(tpl):
     """The opening push is the run id and an instruction to pull. The world's rules
     and the player's own answers are served by endless_read_runtime, so the
     narrator's visible session is not a wall of setup."""
-    state = build_initial_state(tpl, {"name": "艾琳", "era": tpl.opening[0].options[0]})
+    build_initial_state(tpl, {"name": "艾琳", "era": tpl.opening[0].options[0]})
     prompt = compose_opening_prompt(template=tpl, run_id="run-1")
     assert "endless_read_runtime" in prompt, "nothing tells it to pull the world"
     assert "艾琳" not in prompt, "the player's answers are pulled from state, not pushed"

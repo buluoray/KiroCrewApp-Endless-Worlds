@@ -23,7 +23,6 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
 import mcp_server as srv  # noqa: E402
-import memory_graph as mg  # noqa: E402
 import memory_routes  # noqa: E402
 from view import build_play_view  # noqa: E402
 from world import read_world  # noqa: E402
@@ -80,9 +79,7 @@ def world(tmp_path, monkeypatch):
     (data / "worlds").mkdir(parents=True)
     (data / "worlds" / "w.md").write_text(WORLD, encoding="utf-8")
     monkeypatch.setattr(srv, "_DATA", data)
-    ctx = SimpleNamespace(
-        storage=kc_storage.AppStorage("endless-worlds", data), data_dir=data
-    )
+    ctx = SimpleNamespace(storage=kc_storage.AppStorage("endless-worlds", data), data_dir=data)
     return ctx
 
 
@@ -91,8 +88,13 @@ def call(name, **args):
 
 
 def narrate(run, turn, prose, state, memory=None):
-    args = {"runId": run, "turn": turn, "prose": prose, "state": state,
-            "choices": [{"id": "go", "label": "go on"}]}
+    args = {
+        "runId": run,
+        "turn": turn,
+        "prose": prose,
+        "state": state,
+        "choices": [{"id": "go", "label": "go on"}],
+    }
     if memory is not None:
         args["memory"] = memory
     out = call("endless_advance_turn", **args)
@@ -110,23 +112,40 @@ def test_one_life_from_birth_to_inheritance(world):
         {"turn": 0, "worldId": "w", "language": "zh", "alive": True},
         {"runId": "", "worldId": "w", "title": "石桥世界", "turn": 0},
     )
-    narrate(run, 1, "洪水冲桥，你把艾琳拉上岸。", {"alive": True, "age": 16}, memory={
-        "entities": [
-            {"id": "elin", "kind": "character", "name": "艾琳"},
-            {"id": "bridge", "kind": "place", "name": "老石桥"},
-            {"id": "debt", "kind": "thread", "name": "艾琳欠下的人情"},
-        ],
-        "events": [
-            {"key": "saved", "title": "在石桥下救出艾琳", "summary": "你把她拉上岸。",
-             "importance": "major", "participants": ["player", "elin"],
-             "place": "bridge", "threads": [{"id": "debt", "effect": "opened"}],
-             "disclosure": "known"},
-        ],
-        "relations": [
-            {"from": "elin", "type": "trust", "to": "player",
-             "change": "increase", "reasonEvent": "saved"},
-        ],
-    })
+    narrate(
+        run,
+        1,
+        "洪水冲桥，你把艾琳拉上岸。",
+        {"alive": True, "age": 16},
+        memory={
+            "entities": [
+                {"id": "elin", "kind": "character", "name": "艾琳"},
+                {"id": "bridge", "kind": "place", "name": "老石桥"},
+                {"id": "debt", "kind": "thread", "name": "艾琳欠下的人情"},
+            ],
+            "events": [
+                {
+                    "key": "saved",
+                    "title": "在石桥下救出艾琳",
+                    "summary": "你把她拉上岸。",
+                    "importance": "major",
+                    "participants": ["player", "elin"],
+                    "place": "bridge",
+                    "threads": [{"id": "debt", "effect": "opened"}],
+                    "disclosure": "known",
+                },
+            ],
+            "relations": [
+                {
+                    "from": "elin",
+                    "type": "trust",
+                    "to": "player",
+                    "change": "increase",
+                    "reasonEvent": "saved",
+                },
+            ],
+        },
+    )
 
     # ── Act II · 静默的岁月 ─────────────────────────────────────────────
     narrate(run, 2, "平静的一年。", {"alive": True, "age": 17})
@@ -137,30 +156,48 @@ def test_one_life_from_birth_to_inheritance(world):
     candidate_ids = {c["id"] for c in runtime.get("memoryCandidates") or []}
     assert "event-1-saved" in candidate_ids, "the open thread was not recalled"
 
-    narrate(run, 4, "多年后，她记得那一天。", {"alive": True, "age": 19}, memory={
-        "events": [
-            {"key": "repaid", "title": "艾琳还了人情", "summary": "她记得石桥下的那一天。",
-             "participants": ["player", "elin"],
-             "threads": [{"id": "debt", "effect": "resolved"}],
-             "echoes": ["event-1-saved"], "disclosure": "known"},
-        ],
-    })
-    view = build_play_view(pack.template, store.read_state(run),
-                           chronicle=store.read_chronicle(run))
+    narrate(
+        run,
+        4,
+        "多年后，她记得那一天。",
+        {"alive": True, "age": 19},
+        memory={
+            "events": [
+                {
+                    "key": "repaid",
+                    "title": "艾琳还了人情",
+                    "summary": "她记得石桥下的那一天。",
+                    "participants": ["player", "elin"],
+                    "threads": [{"id": "debt", "effect": "resolved"}],
+                    "echoes": ["event-1-saved"],
+                    "disclosure": "known",
+                },
+            ],
+        },
+    )
+    view = build_play_view(
+        pack.template, store.read_state(run), chronicle=store.read_chronicle(run)
+    )
     (marker,) = view["echoes"]
     assert marker["sourceTurn"] == 1 and marker["currentId"] == "event-4-repaid"
 
     # ── Act IV · 收藏与星图 ─────────────────────────────────────────────
     status, kp = handle(
-        memory_routes.create_keepsake, ctx,
+        memory_routes.create_keepsake,
+        ctx,
         match={"run_id": run},
-        body={"kind": "echo", "title": "石桥下的因果",
-              "cites": [marker["sourceId"], marker["currentId"]]},
+        body={
+            "kind": "echo",
+            "title": "石桥下的因果",
+            "cites": [marker["sourceId"], marker["currentId"]],
+        },
     )
     assert status == 200, kp
 
     status, star = handle(
-        memory_routes.get_star, ctx, match={"run_id": run},
+        memory_routes.get_star,
+        ctx,
+        match={"run_id": run},
     )
     assert status == 200
     node_ids = {n["id"] for n in star["nodes"]}
@@ -170,43 +207,65 @@ def test_one_life_from_birth_to_inheritance(world):
 
     # ── Act V · 故事卡 ─────────────────────────────────────────────────
     status, drafted = handle(
-        memory_routes.preview_story_card, ctx,
-        match={"run_id": run}, body={"keepsakeId": kp["id"]},
+        memory_routes.preview_story_card,
+        ctx,
+        match={"run_id": run},
+        body={"keepsakeId": kp["id"]},
     )
     assert status == 200, drafted
     card_id = drafted["card"]["id"]
 
     status, edited = handle(
-        memory_routes.edit_story_card, ctx,
+        memory_routes.edit_story_card,
+        ctx,
         match={"run_id": run, "card_id": card_id},
-        body={"title": "那一天", "coverLine": "有些事，世界一直记得。",
-              "entities": {"elin": {"display": "少女A"}}},
+        body={
+            "title": "那一天",
+            "coverLine": "有些事，世界一直记得。",
+            "entities": {"elin": {"display": "少女A"}},
+        },
     )
     assert status == 200, edited
 
     status, html_out = handle(
-        memory_routes.export_story_card, ctx,
-        match={"run_id": run, "card_id": card_id}, query={"format": "html"},
+        memory_routes.export_story_card,
+        ctx,
+        match={"run_id": run, "card_id": card_id},
+        query={"format": "html"},
     )
     assert status == 200
     assert "少女A" in html_out and "艾琳" not in html_out
     assert run not in html_out and "<script" not in html_out.lower()
 
     # ── Act VI · 终章（由世界的 ending 条件触发，narrator 未写 ended） ──
-    narrate(run, 5, "她陪你走完最后一程。", {"alive": False, "age": 80}, memory={
-        "events": [
-            {"key": "farewell", "title": "落幕", "summary": "一生走到了尽头。",
-             "participants": ["player", "elin"], "disclosure": "known"},
-        ],
-    })
-    view = build_play_view(pack.template, store.read_state(run),
-                           chronicle=store.read_chronicle(run))
+    narrate(
+        run,
+        5,
+        "她陪你走完最后一程。",
+        {"alive": False, "age": 80},
+        memory={
+            "events": [
+                {
+                    "key": "farewell",
+                    "title": "落幕",
+                    "summary": "一生走到了尽头。",
+                    "participants": ["player", "elin"],
+                    "disclosure": "known",
+                },
+            ],
+        },
+    )
+    view = build_play_view(
+        pack.template, store.read_state(run), chronicle=store.read_chronicle(run)
+    )
     assert view["ended"] is True and view["lineage"] is True, (
         "the ending page would offer the bridge…"
     )
 
     status, cands = handle(
-        memory_routes.get_legacy_candidates, ctx, match={"run_id": run},
+        memory_routes.get_legacy_candidates,
+        ctx,
+        match={"run_id": run},
     )
     assert status == 200, (
         f"…but the candidates gate answered {status}: {cands} — the ending "
@@ -222,9 +281,13 @@ def test_one_life_from_birth_to_inheritance(world):
     src_before = src_chronicle_path.read_bytes()
 
     status, created = handle(
-        routes_mod.create_run, ctx,
-        body={"worldId": "w", "language": "zh",
-              "legacy": {"fromRunId": run, "selected": ["elin", "debt"]}},
+        routes_mod.create_run,
+        ctx,
+        body={
+            "worldId": "w",
+            "language": "zh",
+            "legacy": {"fromRunId": run, "selected": ["elin", "debt"]},
+        },
     )
     assert status == 201, created
     heir = created["runId"]
@@ -241,7 +304,9 @@ def test_one_life_from_birth_to_inheritance(world):
 
     # And the heir's own star map shows the inheritance as a real, known event.
     status, heir_star = handle(
-        memory_routes.get_star, ctx, match={"run_id": heir},
+        memory_routes.get_star,
+        ctx,
+        match={"run_id": heir},
     )
     assert status == 200
     heir_nodes = {n["id"] for n in heir_star["nodes"]}

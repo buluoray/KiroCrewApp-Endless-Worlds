@@ -26,8 +26,13 @@ HEADER = {
     "clock": {"unit": "month", "label": "{year}/{month}"},
     "styles": [{"id": "standard", "label": "Standard", "default": True}],
     "opening": [{"id": "name", "label": "Name", "kind": "text"}],
-    "panels": [{"id": "status", "always": True, "fields": [
-        {"id": "age", "label": "Age", "primitive": "field"}]}],
+    "panels": [
+        {
+            "id": "status",
+            "always": True,
+            "fields": [{"id": "age", "label": "Age", "primitive": "field"}],
+        }
+    ],
     "endings": [{"id": "died", "when": "state.alive == false"}],
 }
 
@@ -152,8 +157,7 @@ def test_one_unusable_world_appears_as_a_row_and_the_rest_still_list(
 
 def test_a_world_needing_a_newer_core_lists_both_versions(lib: WorldLibrary) -> None:
     future = json.loads(json.dumps(HEADER))
-    future["compiledFrom"] = {
-        "proseSha256": prose_digest(PROSE), "compiler": "1", "contract": 99}
+    future["compiledFrom"] = {"proseSha256": prose_digest(PROSE), "compiler": "1", "contract": 99}
     lib._worlds.mkdir(parents=True, exist_ok=True)
     lib.path_for("from-the-future").write_text(world_file(future), encoding="utf-8")
 
@@ -179,9 +183,7 @@ def test_a_stale_world_is_still_usable_and_carries_its_note(lib: WorldLibrary) -
 # -- ids ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "bad", ["", "../escape", "a/b", "Upper", "-lead", "x" * 65, "!"]
-)
+@pytest.mark.parametrize("bad", ["", "../escape", "a/b", "Upper", "-lead", "x" * 65, "!"])
 def test_a_malformed_world_id_never_touches_a_path(lib: WorldLibrary, bad: str) -> None:
     with pytest.raises(LibraryError):
         lib.path_for(bad)
@@ -212,9 +214,7 @@ def test_the_shipped_flagship_seed_installs_and_lists(tmp_path: Path) -> None:
     assert row["panelCount"] == 6
     assert row["openingGroups"] == 13
     assert row["lineage"] is True
-    assert row["cardPromise"] == (
-        "从无名之辈走到王座之前——也可能只在故乡，认真过完平凡一生。"
-    )
+    assert row["cardPromise"] == ("从无名之辈走到王座之前——也可能只在故乡，认真过完平凡一生。")
     assert row["cardPossibilities"] == [
         "让一个年轻时的选择，在数十年后回来找你",
         "在魔法、战争与日常之间，决定自己愿意付出的代价",
@@ -236,8 +236,8 @@ def _zh_variant() -> str:
 def test_a_language_variant_is_one_world_not_two(lib: WorldLibrary) -> None:
     """``test-world.zh.md`` is the SAME world in another language, so the shelf
     shows one row carrying both languages — never a second world."""
-    write_seed(lib, "test-world", world_file())          # en, the primary
-    write_seed(lib, "test-world.zh", _zh_variant())       # zh, a variant
+    write_seed(lib, "test-world", world_file())  # en, the primary
+    write_seed(lib, "test-world.zh", _zh_variant())  # zh, a variant
 
     lib.ensure_seeds_installed()
 

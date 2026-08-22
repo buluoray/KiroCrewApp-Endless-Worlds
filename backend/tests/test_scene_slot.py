@@ -49,7 +49,8 @@ def test_the_slot_is_rendered_at_the_root_outside_every_view_branch(ui: str) -> 
 
 
 def test_the_slot_is_hidden_with_display_and_never_destroyed_once_created(
-    slot: str, ui: str,
+    slot: str,
+    ui: str,
 ) -> None:
     """The invariant is "never destroyed or moved ONCE IT EXISTS", not "exists from
     the first paint".

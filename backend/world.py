@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field as dc_field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from dataclasses import field as dc_field
+from datetime import UTC, datetime
 from typing import Any
 
 from template import Template, TemplateError, parse_template, split_front_matter
@@ -51,9 +52,7 @@ class WorldError(ValueError):
 
 class ContractTooNew(WorldError):
     def __init__(self, needed: int, local: int) -> None:
-        super().__init__(
-            f"this world needs core contract {needed}, this build speaks {local}"
-        )
+        super().__init__(f"this world needs core contract {needed}, this build speaks {local}")
         self.needed = needed
         self.local = local
 
@@ -72,16 +71,16 @@ class Provenance:
     contract: int = CONTRACT
 
     @staticmethod
-    def for_prose(prose: str, compiler: str = HAND_COMPILED) -> "Provenance":
+    def for_prose(prose: str, compiler: str = HAND_COMPILED) -> Provenance:
         return Provenance(
             prose_sha256=prose_digest(prose),
             compiler=compiler,
-            compiled_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            compiled_at=datetime.now(UTC).isoformat(timespec="seconds"),
             contract=CONTRACT,
         )
 
     @staticmethod
-    def from_dict(raw: Any) -> "Provenance | None":
+    def from_dict(raw: Any) -> Provenance | None:
         if not isinstance(raw, dict):
             return None
         digest = raw.get("proseSha256")
@@ -142,10 +141,7 @@ class WorldPack:
         if not self.is_stale():
             return None
         if self.template.language == "zh":
-            return (
-                "这个世界的设定在面板生成后有过改动，"
-                "面板内容可能已经和设定对不上了。"
-            )
+            return "这个世界的设定在面板生成后有过改动，面板内容可能已经和设定对不上了。"
         return (
             "This world's rulebook changed after its panels were generated, "
             "so the panels may no longer match it."
@@ -168,9 +164,9 @@ class WorldPack:
         pack_id = pack.get("packId")
         if not isinstance(pack_id, str) or not pack_id:
             raise WorldError("a capability pack needs a packId")
-        self.capability_packs = [
-            p for p in self.capability_packs if p.get("packId") != pack_id
-        ] + [pack]
+        self.capability_packs = [p for p in self.capability_packs if p.get("packId") != pack_id] + [
+            pack
+        ]
 
     def upsert_widget_spec(self, spec: dict[str, Any]) -> None:
         """Promote a reusable widget's SPEC into the world (R14.8).
@@ -187,9 +183,9 @@ class WorldPack:
                 "a widget spec must not carry compiled html — store the spec only "
                 "so the receiving machine compiles it locally"
             )
-        self.widget_specs = [
-            s for s in self.widget_specs if s.get("widgetId") != widget_id
-        ] + [spec]
+        self.widget_specs = [s for s in self.widget_specs if s.get("widgetId") != widget_id] + [
+            spec
+        ]
 
 
 _GENERATED_KEYS = ("compiledFrom", "capabilityPacks", "widgetSpecs")
@@ -273,11 +269,7 @@ def summarize(pack: WorldPack) -> dict[str, Any]:
     promise = raw_promise.strip() if isinstance(raw_promise, str) else ""
     raw_possibilities = card.get("possibilities")
     possibilities = (
-        [
-            item.strip()
-            for item in raw_possibilities
-            if isinstance(item, str) and item.strip()
-        ][:3]
+        [item.strip() for item in raw_possibilities if isinstance(item, str) and item.strip()][:3]
         if isinstance(raw_possibilities, list)
         else []
     )

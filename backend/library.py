@@ -201,9 +201,7 @@ class WorldLibrary:
         """
         self._data.mkdir(parents=True, exist_ok=True)
         tmp = self._removed_path().with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps({"worlds": sorted(ids)}, ensure_ascii=False), encoding="utf-8"
-        )
+        tmp.write_text(json.dumps({"worlds": sorted(ids)}, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self._removed_path())
 
     def remove(self, world_id: str) -> None:
@@ -356,26 +354,43 @@ class WorldLibrary:
                             pack = read_world(variant.read_text(encoding="utf-8"))
                         except (TemplateError, WorldError, ContractTooNew, OSError):
                             pack = base  # a broken variant never hides the world
-                rows.append({
-                    **summarize(pack), "usable": True,
-                    "languages": self.languages_for(world_id, primary),
-                })
+                rows.append(
+                    {
+                        **summarize(pack),
+                        "usable": True,
+                        "languages": self.languages_for(world_id, primary),
+                    }
+                )
             except ContractTooNew as exc:
-                rows.append({
-                    "worldId": world_id, "title": world_id, "usable": False,
-                    "problem": str(exc),
-                    "needsCore": exc.needed, "localCore": exc.local,
-                })
+                rows.append(
+                    {
+                        "worldId": world_id,
+                        "title": world_id,
+                        "usable": False,
+                        "problem": str(exc),
+                        "needsCore": exc.needed,
+                        "localCore": exc.local,
+                    }
+                )
             except TemplateError as exc:
-                rows.append({
-                    "worldId": world_id, "title": world_id, "usable": False,
-                    "problem": f"{exc.field}: {exc.expected}", "field": exc.field,
-                })
+                rows.append(
+                    {
+                        "worldId": world_id,
+                        "title": world_id,
+                        "usable": False,
+                        "problem": f"{exc.field}: {exc.expected}",
+                        "field": exc.field,
+                    }
+                )
             except (WorldError, OSError, UnicodeDecodeError) as exc:
-                rows.append({
-                    "worldId": world_id, "title": world_id, "usable": False,
-                    "problem": str(exc),
-                })
+                rows.append(
+                    {
+                        "worldId": world_id,
+                        "title": world_id,
+                        "usable": False,
+                        "problem": str(exc),
+                    }
+                )
         return rows
 
     def count(self) -> int:

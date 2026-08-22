@@ -148,9 +148,7 @@ def _unpack(entry: Any) -> tuple[str, Any, bool]:
     return "", None, False
 
 
-def event_density(
-    chronicle: list[dict[str, Any]], window: int = DENSITY_WINDOW
-) -> dict[str, Any]:
+def event_density(chronicle: list[dict[str, Any]], window: int = DENSITY_WINDOW) -> dict[str, Any]:
     """How eventful the recent past has been (R7.4).
 
     Counts what the narrator itself marked as notable rather than guessing from
@@ -199,18 +197,23 @@ def attribution(
         for gain in _gains(entry):
             source = str(gain.get("source") or "").strip()
             if not source:
-                unsourced.append({
-                    "turn": entry.get("turn"),
-                    "field": gain.get("field"),
-                    "amount": gain.get("amount"),
-                })
+                unsourced.append(
+                    {
+                        "turn": entry.get("turn"),
+                        "field": gain.get("field"),
+                        "amount": gain.get("amount"),
+                    }
+                )
                 continue
             counts[source] = counts.get(source, 0) + 1
 
-    leaning = sorted(
-        ({"source": s, "times": n} for s, n in counts.items() if n >= REPEAT_PRESSURE),
-        key=lambda r: (-r["times"], r["source"]),
-    )
+    leaning = [
+        {"source": s, "times": n}
+        for s, n in sorted(
+            ((s, n) for s, n in counts.items() if n >= REPEAT_PRESSURE),
+            key=lambda t: (-t[1], t[0]),
+        )
+    ]
     return {
         "turns": len(recent),
         "sources": counts,
@@ -245,13 +248,15 @@ def compose_restraint(chronicle: list[dict[str, Any]], language: Any = "en") -> 
         lines.append(text("restraint.quiet", turns=density["turns"]))
     for lean in credit["leaning"]:
         lines.append(
-            text("restraint.leaning",
-                 source=lean["source"], turns=credit["turns"], times=lean["times"])
+            text(
+                "restraint.leaning",
+                source=lean["source"],
+                turns=credit["turns"],
+                times=lean["times"],
+            )
         )
     if credit["unsourced"]:
-        fields = text("list.join").join(
-            str(u.get("field") or "?") for u in credit["unsourced"][:4]
-        )
+        fields = text("list.join").join(str(u.get("field") or "?") for u in credit["unsourced"][:4])
         lines.append(text("restraint.unsourced", fields=fields))
 
     if not lines:

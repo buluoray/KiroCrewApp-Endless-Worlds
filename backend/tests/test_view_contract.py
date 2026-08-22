@@ -66,11 +66,7 @@ def _reads(src: str, obj: str) -> set[str]:
     only the quote rule, ``t('opening.sealed')`` matched a read of ``g.sealed``,
     because "openin|g." ends in one.
     """
-    return set(
-        re.findall(
-            rf"(?<![\w'\"]){re.escape(obj)}\??\.([a-zA-Z][a-zA-Z0-9]*)", src
-        )
-    )
+    return set(re.findall(rf"(?<![\w'\"]){re.escape(obj)}\??\.([a-zA-Z][a-zA-Z0-9]*)", src))
 
 
 #: Keys the UI computes locally rather than receiving from the backend.
@@ -84,9 +80,7 @@ def test_the_world_bodies_carry_every_field_the_ui_reads(ui_src, pack, tmp_path)
     from library import WorldLibrary
 
     (tmp_path / "seeds").mkdir()
-    (tmp_path / "seeds" / "w.md").write_text(
-        FLAGSHIP.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    (tmp_path / "seeds" / "w.md").write_text(FLAGSHIP.read_text(encoding="utf-8"), encoding="utf-8")
     lib = WorldLibrary(tmp_path / "data", tmp_path / "seeds")
     lib.ensure_seeds_installed()
     row = lib.list_worlds()[0]
@@ -97,8 +91,9 @@ def test_the_world_bodies_carry_every_field_the_ui_reads(ui_src, pack, tmp_path)
     # against is the include_prose shape.
     sent = set(world_detail(pack, include_prose=True)) | set(row) | unusable
 
-    read = (_reads(uisrc.module("library.tsx"), "world")
-            | _reads(uisrc.module("opening.tsx"), "world")) - _LOCAL
+    read = (
+        _reads(uisrc.module("library.tsx"), "world") | _reads(uisrc.module("opening.tsx"), "world")
+    ) - _LOCAL
     missing = sorted(read - sent)
     assert not missing, f"the UI reads fields the backend does not send: {missing}"
 
@@ -111,10 +106,17 @@ def test_the_play_view_carries_every_field_the_ui_reads(ui_src, pack):
         scenes=[],
     )
     # Overlaid by the route, exactly as get_run does.
-    view.update({
-        "runId": "r", "worldId": "w", "title": "t", "awaitingOpening": False,
-        "language": "en", "generating": None, "backdrop": None,
-    })
+    view.update(
+        {
+            "runId": "r",
+            "worldId": "w",
+            "title": "t",
+            "awaitingOpening": False,
+            "language": "en",
+            "generating": None,
+            "backdrop": None,
+        }
+    )
     read = _reads(uisrc.module("play.tsx"), "v") - _LOCAL
     missing = sorted(read - set(view))
     assert not missing, f"the play page reads fields the view does not send: {missing}"
@@ -125,9 +127,15 @@ def test_the_life_list_carries_every_field_the_ui_reads(ui_src):
     ``ended`` are overlaid from each life's own state by the route, not taken
     from the index — so they must be in the row the UI reads."""
     row = {
-        "runId": "r", "worldId": "w", "title": "t", "style": "classic",
-        "turn": 0, "lastPlayed": 0.0,
-        "awaitingOpening": True, "ended": False, "unreadable": False,
+        "runId": "r",
+        "worldId": "w",
+        "title": "t",
+        "style": "classic",
+        "turn": 0,
+        "lastPlayed": 0.0,
+        "awaitingOpening": True,
+        "ended": False,
+        "unreadable": False,
         # Set for every row by list_runs, so a life mid-generation is not shown as
         # one that stalled.
         "generating": False,

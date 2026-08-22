@@ -2,6 +2,7 @@
 
 Network is always faked through phototrace._FETCH; CI never touches Commons.
 """
+
 from __future__ import annotations
 
 import io
@@ -78,12 +79,10 @@ def test_procedural_base_is_valid_for_both_views_and_custom_ramps():
 
 @pytest.mark.parametrize("quote", ['"', "'"])
 def test_compose_replaces_both_placeholder_quote_styles(quote):
-    svg = (
-        f'<svg xmlns="x"><rect/><g id={quote}etr-underlay{quote}/>'
-        '<path d="M0 0h1"/></svg>'
-    )
+    svg = f'<svg xmlns="x"><rect/><g id={quote}etr-underlay{quote}/><path d="M0 0h1"/></svg>'
     out = compose_with_underlay(
-        svg, '<g opacity="0.50"><path d="M1 1h2"/></g>',
+        svg,
+        '<g opacity="0.50"><path d="M1 1h2"/></g>',
         require_placeholder=True,
     )
     assert "etr-underlay" not in out and "M1 1h2" in out
@@ -104,8 +103,12 @@ def test_compose_fails_closed_for_missing_duplicate_or_unbacked_placeholders():
 def test_trace_store_binds_fragments_and_audit_to_the_turn(tmp_path):
     store = TraceStore(tmp_path, "run-abc")
     store.save(
-        turn=4, desktop="<g/>", mobile="<g/>", source=None,
-        kind="base", query="unfindable castle",
+        turn=4,
+        desktop="<g/>",
+        mobile="<g/>",
+        source=None,
+        kind="base",
+        query="unfindable castle",
     )
     stored = store.load(4)
     assert stored["desktop"] == "<g/>"
@@ -116,40 +119,67 @@ def test_trace_store_binds_fragments_and_audit_to_the_turn(tmp_path):
 
 
 def test_search_reference_keeps_only_attribution_free_bitmaps(monkeypatch):
-    payload = {"query": {"pages": {
-        "1": {"title": "File:BySa.jpg", "imageinfo": [{
-            "mime": "image/jpeg",
-            "thumburl": "https://upload.wikimedia.org/by-sa.jpg",
-            "descriptionurl": "https://commons.wikimedia.org/wiki/File:BySa.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}},
-        }]},
-        "2": {"title": "File:CC0.jpg", "imageinfo": [{
-            "mime": "image/jpeg",
-            "thumburl": "https://upload.wikimedia.org/cc0.jpg",
-            "descriptionurl": "https://commons.wikimedia.org/wiki/File:CC0.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "CC0"}},
-        }]},
-        "3": {"title": "File:PublicDomain.png", "imageinfo": [{
-            "mime": "image/png",
-            "thumburl": "https://upload.wikimedia.org/public-domain.png",
-            "descriptionurl": "https://commons.wikimedia.org/wiki/File:PublicDomain.png",
-            "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
-        }]},
-        "4": {"title": "File:Owned.jpg", "imageinfo": [{
-            "mime": "image/jpeg",
-            "thumburl": "https://upload.wikimedia.org/owned.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "All rights reserved"}},
-        }]},
-        # Attribution-free does not make a book scan a photograph.
-        "5": {"title": "File:Scan.djvu", "imageinfo": [{
-            "mime": "image/vnd.djvu",
-            "thumburl": "https://upload.wikimedia.org/scan.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
-        }]},
-    }}}
-    monkeypatch.setattr(
-        phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8")
-    )
+    payload = {
+        "query": {
+            "pages": {
+                "1": {
+                    "title": "File:BySa.jpg",
+                    "imageinfo": [
+                        {
+                            "mime": "image/jpeg",
+                            "thumburl": "https://upload.wikimedia.org/by-sa.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:BySa.jpg",
+                            "extmetadata": {"LicenseShortName": {"value": "CC BY-SA 4.0"}},
+                        }
+                    ],
+                },
+                "2": {
+                    "title": "File:CC0.jpg",
+                    "imageinfo": [
+                        {
+                            "mime": "image/jpeg",
+                            "thumburl": "https://upload.wikimedia.org/cc0.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:CC0.jpg",
+                            "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                        }
+                    ],
+                },
+                "3": {
+                    "title": "File:PublicDomain.png",
+                    "imageinfo": [
+                        {
+                            "mime": "image/png",
+                            "thumburl": "https://upload.wikimedia.org/public-domain.png",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:PublicDomain.png",
+                            "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
+                        }
+                    ],
+                },
+                "4": {
+                    "title": "File:Owned.jpg",
+                    "imageinfo": [
+                        {
+                            "mime": "image/jpeg",
+                            "thumburl": "https://upload.wikimedia.org/owned.jpg",
+                            "extmetadata": {"LicenseShortName": {"value": "All rights reserved"}},
+                        }
+                    ],
+                },
+                # Attribution-free does not make a book scan a photograph.
+                "5": {
+                    "title": "File:Scan.djvu",
+                    "imageinfo": [
+                        {
+                            "mime": "image/vnd.djvu",
+                            "thumburl": "https://upload.wikimedia.org/scan.jpg",
+                            "extmetadata": {"LicenseShortName": {"value": "Public domain"}},
+                        }
+                    ],
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8"))
 
     rows = search_reference("castle")
 
@@ -158,20 +188,40 @@ def test_search_reference_keeps_only_attribution_free_bitmaps(monkeypatch):
 
 
 def test_search_openverse_keeps_cc0_pdm_via_the_thumbnail_proxy(monkeypatch):
-    payload = {"results": [
-        {"title": "A", "license": "cc0", "license_version": "1.0",
-         "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
-         "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A"},
-        {"title": "B", "license": "pdm", "license_version": "1.0",
-         "thumbnail": "https://api.openverse.org/v1/images/b/thumb/",
-         "foreign_landing_url": "https://flickr.com/b"},
-        {"title": "ByDrop", "license": "by", "license_version": "4.0",
-         "thumbnail": "https://api.openverse.org/v1/images/c/thumb/", "foreign_landing_url": "x"},
-        # A CC0 item whose thumbnail is a raw CDN, not the Openverse proxy: dropped
-        # so image bytes never come off an un-allowlisted host.
-        {"title": "OffHost", "license": "cc0", "license_version": "1.0",
-         "thumbnail": "https://live.staticflickr.com/x/raw.jpg", "foreign_landing_url": "x"},
-    ]}
+    payload = {
+        "results": [
+            {
+                "title": "A",
+                "license": "cc0",
+                "license_version": "1.0",
+                "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
+                "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A",
+            },
+            {
+                "title": "B",
+                "license": "pdm",
+                "license_version": "1.0",
+                "thumbnail": "https://api.openverse.org/v1/images/b/thumb/",
+                "foreign_landing_url": "https://flickr.com/b",
+            },
+            {
+                "title": "ByDrop",
+                "license": "by",
+                "license_version": "4.0",
+                "thumbnail": "https://api.openverse.org/v1/images/c/thumb/",
+                "foreign_landing_url": "x",
+            },
+            # A CC0 item whose thumbnail is a raw CDN, not the Openverse proxy: dropped
+            # so image bytes never come off an un-allowlisted host.
+            {
+                "title": "OffHost",
+                "license": "cc0",
+                "license_version": "1.0",
+                "thumbnail": "https://live.staticflickr.com/x/raw.jpg",
+                "foreign_landing_url": "x",
+            },
+        ]
+    }
     monkeypatch.setattr(phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8"))
     rows = search_openverse("bridge")
     assert [r["title"] for r in rows] == ["A", "B"]
@@ -184,16 +234,28 @@ def test_search_met_keeps_only_public_domain_objects_with_an_image(monkeypatch):
         if "/search?" in url:
             return json.dumps({"total": 3, "objectIDs": [1, 2, 3]}).encode("utf-8")
         if url.endswith("/objects/1"):
-            return json.dumps({"isPublicDomain": True, "title": "PD art",
-                "primaryImageSmall": "https://images.metmuseum.org/1.jpg",
-                "objectURL": "https://www.metmuseum.org/1"}).encode("utf-8")
+            return json.dumps(
+                {
+                    "isPublicDomain": True,
+                    "title": "PD art",
+                    "primaryImageSmall": "https://images.metmuseum.org/1.jpg",
+                    "objectURL": "https://www.metmuseum.org/1",
+                }
+            ).encode("utf-8")
         if url.endswith("/objects/2"):
-            return json.dumps({"isPublicDomain": False, "title": "Owned",
-                "primaryImageSmall": "https://images.metmuseum.org/2.jpg"}).encode("utf-8")
+            return json.dumps(
+                {
+                    "isPublicDomain": False,
+                    "title": "Owned",
+                    "primaryImageSmall": "https://images.metmuseum.org/2.jpg",
+                }
+            ).encode("utf-8")
         if url.endswith("/objects/3"):
-            return json.dumps({"isPublicDomain": True, "title": "No image",
-                "primaryImageSmall": ""}).encode("utf-8")
+            return json.dumps(
+                {"isPublicDomain": True, "title": "No image", "primaryImageSmall": ""}
+            ).encode("utf-8")
         raise AssertionError(url)
+
     monkeypatch.setattr(phototrace, "_FETCH", fake)
     rows = search_met("castle")
     assert [r["title"] for r in rows] == ["PD art"]
@@ -216,19 +278,40 @@ def test_search_smithsonian_is_inert_without_an_api_key(monkeypatch):
 
 def test_search_smithsonian_keeps_cc0_items_with_an_image(monkeypatch):
     monkeypatch.setenv("SI_API_KEY", "k")
-    payload = {"response": {"rows": [
-        {"title": "CC0 thing", "content": {"descriptiveNonRepeating": {
-            "record_link": "https://www.si.edu/object/x",
-            "metadata_usage": {"access": "CC0"},
-            "online_media": {"media": [
-                {"type": "Images", "content": "https://ids.si.edu/ids/deliveryService?id=x"}
-            ]},
-        }}},
-        {"title": "Restricted", "content": {"descriptiveNonRepeating": {
-            "metadata_usage": {"access": "Usage conditions apply"},
-            "online_media": {"media": [{"type": "Images", "content": "https://ids.si.edu/y"}]},
-        }}},
-    ]}}
+    payload = {
+        "response": {
+            "rows": [
+                {
+                    "title": "CC0 thing",
+                    "content": {
+                        "descriptiveNonRepeating": {
+                            "record_link": "https://www.si.edu/object/x",
+                            "metadata_usage": {"access": "CC0"},
+                            "online_media": {
+                                "media": [
+                                    {
+                                        "type": "Images",
+                                        "content": "https://ids.si.edu/ids/deliveryService?id=x",
+                                    }
+                                ]
+                            },
+                        }
+                    },
+                },
+                {
+                    "title": "Restricted",
+                    "content": {
+                        "descriptiveNonRepeating": {
+                            "metadata_usage": {"access": "Usage conditions apply"},
+                            "online_media": {
+                                "media": [{"type": "Images", "content": "https://ids.si.edu/y"}]
+                            },
+                        }
+                    },
+                },
+            ]
+        }
+    }
     monkeypatch.setattr(phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8"))
     rows = search_smithsonian("bird")
     assert [r["title"] for r in rows] == ["CC0 thing"]
@@ -239,16 +322,40 @@ def test_search_smithsonian_keeps_cc0_items_with_an_image(monkeypatch):
 def test_search_candidates_photo_lane_lists_openverse_before_commons(monkeypatch):
     def fake(url):
         if "openverse.org/v1/images/?" in url:
-            return json.dumps({"results": [{"title": "OV", "license": "cc0",
-                "thumbnail": "https://api.openverse.org/v1/images/z/thumb/",
-                "foreign_landing_url": "x"}]}).encode("utf-8")
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": "OV",
+                            "license": "cc0",
+                            "thumbnail": "https://api.openverse.org/v1/images/z/thumb/",
+                            "foreign_landing_url": "x",
+                        }
+                    ]
+                }
+            ).encode("utf-8")
         if "api.php" in url:
-            return json.dumps({"query": {"pages": {"1": {"title": "File:C.jpg",
-                "imageinfo": [{"mime": "image/jpeg",
-                    "thumburl": "https://upload.wikimedia.org/c.jpg",
-                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:C.jpg",
-                    "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]}}}}).encode("utf-8")
+            return json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            "1": {
+                                "title": "File:C.jpg",
+                                "imageinfo": [
+                                    {
+                                        "mime": "image/jpeg",
+                                        "thumburl": "https://upload.wikimedia.org/c.jpg",
+                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:C.jpg",
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            ).encode("utf-8")
         raise AssertionError(url)
+
     monkeypatch.setattr(phototrace, "_FETCH", fake)
     rows, audit = search_candidates("village", "photo")
     assert [r["title"] for r in rows] == ["OV", "File:C.jpg"]
@@ -260,10 +367,16 @@ def test_search_candidates_art_lane_uses_the_met(monkeypatch):
         if "metmuseum.org" in url and "/search?" in url:
             return json.dumps({"objectIDs": [7]}).encode("utf-8")
         if url.endswith("/objects/7"):
-            return json.dumps({"isPublicDomain": True, "title": "Met art",
-                "primaryImageSmall": "https://images.metmuseum.org/7.jpg",
-                "objectURL": "https://www.metmuseum.org/7"}).encode("utf-8")
+            return json.dumps(
+                {
+                    "isPublicDomain": True,
+                    "title": "Met art",
+                    "primaryImageSmall": "https://images.metmuseum.org/7.jpg",
+                    "objectURL": "https://www.metmuseum.org/7",
+                }
+            ).encode("utf-8")
         raise AssertionError(url)
+
     monkeypatch.delenv("SI_API_KEY", raising=False)
     monkeypatch.setattr(phototrace, "_FETCH", fake)
     rows, audit = search_candidates("angel", "art")
@@ -312,11 +425,25 @@ def test_the_ladder_widens_a_specific_brief_and_stops_at_the_first_rung(monkeypa
         # Only the narrowest rung matches, and only on the second source, exactly as
         # live Commons behaved for this brief.
         if "api.php" in url and "granary" not in url and "timber" not in url:
-            return json.dumps({"query": {"pages": {"1": {"title": "File:Mill.jpg",
-                "imageinfo": [{"mime": "image/jpeg",
-                    "thumburl": "https://upload.wikimedia.org/mill.jpg",
-                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Mill.jpg",
-                    "extmetadata": {"LicenseShortName": {"value": "CC0"}}}]}}}}).encode()
+            return json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            "1": {
+                                "title": "File:Mill.jpg",
+                                "imageinfo": [
+                                    {
+                                        "mime": "image/jpeg",
+                                        "thumburl": "https://upload.wikimedia.org/mill.jpg",
+                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Mill.jpg",
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            ).encode()
         return json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8")
 
     monkeypatch.setattr(phototrace, "_FETCH", fake)
@@ -337,48 +464,75 @@ def test_a_rephotographed_document_is_not_a_reference_photograph():
     place. Neither letter carried a document CATEGORY; what named them was the
     description, which opened "Manuscript letter". The real metadata shapes are
     copied from those files."""
-    assert phototrace._looks_like_document(
-        "PD US expired|Images from NPGallery",
-        "Frances (Appleton) Longfellow to Emmeline Wadsworth",
-        phototrace._description_lead("<p>Manuscript letter</p>\n<p>Archives 1011</p>"),
-    ) is True
-    assert phototrace._looks_like_document(
-        "CC-Zero|Urquhart Castle|Flickr images reviewed by FlickreviewR 2",
-        "Urquhart Castle on Loch Ness",
-        phototrace._description_lead("<p>The castle above the loch at dusk.</p>"),
-    ) is False
+    assert (
+        phototrace._looks_like_document(
+            "PD US expired|Images from NPGallery",
+            "Frances (Appleton) Longfellow to Emmeline Wadsworth",
+            phototrace._description_lead("<p>Manuscript letter</p>\n<p>Archives 1011</p>"),
+        )
+        is True
+    )
+    assert (
+        phototrace._looks_like_document(
+            "CC-Zero|Urquhart Castle|Flickr images reviewed by FlickreviewR 2",
+            "Urquhart Castle on Loch Ness",
+            phototrace._description_lead("<p>The castle above the loch at dusk.</p>"),
+        )
+        is False
+    )
     # Only the LEAD of a description names the object, so an incidental mention
     # further down still keeps a real photograph.
-    assert phototrace._looks_like_document(
-        "CC-Zero|Castles in Wales", "Gate tower at dawn",
-        phototrace._description_lead(
-            "<p>The gate tower from the causeway.</p>" + "x" * 200
-            + " carved letters above the arch record the mason's name"
-        ),
-    ) is False
+    assert (
+        phototrace._looks_like_document(
+            "CC-Zero|Castles in Wales",
+            "Gate tower at dawn",
+            phototrace._description_lead(
+                "<p>The gate tower from the causeway.</p>"
+                + "x" * 200
+                + " carved letters above the arch record the mason's name"
+            ),
+        )
+        is False
+    )
 
 
 def test_the_search_itself_drops_a_document_that_outranks_the_subject(monkeypatch):
     """Pins the CALL SITE, not just the predicate."""
-    payload = {"query": {"pages": {
-        "1": {"title": "File:Letter.jpg", "imageinfo": [{
-            "mime": "image/jpeg",
-            "thumburl": "https://upload.wikimedia.org/letter.jpg",
-            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Letter.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "Public domain"},
-                            "ImageDescription": {"value": "<p>Manuscript letter</p>"}},
-        }]},
-        "2": {"title": "File:Castle.jpg", "imageinfo": [{
-            "mime": "image/jpeg",
-            "thumburl": "https://upload.wikimedia.org/castle.jpg",
-            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Castle.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "CC0"},
-                            "ImageDescription": {"value": "<p>The castle.</p>"}},
-        }]},
-    }}}
-    monkeypatch.setattr(
-        phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8")
-    )
+    payload = {
+        "query": {
+            "pages": {
+                "1": {
+                    "title": "File:Letter.jpg",
+                    "imageinfo": [
+                        {
+                            "mime": "image/jpeg",
+                            "thumburl": "https://upload.wikimedia.org/letter.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Letter.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "Public domain"},
+                                "ImageDescription": {"value": "<p>Manuscript letter</p>"},
+                            },
+                        }
+                    ],
+                },
+                "2": {
+                    "title": "File:Castle.jpg",
+                    "imageinfo": [
+                        {
+                            "mime": "image/jpeg",
+                            "thumburl": "https://upload.wikimedia.org/castle.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Castle.jpg",
+                            "extmetadata": {
+                                "LicenseShortName": {"value": "CC0"},
+                                "ImageDescription": {"value": "<p>The castle.</p>"},
+                            },
+                        }
+                    ],
+                },
+            }
+        }
+    }
+    monkeypatch.setattr(phototrace, "_FETCH", lambda url: json.dumps(payload).encode("utf-8"))
     assert [r["title"] for r in search_reference("castle")] == ["File:Castle.jpg"]
 
 
@@ -394,11 +548,19 @@ def test_a_satisfied_lane_does_not_pay_for_the_next_source(monkeypatch):
     def fake(url: str) -> bytes:
         asked.append(url)
         if "openverse" in url:
-            return json.dumps({"results": [
-                {"title": f"OV{i}", "license": "cc0",
-                 "thumbnail": f"https://api.openverse.org/v1/images/{i}/thumb/",
-                 "foreign_landing_url": "x"} for i in range(3)
-            ]}).encode("utf-8")
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": f"OV{i}",
+                            "license": "cc0",
+                            "thumbnail": f"https://api.openverse.org/v1/images/{i}/thumb/",
+                            "foreign_landing_url": "x",
+                        }
+                        for i in range(3)
+                    ]
+                }
+            ).encode("utf-8")
         raise AssertionError(f"commons must not be asked: {url}")
 
     monkeypatch.setattr(phototrace, "_FETCH", fake)
@@ -444,6 +606,7 @@ def test_a_rate_limited_search_is_never_cached_as_a_world_without_photographs(
 ):
     """The distinction the whole cache rests on. One 429 would otherwise mark a
     subject imageless for a fortnight."""
+
     def boom(url: str) -> bytes:
         raise OSError("HTTP Error 429: Too Many Requests")
 
@@ -457,9 +620,7 @@ def test_a_rate_limited_search_is_never_cached_as_a_world_without_photographs(
     assert not cache.missed("commons", "castle tower night")
 
 
-def test_a_recorded_miss_expires_and_does_not_outlive_a_filter_change(
-    tmp_path, monkeypatch
-):
+def test_a_recorded_miss_expires_and_does_not_outlive_a_filter_change(tmp_path, monkeypatch):
     """Two ways a negative stops being true: time (the corpora grow) and a change to
     the gates that produced it. The second is the dangerous one — without the
     fingerprint, fixing a filter would keep answering "no image" from a cache built
@@ -511,9 +672,7 @@ def test_photo_fetch_refuses_urls_outside_the_allowed_https_boundary(url, monkey
 def test_redirect_to_a_disallowed_host_is_refused_before_following():
     handler = phototrace._AllowedHostRedirectHandler()
     with pytest.raises(BackdropError, match="allowed archive"):
-        handler.redirect_request(
-            None, None, 302, "Found", {}, "https://example.com/redirected.jpg"
-        )
+        handler.redirect_request(None, None, 302, "Found", {}, "https://example.com/redirected.jpg")
 
 
 def test_unsupported_actual_image_format_is_refused_before_tracing():
@@ -569,12 +728,8 @@ def test_each_variant_uses_its_own_focal_point(monkeypatch):
         return original_fit(image, size, *args, **kwargs)
 
     monkeypatch.setattr(ImageOps, "fit", capture_fit)
-    left = build_underlay_fragment(
-        _photo_bytes(bright=True), view=(200, 200), focal=(0.0, 0.25)
-    )
-    right = build_underlay_fragment(
-        _photo_bytes(bright=True), view=(200, 200), focal=(1.0, 0.75)
-    )
+    left = build_underlay_fragment(_photo_bytes(bright=True), view=(200, 200), focal=(0.0, 0.25))
+    right = build_underlay_fragment(_photo_bytes(bright=True), view=(200, 200), focal=(1.0, 0.75))
 
     assert seen == [(0.0, 0.25), (1.0, 0.75)]
     assert left != right, "different focal framing must change an asymmetric trace"
@@ -644,6 +799,7 @@ def _call(name, **args):
 
 def _request_backdrop(data: Path, run_id: str, turn: int):
     from kiro_crew.apps.app_storage import AppStorage
+
     from store import RunStore
 
     RunStore(AppStorage("endless-worlds", data), data).request_backdrop(
@@ -656,15 +812,25 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
 
     def fake_fetch(url: str) -> bytes:
         if "api.php" in url:
-            return json.dumps({"query": {"pages": {"1": {
-                "title": "File:Bridge.jpg",
-                "imageinfo": [{
-                    "mime": "image/jpeg",
-                    "thumburl": "https://upload.wikimedia.org/b.jpg",
-                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
-                    "extmetadata": {"LicenseShortName": {"value": "CC0"}},
-                }],
-            }}}}).encode("utf-8")
+            return json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            "1": {
+                                "title": "File:Bridge.jpg",
+                                "imageinfo": [
+                                    {
+                                        "mime": "image/jpeg",
+                                        "thumburl": "https://upload.wikimedia.org/b.jpg",
+                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            ).encode("utf-8")
         return photo
 
     monkeypatch.setattr(phototrace, "_FETCH", fake_fetch)
@@ -688,13 +854,20 @@ def test_trace_tool_stores_reference_underlay_and_commit_composes_it(data, monke
         '<path d="M10 10 h40" stroke="#c9a227" fill="none"/></svg>'
     )
     draft = _call(
-        "endless_submit_backdrop_draft", runId=run_id, turn=1,
-        markup=overlay.format(w=800, h=600), mobile=overlay.format(w=450, h=900),
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=1,
+        markup=overlay.format(w=800, h=600),
+        mobile=overlay.format(w=450, h=900),
     )
     assert draft["ok"] is True
     final = _call(
-        "endless_commit_backdrop", runId=run_id, turn=1, draftId=draft["draftId"],
-        markup=overlay.format(w=800, h=600), mobile=overlay.format(w=450, h=900),
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=overlay.format(w=800, h=600),
+        mobile=overlay.format(w=450, h=900),
     )
     assert final["ok"] is True
     committed = BackdropStore(data, run_id).current()
@@ -731,15 +904,25 @@ def test_a_transient_fetch_failure_is_retried_before_settling_for_base(data, mon
 
     def flaky_fetch(url: str) -> bytes:
         if "api.php" in url:
-            return json.dumps({"query": {"pages": {"1": {
-                "title": "File:Forge.jpg",
-                "imageinfo": [{
-                    "mime": "image/jpeg",
-                    "thumburl": img_url,
-                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Forge.jpg",
-                    "extmetadata": {"LicenseShortName": {"value": "CC0"}},
-                }],
-            }}}}).encode("utf-8")
+            return json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            "1": {
+                                "title": "File:Forge.jpg",
+                                "imageinfo": [
+                                    {
+                                        "mime": "image/jpeg",
+                                        "thumburl": img_url,
+                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Forge.jpg",
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            ).encode("utf-8")
         if url == img_url:
             calls["img"] += 1
             if calls["img"] <= 1:
@@ -763,29 +946,35 @@ def test_a_transient_fetch_failure_is_retried_before_settling_for_base(data, mon
     ("source", "expected_underlay"),
     [
         (None, "base"),
-        ({
-            "title": "Legacy reference",
-            "pageUrl": "https://commons.wikimedia.org/wiki/File:Legacy.jpg",
-            "license": "CC0",
-        }, "reference"),
+        (
+            {
+                "title": "Legacy reference",
+                "pageUrl": "https://commons.wikimedia.org/wiki/File:Legacy.jpg",
+                "license": "CC0",
+            },
+            "reference",
+        ),
     ],
 )
-def test_legacy_inflight_trace_gets_a_durable_receipt(
-    data, source, expected_underlay
-):
+def test_legacy_inflight_trace_gets_a_durable_receipt(data, source, expected_underlay):
     run_id = "f" * 32
     turn = 6
     _request_backdrop(data, run_id, turn)
     trace_path = data / "runs" / run_id / "trace-underlay.json"
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     fragment = '<g opacity="0.50"><rect width="10" height="10" fill="#334455"/></g>'
-    trace_path.write_text(json.dumps({
-        "fragmentId": "0123456789abcdef",
-        "turn": turn,
-        "desktop": fragment,
-        "mobile": fragment,
-        "source": source,
-    }), encoding="utf-8")
+    trace_path.write_text(
+        json.dumps(
+            {
+                "fragmentId": "0123456789abcdef",
+                "turn": turn,
+                "desktop": fragment,
+                "mobile": fragment,
+                "source": source,
+            }
+        ),
+        encoding="utf-8",
+    )
     scene = (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
         '<rect width="10" height="10" fill="#111111"/>'
@@ -793,12 +982,19 @@ def test_legacy_inflight_trace_gets_a_durable_receipt(
     )
 
     draft = _call(
-        "endless_submit_backdrop_draft", runId=run_id, turn=turn,
-        markup=scene, mobile=scene,
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=turn,
+        markup=scene,
+        mobile=scene,
     )
     final = _call(
-        "endless_commit_backdrop", runId=run_id, turn=turn,
-        draftId=draft["draftId"], markup=scene, mobile=scene,
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=turn,
+        draftId=draft["draftId"],
+        markup=scene,
+        mobile=scene,
     )
 
     assert final["ok"] is True
@@ -812,15 +1008,23 @@ def test_legacy_inflight_trace_gets_a_durable_receipt(
 
 
 def test_trace_tool_passes_independent_focal_points_to_the_worker(data, monkeypatch):
-    payload = {"query": {"pages": {"1": {
-        "title": "File:Bridge.jpg",
-        "imageinfo": [{
-            "mime": "image/jpeg",
-            "thumburl": "https://upload.wikimedia.org/bridge.jpg",
-            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
-            "extmetadata": {"LicenseShortName": {"value": "CC0"}},
-        }],
-    }}}}
+    payload = {
+        "query": {
+            "pages": {
+                "1": {
+                    "title": "File:Bridge.jpg",
+                    "imageinfo": [
+                        {
+                            "mime": "image/jpeg",
+                            "thumburl": "https://upload.wikimedia.org/bridge.jpg",
+                            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Bridge.jpg",
+                            "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                        }
+                    ],
+                }
+            }
+        }
+    }
 
     def fake_fetch(url: str) -> bytes:
         return json.dumps(payload).encode("utf-8") if "api.php" in url else b"photo"
@@ -859,8 +1063,11 @@ def test_trace_tool_passes_a_custom_ramp_through_to_the_base(data, monkeypatch):
     run_id = "e" * 32
     _request_backdrop(data, run_id, 4)
     out = _call(
-        "endless_trace_reference", runId=run_id, turn=4,
-        query="unfindable", ramp=["#0a0d14", "#182030", "#2c3c55", "#9db4d4"],
+        "endless_trace_reference",
+        runId=run_id,
+        turn=4,
+        query="unfindable",
+        ramp=["#0a0d14", "#182030", "#2c3c55", "#9db4d4"],
     )
     assert out["ok"] is True and out["underlay"] == "base"
     stored = TraceStore(data, run_id).load(4)
@@ -879,19 +1086,29 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
 
     plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
     missing = _call(
-        "endless_submit_backdrop_draft", runId=run_id, turn=2,
-        markup=plain, mobile=plain,
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=2,
+        markup=plain,
+        mobile=plain,
     )
     assert missing["ok"] is False and "exactly one etr-underlay" in missing["error"]
 
     scene = plain.replace("</svg>", "<g id='etr-underlay'/></svg>")
     draft = _call(
-        "endless_submit_backdrop_draft", runId=run_id, turn=2,
-        markup=scene, mobile=scene,
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=2,
+        markup=scene,
+        mobile=scene,
     )
     final = _call(
-        "endless_commit_backdrop", runId=run_id, turn=2,
-        draftId=draft["draftId"], markup=scene, mobile=scene,
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=2,
+        draftId=draft["draftId"],
+        markup=scene,
+        mobile=scene,
     )
     assert final["ok"] is True
     committed = BackdropStore(data, run_id).current()
@@ -909,7 +1126,8 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
     }
     assert fb["reason"] == "no-candidates"
     assert {(a["source"], a["outcome"]) for a in fb["attempts"]} == {
-        ("openverse", "no-candidates"), ("commons", "no-candidates"),
+        ("openverse", "no-candidates"),
+        ("commons", "no-candidates"),
     }
 
 
@@ -919,14 +1137,20 @@ def test_a_total_miss_offers_a_way_back_and_names_the_subject_rule(data, monkeyp
     compound subject misses while its head noun hits. The first miss creates NO base
     (the scene gate then forces the retry), and the directive asks for one noun."""
     import mcp_server as srv
+
     monkeypatch.setattr(
-        phototrace, "_FETCH",
+        phototrace,
+        "_FETCH",
         lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
     )
     run_id = "e" * 32
     _request_backdrop(data, run_id, 2)
-    out = _call("endless_trace_reference", runId=run_id, turn=2,
-                query="medieval European river-mill village timber granary dirt road")
+    out = _call(
+        "endless_trace_reference",
+        runId=run_id,
+        turn=2,
+        query="medieval European river-mill village timber granary dirt road",
+    )
 
     assert out["ok"] is True and out["underlay"] == "none", "a multi-word miss is not settled"
     assert TraceStore(data, run_id).load(2) is None, "no base is created on the first miss"
@@ -962,9 +1186,8 @@ def test_the_query_contract_asks_for_a_subject_not_a_scene():
     or structure, e.g. "stone bridge river mist"') invited exactly the four-word-plus
     query that returns nothing."""
     import mcp_server as srv
-    desc = next(
-        t["description"] for t in srv._TOOLS if t["name"] == "endless_trace_reference"
-    )
+
+    desc = next(t["description"] for t in srv._TOOLS if t["name"] == "endless_trace_reference")
     assert "SUBJECT" in desc
     assert "NOT the era, region, weather, time of day or mood" in desc
     assert "each extra word removes results" in desc
@@ -980,17 +1203,17 @@ def test_a_scene_brief_cannot_be_published_as_a_hand_drawn_motif(data, monkeypat
     tell whether the narrator had asked for a motif or the scene lane had been quietly
     abandoned, because the brief is cleared the moment art commits."""
     import mcp_server as srv
+
     store = srv._store()
     run_id = "a" * 32
     store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    store.request_backdrop(run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\"")
+    store.request_backdrop(run_id, turn=1, brief='LANE: scene\nREFERENCE: subject="stone bridge"')
 
     # The lane is parsed once, at request time, and kept beside the brief.
     assert store.read_backdrop_request(run_id)["lane"] == "scene"
 
     plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
-    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1,
-                markup=plain, mobile=plain)
+    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1, markup=plain, mobile=plain)
     assert out["ok"] is False
     assert "declared LANE: scene" in out["error"]
     assert "endless_trace_reference" in out["error"], "the refusal names the fix"
@@ -1000,6 +1223,7 @@ def test_a_motif_brief_is_still_free_to_be_hand_drawn(data, monkeypatch):
     """The gate is scoped to the lane the brief declared: a motif page must stay
     exactly as cheap and unconstrained as it was."""
     import mcp_server as srv
+
     store = srv._store()
     run_id = "b" * 32
     store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
@@ -1007,8 +1231,7 @@ def test_a_motif_brief_is_still_free_to_be_hand_drawn(data, monkeypatch):
     assert store.read_backdrop_request(run_id)["lane"] == "motif"
 
     plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
-    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1,
-                markup=plain, mobile=plain)
+    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1, markup=plain, mobile=plain)
     assert out["ok"] is True, out
 
 
@@ -1016,22 +1239,25 @@ def test_a_base_underlay_satisfies_the_scene_gate(data, monkeypatch):
     """The gate is "the lane RAN", not "a photograph was found". A search that finds
     nothing hands back a procedural base, and that page is a legitimate scene."""
     import mcp_server as srv
+
     monkeypatch.setattr(
-        phototrace, "_FETCH",
+        phototrace,
+        "_FETCH",
         lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
     )
     store = srv._store()
     run_id = "c" * 32
     store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    store.request_backdrop(run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\"")
+    store.request_backdrop(run_id, turn=1, brief='LANE: scene\nREFERENCE: subject="stone bridge"')
 
     traced = _call("endless_trace_reference", runId=run_id, turn=1, query="castle")
     assert traced["underlay"] == "base"
 
-    scene = ('<svg xmlns="http://www.w3.org/2000/svg"><g id="etr-underlay"/>'
-             '<rect width="10" height="10"/></svg>')
-    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1,
-                markup=scene, mobile=scene)
+    scene = (
+        '<svg xmlns="http://www.w3.org/2000/svg"><g id="etr-underlay"/>'
+        '<rect width="10" height="10"/></svg>'
+    )
+    out = _call("endless_submit_backdrop_draft", runId=run_id, turn=1, markup=scene, mobile=scene)
     assert out["ok"] is True, out
 
 
@@ -1040,9 +1266,10 @@ def test_an_undeclared_lane_is_not_enforced(data):
     oddly, or omitted, is still art direction. Losing a page's art over a header is a
     worse outcome than not enforcing the lane on that page."""
     from store import brief_lane
+
     assert brief_lane("LANE: scene\nx") == "scene"
     assert brief_lane("lane:  MOTIF  \nx") == "motif"
-    assert brief_lane("REFERENCE: subject=\"bridge\"") == ""
+    assert brief_lane('REFERENCE: subject="bridge"') == ""
     assert brief_lane("a scene of a bridge") == "", "prose is not a declaration"
     assert brief_lane("") == ""
 
@@ -1051,11 +1278,14 @@ def test_a_placeholder_without_a_stored_trace_is_refused_at_draft_time(data):
     run_id = "c" * 32
     _request_backdrop(data, run_id, 3)
     svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">'
-        '<g id="etr-underlay"/></svg>'
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><g id="etr-underlay"/></svg>'
     )
     out = _call(
-        "endless_submit_backdrop_draft", runId=run_id, turn=3, markup=svg, mobile=svg,
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=3,
+        markup=svg,
+        mobile=svg,
     )
     assert out["ok"] is False and "endless_trace_reference" in out["error"]
 
@@ -1065,14 +1295,26 @@ def test_trace_offers_multiple_candidates_and_select_promotes_the_chosen(data, m
 
     def fake_fetch(url: str) -> bytes:
         if "openverse.org/v1/images/?" in url:
-            return json.dumps({"results": [
-                {"title": "Bridge A", "license": "cc0", "license_version": "1.0",
-                 "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
-                 "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A"},
-                {"title": "Bridge B", "license": "pdm", "license_version": "1.0",
-                 "thumbnail": "https://api.openverse.org/v1/images/b/thumb/",
-                 "foreign_landing_url": "https://www.flickr.com/b"},
-            ]}).encode("utf-8")
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": "Bridge A",
+                            "license": "cc0",
+                            "license_version": "1.0",
+                            "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
+                            "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A",
+                        },
+                        {
+                            "title": "Bridge B",
+                            "license": "pdm",
+                            "license_version": "1.0",
+                            "thumbnail": "https://api.openverse.org/v1/images/b/thumb/",
+                            "foreign_landing_url": "https://www.flickr.com/b",
+                        },
+                    ]
+                }
+            ).encode("utf-8")
         return photo  # thumbnail proxy bytes; commons api.php parse-fails to []
 
     monkeypatch.setattr(phototrace, "_FETCH", fake_fetch)
@@ -1095,12 +1337,19 @@ def test_trace_offers_multiple_candidates_and_select_promotes_the_chosen(data, m
         '<rect width="{w}" height="{h}" fill="#0b0e17"/><g id=\'etr-underlay\'/></svg>'
     )
     draft = _call(
-        "endless_submit_backdrop_draft", runId=run_id, turn=1,
-        markup=overlay.format(w=800, h=600), mobile=overlay.format(w=450, h=900),
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=1,
+        markup=overlay.format(w=800, h=600),
+        mobile=overlay.format(w=450, h=900),
     )
     final = _call(
-        "endless_commit_backdrop", runId=run_id, turn=1, draftId=draft["draftId"],
-        markup=overlay.format(w=800, h=600), mobile=overlay.format(w=450, h=900),
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=overlay.format(w=800, h=600),
+        mobile=overlay.format(w=450, h=900),
     )
     assert final["ok"] is True
     committed = BackdropStore(data, run_id).current()
@@ -1122,9 +1371,14 @@ def test_trace_art_lane_routes_to_the_met(data, monkeypatch):
         if "metmuseum.org" in url and "/search?" in url:
             return json.dumps({"objectIDs": [7]}).encode("utf-8")
         if url.endswith("/objects/7"):
-            return json.dumps({"isPublicDomain": True, "title": "PD Painting",
-                "primaryImageSmall": "https://images.metmuseum.org/7.jpg",
-                "objectURL": "https://www.metmuseum.org/7"}).encode("utf-8")
+            return json.dumps(
+                {
+                    "isPublicDomain": True,
+                    "title": "PD Painting",
+                    "primaryImageSmall": "https://images.metmuseum.org/7.jpg",
+                    "objectURL": "https://www.metmuseum.org/7",
+                }
+            ).encode("utf-8")
         return photo
 
     monkeypatch.delenv("SI_API_KEY", raising=False)
@@ -1142,19 +1396,19 @@ def test_the_server_publishes_the_base_underlay_when_the_model_never_commits(dat
     publishes that underlay ALONE as the page's backdrop — a real image, with no
     model call and no hand-drawn recovery."""
     import mcp_server as srv
+
     monkeypatch.setattr(
-        phototrace, "_FETCH",
+        phototrace,
+        "_FETCH",
         lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
     )
     store = srv._store()
     run_id = "d" * 32
     store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    store.request_backdrop(
-        run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\""
+    store.request_backdrop(run_id, turn=1, brief='LANE: scene\nREFERENCE: subject="stone bridge"')
+    assert (
+        _call("endless_trace_reference", runId=run_id, turn=1, query="castle")["underlay"] == "base"
     )
-    assert _call(
-        "endless_trace_reference", runId=run_id, turn=1, query="castle"
-    )["underlay"] == "base"
 
     # The model never drafts or commits — it "timed out". The base underlay is in
     # the trace store but is NOT yet the page's backdrop.
@@ -1172,12 +1426,11 @@ def test_the_server_fallback_is_a_noop_when_nothing_was_traced(data):
     publish; the fallback declines (returns False) and commits nothing, leaving the
     narrator recovery as the last resort."""
     import mcp_server as srv
+
     store = srv._store()
     run_id = "e" * 32
     store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
-    store.request_backdrop(
-        run_id, turn=1, brief="LANE: scene\nREFERENCE: subject=\"stone bridge\""
-    )
+    store.request_backdrop(run_id, turn=1, brief='LANE: scene\nREFERENCE: subject="stone bridge"')
 
     assert srv.commit_underlay_only(data, store, run_id, 1) is False
     assert BackdropStore(data, run_id).exact(1) is None
@@ -1188,16 +1441,17 @@ def test_a_multiword_scene_miss_is_handed_back_then_settles(data, monkeypatch):
     directive and creates NO base (so the scene gate forces the retry); a SECOND
     miss settles for the base rather than wedging the page."""
     import mcp_server as srv
+
     monkeypatch.setattr(
-        phototrace, "_FETCH",
+        phototrace,
+        "_FETCH",
         lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
     )
     store = srv._store()
     run_id = "f" * 32
     _request_backdrop(data, run_id, 1)
 
-    first = _call("endless_trace_reference", runId=run_id, turn=1,
-                  query="stone forge workshop")
+    first = _call("endless_trace_reference", runId=run_id, turn=1, query="stone forge workshop")
     assert first["underlay"] == "none", "the first multi-word miss is handed back"
     assert TraceStore(data, run_id).load(1) is None, "no base created on the first miss"
     assert "SINGLE most-relevant noun" in first["next"]
@@ -1213,7 +1467,8 @@ def test_a_single_word_scene_miss_settles_for_base_immediately(data, monkeypatch
     """A single-word query has nothing left to simplify, so a miss settles for the
     base on the first call rather than asking for a pointless retry."""
     monkeypatch.setattr(
-        phototrace, "_FETCH",
+        phototrace,
+        "_FETCH",
         lambda url: json.dumps({"results": [], "query": {"pages": {}}}).encode("utf-8"),
     )
     run_id = "0" * 32

@@ -18,8 +18,8 @@ import pytest
 _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
-import memory_graph as mg  # noqa: E402
 import mcp_server as srv  # noqa: E402
+import memory_graph as mg  # noqa: E402
 
 WORLD = """---
 {"id": "w", "title": "W", "version": "1.0", "language": "en",
@@ -51,8 +51,14 @@ def call(name, **args):
 
 
 def turn_entry(turn, memory=None, action="", prose="p"):
-    entry = {"turn": turn, "prose": prose, "action": action,
-             "choices": [], "events": [], "gains": []}
+    entry = {
+        "turn": turn,
+        "prose": prose,
+        "action": action,
+        "choices": [],
+        "events": [],
+        "gains": [],
+    }
     if memory is not None:
         entry["memory"] = memory
     return entry
@@ -63,23 +69,31 @@ def bridge_memory():
     declared."""
     return {
         "entities": [
-            {"id": "elin", "kind": "character", "name": "艾琳",
-             "aliases": ["桥边的女孩"]},
+            {"id": "elin", "kind": "character", "name": "艾琳", "aliases": ["桥边的女孩"]},
             {"id": "old-stone-bridge", "kind": "place", "name": "老石桥"},
             {"id": "elin-debt", "kind": "thread", "name": "艾琳欠下的人情"},
         ],
         "events": [
-            {"key": "saved-elin", "title": "在石桥下救出艾琳",
-             "summary": "洪水冲毁石桥时，你把艾琳拉上岸。",
-             "importance": "notable",
-             "participants": ["player", "elin"],
-             "place": "old-stone-bridge",
-             "threads": [{"id": "elin-debt", "effect": "opened"}],
-             "echoes": [], "disclosure": "known"},
+            {
+                "key": "saved-elin",
+                "title": "在石桥下救出艾琳",
+                "summary": "洪水冲毁石桥时，你把艾琳拉上岸。",
+                "importance": "notable",
+                "participants": ["player", "elin"],
+                "place": "old-stone-bridge",
+                "threads": [{"id": "elin-debt", "effect": "opened"}],
+                "echoes": [],
+                "disclosure": "known",
+            },
         ],
         "relations": [
-            {"from": "elin", "type": "trust", "to": "player",
-             "change": "increase", "reasonEvent": "saved-elin"},
+            {
+                "from": "elin",
+                "type": "trust",
+                "to": "player",
+                "change": "increase",
+                "reasonEvent": "saved-elin",
+            },
         ],
     }
 
@@ -88,8 +102,17 @@ def bridge_memory():
 
 
 def test_unknown_participant_is_dropped_but_the_event_survives():
-    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
-                          "participants": ["nobody"], "disclosure": "known"}]}
+    memory = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "participants": ["nobody"],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert [d["field"] for d in dropped] == ["memory.events[0].participants[0]"]
     (ev,) = clean["events"]
@@ -101,10 +124,12 @@ def test_a_reused_event_key_is_suffixed_so_both_events_survive():
     """A key only has to be unique inside its own turn, so a collision is answered
     by a free neighbour — dropping the second event would lose a thing that happened
     over a naming slip."""
-    memory = {"events": [
-        {"key": "k", "title": "t", "summary": "s", "disclosure": "known"},
-        {"key": "k", "title": "t2", "summary": "s2", "disclosure": "known"},
-    ]}
+    memory = {
+        "events": [
+            {"key": "k", "title": "t", "summary": "s", "disclosure": "known"},
+            {"key": "k", "title": "t2", "summary": "s2", "disclosure": "known"},
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert dropped == [], "a reused key is repaired, not warned"
     assert [ev["key"] for ev in clean["events"]] == ["k", "k-2"]
@@ -113,10 +138,12 @@ def test_a_reused_event_key_is_suffixed_so_both_events_survive():
 
 def test_a_key_already_recorded_for_this_turn_is_suffixed_not_dropped():
     """Events are append-only, so a replayed key cannot overwrite — it steps aside."""
-    chronicle = [turn_entry(3, {"events": [{"key": "k", "title": "old", "summary": "s",
-                                            "disclosure": "known"}]})]
-    memory = {"events": [{"key": "k", "title": "new", "summary": "s",
-                          "disclosure": "known"}]}
+    chronicle = [
+        turn_entry(
+            3, {"events": [{"key": "k", "title": "old", "summary": "s", "disclosure": "known"}]}
+        )
+    ]
+    memory = {"events": [{"key": "k", "title": "new", "summary": "s", "disclosure": "known"}]}
     clean, dropped = mg.sanitize_memory(memory, mg.build_index(chronicle), turn=3)
     assert dropped == []
     assert clean["events"][0]["key"] == "k-2", "the old event keeps its id"
@@ -127,10 +154,12 @@ def test_a_namespaced_entity_id_is_repaired_not_dropped():
     shown colon-namespaced canonical ids (`event:6:slept-through`), so it wrote
     `character:lin-shuang` — five entities vanished per turn over it. `event_id` no
     longer mints a colon at all, and the habit is repaired rather than dropped."""
-    memory = {"entities": [
-        {"id": "character:lin-shuang", "kind": "character", "name": "林霜"},
-        {"id": "group: darkflame court", "kind": "group", "name": "黑焰廷"},
-    ]}
+    memory = {
+        "entities": [
+            {"id": "character:lin-shuang", "kind": "character", "name": "林霜"},
+            {"id": "group: darkflame court", "kind": "group", "name": "黑焰廷"},
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert dropped == [], "a repairable id is never a warning"
     assert [e["id"] for e in clean["entities"]] == ["lin-shuang", "darkflame-court"]
@@ -140,11 +169,20 @@ def test_a_repaired_reference_lands_on_the_entity_it_meant():
     """The cascade the drops caused: a later turn names an entity it already declared,
     in the namespaced form. The reference is repaired to the SAME id the declaration
     was repaired to, so the event keeps its participant."""
-    index = mg.build_index([turn_entry(1, {"entities": [
-        {"id": "lin-shuang", "kind": "character", "name": "林霜"}]})])
-    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
-                          "participants": ["character:lin-shuang"],
-                          "disclosure": "known"}]}
+    index = mg.build_index(
+        [turn_entry(1, {"entities": [{"id": "lin-shuang", "kind": "character", "name": "林霜"}]})]
+    )
+    memory = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "participants": ["character:lin-shuang"],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, index, turn=4)
     assert dropped == []
     assert clean["events"][0]["participants"] == ["lin-shuang"]
@@ -162,8 +200,11 @@ def test_the_canonical_id_shape_is_a_slug_the_narrator_can_safely_mirror():
 def test_a_canonical_id_written_where_a_key_belongs_is_unwrapped():
     """Mirroring has a floor: the narrator writing the canonical id as an event KEY
     would otherwise mint `event-1-event-1-x`. The key is the tail."""
-    memory = {"events": [{"key": "event-1-met-hui-ya", "title": "t", "summary": "s",
-                          "disclosure": "known"}]}
+    memory = {
+        "events": [
+            {"key": "event-1-met-hui-ya", "title": "t", "summary": "s", "disclosure": "known"}
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert dropped == []
     assert clean["events"][0]["key"] == "met-hui-ya"
@@ -173,12 +214,15 @@ def test_a_kind_prefixed_id_is_only_unwrapped_when_it_lands_on_a_known_entity():
     """`character-lin-shuang` is the colon habit in a shape the id rule cannot see,
     so the graph's own knowledge decides: it is unwrapped when `lin-shuang` exists,
     and left exactly as written when it does not — `place-of-bones` is an id too."""
-    index = mg.build_index([turn_entry(1, {"entities": [
-        {"id": "lin-shuang", "kind": "character", "name": "林霜"}]})])
-    memory = {"entities": [
-        {"id": "character-lin-shuang", "kind": "character", "name": "林霜"},
-        {"id": "place-of-bones", "kind": "place", "name": "白骨原"},
-    ]}
+    index = mg.build_index(
+        [turn_entry(1, {"entities": [{"id": "lin-shuang", "kind": "character", "name": "林霜"}]})]
+    )
+    memory = {
+        "entities": [
+            {"id": "character-lin-shuang", "kind": "character", "name": "林霜"},
+            {"id": "place-of-bones", "kind": "place", "name": "白骨原"},
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, index, turn=2)
     assert dropped == []
     assert [e["id"] for e in clean["entities"]] == ["lin-shuang", "place-of-bones"]
@@ -195,9 +239,17 @@ def test_an_id_with_nothing_usable_left_is_still_dropped():
 def test_a_dangling_echo_is_dropped_but_the_event_survives():
     """§12.2: 回响必须引用真实旧事件 — but a bad echo only loses the echo, not the
     event; a cross-life id simply does not resolve here."""
-    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
-                          "echoes": ["event-3-never-happened"],
-                          "disclosure": "known"}]}
+    memory = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "echoes": ["event-3-never-happened"],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=5)
     assert [d["field"] for d in dropped] == ["memory.events[0].echoes[0]"]
     (ev,) = clean["events"]
@@ -220,8 +272,11 @@ def test_an_unknown_kind_is_kept_as_object_not_dropped():
     """The screenshot report: kind 'concept' is a narrator-invented category, so it
     must not cost the whole entity. It is KEPT, bucketed as the generic 'object', and
     only a warning is raised — recall rules still see nothing outside KINDS."""
-    memory = {"entities": [{"id": "resonant-notation", "kind": "concept",
-                            "name": "共鸣符记法", "summary": "s"}]}
+    memory = {
+        "entities": [
+            {"id": "resonant-notation", "kind": "concept", "name": "共鸣符记法", "summary": "s"}
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=2)
     assert dropped == [], "the coercion is a repair, not a warning"
     (ent,) = clean["entities"]
@@ -243,16 +298,21 @@ def test_an_unknown_kind_on_a_known_entity_adopts_the_established_kind():
 def test_a_narrators_word_for_a_disclosure_is_read_not_refused():
     """The vocabulary stays closed for every consumer, but the narrator writing
     "public" or "widely rumored" keeps its event — the synonym is mapped."""
-    memory = {"events": [
-        {"key": "a", "title": "t", "summary": "s", "disclosure": "public"},
-        {"key": "b", "title": "t", "summary": "s", "disclosure": "widely rumored"},
-        {"key": "c", "title": "t", "summary": "s", "disclosure": "secret"},
-        {"key": "d", "title": "t", "summary": "s", "disclosure": "loud"},
-    ]}
+    memory = {
+        "events": [
+            {"key": "a", "title": "t", "summary": "s", "disclosure": "public"},
+            {"key": "b", "title": "t", "summary": "s", "disclosure": "widely rumored"},
+            {"key": "c", "title": "t", "summary": "s", "disclosure": "secret"},
+            {"key": "d", "title": "t", "summary": "s", "disclosure": "loud"},
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert dropped == []
     assert [ev["disclosure"] for ev in clean["events"]] == [
-        "known", "rumoured", "hidden", mg.DEFAULT_DISCLOSURE,
+        "known",
+        "rumoured",
+        "hidden",
+        mg.DEFAULT_DISCLOSURE,
     ], "an unreadable word falls back to the documented default"
 
 
@@ -267,8 +327,7 @@ def test_an_event_with_neither_title_nor_summary_is_dropped():
 def test_a_titleless_event_takes_its_title_from_its_summary():
     """The live report: `memory.events[0].title` dropped a whole event the narrator
     had written a summary for. The summary names it instead."""
-    memory = {"events": [{"key": "k", "summary": "他在塌方里睡了整夜。",
-                          "disclosure": "known"}]}
+    memory = {"events": [{"key": "k", "summary": "他在塌方里睡了整夜。", "disclosure": "known"}]}
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert dropped == []
     (ev,) = clean["events"]
@@ -294,10 +353,27 @@ def test_an_event_named_only_by_its_summary_still_gets_a_key():
 def test_a_bare_event_key_in_an_echo_resolves_to_its_canonical_id():
     """The narrator names an old event by the key it wrote, not by the canonical id
     the server minted; both readings reach the same event."""
-    chronicle = [turn_entry(2, {"events": [{"key": "saved-elin", "title": "t",
-                                            "summary": "s", "disclosure": "known"}]})]
-    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
-                          "echoes": ["saved-elin"], "disclosure": "known"}]}
+    chronicle = [
+        turn_entry(
+            2,
+            {
+                "events": [
+                    {"key": "saved-elin", "title": "t", "summary": "s", "disclosure": "known"}
+                ]
+            },
+        )
+    ]
+    memory = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "echoes": ["saved-elin"],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index(chronicle), turn=9)
     assert dropped == []
     assert clean["events"][0]["echoes"] == ["event-2-saved-elin"]
@@ -306,8 +382,7 @@ def test_a_bare_event_key_in_an_echo_resolves_to_its_canonical_id():
 def test_a_narrators_word_for_a_relation_change_is_read_not_refused():
     memory = {
         "entities": [{"id": "elin", "kind": "character", "name": "Elin"}],
-        "relations": [{"from": "elin", "type": "trust", "to": "player",
-                       "change": "deepened"}],
+        "relations": [{"from": "elin", "type": "trust", "to": "player", "change": "deepened"}],
     }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert dropped == []
@@ -319,8 +394,15 @@ def test_a_dangling_reason_costs_the_reason_not_the_relation():
     and keeps the edge the narrator actually declared."""
     memory = {
         "entities": [{"id": "elin", "kind": "character", "name": "Elin"}],
-        "relations": [{"from": "elin", "type": "trust", "to": "player",
-                       "change": "increase", "reasonEvent": "never-happened"}],
+        "relations": [
+            {
+                "from": "elin",
+                "type": "trust",
+                "to": "player",
+                "change": "increase",
+                "reasonEvent": "never-happened",
+            }
+        ],
     }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert [d["field"] for d in dropped] == ["memory.relations[0].reasonEvent"]
@@ -331,8 +413,9 @@ def test_a_dangling_reason_costs_the_reason_not_the_relation():
 def test_a_non_place_place_is_dropped_but_the_event_survives():
     memory = {
         "entities": [{"id": "elin", "kind": "character", "name": "Elin"}],
-        "events": [{"key": "k", "title": "t", "summary": "s",
-                    "place": "elin", "disclosure": "known"}],
+        "events": [
+            {"key": "k", "title": "t", "summary": "s", "place": "elin", "disclosure": "known"}
+        ],
     }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=1)
     assert [d["field"] for d in dropped] == ["memory.events[0].place"]
@@ -344,9 +427,17 @@ def test_opening_a_thread_needs_no_prior_entity():
     """The screenshot bug: opening a NEW thread is what creates it, so it must not
     require a kind:thread entity declared first — the whole memory used to be dropped
     over exactly this."""
-    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
-                          "threads": [{"id": "orwins-shadow", "effect": "opened"}],
-                          "disclosure": "known"}]}
+    memory = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "threads": [{"id": "orwins-shadow", "effect": "opened"}],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=14)
     assert dropped == [], "opening a thread is not an error"
     (ev,) = clean["events"]
@@ -357,9 +448,17 @@ def test_advancing_a_never_opened_thread_opens_it_on_that_first_mention():
     """Naming a thread is what brings it into the graph, so `advanced` on a thread
     nobody opened is an opening — not an inconsistency to throw away. build_index
     opens it on the first touch, so it reads as an OPEN thread afterwards."""
-    memory = {"events": [{"key": "k", "title": "t", "summary": "s",
-                          "threads": [{"id": "ghost", "effect": "advanced"}],
-                          "disclosure": "known"}]}
+    memory = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "threads": [{"id": "ghost", "effect": "advanced"}],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index([]), turn=3)
     assert dropped == []
     (ev,) = clean["events"]
@@ -370,9 +469,17 @@ def test_advancing_a_never_opened_thread_opens_it_on_that_first_mention():
 
 def test_resolving_a_previously_opened_thread_is_kept():
     chronicle = [turn_entry(1, bridge_memory())]  # opens elin-debt
-    memory = {"events": [{"key": "repaid", "title": "t", "summary": "s",
-                          "threads": [{"id": "elin-debt", "effect": "resolved"}],
-                          "disclosure": "known"}]}
+    memory = {
+        "events": [
+            {
+                "key": "repaid",
+                "title": "t",
+                "summary": "s",
+                "threads": [{"id": "elin-debt", "effect": "resolved"}],
+                "disclosure": "known",
+            }
+        ]
+    }
     clean, dropped = mg.sanitize_memory(memory, mg.build_index(chronicle), turn=3)
     assert dropped == []
     (ev,) = clean["events"]
@@ -402,12 +509,22 @@ def test_rebuilding_the_index_is_byte_stable():
     chronicle = [
         turn_entry(1, bridge_memory(), action="save her"),
         turn_entry(2),
-        turn_entry(3, {"events": [
-            {"key": "repaid", "title": "艾琳还了人情", "summary": "s",
-             "participants": ["player", "elin"],
-             "threads": [{"id": "elin-debt", "effect": "resolved"}],
-             "echoes": ["event-1-saved-elin"], "disclosure": "known"},
-        ]}),
+        turn_entry(
+            3,
+            {
+                "events": [
+                    {
+                        "key": "repaid",
+                        "title": "艾琳还了人情",
+                        "summary": "s",
+                        "participants": ["player", "elin"],
+                        "threads": [{"id": "elin-debt", "effect": "resolved"}],
+                        "echoes": ["event-1-saved-elin"],
+                        "disclosure": "known",
+                    },
+                ]
+            },
+        ),
     ]
     once = json.dumps(mg.build_index(chronicle), sort_keys=True, ensure_ascii=False)
     twice = json.dumps(mg.build_index(chronicle), sort_keys=True, ensure_ascii=False)
@@ -429,9 +546,14 @@ def test_relation_projection_is_stable_and_keeps_its_sources():
 def test_cleared_ends_a_relation_but_never_erases_its_history():
     chronicle = [
         turn_entry(1, bridge_memory()),
-        turn_entry(2, {"relations": [
-            {"from": "elin", "type": "trust", "to": "player", "change": "cleared"},
-        ]}),
+        turn_entry(
+            2,
+            {
+                "relations": [
+                    {"from": "elin", "type": "trust", "to": "player", "change": "cleared"},
+                ]
+            },
+        ),
     ]
     (slot,) = mg.project_relations(mg.build_index(chronicle)).values()
     assert slot["active"] is False
@@ -452,11 +574,21 @@ def test_an_open_thread_is_recalled_and_a_resolved_one_scores_lower():
 def test_cooldown_a_just_echoed_event_rests():
     chronicle = [
         turn_entry(1, bridge_memory()),
-        turn_entry(4, {"events": [
-            {"key": "again", "title": "又见艾琳", "summary": "s",
-             "participants": ["elin"],
-             "echoes": ["event-1-saved-elin"], "disclosure": "known"},
-        ]}),
+        turn_entry(
+            4,
+            {
+                "events": [
+                    {
+                        "key": "again",
+                        "title": "又见艾琳",
+                        "summary": "s",
+                        "participants": ["elin"],
+                        "echoes": ["event-1-saved-elin"],
+                        "disclosure": "known",
+                    },
+                ]
+            },
+        ),
     ]
     index = mg.build_index(chronicle)
     # Turn 5: echoed on turn 4, inside the cooldown window — must rest.
@@ -480,10 +612,21 @@ def test_the_player_action_mentioning_a_name_recalls_the_event():
 
 def test_candidates_never_exceed_the_cap():
     chronicle = [
-        turn_entry(t, {"events": [
-            {"key": f"e{t}", "title": f"t{t}", "summary": "s",
-             "threads": [{"id": "q", "effect": "advanced"}], "disclosure": "known"},
-        ], "entities": ([{"id": "q", "kind": "thread", "name": "quest"}] if t == 1 else [])})
+        turn_entry(
+            t,
+            {
+                "events": [
+                    {
+                        "key": f"e{t}",
+                        "title": f"t{t}",
+                        "summary": "s",
+                        "threads": [{"id": "q", "effect": "advanced"}],
+                        "disclosure": "known",
+                    },
+                ],
+                "entities": ([{"id": "q", "kind": "thread", "name": "quest"}] if t == 1 else []),
+            },
+        )
         for t in range(1, 12)
     ]
     # Open the thread on turn 1 so every event ties to an open thread.
@@ -501,8 +644,10 @@ def named_life_chronicle(turns=4, self_id="chen-yu", extra_participant=None):
     The measured real-world shape: every event is about the declared id and
     `player` is never referenced once.
     """
-    entities = [{"id": self_id, "kind": "character", "name": "陈屿"},
-                {"id": "neighbour", "kind": "character", "name": "对门老周"}]
+    entities = [
+        {"id": self_id, "kind": "character", "name": "陈屿"},
+        {"id": "neighbour", "kind": "character", "name": "对门老周"},
+    ]
     chronicle = []
     for t in range(1, turns + 1):
         who = [self_id]
@@ -510,15 +655,35 @@ def named_life_chronicle(turns=4, self_id="chen-yu", extra_participant=None):
             who.append(extra_participant)
         elif t == turns:
             who.append("neighbour")
-        chronicle.append(turn_entry(t, {
-            "entities": entities,
-            "events": [{"key": f"day-{t}", "title": f"第 {t} 天", "summary": "s",
-                        "importance": "major", "participants": who,
-                        "disclosure": "known"}],
-            "relations": [{"from": self_id, "type": "debt", "to": "neighbour",
-                           "change": "increase", "reasonEvent": f"day-{turns}"}]
-            if t == turns else [],
-        }))
+        chronicle.append(
+            turn_entry(
+                t,
+                {
+                    "entities": entities,
+                    "events": [
+                        {
+                            "key": f"day-{t}",
+                            "title": f"第 {t} 天",
+                            "summary": "s",
+                            "importance": "major",
+                            "participants": who,
+                            "disclosure": "known",
+                        }
+                    ],
+                    "relations": [
+                        {
+                            "from": self_id,
+                            "type": "debt",
+                            "to": "neighbour",
+                            "change": "increase",
+                            "reasonEvent": f"day-{turns}",
+                        }
+                    ]
+                    if t == turns
+                    else [],
+                },
+            )
+        )
     return chronicle
 
 
@@ -544,12 +709,24 @@ def test_a_referenced_player_is_never_second_guessed():
 def test_a_player_named_by_declaring_player_itself_carries_that_name():
     """The contract `shape.memory` now states: name the protagonist by declaring
     `player`, not by minting a second id."""
-    chronicle = [turn_entry(1, {
-        "entities": [{"id": "player", "kind": "character", "name": "陈屿"}],
-        "events": [{"key": "wake", "title": "醒来", "summary": "s",
-                    "importance": "major", "participants": ["player"],
-                    "disclosure": "known"}],
-    })]
+    chronicle = [
+        turn_entry(
+            1,
+            {
+                "entities": [{"id": "player", "kind": "character", "name": "陈屿"}],
+                "events": [
+                    {
+                        "key": "wake",
+                        "title": "醒来",
+                        "summary": "s",
+                        "importance": "major",
+                        "participants": ["player"],
+                        "disclosure": "known",
+                    }
+                ],
+            },
+        )
+    ]
     assert mg.life_centre(mg.build_index(chronicle)) == {"id": "player", "name": "陈屿"}
 
 
@@ -562,19 +739,41 @@ def test_no_character_with_a_majority_leaves_the_centre_where_it_was():
     """An ensemble life has no protagonist to infer, and must not be handed one:
     two characters at half the events each clear nothing."""
     chronicle = [
-        turn_entry(1, {
-            "entities": [{"id": "a", "kind": "character", "name": "A"},
-                         {"id": "b", "kind": "character", "name": "B"}],
-            "events": [{"key": "one", "title": "t", "summary": "s",
-                        "importance": "major", "participants": ["a"],
-                        "disclosure": "known"}],
-        }),
-        turn_entry(2, {
-            "entities": [],
-            "events": [{"key": "two", "title": "t", "summary": "s",
-                        "importance": "major", "participants": ["b"],
-                        "disclosure": "known"}],
-        }),
+        turn_entry(
+            1,
+            {
+                "entities": [
+                    {"id": "a", "kind": "character", "name": "A"},
+                    {"id": "b", "kind": "character", "name": "B"},
+                ],
+                "events": [
+                    {
+                        "key": "one",
+                        "title": "t",
+                        "summary": "s",
+                        "importance": "major",
+                        "participants": ["a"],
+                        "disclosure": "known",
+                    }
+                ],
+            },
+        ),
+        turn_entry(
+            2,
+            {
+                "entities": [],
+                "events": [
+                    {
+                        "key": "two",
+                        "title": "t",
+                        "summary": "s",
+                        "importance": "major",
+                        "participants": ["b"],
+                        "disclosure": "known",
+                    }
+                ],
+            },
+        ),
     ]
     assert mg.life_centre(mg.build_index(chronicle))["id"] == mg.PLAYER
 
@@ -597,8 +796,9 @@ def test_the_centre_rides_in_the_star_payload_so_the_client_guesses_nothing():
 def test_the_centre_is_byte_stable_across_rebuilds():
     chronicle = named_life_chronicle()
     a = json.dumps(mg.life_centre(mg.build_index(chronicle)), sort_keys=True)
-    b = json.dumps(mg.life_centre(mg.build_index(list(reversed(list(
-        reversed(chronicle)))))), sort_keys=True)
+    b = json.dumps(
+        mg.life_centre(mg.build_index(list(reversed(list(reversed(chronicle)))))), sort_keys=True
+    )
     assert a == b
 
 
@@ -610,13 +810,21 @@ def echo_chronicle(source_disclosure="known", current_disclosure="known"):
     first["events"][0]["disclosure"] = source_disclosure
     return [
         turn_entry(1, first, action="把她拉上岸"),
-        turn_entry(8, {"events": [
-            {"key": "repaid", "title": "艾琳还了人情",
-             "summary": "她记得石桥下的那一天。",
-             "participants": ["player", "elin"],
-             "echoes": ["event-1-saved-elin"],
-             "disclosure": current_disclosure},
-        ]}),
+        turn_entry(
+            8,
+            {
+                "events": [
+                    {
+                        "key": "repaid",
+                        "title": "艾琳还了人情",
+                        "summary": "她记得石桥下的那一天。",
+                        "participants": ["player", "elin"],
+                        "echoes": ["event-1-saved-elin"],
+                        "disclosure": current_disclosure,
+                    },
+                ]
+            },
+        ),
     ]
 
 
@@ -657,9 +865,14 @@ def committed_run(store):
 
 
 def take_turn(run, turn, memory=None, **extra):
-    args = {"runId": run, "turn": turn, "prose": f"turn {turn}",
-            "choices": [{"id": "go", "label": "go on"}],
-            "state": {"alive": True}, **extra}
+    args = {
+        "runId": run,
+        "turn": turn,
+        "prose": f"turn {turn}",
+        "choices": [{"id": "go", "label": "go on"}],
+        "state": {"alive": True},
+        **extra,
+    }
     if memory is not None:
         args["memory"] = memory
     return call("endless_advance_turn", **args)
@@ -671,8 +884,17 @@ def test_a_bad_reference_is_salvaged_and_the_turn_keeps_the_event(app):
     the drop is surfaced as a non-blocking warning. Nothing is back-filled from prose."""
     store = srv._store()
     run = committed_run(store)
-    bad = {"events": [{"key": "k", "title": "t", "summary": "s",
-                       "participants": ["nobody"], "disclosure": "known"}]}
+    bad = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "participants": ["nobody"],
+                "disclosure": "known",
+            }
+        ]
+    }
     out = take_turn(run, 1, memory=bad)
     assert out["committed"] is True, "the turn lands; memory never holds it hostage"
     warned = out.get("warnings") or []
@@ -691,8 +913,17 @@ def test_a_block_whose_parts_all_fail_records_no_memory(app):
     run = committed_run(store)
     # An event dropped whole (unknown disclosure is structural, caught pre-schema here
     # via a reference-only failure): use an event that loses its only anchor.
-    bad = {"events": [{"key": "k", "title": "t", "summary": "s",
-                       "participants": ["nobody"], "disclosure": "known"}]}
+    bad = {
+        "events": [
+            {
+                "key": "k",
+                "title": "t",
+                "summary": "s",
+                "participants": ["nobody"],
+                "disclosure": "known",
+            }
+        ]
+    }
     out = take_turn(run, 1, memory=bad)
     assert out["committed"] is True
     (entry,) = store.read_chronicle(run)
@@ -707,11 +938,18 @@ def test_memory_sent_as_a_json_string_is_recovered(app):
     """A narrator that double-encodes the block sends `memory` as a JSON STRING; the
     call recovers it to an object instead of failing the turn on a type mismatch."""
     import json as _json
+
     store = srv._store()
     run = committed_run(store)
-    out = call("endless_advance_turn", runId=run, turn=1, prose="turn 1",
-               choices=[{"id": "go", "label": "go on"}], state={"alive": True},
-               memory=_json.dumps(bridge_memory(), ensure_ascii=False))
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="turn 1",
+        choices=[{"id": "go", "label": "go on"}],
+        state={"alive": True},
+        memory=_json.dumps(bridge_memory(), ensure_ascii=False),
+    )
     assert out["committed"] is True
     (entry,) = store.read_chronicle(run)
     assert entry["memory"]["events"][0]["key"] == "saved-elin"
@@ -722,9 +960,15 @@ def test_memory_sent_as_a_non_json_string_is_dropped_not_fatal(app):
     never blocks a turn, at the schema layer or the semantic one."""
     store = srv._store()
     run = committed_run(store)
-    out = call("endless_advance_turn", runId=run, turn=1, prose="turn 1",
-               choices=[{"id": "go", "label": "go on"}], state={"alive": True},
-               memory="not json at all")
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="turn 1",
+        choices=[{"id": "go", "label": "go on"}],
+        state={"alive": True},
+        memory="not json at all",
+    )
     assert out["committed"] is True
     (entry,) = store.read_chronicle(run)
     assert "memory" not in entry
@@ -773,7 +1017,8 @@ def test_read_runtime_serves_a_bounded_neighbourhood_by_id(app):
     run = committed_run(store)
     take_turn(run, 1, memory=bridge_memory())
     got = call(
-        "endless_read_runtime", runId=run,
+        "endless_read_runtime",
+        runId=run,
         memoryEvents=["event-1-saved-elin", "event-9-not-a-thing"],
     )
     (ev,) = got["memoryEvents"]
@@ -788,10 +1033,15 @@ def test_a_bad_disclosure_is_repaired_end_to_end_with_no_warning(app):
     disclosure and the narrator is not warned about a thing it need not fix."""
     store = srv._store()
     run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
-    out = call("endless_advance_turn", runId=run, turn=1, prose="p",
-               choices=[{"id": "go", "label": "go"}], state={"alive": True},
-               memory={"events": [{"key": "k", "title": "t", "summary": "s",
-                                   "disclosure": "loud"}]})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="p",
+        choices=[{"id": "go", "label": "go"}],
+        state={"alive": True},
+        memory={"events": [{"key": "k", "title": "t", "summary": "s", "disclosure": "loud"}]},
+    )
     assert out.get("committed") is True and out.get("ok") is not False
     (entry,) = store.read_chronicle(run)
     (ev,) = entry["memory"]["events"]
