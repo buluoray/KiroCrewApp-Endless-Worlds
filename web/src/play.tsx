@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 
 import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
 import { api, API } from './api'
@@ -1003,29 +1002,33 @@ export function PlayPage({
           }}
         />
       ) : null}
-      {/* One row at the top of the page, where a reader looks for "back" and for
-          which page they are on. On a phone it is FIXED to the pane's top edge rather
-          than sticky: sticky pins inside the scrollport, so a pane rubber-banding past
-          its own top carried the bar down with it and left it under a band of bare
-          canvas. Fixed keeps it at the top through the bounce, and the bounce itself is
-          left alone — it belongs to the dashboard's pane, not to this app.
-          Portalled because `position: fixed` resolves against a transformed ancestor
-          in the dashboard shell, not the viewport. `paneTop` is the pane's own top
-          edge, which does not move when its CONTENT is overscrolled. */}
+      {/* One row at the top of the page, where a reader looks for "back" and for which
+          page they are on. On a phone it is FIXED below the dashboard's chrome, so a
+          pane rubber-banding past its own top slides its content UNDER a row that does
+          not move (sticky pins inside the scrollport and travels with it).
+
+          NOT portalled, and that is the load-bearing part. The dashboard's shell is a
+          stacking context, so a row at body level competes with that whole shell rather
+          than with anything inside it — and both ends of that were measured on a real
+          device: high enough to clear the app (30) also cleared the host's chrome and
+          covered its menus, while low enough to sit under the chrome (2) put the row
+          BEHIND the app's own backdrop, invisible. There is no value between, because
+          the app's content and the host's chrome live in the SAME context. Rendered in
+          place, the row is inside that shell: it cannot outrank the chrome at all, and
+          `z-index: 2` is enough to clear the story it floats over. `fixed` still
+          resolves against the shell, which spans the window, so the offset means what
+          it says. */}
       {readerBar ? <div className="ew-topbar-slot" /> : null}
-      {readerBar ? createPortal((
-        <div
-          className={'ew-topbar ew-topbar-fixed' + (barHidden ? ' ew-topbar-hidden' : '')}
-        >
-          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-          {pager}
-        </div>
-      ), document.body) : (
-        <div className="ew-topbar">
-          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-          {pager}
-        </div>
-      )}
+      <div
+        className={
+          'ew-topbar'
+          + (readerBar ? ' ew-topbar-fixed' : '')
+          + (readerBar && barHidden ? ' ew-topbar-hidden' : '')
+        }
+      >
+        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+        {pager}
+      </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
         // the story readable. The next successful poll clears it (M0.5).

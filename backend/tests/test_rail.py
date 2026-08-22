@@ -592,9 +592,15 @@ def test_the_chrome_offset_is_declared_not_measured():
     )
 
     play = module("play.tsx")
-    assert "createPortal" in play, (
-        "a fixed row must be portalled: inside the shell it resolves against a "
-        "transformed ancestor rather than the viewport"
+    # NOT portalled. The dashboard's shell is a stacking context, so a row at body level
+    # competes with that whole shell: high enough to clear the app also clears the host's
+    # chrome (measured — it covered the menus), and low enough to sit under the chrome
+    # puts the row behind the app's own backdrop (measured — invisible). No value lies
+    # between, because the app's content and the host's chrome share that context. In
+    # place, the row cannot outrank the chrome and 2 clears the story.
+    assert "createPortal" not in play, (
+        "the row is portalled to body again, where no z-index can be both visible above "
+        "the app and below the host's chrome"
     )
     assert "getBoundingClientRect" not in play, (
         "the offset is measured again, which is the reading that returns 0 too early"
