@@ -56,6 +56,11 @@ export function StarMap({
       : 'canvas'
   ))
   const [kept, setKept] = useState<string[]>([])
+  // MUST stay above the `if (!payload || !lens) return` early return below: a hook
+  // declared after that guard runs only once the payload has loaded, so the render
+  // count jumps from N to N+1 and React throws #310 ("rendered more hooks than
+  // during the previous render"). All hooks live before the first conditional return.
+  const [keepFailed, setKeepFailed] = useState(false)
 
   const load = useCallback(async () => {
     const got = await api.star(runId)
@@ -92,7 +97,6 @@ export function StarMap({
       || payload.keepsakes.some((kp) => kp.cites.includes(focused.id))
     : false
 
-  const [keepFailed, setKeepFailed] = useState(false)
   const keep = async () => {
     if (!focused || focused.kind !== 'event') return
     setKeepFailed(false)

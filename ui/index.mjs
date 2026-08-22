@@ -4742,6 +4742,7 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 	const [centre, setCentre] = useState("");
 	const [mode, setMode] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches ? "list" : "canvas");
 	const [kept, setKept] = useState([]);
+	const [keepFailed, setKeepFailed] = useState(false);
 	const load = useCallback(async () => {
 		const got = await api.star(runId);
 		setPayload(got);
@@ -4778,7 +4779,6 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 	});
 	const focused = focus ? nodeById(payload, focus) : void 0;
 	const isKept = focused ? kept.includes(focused.id) || payload.keepsakes.some((kp) => kp.cites.includes(focused.id)) : false;
-	const [keepFailed, setKeepFailed] = useState(false);
 	const keep = async () => {
 		if (!focused || focused.kind !== "event") return;
 		setKeepFailed(false);
@@ -7402,7 +7402,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.5.18" })
+								children: t("app.version", { version: "0.5.20" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",
