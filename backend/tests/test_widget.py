@@ -126,6 +126,9 @@ def test_a_grid_row_is_sized_by_its_content_not_by_the_room_around_it():
     grid = style.split(".grid {", 1)[1].split("}", 1)[0]
     assert "align-content: start" in grid
     assert "grid-auto-rows: min-content" in grid
+    # Third latch: iOS WebKit still stretched cells to a mis-sized track with only
+    # the first two, so cells must not stretch — each takes its own content height.
+    assert "align-items: start" in grid
 
 
 def test_the_documents_canvas_is_painted_not_just_its_body():
@@ -256,6 +259,32 @@ def test_a_bind_reads_the_same_state_the_panels_read():
     out = compile_scene("map", spec, STATE)
     assert "40" in out
     assert "width:40%" in out
+
+
+def test_a_keyvalue_renders_a_pairs_block_as_rows():
+    """A keyvalue may carry a `pairs` array (a labelled ledger of key/value rows),
+    not only a single label/value. Before this, `pairs` was ignored and the element
+    rendered ONE empty row, so a whole 食物/饮水/药品 ledger looked blank."""
+    spec = {
+        "elements": [
+            {
+                "kind": "keyvalue",
+                "pairs": [
+                    {"key": "存货", "value": "整车囤货，约178天"},
+                    {"key": "两人消耗", "value": "实际约90天"},
+                ],
+            },
+        ]
+    }
+    out = compile_scene("map", spec, STATE)
+    assert "存货" in out and "整车囤货，约178天" in out
+    assert "两人消耗" in out and "实际约90天" in out
+    assert out.count('<div class="r">') == 2, "one row per pair, not one empty row"
+    # A single label/value still works (backward compatible).
+    single = compile_scene(
+        "map", {"elements": [{"kind": "keyvalue", "label": "年龄", "value": "十五岁"}]}, STATE
+    )
+    assert "年龄" in single and "十五岁" in single
 
 
 def test_an_unresolvable_bind_falls_back_to_the_literal():

@@ -190,17 +190,20 @@ button {
   font: inherit; color: inherit; cursor: pointer;
   background: #1f2030; border: 1px solid #2d2f3d; border-radius: 8px;
 }
-/* Rows are sized by what is IN them and never by the room around them. Two
-   independent latches, because what hands this box a height larger than its rows on
-   a phone is not reproducible off-device: `align-content` otherwise defaults to
-   stretch and shares any surplus out among the auto rows, and `grid-auto-rows` pins
-   each track to its content even if something still does. Measured: a grid box
-   forced to 464px turned six short labels into 236px boxes holding 57px of text,
-   which is the shape a real phone showed; with these, 95px and 82px.
-   Cells still stretch to their own row, so a row's boxes stay equal height. */
+/* Rows are sized by what is IN them and never by the room around them. THREE
+   latches now, because iOS WebKit still ballooned cells with the first two: it
+   stretches the implicit row's TRACK past min-content and then, under the default
+   `align-items: stretch`, stretches every cell to fill it — turning short map
+   labels into tall empty boxes on a phone (not reproducible off-device). Two pin
+   the track (`align-content: start` stops the surplus being shared out among auto
+   rows; `grid-auto-rows: min-content` pins each track to its content), and
+   `align-items: start` decouples a CELL's height from the track so a cell is its
+   own content height even when WebKit mis-sizes the track. A row's cells are then
+   content-height rather than force-equalised, which for a map of independent
+   places reads fine. */
 .grid {
   display: grid; gap: 6px; margin: 8px 0;
-  align-content: start; grid-auto-rows: min-content;
+  align-content: start; grid-auto-rows: min-content; align-items: start;
 }
 /* A map cell is a label, not prose: the body's reading line-height turns six short
    cells into a tall airy block, and at phone width a column is ~100px wide, so a
@@ -343,6 +346,24 @@ def _element(el: Any, index: int, state: dict[str, Any]) -> str:
         return f'<p class="n">{body}</p>' if kind == "note" else f"<p>{body}</p>"
 
     if kind == "keyvalue":
+        # Two shapes: a single {label, value}, OR a {pairs: [{key, value}, ...]}
+        # block of rows. The narrator naturally reaches for `pairs` for a labelled
+        # ledger (食物/饮水/药品 with several rows each); before this it was ignored
+        # and the element rendered one empty row, so the whole ledger looked blank.
+        pairs = el.get("pairs")
+        if isinstance(pairs, list) and pairs:
+            pair_rows: list[str] = []
+            for pn, pr in enumerate(pairs[:MAX_ROWS]):
+                if not isinstance(pr, dict):
+                    continue  # drop a malformed pair, keep the rest
+                k = _esc(_text(pr.get("key", pr.get("label")), f"{where}.pairs[{pn}].key", cap=64))
+                v = _esc(_text(pr.get("value"), f"{where}.pairs[{pn}].value"))
+                pair_rows.append(
+                    f'<div class="r"><div class="k">{k}</div><div class="v">{v}</div></div>'
+                )
+            if not pair_rows:
+                raise SceneSpecError(f"{where}.pairs", "at least one usable pair")
+            return "".join(pair_rows)
         label = _esc(_text(el.get("label"), f"{where}.label"))
         raw = _valued(el, where, bound, bind_failed, "value")
         value = _esc(_text(raw, f"{where}.value"))
