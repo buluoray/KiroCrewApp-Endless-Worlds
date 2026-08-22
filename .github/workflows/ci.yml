@@ -56,3 +56,19 @@ jobs:
       - name: Typecheck and build
         working-directory: web
         run: npm run build
+
+  version-bump:
+    name: Version bump on shipped changes
+    # Pull requests only: a push to main has no branch point to compare against,
+    # and the rule is about what a pull request is proposing to ship.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The gate diffs against the merge base, so it needs real history
+          # rather than the default single-commit checkout.
+          fetch-depth: 0
+
+      - name: Shipped changes must raise app.json's version
+        run: python3 scripts/check_version_bump.py "origin/${{ github.base_ref }}"

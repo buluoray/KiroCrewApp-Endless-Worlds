@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Rebuild the tracked UI bundle when a staged change would make it stale.
+#
+# `ui/index.mjs` is committed because a registry install copies the repository
+# as-is — nothing builds the app after checkout. So every change under `web/`,
+# and every version bump in `app.json` (vite bakes the version into the bundle at
+# BUILD time), has to ship a rebuilt artifact or the installed UI silently runs
+# older code than the commit claims.
+#
+# This hook removes that manual step: when such a file is staged it runs the
+# build and stages the result with the same commit. CI verifies the same
+# invariant, so a contributor who has not enabled hooks is caught rather than
+# trusted — this is the convenience half, not the enforcement half.
+#
+# Enable it once per clone (git does not do this for you):
+#     git config core.hooksPath .githooks
+set -euo pipefail
+
+# Only the paths that can invalidate the bundle. `ui/index.mjs` itself is
+# excluded on purpose: staging just the artifact (a rebuild commit) must not
+# recurse into another build.
+if ! git diff --cached --name-only | grep -qE '^(web/(src/|package(-lock)?\.json|vite\.config\.ts|tsconfig)|app\.json$)'; then
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root/web"
+
+if [ ! -d node_modules ]; then
+  echo "pre-commit: web/node_modules is missing; run 'cd web && npm ci' once, then commit again." >&2
+  exit 1
+fi
+
+echo "pre-commit: a staged change affects the UI bundle — rebuilding ui/index.mjs"
+npm run build >/dev/null
+
+cd "$repo_root"
+if ! git diff --quiet -- ui/index.mjs; then
+  git add ui/index.mjs
+  echo "pre-commit: staged a rebuilt ui/index.mjs"
+fi
