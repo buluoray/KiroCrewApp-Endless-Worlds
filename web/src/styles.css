@@ -1428,10 +1428,11 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
    line from the dashboard's console:
      getComputedStyle(document.querySelector('main')).getPropertyValue('padding-top')
      || document.querySelector('main').getBoundingClientRect().top
-   If the row ever overlaps the menu or leaves a gap above itself, this is the only
-   value to change. `.topbar` declares no height of its own (it is content-driven and
+   42px is the pane's top edge as MEASURED at 390px width, not an eyeballed value. If
+   the row ever overlaps the menu or leaves a gap above itself, this is the only value
+   to change. `.topbar` declares no height of its own (it is content-driven and
    its padding varies by platform), so there is no host variable to read instead. */
-.ew-root { --ew-chrome-h: 24px; }
+.ew-root { --ew-chrome-h: 42px; }
 
 .ew-topbar-fixed {
   position: fixed; left: 0; right: 0; top: var(--ew-chrome-h); z-index: 30;
