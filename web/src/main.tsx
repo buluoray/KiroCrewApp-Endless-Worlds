@@ -891,10 +891,9 @@ export default function EndlessWorlds() {
             className="ew-bodywrap"
             style={{
               display: hideBody ? 'none' : undefined,
-              // Clear BOTH phone bars, not just the tab bar: the reading controls
-              // now float 60px above it, and 72px left the last lines of a month
-              // (measured: an echo marker at y=784) sitting underneath them.
-              paddingBottom: narrowLive ? 'calc(72px + 60px)' : undefined,
+              // Only the tab bar sits at the foot now — the reading controls stick
+              // to the TOP of the pane, so nothing extra is owed down here.
+              paddingBottom: narrowLive ? '72px' : undefined,
             }}
           >
             {body}
