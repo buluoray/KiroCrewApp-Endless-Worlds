@@ -1407,45 +1407,34 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 .ew-tabbar-hidden { transform: translateY(96px); }
 
-/* The phone's reading controls, stuck to the top of the reading pane.
-   They belong at the top — that is where a reader looks for "back" and for which
-   page they are on — but a row that only lives at the top of the DOCUMENT is a full
-   swipe away at the foot of a long month, which is what made paging on awkward. So
-   it sticks, and rides the scroll: away while you read downward, back on the first
-   upward swipe.
-   Sticky, not fixed: no portal, nothing for a transformed ancestor to capture, and
-   it settles below the dashboard's own chrome rather than over it. The negative
-   margins let its band span the app's 16px gutter so prose does not show beside it,
-   and the background is near-opaque because the story scrolls underneath. */
-/* Inside a life on a phone the page starts flush: the reading bar is the first
-   thing in the panel, so the root's own top inset would show as a separate dark
-   strip between the dashboard's chrome and the bar — two boundaries where the
-   reader should see one. The bar's rest position then equals its stuck position,
-   so it also stops shifting the moment you scroll. */
-.ew-root-flushtop { padding-top: 0; }
-
-.ew-topbar-float {
-  position: sticky; top: 0; z-index: 12;
-  /* The negative side margins let the band span the app's gutter; the bottom one is
-     the only gap between the bar and the title under it. It belongs on the bar rather
-     than the title because it must NOT show while the bar is stuck — the story is
-     meant to pass directly beneath it there, and layout margin does exactly that. */
-  margin: 0 calc(-1 * var(--ew-gutter, 16px)) 10px;
+/* The phone's reading controls, held at the pane's top edge.
+   FIXED, not sticky: sticky pins inside the scrollport, so a pane rubber-banding past
+   its own top carried the row down with it and left it below a band of bare canvas —
+   the one place it must never leave. Fixed rides out the bounce, and the bounce is
+   left to the dashboard's pane rather than switched off, since it is not this app's
+   to remove. `top` is set inline from the measured pane edge.
+   They belong at the top, but a row that only lives at the top of the DOCUMENT is a
+   full swipe away at the foot of a long month — so it rides the scroll: away while
+   reading downward, back on the first upward swipe, and pinned at both ends of the
+   page where hiding uncovers nothing.
+   Near-opaque is wrong here (a black slab over the world's own art); frosted lets the
+   page's colour through and the blur is what separates the prose sliding underneath,
+   so a hairline is the only edge needed. */
+.ew-topbar-fixed {
+  position: fixed; left: 0; right: 0; z-index: 30;
   padding: 8px var(--ew-gutter, 16px);
-  /* Frosted, not a black slab. A near-opaque dark band sat on top of the world's
-     own art as a foreign rectangle; letting the page's colour through and leaning on
-     the blur for legibility keeps the bar quiet. The blur is what separates the prose
-     sliding underneath, so a hairline is the only edge needed — the tall gradient
-     that used to do it read as a smear across the top of the story. */
   background: rgba(8, 9, 18, .52);
   backdrop-filter: blur(16px) saturate(1.15);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   transition: transform .28s ease, opacity .28s ease;
 }
-/* Slides UP out of the pane, far enough to take its fade with it. */
+/* Holds the row's place in the flow, sized from the row's measured height so the
+   world's name can never slide under it. */
+.ew-topbar-slot { flex: none; }
+/* Slides UP out of the pane, far enough to take its hairline with it. */
 .ew-topbar-hidden { transform: translateY(-115%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
-  .ew-topbar-float { transition: none; }
+  .ew-topbar-fixed { transition: none; }
 }
 .ew-tab {
   flex: 1; display: flex; flex-direction: column; align-items: center;
