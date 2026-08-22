@@ -579,10 +579,8 @@ def test_the_reading_bar_holds_the_top_through_a_bounce():
     belongs to the dashboard's pane, not to this app, and switching it off cost the
     bottom bar its only way back at the end of a page.
 
-    Two things this pins beyond `position: fixed`: the row is PORTALLED (fixed
-    resolves against a transformed ancestor in the dashboard shell, not the viewport),
-    and the scroll container is DISCOVERED rather than named, since a hardcoded
-    selector fails silently the day the shell changes shape.
+    The row is also PORTALLED, because `fixed` resolves against a transformed ancestor
+    in the dashboard shell rather than the viewport.
     """
     play = module("play.tsx")
     assert "ew-topbar-fixed" in play, "the row is no longer held at the pane's top"
@@ -590,15 +588,11 @@ def test_the_reading_bar_holds_the_top_through_a_bounce():
         "a fixed row inside the shell resolves against a transformed ancestor, so it "
         "must be portalled"
     )
-    assert "querySelector('main')" not in play and 'querySelector("main")' not in play, (
-        "the scroll container must be discovered, not hardcoded to the host's DOM"
-    )
-    assert "overflowY" in play, "the walk-up never inspects what actually scrolls"
-    assert "getBoundingClientRect().top" in play, "the pane's top edge is never measured"
     # The row leaves the flow, so something must hold its place or the world's name
-    # slides under it — and that height is measured, never assumed.
+    # slides under it. Both that height and the offset below the host's chrome are
+    # DECLARED — see test_the_row_clears_the_host_chrome_by_a_declared_offset for why
+    # measuring them was worse than stating them.
     assert "ew-topbar-slot" in play, "nothing holds the row's place in the flow"
-    assert "offsetHeight" in play, "the slot's height is assumed rather than measured"
 
     css = styles()
     assert re.search(r"\.ew-topbar-fixed\s*\{[^}]*position:\s*fixed", css), (
@@ -610,26 +604,32 @@ def test_the_reading_bar_holds_the_top_through_a_bounce():
     )
 
 
-def test_the_pane_top_is_re_read_not_trusted_once():
-    """One reading at mount is not enough, and the failure is silent.
+def test_the_row_clears_the_host_chrome_by_a_declared_offset():
+    """The row is fixed, so something must keep it below the dashboard's own menu.
 
-    The row is fixed to the pane's top edge. A single early read can land while the
-    dashboard's own chrome has not been laid out: the pane's top is still 0, the row
-    is placed there, and when the chrome appears and pushes the pane down the row
-    stays — sitting ON TOP of the host's menu. A ResizeObserver does not catch it
-    either, because the pane's size never changed, only its position.
-
-    So the reading is repeated on the frames after mount and on every scroll frame,
-    where it is a cheap no-op that recovers any layout shift the observers cannot see.
+    That offset is DECLARED, not measured. Measuring it needs listeners and re-reads,
+    and a reading taken before the host's chrome lays out places the row at 0 — on top
+    of the menu, with nothing to notice, which is what happened. The trade is explicit:
+    a number this app does not own lives in exactly one place, so a host that changes
+    its chrome is one edit rather than a hunt.
     """
+    css = styles()
+    assert re.search(r"--ew-chrome-h:\s*\d+px", css), (
+        "the offset has no single declared owner"
+    )
+    assert re.search(r"\.ew-topbar-fixed\s*\{[^}]*top:\s*var\(--ew-chrome-h\)", css), (
+        "the row does not use the declared offset, so it sits at the viewport top"
+    )
+    # And the row is out of the flow, so its place must still be held.
+    assert re.search(r"\.ew-topbar-slot\s*\{[^}]*height:\s*\d+px", css), (
+        "nothing holds the row's place, so the world's name slides under it"
+    )
+
     play = module("play.tsx")
-    assert "requestAnimationFrame(() => requestAnimationFrame(measure))" in play, (
-        "nothing re-reads the pane's top on the frames after mount, so a chrome that "
-        "lays out late leaves the row over the host's menu"
+    assert "ew-topbar-slot" in play and "ew-topbar-fixed" in play
+    # The measurement is gone on purpose: no listeners, nothing to go stale.
+    assert "getBoundingClientRect" not in play, (
+        "the offset is measured again, which is the timing bug this replaced"
     )
-    assert "addEventListener('scroll', remeasure, true)" in play, (
-        "a layout shift with no resize and no scroll listener is unrecoverable"
-    )
-    # Coalesced, or a scroll turns into one layout read per event.
-    assert "if (queued) return" in play, "the re-read is not coalesced to one per frame"
-    assert "cancelAnimationFrame" in play, "the queued frame outlives the component"
+    assert "ResizeObserver" not in play, "a stale observer is back"
+

@@ -1420,8 +1420,21 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
    Near-opaque is wrong here (a black slab over the world's own art); frosted lets the
    page's colour through and the blur is what separates the prose sliding underneath,
    so a hairline is the only edge needed. */
+/* How far down the row starts: the dashboard's own top chrome, so its menu stays
+   reachable. A declared number rather than a measured one, on purpose — measuring it
+   needs listeners and re-reads, and a reading taken before the chrome lays out puts
+   the row ON TOP of that menu.
+   It is a number this app does not own, so it is here, alone, and checkable in one
+   line from the dashboard's console:
+     getComputedStyle(document.querySelector('main')).getPropertyValue('padding-top')
+     || document.querySelector('main').getBoundingClientRect().top
+   If the row ever overlaps the menu or leaves a gap above itself, this is the only
+   value to change. `.topbar` declares no height of its own (it is content-driven and
+   its padding varies by platform), so there is no host variable to read instead. */
+.ew-root { --ew-chrome-h: 24px; }
+
 .ew-topbar-fixed {
-  position: fixed; left: 0; right: 0; z-index: 30;
+  position: fixed; left: 0; right: 0; top: var(--ew-chrome-h); z-index: 30;
   padding: 8px var(--ew-gutter, 16px);
   background: rgba(8, 9, 18, .52);
   backdrop-filter: blur(16px) saturate(1.15);
@@ -1430,7 +1443,9 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 /* Holds the row's place in the flow, sized from the row's measured height so the
    world's name can never slide under it. */
-.ew-topbar-slot { flex: none; }
+/* The row's own footprint (44px of controls + 8px padding twice, plus the 10px
+   it holds above the title), holding its place now that it is out of the flow. */
+.ew-topbar-slot { flex: none; height: 70px; }
 /* Slides UP out of the pane, far enough to take its hairline with it. */
 .ew-topbar-hidden { transform: translateY(-115%); opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
