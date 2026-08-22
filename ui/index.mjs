@@ -7402,7 +7402,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.5.17" })
+								children: t("app.version", { version: "0.5.18" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",

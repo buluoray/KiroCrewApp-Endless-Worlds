@@ -536,8 +536,11 @@ sees is produced locally from a closed, code-owned vocabulary.
   it is told, not silently stripped
   (`test_compile_refuses_script_handlers_foreignobject_external_and_non_svg`,
   `test_ordinary_attributes_are_not_mistaken_for_handlers`). A self-contained SVG with
-  gradients, patterns, filters, and SMIL animation is accepted
-  (`test_compile_accepts_a_self_contained_svg`).
+  gradients, patterns, filters, and animation — both SMIL and inline CSS (a `<style>`
+  block with `@keyframes`, or `style=` transitions) — is accepted; only SCRIPTS are
+  inert in the image context, so declarative CSS animation plays, and the gate blocks
+  only `@import` and external `url()`
+  (`test_compile_accepts_a_self_contained_svg`, `test_compile_accepts_inline_css_animation`).
 
 - **Repair runs before the well-formedness check.** The gate injects a missing
   `xmlns`, and injects `xmlns:xlink` when an `xlink:` attribute is used but its prefix

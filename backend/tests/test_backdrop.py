@@ -54,6 +54,25 @@ def test_compile_injects_the_namespace_when_missing():
     assert 'xmlns="http://www.w3.org/2000/svg"' in out
 
 
+def test_compile_accepts_inline_css_animation():
+    # Inline CSS animation runs in an <img>-embedded SVG (only SCRIPTS are inert
+    # there), so a self-contained <style> @keyframes or a style= transition is
+    # allowed. The gate blocks only @import and external url(), covered by the
+    # reject tests below.
+    styled = compile_backdrop(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        "<style>@keyframes pulse{from{opacity:.2}to{opacity:1}}"
+        ".spark{animation:pulse 3s ease-in-out infinite alternate}</style>"
+        '<rect class="spark" width="10" height="10" fill="#d9b45a"/></svg>'
+    )
+    assert "@keyframes" in styled and "animation:pulse" in styled
+    inline = compile_backdrop(
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect width="10" height="10" style="transition:opacity 2s"/></svg>'
+    )
+    assert "transition:opacity" in inline
+
+
 @pytest.mark.parametrize(
     "bad",
     [
