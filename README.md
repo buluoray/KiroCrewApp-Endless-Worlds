@@ -1,5 +1,7 @@
 # Endless Worlds
 
+**English** | [简体中文](README.zh-CN.md)
+
 Live a whole life inside an AI-simulated world. Endless Worlds is a
 [Kiro Crew](https://github.com/kirodotdev/KiroCrew) app: a text life-simulation
 where you are born into a world, live it one turn at a time, and an LLM
