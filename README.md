@@ -38,30 +38,41 @@ per-module contracts live under [`docs/modules/`](docs/modules/README.md).
 
 ## Install
 
-Requires a running [Kiro Crew](https://github.com/kirodotdev/KiroCrew) gateway
-(Python 3.10+, Node.js 22+ to build the UI).
+Requires a running [Kiro Crew](https://github.com/kirodotdev/KiroCrew) gateway,
+with Python 3.10+ and Node.js 22+ on the host (used to build the UI during a
+registry install).
 
-Install a local checkout (this repository does not currently declare a public
-remote URL):
+**Install from a registry (recommended).** A registry install clones and builds
+the app and runs its `setup.sh`, which best-effort-installs the optional art
+dependencies described below. Add this repository as an app registry and install
+Endless Worlds from the dashboard's **App Store**:
+
+- Registry URL: `https://github.com/buluoray/KiroCrewApp-Endless-Worlds`
+  (its `app-registry.json` lists the app).
+- In the dashboard, open the **App Store**, add that registry, then install
+  **无限世界 / Endless Worlds** and enable it.
+
+Pick it from the sidebar. The app self-heals its MCP server path to wherever it
+was installed, so no manual `app.json` editing is needed.
+
+On that registry install (and every update) the app runs `setup.sh` — a
+**best-effort, non-blocking** setup of its OPTIONAL art dependencies: an SVG
+rasterizer (so the illustrator can preview draft backdrops) and `vtracer` +
+`pillow` (so SCENE pages can trace reference photos). The install never fails on
+them — if any are missing the app still runs: backdrop publication falls back to
+the narrator's hand-drawn path, and photo scenes degrade to a quiet procedural
+tonal base. Reference photos are fetched only over HTTPS from a fixed
+CC0/public-domain allowlist.
+
+**Local install — for development only.** A local-path install copies the app but
+does **not** run `setup.sh`; use it when iterating on the code, not for regular
+use:
 
 ```bash
 kirocrew app install /absolute/path/to/endless-worlds
 kirocrew app enable endless-worlds
+bash setup.sh   # the local install skips this, so run it yourself if you want the optional deps
 ```
-
-Open the dashboard and pick **无限世界 / Endless Worlds** from the sidebar. The
-app self-heals its MCP server path to wherever it was installed, so no manual
-editing of `app.json` is needed.
-
-On a registry install (or update) the app runs `setup.sh` — a **best-effort,
-non-blocking** setup of its OPTIONAL art dependencies: an SVG rasterizer (so the
-illustrator can preview draft backdrops) and `vtracer` + `pillow` (so SCENE pages
-can trace reference photos). The install never fails on them — if any are missing
-the app still runs: backdrop publication falls back to the narrator's hand-drawn
-path, and photo scenes degrade to a quiet procedural tonal base. Reference photos
-are fetched only over HTTPS from a fixed CC0/public-domain allowlist. A local-path
-`kirocrew app install <dir>` does not run `setup.sh`; run `bash setup.sh` yourself
-if you want the optional dependencies while developing.
 
 ## Build and develop
 
