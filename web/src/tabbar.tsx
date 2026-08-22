@@ -86,7 +86,14 @@ export function buildTabs(scenes: SceneRow[], panels: PanelView[] = []): WorldTa
 /** Hide on scroll-down, show on scroll-up. Listens in the capture phase so it
  *  catches whichever element actually scrolls — the window in a standalone web
  *  view, or the dashboard's panel div when embedded. */
-export function useScrollHide(enabled: boolean): boolean {
+/** How far the story must scroll before the reading bar is allowed to move.
+ *
+ *  The bar's own footprint: 60px tall plus the 10px it holds above the title. Below
+ *  this the reader has not yet passed the text the bar sits over, so hiding it buys
+ *  nothing and only makes it flicker in and out under small swipes. */
+export const READER_BAR_PIN_PX = 70
+
+export function useScrollHide(enabled: boolean, pinUntil = 40): boolean {
   const [hidden, setHidden] = useState(false)
   useEffect(() => {
     if (!enabled) {
@@ -102,14 +109,19 @@ export function useScrollHide(enabled: boolean): boolean {
       if (last < 0) { last = y; return }
       const dy = y - last
       if (Math.abs(dy) < 8) return
-      if (y < 40) setHidden(false)
+      // Pinned near the top: the bar is TALLER than a small swipe, so a 40px
+      // threshold let it slide away before the reader had passed the text it sits
+      // over — and a swipe back down slid it in again, so it flickered in place.
+      // Inside this zone it does not move at all; hiding only earns its keep once
+      // the reader is genuinely past where the bar sits.
+      if (y < pinUntil) setHidden(false)
       else if (dy > 0) setHidden(true)
       else setHidden(false)
       last = y
     }
     window.addEventListener('scroll', onScroll, true)
     return () => window.removeEventListener('scroll', onScroll, true)
-  }, [enabled])
+  }, [enabled, pinUntil])
   return hidden
 }
 
