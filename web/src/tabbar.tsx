@@ -114,7 +114,17 @@ export function useScrollHide(enabled: boolean, pinUntil = 40): boolean {
       // over — and a swipe back down slid it in again, so it flickered in place.
       // Inside this zone it does not move at all; hiding only earns its keep once
       // the reader is genuinely past where the bar sits.
-      if (y < pinUntil) setHidden(false)
+      // Pinned at BOTH ends. Near the top the bar is taller than a small swipe, so a
+      // low threshold let it leave before the reader had passed the text it sits over.
+      // At the end of the page hiding buys nothing — there is no more story to uncover
+      // — and this is also where paging on matters most. It used to reappear here only
+      // as a side effect of the rubber band's spring-back producing an upward scroll;
+      // resting on that meant the controls were unreachable the moment a pane did not
+      // bounce.
+      const end = el instanceof HTMLElement
+        ? el.scrollHeight - el.clientHeight - y
+        : Number.POSITIVE_INFINITY
+      if (y < pinUntil || end < pinUntil) setHidden(false)
       else if (dy > 0) setHidden(true)
       else setHidden(false)
       last = y

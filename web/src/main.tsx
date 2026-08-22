@@ -170,32 +170,6 @@ export default function EndlessWorlds() {
   // top on every view change.
   const rootRef = useRef<HTMLDivElement>(null)
 
-  // The reading bar is `position: sticky`, which pins it inside the SCROLLPORT — and
-  // a scrollport that rubber-bands past its own top carries its content, bar
-  // included, down with it. The bar then sits below a band of bare canvas instead of
-  // at the top, which is the one place it must never leave.
-  //
-  // So the app turns the bounce off on the container it actually scrolls in, and puts
-  // the property back on the way out. That container belongs to the dashboard, so
-  // this is borrowed, not owned: one CSS property, restored on unmount, and found by
-  // walking up for a real scrollable ancestor rather than by naming the host's DOM —
-  // which would break the day the shell changes shape.
-  //
-  // Pinning the bar with `fixed` instead was the alternative, and it needs the pane's
-  // top edge measured and kept fresh; a stale offset there puts the bar OVER the
-  // dashboard's own chrome, which is worse than the gap it fixes.
-  useEffect(() => {
-    let node: HTMLElement | null = rootRef.current?.parentElement ?? null
-    while (node) {
-      const flow = getComputedStyle(node).overflowY
-      if (flow === 'auto' || flow === 'scroll') break
-      node = node.parentElement
-    }
-    if (!node) return undefined
-    const had = node.style.overscrollBehaviorY
-    node.style.overscrollBehaviorY = 'none'
-    return () => { node.style.overscrollBehaviorY = had }
-  }, [])
   useEffect(() => {
     rootRef.current?.scrollIntoView({ block: 'start' })
   }, [view])

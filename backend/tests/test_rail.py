@@ -545,20 +545,26 @@ def test_a_birth_does_not_borrow_the_phrase_for_a_passing_month():
     )
 
 
-def test_the_reading_bar_is_pinned_until_the_reader_is_past_it():
+def test_the_reading_bar_is_pinned_at_both_ends_of_the_page():
     """A 40px threshold let the bar slide away before the reader had passed the text
-    it sits over — and a swipe back down slid it in again, so a small gesture near
-    the top made it flicker in place. The pin zone is the bar's own footprint, and it
-    is derived once rather than written as a number at the call site.
+    it sits over, and a swipe back down slid it in again, so a small gesture near the
+    top made it flicker in place. The pin zone is the bar's own footprint.
+
+    The END of the page needs the same pin, and for a sharper reason: hiding there
+    uncovers no story, and it is exactly where paging on matters. It used to reappear
+    only as a side effect of the rubber band springing back — so the controls became
+    unreachable the moment a pane did not bounce.
     """
     bar = module("tabbar.tsx")
     assert "READER_BAR_PIN_PX" in bar, "the pin zone has no named owner"
-    assert "if (y < pinUntil) setHidden(false)" in bar, (
-        "the hook no longer pins the bar near the top"
-    )
-    # The threshold must be a parameter, not a constant baked into the hook: the
-    # bottom tab bar and the reading bar are different heights.
     assert "pinUntil = 40" in bar, "the default pin zone is gone"
+    assert "y < pinUntil" in bar, "the hook no longer pins the bar near the top"
+    assert "end < pinUntil" in bar, (
+        "the bar is not pinned at the END of the page, so it stays hidden there"
+    )
+    assert "scrollHeight - el.clientHeight - y" in bar, (
+        "distance-to-end is never computed, so the end-of-page pin cannot fire"
+    )
 
     root = module("main.tsx")
     assert "useScrollHide(narrowLive, READER_BAR_PIN_PX)" in root, (
@@ -566,25 +572,39 @@ def test_the_reading_bar_is_pinned_until_the_reader_is_past_it():
     )
 
 
-def test_the_reading_bar_survives_an_overscrolled_pane():
-    """A sticky bar is pinned inside the SCROLLPORT, and a scrollport that rubber-bands
-    past its own top carries its content — bar included — down with it, leaving the bar
-    below a band of bare canvas. The app turns that bounce off on the container it
-    scrolls in, and gives the property back when it unmounts.
+def test_the_reading_bar_holds_the_top_through_a_bounce():
+    """Sticky pins inside the SCROLLPORT, so a pane rubber-banding past its own top
+    carried the row down and left it below a band of bare canvas. The row is fixed to
+    the pane's measured top edge instead, and the bounce itself is left alone — it
+    belongs to the dashboard's pane, not to this app, and switching it off cost the
+    bottom bar its only way back at the end of a page.
 
-    The container is found by WALKING UP for a scrollable ancestor, never by naming the
-    dashboard's own element: a hardcoded `main` breaks silently the day the shell
-    changes shape, and the failure is invisible (the bar simply drifts again).
+    Two things this pins beyond `position: fixed`: the row is PORTALLED (fixed
+    resolves against a transformed ancestor in the dashboard shell, not the viewport),
+    and the scroll container is DISCOVERED rather than named, since a hardcoded
+    selector fails silently the day the shell changes shape.
     """
-    root = module("main.tsx")
-    assert "overscrollBehaviorY = 'none'" in root, (
-        "the pane still bounces, so the bar is dragged off the top"
+    play = module("play.tsx")
+    assert "ew-topbar-fixed" in play, "the row is no longer held at the pane's top"
+    assert "createPortal" in play and "document.body" in play, (
+        "a fixed row inside the shell resolves against a transformed ancestor, so it "
+        "must be portalled"
     )
-    assert "querySelector('main')" not in root and 'querySelector("main")' not in root, (
+    assert "querySelector('main')" not in play and 'querySelector("main")' not in play, (
         "the scroll container must be discovered, not hardcoded to the host's DOM"
     )
-    assert "overflowY" in root, "the walk-up never inspects what actually scrolls"
-    # Borrowed, not taken: the property goes back or every later page inherits it.
-    assert "node.style.overscrollBehaviorY = had" in root, (
-        "the borrowed property is never restored on unmount"
+    assert "overflowY" in play, "the walk-up never inspects what actually scrolls"
+    assert "getBoundingClientRect().top" in play, "the pane's top edge is never measured"
+    # The row leaves the flow, so something must hold its place or the world's name
+    # slides under it — and that height is measured, never assumed.
+    assert "ew-topbar-slot" in play, "nothing holds the row's place in the flow"
+    assert "offsetHeight" in play, "the slot's height is assumed rather than measured"
+
+    css = styles()
+    assert re.search(r"\.ew-topbar-fixed\s*\{[^}]*position:\s*fixed", css), (
+        "the row is not fixed, so a bounce still carries it off the top"
+    )
+    # And the app must not reach onto the host to stop the bounce.
+    assert "overscroll-behavior" not in css, (
+        "the pane's bounce is not this app's to remove"
     )

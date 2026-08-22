@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { EchoMarker, PastTurn, PlayView, SceneRow } from './api'
 import { api, API } from './api'
@@ -20,7 +21,7 @@ const ACT = 'act'
 const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
-import { useScrollHide } from './tabbar'
+import { READER_BAR_PIN_PX, useScrollHide } from './tabbar'
 import { ChoiceEffect, effectClass } from './effects'
 import { History, LifeSummary } from './history'
 import { LegacyPicker } from './legacy'
@@ -224,6 +225,45 @@ export function PlayPage({
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
+  // Where the pane's top edge is, and how tall the row actually is. Both are
+  // measured rather than assumed: the top must survive a chrome of unknown height,
+  // and the slot must match the row exactly or the title slides under it. The pane's
+  // top only moves when the window or the chrome changes shape — never per scroll
+  // frame — so a resize observer is enough and costs nothing while reading.
+  const barRef = useRef<HTMLDivElement>(null)
+  const barSlotRef = useRef<HTMLDivElement>(null)
+  const [paneTop, setPaneTop] = useState(0)
+  const [slotH, setSlotH] = useState(READER_BAR_PIN_PX)
+  useEffect(() => {
+    if (!readerBar) return undefined
+    // The scroll container is DISCOVERED, not named: hardcoding the dashboard's own
+    // element breaks silently the day the shell changes shape, and the only symptom
+    // is the bar drifting again.
+    let node: HTMLElement | null = barSlotRef.current?.parentElement ?? null
+    while (node) {
+      const flow = getComputedStyle(node).overflowY
+      if (flow === 'auto' || flow === 'scroll') break
+      node = node.parentElement
+    }
+    const measure = () => {
+      const top = node ? node.getBoundingClientRect().top : 0
+      setPaneTop(Math.max(0, Math.round(top)))
+      const h = barRef.current?.offsetHeight
+      if (h) setSlotH(h)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+    const ro = new ResizeObserver(measure)
+    if (node) ro.observe(node)
+    if (barRef.current) ro.observe(barRef.current)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+      ro.disconnect()
+    }
+  }, [readerBar])
+
   const [chron, setChron] = useState<PastTurn[]>([])
   useEffect(() => {
     if (!v || v.turn < 1) return undefined
@@ -1001,23 +1041,31 @@ export function PlayPage({
           }}
         />
       ) : null}
-      {/* One row, in one place: the top of the page, where a reader looks for "back"
-          and for which page they are on. On a phone it STICKS there and gets out of
-          the way while you read downward, returning on the first upward swipe — which
-          is what makes paging on possible from the foot of a long month without
-          scrolling all the way back up. Sticky rather than fixed: it needs no portal,
-          cannot be captured by a transformed ancestor, and settles under the
-          dashboard's own chrome instead of over it. */}
-      <div
-        className={
-          'ew-topbar'
-          + (readerBar ? ' ew-topbar-float' : '')
-          + (readerBar && barHidden ? ' ew-topbar-hidden' : '')
-        }
-      >
-        <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
-        {pager}
-      </div>
+      {/* One row at the top of the page, where a reader looks for "back" and for
+          which page they are on. On a phone it is FIXED to the pane's top edge rather
+          than sticky: sticky pins inside the scrollport, so a pane rubber-banding past
+          its own top carried the bar down with it and left it under a band of bare
+          canvas. Fixed keeps it at the top through the bounce, and the bounce itself is
+          left alone — it belongs to the dashboard's pane, not to this app.
+          Portalled because `position: fixed` resolves against a transformed ancestor
+          in the dashboard shell, not the viewport. `paneTop` is the pane's own top
+          edge, which does not move when its CONTENT is overscrolled. */}
+      {readerBar ? <div className="ew-topbar-slot" ref={barSlotRef} style={{ height: slotH }} /> : null}
+      {readerBar ? createPortal((
+        <div
+          className={'ew-topbar ew-topbar-fixed' + (barHidden ? ' ew-topbar-hidden' : '')}
+          style={{ top: `${paneTop}px` }}
+          ref={barRef}
+        >
+          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+          {pager}
+        </div>
+      ), document.body) : (
+        <div className="ew-topbar">
+          <button className="ew-back" type="button" onClick={onBack}>{t('play.back')}</button>
+          {pager}
+        </div>
+      )}
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
         // the story readable. The next successful poll clears it (M0.5).
