@@ -492,6 +492,116 @@ def test_candidates_never_exceed_the_cap():
     assert len(got) <= mg.MAX_CANDIDATES
 
 
+# ── §8.3.1 the people lens has ONE centre ────────────────────────────────
+
+
+def named_life_chronicle(turns=4, self_id="chen-yu", extra_participant=None):
+    """A life whose narrator declared its protagonist instead of using `player`.
+
+    The measured real-world shape: every event is about the declared id and
+    `player` is never referenced once.
+    """
+    entities = [{"id": self_id, "kind": "character", "name": "陈屿"},
+                {"id": "neighbour", "kind": "character", "name": "对门老周"}]
+    chronicle = []
+    for t in range(1, turns + 1):
+        who = [self_id]
+        if extra_participant and t == 1:
+            who.append(extra_participant)
+        elif t == turns:
+            who.append("neighbour")
+        chronicle.append(turn_entry(t, {
+            "entities": entities,
+            "events": [{"key": f"day-{t}", "title": f"第 {t} 天", "summary": "s",
+                        "importance": "major", "participants": who,
+                        "disclosure": "known"}],
+            "relations": [{"from": self_id, "type": "debt", "to": "neighbour",
+                           "change": "increase", "reasonEvent": f"day-{turns}"}]
+            if t == turns else [],
+        }))
+    return chronicle
+
+
+def test_the_declared_protagonist_becomes_the_centre_when_player_is_unused():
+    """The bug: 我 and 陈屿 were offered as two people, and every relation sat on
+    the one that was not the default."""
+    centre = mg.life_centre(mg.build_index(named_life_chronicle()))
+    assert centre == {"id": "chen-yu", "name": "陈屿"}
+
+
+def test_a_referenced_player_is_never_second_guessed():
+    """A life that DOES address `player` keeps it as the centre even when another
+    character out-appears it outright — a declared identity outranks inference,
+    which is why the substitution is gated on `player` being unreferenced rather
+    than on who appears most."""
+    chronicle = named_life_chronicle(turns=3, extra_participant="player")
+    present = [ev["participants"] for ev in mg.build_index(chronicle)["events"].values()]
+    assert sum("player" in p for p in present) == 1  # 1 of 3 …
+    assert sum("chen-yu" in p for p in present) == 3  # … against 3 of 3
+    assert mg.life_centre(mg.build_index(chronicle))["id"] == mg.PLAYER
+
+
+def test_a_player_named_by_declaring_player_itself_carries_that_name():
+    """The contract `shape.memory` now states: name the protagonist by declaring
+    `player`, not by minting a second id."""
+    chronicle = [turn_entry(1, {
+        "entities": [{"id": "player", "kind": "character", "name": "陈屿"}],
+        "events": [{"key": "wake", "title": "醒来", "summary": "s",
+                    "importance": "major", "participants": ["player"],
+                    "disclosure": "known"}],
+    })]
+    assert mg.life_centre(mg.build_index(chronicle)) == {"id": "player", "name": "陈屿"}
+
+
+def test_an_unnamed_player_ships_no_name_so_the_client_says_me_in_its_own_words():
+    index = mg.build_index([turn_entry(1, bridge_memory())])
+    assert mg.life_centre(index)["name"] == ""
+
+
+def test_no_character_with_a_majority_leaves_the_centre_where_it_was():
+    """An ensemble life has no protagonist to infer, and must not be handed one:
+    two characters at half the events each clear nothing."""
+    chronicle = [
+        turn_entry(1, {
+            "entities": [{"id": "a", "kind": "character", "name": "A"},
+                         {"id": "b", "kind": "character", "name": "B"}],
+            "events": [{"key": "one", "title": "t", "summary": "s",
+                        "importance": "major", "participants": ["a"],
+                        "disclosure": "known"}],
+        }),
+        turn_entry(2, {
+            "entities": [],
+            "events": [{"key": "two", "title": "t", "summary": "s",
+                        "importance": "major", "participants": ["b"],
+                        "disclosure": "known"}],
+        }),
+    ]
+    assert mg.life_centre(mg.build_index(chronicle))["id"] == mg.PLAYER
+
+
+def test_a_non_character_in_every_event_is_never_the_centre():
+    """A place or an object can out-appear the cast; only a person is a centre."""
+    chronicle = named_life_chronicle(turns=2, self_id="home-town")
+    for entry in chronicle:
+        entry["memory"]["entities"][0]["kind"] = "place"
+    assert mg.life_centre(mg.build_index(chronicle))["id"] == mg.PLAYER
+
+
+def test_the_centre_rides_in_the_star_payload_so_the_client_guesses_nothing():
+    payload = mg.star_payload(mg.build_index(named_life_chronicle()))
+    assert payload["centre"] == {"id": "chen-yu", "name": "陈屿"}
+    # And the centre it names is a node the lens can actually render.
+    assert any(n["id"] == "chen-yu" for n in payload["nodes"])
+
+
+def test_the_centre_is_byte_stable_across_rebuilds():
+    chronicle = named_life_chronicle()
+    a = json.dumps(mg.life_centre(mg.build_index(chronicle)), sort_keys=True)
+    b = json.dumps(mg.life_centre(mg.build_index(list(reversed(list(
+        reversed(chronicle)))))), sort_keys=True)
+    assert a == b
+
+
 # ── §12.2 the player-facing markers ───────────────────────────────────────
 
 

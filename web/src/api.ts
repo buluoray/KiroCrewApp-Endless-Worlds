@@ -207,6 +207,10 @@ export interface StarPayload {
   edges: StarEdge[]
   relations: StarRelation[]
   keepsakes: Keepsake[]
+  /** Whose life this is — the one node the people lens orbits, resolved
+   *  server-side. `name` is empty when the life never named its protagonist,
+   *  which is the cue to fall back on this locale's word for "me". */
+  centre: { id: string; name: string }
   /** This life's last-used lens; the smart entry only sets the INITIAL one. */
   view: MemoryView
 }

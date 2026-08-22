@@ -117,6 +117,12 @@ _RELATION_CHANGE_WORDS: tuple[tuple[str, str], ...] = (
 #: The player is an entity every life has without declaring it.
 PLAYER = "player"
 
+#: A character must be present in MORE than this share of a life's events to be
+#: read as the one whose life it is (see :func:`life_centre`). Strictly more than
+#: half is the whole point: at most one character can clear it, so the reading is
+#: unique or absent, never a pick between rivals.
+CENTRE_EVENT_SHARE = 0.5
+
 #: A just-echoed event must rest before it can be recalled again (design §7.2).
 ECHO_COOLDOWN_TURNS = 3
 
@@ -945,6 +951,61 @@ def event_neighbourhood(index: dict[str, Any], ids: list[str]) -> list[dict[str,
 # ── the life star map — one sparse payload, three lenses (design §8.3) ───
 
 
+def life_centre(index: dict[str, Any]) -> dict[str, Any]:
+    """Who this life is *about* — the single node the people lens orbits.
+
+    ``PLAYER`` is the entity every life has without declaring it, and the design
+    assumed a narrator would address the protagonist through it. Nothing ever told
+    the narrator that id exists: ``shape.memory`` asks it to declare "a person a
+    turn introduces", and the person a named life introduces first is the one
+    living it. So a narrator declares that person as a character of its own and
+    then addresses *everything* to that id. Measured on a live run: ``chen-yu``
+    (陈屿) carried 26 of 26 event participations and all 5 relations while
+    ``player`` carried none — two ids for one person, which the lens rendered as
+    two selectable centres, and the one it defaulted to was the empty one.
+
+    Both halves are fixed: ``shape.memory`` now names ``player`` so a new life
+    declares one identity, and the centre is *resolved from the graph* rather than
+    assumed, so a life already written the other way reads correctly too.
+
+    ``player`` wins whenever the graph references it at all — a declared identity
+    is never second-guessed. Only when it is entirely unreferenced does a
+    substitute apply, and only for the character present in strictly more than
+    :data:`CENTRE_EVENT_SHARE` of the life's events: a share at most one character
+    can hold, and one a supporting character cannot. Below it there is no
+    substitute and ``player`` stands, because a life with no evident centre must
+    not be handed an invented one.
+
+    Returns ``{"id", "name"}``; ``name`` is empty when the centre is an unnamed
+    ``player``, which is the client's cue to use its own word for "me".
+    """
+    events = index["events"]
+    entities = index["entities"]
+    referenced = any(
+        PLAYER in ev["participants"] for ev in events.values()
+    ) or any(PLAYER in (rec["from"], rec["to"]) for rec in index["relations"])
+
+    chosen = PLAYER
+    if not referenced and events:
+        present: dict[str, int] = {}
+        for ev in events.values():
+            for pid in set(ev["participants"]):
+                if (entities.get(pid) or {}).get("kind") == "character":
+                    present[pid] = present.get(pid, 0) + 1
+        # Sorted, not just max(): two entities can never both clear a strict
+        # majority, but ordering the scan anyway keeps a rebuild byte-identical
+        # regardless of dict insertion order (the Phase 0 determinism bar).
+        for count, eid in sorted(((n, i) for i, n in present.items()), reverse=True):
+            if count > len(events) * CENTRE_EVENT_SHARE:
+                chosen = eid
+            break
+
+    name = str((entities.get(chosen) or {}).get("name") or "")
+    # build_index seeds the implicit player's name with its own id; that is a
+    # placeholder, not a thing to show a player.
+    return {"id": chosen, "name": "" if name == PLAYER else name}
+
+
 def star_payload(
     index: dict[str, Any],
     keepsakes: list[dict[str, Any]] | None = None,
@@ -1047,7 +1108,8 @@ def star_payload(
         and slot["to"] in (picked_entities | {PLAYER})
     ]
 
-    return {"nodes": nodes, "edges": edges, "relations": relations}
+    return {"nodes": nodes, "edges": edges, "relations": relations,
+            "centre": life_centre(index)}
 
 
 
