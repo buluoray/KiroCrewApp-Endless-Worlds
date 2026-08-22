@@ -92,8 +92,11 @@ cd backend
 python3 -m pytest
 ```
 
-Contributor guide and the "read the spec before you touch the code" routing
-table are in [`AGENTS.md`](AGENTS.md).
+Contributor workflow (setup, quality gates, PR process, linters) is in
+[`CONTRIBUTING.md`](CONTRIBUTING.md); the "read the spec before you touch the
+code" routing table and engineering rules are in [`AGENTS.md`](AGENTS.md). Hitting
+a runtime problem (e.g. the narrator loses its tools — restart the gateway)? See
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
 ## Creating a world
 
