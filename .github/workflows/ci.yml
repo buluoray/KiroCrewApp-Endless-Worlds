@@ -60,6 +60,13 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Lint (React Rules of Hooks)
+        # A narrow gate: react-hooks/rules-of-hooks is an error. A hook after an
+        # early return (React #310, which crashed the Life Star Map) fails here
+        # instead of shipping. See web/eslint.config.js.
+        working-directory: web
+        run: npm run lint
+
       - name: Typecheck and build
         working-directory: web
         run: npm run build
