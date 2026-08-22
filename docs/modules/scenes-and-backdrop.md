@@ -55,7 +55,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_a_cells_symbol_mark_is_rendered_and_does_not_tint_every_cell`,
   `test_a_true_mark_still_tints_the_cell_and_draws_no_badge`,
   `test_a_mark_that_is_not_a_symbol_draws_nothing_rather_than_a_cut_one`, and
-  `test_a_symbol_mark_is_escaped_like_any_other_narrator_text` pin it. Node, edge,
+  `test_a_symbol_mark_is_escaped_like_any_other_narrator_text` pin it. A grid's rows
+  are sized by their content and never by the room around them: `align-content`
+  otherwise defaults to stretch and shares any surplus out among the auto rows, so a
+  grid box taller than its rows turned six short map labels into 236px boxes holding
+  57px of text — the shape a real phone showed. Both `align-content: start` and
+  `grid-auto-rows: min-content` are declared, deliberately redundantly, because what
+  gives that box its height on a phone is not reproducible off-device.
+  `test_a_grid_row_is_sized_by_its_content_not_by_the_room_around_it` pins both.
+  Node, edge,
   and depth ceilings are legibility bounds pinned by the same tests, not restated
   here.
 
@@ -116,11 +124,14 @@ sees is produced locally from a closed, code-owned vocabulary.
   One fixed height for every spec was wrong in both directions: a three-row ledger
   sat in a dead band, and a map taller than the frame lost its last row to
   `overflow: hidden` with nothing to scroll. The frame has an opaque origin, so the
-  host cannot measure inside it — `SCENE_SCRIPT` reports `document.body`'s own
-  height (never `documentElement`, whose height tracks the frame's viewport and so
-  can never report a shrink) on load and through a `ResizeObserver`, and `SceneSlot`
+  host cannot measure inside it — `SCENE_SCRIPT` reports the CONTENT's own extent
+  (the furthest child's bottom plus that child's bottom margin, plus the body's
+  bottom padding) on load and through a `ResizeObserver`, and `SceneSlot`
   applies it clamped between `MIN_SCENE_H` and `MAX_SCENE_H`; the stylesheet's
-  `.ew-slot-on` height stands in until the first report. A height message is not an
+  `.ew-slot-on` height stands in until the first report. It measures the content and
+  never `body`'s or `documentElement`'s own box: both track the frame's viewport when
+  the document is shorter, so a frame sized from either can never shrink, and a phone
+  showed a body inflated well past its content. A height message is not an
   answer: it is handled before the answer guards, so it neither fires a turn nor
   trips the first-result latch. `_STYLE` colours `html` as well as `body`, because
   the part of a frame a short document does not cover is painted by the canvas —

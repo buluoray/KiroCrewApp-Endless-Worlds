@@ -91,14 +91,35 @@ def test_the_frame_reports_its_own_content_height():
     short ledger sits in a dead band, and a map's last row is clipped off with no
     way to scroll to it.
 
-    Measured on ``body``, not ``documentElement``: the latter's height tracks the
-    frame's viewport when content is shorter, so it can never report a shrink.
+    Measured as the CONTENT's extent — the furthest child's bottom plus its own
+    bottom margin, plus the body's bottom padding — and never as the body's or the
+    documentElement's own box. Both of those track the frame's viewport when the
+    document is shorter than the frame, so a frame sized from either can never
+    shrink; a phone showed a body inflated well past its content.
     """
     out = compile_scene("map", SIMPLE, STATE)
     assert "height:" in SCENE_SCRIPT and "ResizeObserver" in SCENE_SCRIPT
-    assert "document.body.getBoundingClientRect().height" in SCENE_SCRIPT
-    assert "documentElement.getBoundingClientRect" not in SCENE_SCRIPT
+    assert "b.children" in SCENE_SCRIPT, "the report does not measure the content"
+    assert "marginBottom" in SCENE_SCRIPT, "a child's own bottom margin is content too"
+    assert "paddingBottom" in SCENE_SCRIPT
+    for box in ("body.getBoundingClientRect().height",
+                "documentElement.getBoundingClientRect",
+                "body.scrollHeight", "documentElement.scrollHeight"):
+        assert box not in SCENE_SCRIPT, f"{box} tracks the frame, not the content"
     assert SCENE_SCRIPT in out
+
+
+def test_a_grid_row_is_sized_by_its_content_not_by_the_room_around_it():
+    """`align-content` defaults to stretch, so a grid box taller than its rows hands
+    the surplus out among them: six short map labels became 236px boxes holding 57px
+    of text. Two independent latches, because what gives the box that height on a
+    phone is not reproducible off-device — and one of them silently doing nothing
+    must not be the difference between a map and a column of empty panes.
+    """
+    style = compile_scene("map", SIMPLE, STATE).split("<style>", 1)[1].split("</style>", 1)[0]
+    grid = style.split(".grid {", 1)[1].split("}", 1)[0]
+    assert "align-content: start" in grid
+    assert "grid-auto-rows: min-content" in grid
 
 
 def test_the_documents_canvas_is_painted_not_just_its_body():
