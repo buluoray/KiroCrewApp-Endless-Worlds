@@ -45,7 +45,11 @@ export function StarMap({
   const [lens, setLens] = useState<MemoryView | null>(null)
   const [focus, setFocus] = useState(initialFocus ?? '')
   const [filters, setFilters] = useState<StarFilters>(ALL_FILTERS)
-  const [centre, setCentre] = useState('player')
+  // Empty, not 'player': who this life is about is a fact the server resolves
+  // from the graph (memory_graph.life_centre), so the initial centre must come
+  // from the payload rather than be guessed here. Staying empty until the player
+  // picks also means a pick is never silently overwritten when the graph reloads.
+  const [centre, setCentre] = useState('')
   const [mode, setMode] = useState<'canvas' | 'list'>(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 860px)').matches
       ? 'list'

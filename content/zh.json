@@ -20,7 +20,7 @@
   "shape.field": "{id}（{label}）",
   "shape.intro": "declare 状态时，通过 endless_advance_turn 的 `state` 参数，用下面这个形状。每一项写成「id（label）」——键名一律用括号前的 id，一字不差地照抄：不要翻译它、不要改名、也不要用 label 当键。玩家的状态栏就是按这些 id 拼出来的，用别的名字这一项会显示为空（这也是为什么你即使在正文里写了状态、状态栏看起来还是空的）。值随剧情变。",
   "shape.omission": "每一项都要给出，即使内容是「无」——少写一项，玩家看到的是一件凭空消失的事实。例外是 digest 和 relations：它们是累加合并的，那里只申报本回合有变化的项，其余省略即可，写 null 表示撤下某一项。",
-  "shape.memory": "endless_advance_turn 除了 `state` 还接受可选的 `memory`——这是世界记住往事的唯一方式。当某回合出现新的人物、地点、组织、物品，或一条会延续下去的线索（承诺、目标、秘密），就在 `memory.entities` 里用稳定的 id 声明它，并把发生的事记成 `memory.events`（每条要有 key、标题、一句话摘要，以及 disclosure：known/rumoured/foreshadowed/hidden——hidden 是玩家还不该知道的世界连续性）。同一个人每次出现都用同一个 id。当新事件回应了旧事件，把旧事件的规范 id（来自 memoryCandidates，形如 event:3:some-key）写进新事件的 `echoes`——只有这个声明能让玩家追溯这段因果，正文里提到不算。关系变化写进 `memory.relations` 并注明来源事件。只声明确实发生的变化，不要每回合复述整个世界。",
+  "shape.memory": "endless_advance_turn 除了 `state` 还接受可选的 `memory`——这是世界记住往事的唯一方式。当某回合出现新的人物、地点、组织、物品，或一条会延续下去的线索（承诺、目标、秘密），就在 `memory.entities` 里用稳定的 id 声明它，并把发生的事记成 `memory.events`（每条要有 key、标题、一句话摘要，以及 disclosure：known/rumoured/foreshadowed/hidden——hidden 是玩家还不该知道的世界连续性）。同一个人每次出现都用同一个 id。当新事件回应了旧事件，把旧事件的规范 id（来自 memoryCandidates，形如 event-3-some-key）写进新事件的 `echoes`——只有这个声明能让玩家追溯这段因果，正文里提到不算。关系变化写进 `memory.relations` 并注明来源事件。只声明确实发生的变化，不要每回合复述整个世界。这段人生的主角本身已经是实体 `player`：他参与的事件和关系都写这个 id，要给他名字就直接声明 `player`（`{id: \"player\", kind: \"character\", name: \"…\"}`）。不要再给他另起一个 id——同一个人有两个 id，会把他的整段人生劈成两半。",
   "shape.panel": "- {panel}：{gate}；里面放 {fields}",
   "shape.panel.always": "始终显示",
   "shape.panel.conditional": "满足条件时显示",

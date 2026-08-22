@@ -45,16 +45,24 @@ export function RelationsLens({
   focus: string
   setFocus: (id: string) => void
   filters: StarFilters
-  /** Whose orbits these are — the player, or the character an entry named. */
+  /** Whose orbits these are. Empty until the player picks: the life's own centre
+   *  (§8.3.1) is resolved server-side and is not a default this file may guess. */
   centre: string
   setCentre: (id: string) => void
   mode: 'canvas' | 'list'
 }) {
+  // One person, one id. The protagonist may be the implicit `player` OR a
+  // character the narrator declared and addressed everything to; the server says
+  // which. Offering both is what showed 我 and 陈屿 as two separate people, with
+  // every relation on one of them and "no relationship recorded" on the other.
+  const self = payload.centre
+  const selfLabel = self.name || mt(lang, 'star.people.me')
+  const centred = centre || self.id
   const characters = payload.nodes.filter(
     (n) => n.kind === 'character' && nodeVisible(n, filters),
   )
   const relations = payload.relations.filter(
-    (r) => r.from === centre || r.to === centre,
+    (r) => r.from === centred || r.to === centred,
   )
   if (!characters.length && !relations.length) {
     return <div className="ews-empty">{mt(lang, 'star.people.none')}</div>
@@ -62,7 +70,7 @@ export function RelationsLens({
 
   const partners = new Map<string, StarRelation[]>()
   for (const r of relations) {
-    const other = r.from === centre ? r.to : r.from
+    const other = r.from === centred ? r.to : r.from
     partners.set(other, [...(partners.get(other) ?? []), r])
   }
   const inner = [...partners.keys()]
@@ -71,30 +79,31 @@ export function RelationsLens({
     .sort((a, b) => a.id.localeCompare(b.id))
   const outer = payload.nodes
     .filter(
-      (n) => n.kind !== 'event' && n.id !== centre && !partners.has(n.id)
+      (n) => n.kind !== 'event' && n.id !== centred && !partners.has(n.id)
         && nodeVisible(n, filters),
     )
     .sort((a, b) => a.id.localeCompare(b.id))
   const unrelatedCharacters = characters
-    .filter((character) => character.id !== centre && !partners.has(character.id))
+    .filter((character) => character.id !== centred && !partners.has(character.id))
     .sort((a, b) => a.id.localeCompare(b.id))
 
-  const centreLabel =
-    centre === 'player' ? mt(lang, 'star.lens.life') : nodeLabel(nodeById(payload, centre) ?? { id: centre, kind: 'character', name: centre })
+  const centreLabel = centred === self.id
+    ? selfLabel
+    : nodeLabel(nodeById(payload, centred) ?? { id: centred, kind: 'character', name: centred })
 
   const picker = (
     <div className="ews-centre-row">
       <span className="ews-centre-label">{mt(lang, 'star.people.centre')}</span>
       <button
-        className={'ews-chip' + (centre === 'player' ? ' ews-chip-sel' : '')}
+        className={'ews-chip' + (centred === self.id ? ' ews-chip-sel' : '')}
         type="button"
-        onClick={() => setCentre('player')}
+        onClick={() => setCentre(self.id)}
       >
-        {lang === 'zh' ? '我' : 'Me'}
+        {selfLabel}
       </button>
-      {characters.map((c) => (
+      {characters.filter((c) => c.id !== self.id).map((c) => (
         <button
-          className={'ews-chip ews-chip-character' + (centre === c.id ? ' ews-chip-sel' : '')}
+          className={'ews-chip ews-chip-character' + (centred === c.id ? ' ews-chip-sel' : '')}
           type="button"
           key={c.id}
           onClick={() => setCentre(c.id)}
@@ -111,7 +120,7 @@ export function RelationsLens({
         {picker}
         <div className="ews-rel-list">
           {relations.map((r, i) => {
-            const other = r.from === centre ? r.to : r.from
+            const other = r.from === centred ? r.to : r.from
             const node = nodeById(payload, other)
             return (
               <div className="ews-rel-row" key={`${r.from}-${r.type}-${r.to}-${i}`}>
@@ -188,7 +197,7 @@ export function RelationsLens({
         })}
         <g
           className="ews-star ews-star-centre"
-          onClick={() => setFocus(centre)}
+          onClick={() => setFocus(centred)}
           role="button"
           tabIndex={0}
         >

@@ -3471,6 +3471,7 @@ var TABLES = {
 		"star.keep.this": "收藏这一刻",
 		"star.keep.kept": "已收藏",
 		"star.people.centre": "以谁为中心",
+		"star.people.me": "我",
 		"star.people.none": "这段人生还没有记下与人的往来。",
 		"star.rel.evidence": "因为这些事",
 		"star.rel.unrecorded": "尚无关系记录",
@@ -3558,6 +3559,7 @@ var TABLES = {
 		"star.keep.this": "Keep this moment",
 		"star.keep.kept": "Kept",
 		"star.people.centre": "Centred on",
+		"star.people.me": "Me",
 		"star.people.none": "No dealings with anyone have been recorded yet.",
 		"star.rel.evidence": "Because of",
 		"star.rel.unrecorded": "No relationship recorded yet",
@@ -3993,24 +3995,27 @@ function ring(index, count, radius) {
 	};
 }
 function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCentre, mode }) {
+	const self = payload.centre;
+	const selfLabel = self.name || mt(lang, "star.people.me");
+	const centred = centre || self.id;
 	const characters = payload.nodes.filter((n) => n.kind === "character" && nodeVisible(n, filters));
-	const relations = payload.relations.filter((r) => r.from === centre || r.to === centre);
+	const relations = payload.relations.filter((r) => r.from === centred || r.to === centred);
 	if (!characters.length && !relations.length) return /* @__PURE__ */ jsx("div", {
 		className: "ews-empty",
 		children: mt(lang, "star.people.none")
 	});
 	const partners = /* @__PURE__ */ new Map();
 	for (const r of relations) {
-		const other = r.from === centre ? r.to : r.from;
+		const other = r.from === centred ? r.to : r.from;
 		partners.set(other, [...partners.get(other) ?? [], r]);
 	}
 	const inner = [...partners.keys()].map((id) => nodeById(payload, id)).filter((n) => !!n && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
-	const outer = payload.nodes.filter((n) => n.kind !== "event" && n.id !== centre && !partners.has(n.id) && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
-	const unrelatedCharacters = characters.filter((character) => character.id !== centre && !partners.has(character.id)).sort((a, b) => a.id.localeCompare(b.id));
-	const centreLabel = centre === "player" ? mt(lang, "star.lens.life") : nodeLabel(nodeById(payload, centre) ?? {
-		id: centre,
+	const outer = payload.nodes.filter((n) => n.kind !== "event" && n.id !== centred && !partners.has(n.id) && nodeVisible(n, filters)).sort((a, b) => a.id.localeCompare(b.id));
+	const unrelatedCharacters = characters.filter((character) => character.id !== centred && !partners.has(character.id)).sort((a, b) => a.id.localeCompare(b.id));
+	const centreLabel = centred === self.id ? selfLabel : nodeLabel(nodeById(payload, centred) ?? {
+		id: centred,
 		kind: "character",
-		name: centre
+		name: centred
 	});
 	const picker = /* @__PURE__ */ jsxs("div", {
 		className: "ews-centre-row",
@@ -4020,13 +4025,13 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 				children: mt(lang, "star.people.centre")
 			}),
 			/* @__PURE__ */ jsx("button", {
-				className: "ews-chip" + (centre === "player" ? " ews-chip-sel" : ""),
+				className: "ews-chip" + (centred === self.id ? " ews-chip-sel" : ""),
 				type: "button",
-				onClick: () => setCentre("player"),
-				children: lang === "zh" ? "我" : "Me"
+				onClick: () => setCentre(self.id),
+				children: selfLabel
 			}),
-			characters.map((c) => /* @__PURE__ */ jsx("button", {
-				className: "ews-chip ews-chip-character" + (centre === c.id ? " ews-chip-sel" : ""),
+			characters.filter((c) => c.id !== self.id).map((c) => /* @__PURE__ */ jsx("button", {
+				className: "ews-chip ews-chip-character" + (centred === c.id ? " ews-chip-sel" : ""),
 				type: "button",
 				onClick: () => setCentre(c.id),
 				children: nodeLabel(c)
@@ -4037,7 +4042,7 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 		className: "ews-rel-list",
 		children: [
 			relations.map((r, i) => {
-				const other = r.from === centre ? r.to : r.from;
+				const other = r.from === centred ? r.to : r.from;
 				const node = nodeById(payload, other);
 				return /* @__PURE__ */ jsxs("div", {
 					className: "ews-rel-row",
@@ -4120,7 +4125,7 @@ function RelationsLens({ payload, lang, focus, setFocus, filters, centre, setCen
 			}),
 			/* @__PURE__ */ jsxs("g", {
 				className: "ews-star ews-star-centre",
-				onClick: () => setFocus(centre),
+				onClick: () => setFocus(centred),
 				role: "button",
 				tabIndex: 0,
 				children: [/* @__PURE__ */ jsx("circle", {
@@ -4727,7 +4732,7 @@ function StarMap({ runId, lang, onClose, onJumpTurn, initialFocus, backdrop }) {
 	const [lens, setLens] = useState(null);
 	const [focus, setFocus] = useState(initialFocus ?? "");
 	const [filters, setFilters] = useState(ALL_FILTERS);
-	const [centre, setCentre] = useState("player");
+	const [centre, setCentre] = useState("");
 	const [mode, setMode] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 860px)").matches ? "list" : "canvas");
 	const [kept, setKept] = useState([]);
 	const load = useCallback(async () => {

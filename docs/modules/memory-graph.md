@@ -186,3 +186,38 @@ relations. The payload is a sparse, layout-agnostic projection shared by every U
 lens; its selection and lens-free stability are documented with the meaning
 layer, since the lenses are player-meaning surfaces. See
 [meaning-layer.md](meaning-layer.md).
+
+## One life, one centre
+
+`PLAYER` (`"player"`) is the entity every life has without declaring it. Nothing
+told the narrator that — `shape.memory` asks it to declare "a person a turn
+introduces", and the person a *named* life introduces first is the one living it
+— so a narrator declares the protagonist as a character of its own and addresses
+everything to that id. Measured on a live life: `chen-yu` (陈屿) carried 26 of 26
+event participations and all 5 relations while `player` carried none. Two ids for
+one person, which the people lens rendered as two selectable centres — and the one
+it defaulted to was the empty one, reading "no relationship recorded yet" about
+the very person whose relationships they were.
+
+Both halves are closed:
+
+- **The contract names it.** `shape.memory` (in `content/*.json`) states that the
+  protagonist already exists as `player`, that their events and relations go to
+  that id, and that naming them means declaring `player` itself rather than
+  minting a second id.
+- **The centre is resolved, not assumed.** `life_centre(index)` returns
+  `{"id", "name"}` and rides in `star_payload` as `centre`, so a life already
+  written the other way reads correctly and the client guesses nothing. `player`
+  wins whenever the graph references it at all — a declared identity is never
+  second-guessed. Only when `player` is entirely unreferenced does a substitute
+  apply, and only for the character present in strictly more than
+  `CENTRE_EVENT_SHARE` of the life's events: a share at most one character can
+  hold and a supporting character cannot. Below it, `player` stands, because a
+  life with no evident centre must not be handed an invented one. An empty `name`
+  is the client's cue to use its own word for "me".
+
+Pinned by `test_the_declared_protagonist_becomes_the_centre_when_player_is_unused`,
+`test_a_referenced_player_is_never_second_guessed`,
+`test_no_character_with_a_majority_leaves_the_centre_where_it_was`,
+`test_a_non_character_in_every_event_is_never_the_centre`, and
+`test_the_centre_rides_in_the_star_payload_so_the_client_guesses_nothing`.
