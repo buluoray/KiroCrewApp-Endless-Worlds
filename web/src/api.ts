@@ -28,7 +28,10 @@ export function normalizeModels(raw: unknown): Array<{ id: string; name?: string
     .map((m) => {
       if (typeof m === 'string') return { id: m }
       const o = m as {
-        model_id?: string; model_name?: string; id?: string; name?: string
+        model_id?: string
+        model_name?: string
+        id?: string
+        name?: string
       }
       const id = o.model_id || o.model_name || o.id || ''
       return { id, name: o.model_name || o.name || id }
@@ -37,7 +40,7 @@ export function normalizeModels(raw: unknown): Array<{ id: string; name?: string
 }
 
 export type Primitive =
-  | 'field' | 'stat' | 'rank' | 'people' | 'trend' | 'resource' | 'inventory' | 'threads'
+  'field' | 'stat' | 'rank' | 'people' | 'trend' | 'resource' | 'inventory' | 'threads'
 
 export interface ShapedField {
   id: string
@@ -57,7 +60,10 @@ export interface ShapedField {
   /** People/threads rows. People rows may carry declared attribute columns under
    *  `cols`; threads rows use text/status. */
   entries?: Array<{
-    name?: string; note?: string; text?: string; status?: string
+    name?: string
+    note?: string
+    text?: string
+    status?: string
     cols?: Record<string, string>
   }>
   /** The attribute column names a `people` field declared, in order. */
@@ -150,8 +156,7 @@ export interface EchoMarker {
 
 // ── the life star map (design §8.3): one sparse payload, three lenses ──
 
-export type StarNodeKind =
-  | 'event' | 'character' | 'place' | 'group' | 'object' | 'thread'
+export type StarNodeKind = 'event' | 'character' | 'place' | 'group' | 'object' | 'thread'
 
 export interface StarNode {
   id: string
@@ -673,15 +678,15 @@ export const api = {
     return json<WorldDetail>(`/worlds/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`)
   },
 
-  worldDeletion: (id: string) =>
-    json<DeletionFacts>(`/worlds/${encodeURIComponent(id)}/deletion`),
+  worldDeletion: (id: string) => json<DeletionFacts>(`/worlds/${encodeURIComponent(id)}/deletion`),
 
   /** `lives` is a precondition, not a parameter: it must match what the dialog
    *  showed, or the server refuses with 409 rather than ending a life the player
    *  was never told about. */
   deleteWorld: (id: string, lives: number) =>
     post<{ worldId: string; livesRemoved: string[]; restorable: boolean }>(
-      `/worlds/${encodeURIComponent(id)}/delete`, { confirm: id, lives },
+      `/worlds/${encodeURIComponent(id)}/delete`,
+      { confirm: id, lives },
     ),
 
   lifeDeletion: (runId: string) =>
@@ -692,35 +697,36 @@ export const api = {
    *  was told about. */
   deleteLife: (runId: string, turn: number) =>
     post<{ runId: string; deleted: boolean; turn: number }>(
-      `/runs/${encodeURIComponent(runId)}/delete`, { confirm: runId, turn },
+      `/runs/${encodeURIComponent(runId)}/delete`,
+      { confirm: runId, turn },
     ),
 
   /** A player's own name and shelf state for a life — metadata only, never the
    *  story. Pass `label: ""` to clear a custom name. */
   setLifeMeta: (runId: string, body: { label?: string; archived?: boolean }) =>
     post<{ runId: string; label?: string; archived?: boolean }>(
-      `/runs/${encodeURIComponent(runId)}/meta`, body,
+      `/runs/${encodeURIComponent(runId)}/meta`,
+      body,
     ),
 
   restoreWorld: (id: string) =>
-    post<{ worldId: string; restored: boolean }>(
-      `/worlds/${encodeURIComponent(id)}/restore`, {},
-    ),
+    post<{ worldId: string; restored: boolean }>(`/worlds/${encodeURIComponent(id)}/restore`, {}),
 
   // ── world drafts: paste → worldsmith cleans+compiles → review → install ──
   worldDrafts: () => json<{ drafts: WorldDraftRow[] }>('/world-drafts'),
-  worldDraft: (id: string) =>
-    json<WorldDraftDetail>(`/world-drafts/${encodeURIComponent(id)}`),
+  worldDraft: (id: string) => json<WorldDraftDetail>(`/world-drafts/${encodeURIComponent(id)}`),
   createWorldDraft: (text: string, title = '') =>
     post<{ draftId: string }>('/world-drafts', { text, title }),
   compileWorldDraft: (id: string) =>
     post<{ dispatched: boolean; reason?: string }>(
-      `/world-drafts/${encodeURIComponent(id)}/compile`, {},
+      `/world-drafts/${encodeURIComponent(id)}/compile`,
+      {},
     ),
   /** Optional `title` renames the world's display title before installing it. */
   installWorldDraft: (id: string, title = '') =>
     post<{ worldId: string }>(
-      `/world-drafts/${encodeURIComponent(id)}/install`, title ? { title } : {},
+      `/world-drafts/${encodeURIComponent(id)}/install`,
+      title ? { title } : {},
     ),
   discardWorldDraft: (id: string) =>
     send<{ deleted: boolean }>('DELETE', `/world-drafts/${encodeURIComponent(id)}`),
@@ -736,54 +742,55 @@ export const api = {
     if (q) p.set('q', q)
     if (limit > 0) p.set('limit', String(limit))
     const qs = p.toString()
-    return json<Chronicle>(
-      `/runs/${encodeURIComponent(id)}/chronicle${qs ? `?${qs}` : ''}`,
-    )
+    return json<Chronicle>(`/runs/${encodeURIComponent(id)}/chronicle${qs ? `?${qs}` : ''}`)
   },
 
-  createRun: (
-    body: {
-      worldId?: string
-      style?: string
-      answers?: Record<string, string>
-      /** A chosen starting archetype (`WorldDetail.roles[].id`); presets the
-       *  opening and seeds initial state from its grants, server-side. */
-      role?: string
-      /** Which language to live this life in — one of the world's `languages`.
-       *  Binds the run to that language's rulebook and UI for its whole life. */
-      language?: string
-      /** Copy a prior life's opening picks as the starting point. */
-      fromRunId?: string
-      /** The legacy bridge (§9): carry a finished life's chosen inheritance in.
-       *  Refused unless the world declares lineage and the source life ended. */
-      legacy?: { fromRunId: string; selected: string[] }
-    },
-  ) => post<{ runId: string }>('/runs', body),
+  createRun: (body: {
+    worldId?: string
+    style?: string
+    answers?: Record<string, string>
+    /** A chosen starting archetype (`WorldDetail.roles[].id`); presets the
+     *  opening and seeds initial state from its grants, server-side. */
+    role?: string
+    /** Which language to live this life in — one of the world's `languages`.
+     *  Binds the run to that language's rulebook and UI for its whole life. */
+    language?: string
+    /** Copy a prior life's opening picks as the starting point. */
+    fromRunId?: string
+    /** The legacy bridge (§9): carry a finished life's chosen inheritance in.
+     *  Refused unless the world declares lineage and the source life ended. */
+    legacy?: { fromRunId: string; selected: string[] }
+  }) => post<{ runId: string }>('/runs', body),
 
   /** What a finished life may pass on, grouped by category (§9 step 1). */
   legacyCandidates: (runId: string) =>
     json<{
       runId: string
       worldId: string
-      candidates: Record<string, Array<{
-        id: string
-        kind: string
-        name: string
-        summary: string
-        appearances: number
-        relations?: Array<{ type: string; level: number; value: string }>
-        open?: boolean
-      }>>
+      candidates: Record<
+        string,
+        Array<{
+          id: string
+          kind: string
+          name: string
+          summary: string
+          appearances: number
+          relations?: Array<{ type: string; level: number; value: string }>
+          open?: boolean
+        }>
+      >
     }>(`/runs/${encodeURIComponent(runId)}/legacy/candidates`),
 
   openRun: (id: string) =>
     post<{ advanced: boolean; reason: string; turn: number }>(
-      `/runs/${encodeURIComponent(id)}/open`, {},
+      `/runs/${encodeURIComponent(id)}/open`,
+      {},
     ),
 
   takeTurn: (id: string, body: { turn?: number; action?: string }) =>
     post<{ advanced: boolean; reason: string; turn: number }>(
-      `/runs/${encodeURIComponent(id)}/turn`, body,
+      `/runs/${encodeURIComponent(id)}/turn`,
+      body,
     ),
 
   scene: async (runId: string, sceneId: string): Promise<string> => {
@@ -805,17 +812,19 @@ export const api = {
 
   answerScene: (runId: string, sceneId: string, body: { choice: string; nonce: string }) =>
     post<{ accepted: boolean; action?: string; reason?: string }>(
-      `/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}/answer`, body,
+      `/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}/answer`,
+      body,
     ),
 
   /** The sparse graph all three star-map lenses share — one request per open. */
-  star: (runId: string) =>
-    json<StarPayload>(`/runs/${encodeURIComponent(runId)}/memory/star`),
+  star: (runId: string) => json<StarPayload>(`/runs/${encodeURIComponent(runId)}/memory/star`),
 
   /** Remember this life's last-used lens. Fire-and-forget metadata. */
   setMemoryView: (runId: string, view: MemoryView) =>
     send<{ runId: string; view: MemoryView }>(
-      'PATCH', `/runs/${encodeURIComponent(runId)}/preferences/memory-view`, { view },
+      'PATCH',
+      `/runs/${encodeURIComponent(runId)}/preferences/memory-view`,
+      { view },
     ),
 
   createKeepsake: (
@@ -852,7 +861,8 @@ export const api = {
   /** Turn a keepsake into an editable story-card draft (allowlist fixed here). */
   previewStoryCard: (runId: string, keepsakeId: string) =>
     post<{ card: StoryCard; preview: CardPreview }>(
-      `/runs/${encodeURIComponent(runId)}/story-cards/preview`, { keepsakeId },
+      `/runs/${encodeURIComponent(runId)}/story-cards/preview`,
+      { keepsakeId },
     ),
 
   /** Narrow, relabel, reorder — the server refuses anything additive. */

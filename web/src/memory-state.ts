@@ -24,12 +24,19 @@ export interface StarFilters {
 }
 
 export const ALL_FILTERS: StarFilters = {
-  characters: true, places: true, groups: true, objects: true, threads: true,
+  characters: true,
+  places: true,
+  groups: true,
+  objects: true,
+  threads: true,
 }
 
 const KIND_TO_FILTER: Record<string, keyof StarFilters> = {
-  character: 'characters', place: 'places', group: 'groups',
-  object: 'objects', thread: 'threads',
+  character: 'characters',
+  place: 'places',
+  group: 'groups',
+  object: 'objects',
+  thread: 'threads',
 }
 
 export function nodeVisible(node: StarNode, filters: StarFilters): boolean {
@@ -140,7 +147,8 @@ const TABLES: Record<'zh' | 'en', Record<string, string>> = {
     'card.wrap': '界面语言',
     'legacy.title': '传承',
     'legacy.close': '返回',
-    'legacy.hint': '这一生结束了。有些东西可以留给下一代——人、物、未了的心愿。被带走的只是它们在你生命里的样子；这一生本身不会被改动。',
+    'legacy.hint':
+      '这一生结束了。有些东西可以留给下一代——人、物、未了的心愿。被带走的只是它们在你生命里的样子；这一生本身不会被改动。',
     'legacy.none': '这一生没有留下可以传承的东西。有些人生就是这样，干干净净。',
     'legacy.group.characters': '人与羁绊',
     'legacy.group.objects': '物品',
@@ -197,7 +205,8 @@ const TABLES: Record<'zh' | 'en', Record<string, string>> = {
     'star.rel.type.rivalry': 'Rivalry',
     'star.mode.canvas': 'Canvas',
     'star.mode.list': 'List',
-    'star.keeps.none': 'No keepsakes yet. Tap "keep" on an echo or a map node to hold on to a moment.',
+    'star.keeps.none':
+      'No keepsakes yet. Tap "keep" on an echo or a map node to hold on to a moment.',
     'star.keeps.thought': 'Thought',
     'star.keeps.thoughtPlaceholder': 'Why this moment matters…',
     'star.keeps.rename': 'Rename',
@@ -229,7 +238,8 @@ const TABLES: Record<'zh' | 'en', Record<string, string>> = {
     'card.wrap': 'Card language',
     'legacy.title': 'Inheritance',
     'legacy.close': 'Back',
-    'legacy.hint': 'This life is over. Some things can be left to the next one — people, objects, unfinished business. What crosses is how they stood in your life; the life itself is never altered.',
+    'legacy.hint':
+      'This life is over. Some things can be left to the next one — people, objects, unfinished business. What crosses is how they stood in your life; the life itself is never altered.',
     'legacy.none': 'This life leaves nothing to pass on. Some lives are like that — clean.',
     'legacy.group.characters': 'People and bonds',
     'legacy.group.objects': 'Objects',
@@ -245,11 +255,7 @@ const TABLES: Record<'zh' | 'en', Record<string, string>> = {
   },
 }
 
-export function mt(
-  lang: string,
-  key: string,
-  vars: Record<string, string | number> = {},
-): string {
+export function mt(lang: string, key: string, vars: Record<string, string | number> = {}): string {
   const table = lang === 'zh' ? TABLES.zh : TABLES.en
   const raw = table[key] ?? TABLES.en[key] ?? key
   return raw.replace(/\{(\w+)\}/g, (whole, name: string) =>

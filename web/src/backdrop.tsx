@@ -23,18 +23,24 @@ import { API } from './api'
  *
  * `version` is the cache-buster: a replaced background loads the new image.
  */
-export function Backdrop(
-  { runId, version, turn, mobile = false }: {
-    runId: string; version: number; turn?: number; mobile?: boolean
-  },
-) {
+export function Backdrop({
+  runId,
+  version,
+  turn,
+  mobile = false,
+}: {
+  runId: string
+  version: number
+  turn?: number
+  mobile?: boolean
+}) {
   // Use the same narrow environment boundary as the rest of the app. A variant
   // change only changes `src`; the existing double buffer below preloads it before
   // replacing the painted frame, so resizing never flashes the plain page.
-  const [narrow, setNarrow] = useState(
-    () => (typeof window !== 'undefined' && window.matchMedia
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(max-width: 1100px)').matches
-      : false),
+      : false,
   )
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return
@@ -69,7 +75,9 @@ export function Backdrop(
     // decoded frame with no network gap (same URL = cache hit), so the swap is
     // instant and flash-free.
     const img = new Image()
-    img.onload = () => { if (alive) setShownSrc(src) }
+    img.onload = () => {
+      if (alive) setShownSrc(src)
+    }
     // Keep an already-painted backdrop on error; a first backdrop that never loads
     // just leaves the plain page (the story reads fine without one) — after ONE
     // delayed retry, since the common failure here is a blip, not a bad image.
@@ -79,24 +87,24 @@ export function Backdrop(
       timer = window.setTimeout(() => {
         if (!alive) return
         const again = new Image()
-        again.onload = () => { if (alive) setShownSrc(src) }
+        again.onload = () => {
+          if (alive) setShownSrc(src)
+        }
         again.src = src
       }, 1500)
     }
     img.src = src
-    return () => { alive = false; if (timer) window.clearTimeout(timer) }
+    return () => {
+      alive = false
+      if (timer) window.clearTimeout(timer)
+    }
   }, [src, shownSrc])
 
   // Nothing painted yet: a plain page until the first backdrop finishes loading.
   if (shownSrc == null) return null
   return (
     <div className="ew-backdrop" aria-hidden="true">
-      <img
-        className="ew-backdrop-frame"
-        src={shownSrc}
-        alt=""
-        draggable={false}
-      />
+      <img className="ew-backdrop-frame" src={shownSrc} alt="" draggable={false} />
       <div className="ew-backdrop-scrim" />
     </div>
   )

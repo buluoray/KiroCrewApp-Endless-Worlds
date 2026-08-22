@@ -26,7 +26,10 @@ const GROUP_ORDER = ['characters', 'objects', 'groups', 'threads', 'places'] as 
 const MAX_PICK = 12
 
 export function LegacyPicker({
-  runId, lang, onClose, onContinue,
+  runId,
+  lang,
+  onClose,
+  onContinue,
 }: {
   runId: string
   lang: string
@@ -42,24 +45,33 @@ export function LegacyPicker({
 
   useEffect(() => {
     let alive = true
-    api.legacyCandidates(runId)
-      .then((got) => { if (alive) setGroups(got.candidates) })
-      .catch((e) => { if (alive) setError((e as Error).message) })
-    return () => { alive = false }
+    api
+      .legacyCandidates(runId)
+      .then((got) => {
+        if (alive) setGroups(got.candidates)
+      })
+      .catch((e) => {
+        if (alive) setError((e as Error).message)
+      })
+    return () => {
+      alive = false
+    }
   }, [runId])
 
   const toggle = (id: string) =>
-    setPicked((p) => p.includes(id)
-      ? p.filter((x) => x !== id)
-      : p.length < MAX_PICK ? [...p, id] : p)
+    setPicked((p) =>
+      p.includes(id) ? p.filter((x) => x !== id) : p.length < MAX_PICK ? [...p, id] : p,
+    )
 
-  const total = groups
-    ? GROUP_ORDER.reduce((n, g) => n + (groups[g]?.length ?? 0), 0)
-    : 0
+  const total = groups ? GROUP_ORDER.reduce((n, g) => n + (groups[g]?.length ?? 0), 0) : 0
 
   return (
-    <div className="ewl-overlay" role="dialog" aria-modal="true"
-      aria-label={mt(lang, 'legacy.title')}>
+    <div
+      className="ewl-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={mt(lang, 'legacy.title')}
+    >
       <div className="ewl-head">
         <div className="ewl-title">{mt(lang, 'legacy.title')}</div>
         <button className="ews-btn" type="button" onClick={onClose}>
@@ -70,38 +82,44 @@ export function LegacyPicker({
 
       <div className="ewl-body">
         {error ? <div className="ewl-empty">{error}</div> : null}
-        {groups && !total ? (
-          <div className="ewl-empty">{mt(lang, 'legacy.none')}</div>
-        ) : null}
-        {groups ? GROUP_ORDER.map((g) => {
-          const rows = groups[g] ?? []
-          if (!rows.length) return null
-          return (
-            <div key={g}>
-              <div className="ewl-group">{mt(lang, `legacy.group.${g}`)}</div>
-              {rows.map((c) => (
-                <label className="ewl-row" key={c.id}>
-                  <input
-                    type="checkbox"
-                    checked={picked.includes(c.id)}
-                    disabled={!picked.includes(c.id) && picked.length >= MAX_PICK}
-                    onChange={() => toggle(c.id)}
-                  />
-                  <span className="ewl-name">{c.name}</span>
-                  <span className="ewl-meta">
-                    {c.relations?.length
-                      ? c.relations.map((r) =>
-                          `${r.type}${r.value ? ` ${r.value}` : r.level ? ` ${r.level > 0 ? '+' : ''}${r.level}` : ''}`,
-                        ).join(' · ')
-                      : c.kind === 'thread'
-                        ? mt(lang, c.open ? 'star.detail.thread.open' : 'star.detail.thread.done')
-                        : c.summary}
-                  </span>
-                </label>
-              ))}
-            </div>
-          )
-        }) : null}
+        {groups && !total ? <div className="ewl-empty">{mt(lang, 'legacy.none')}</div> : null}
+        {groups
+          ? GROUP_ORDER.map((g) => {
+              const rows = groups[g] ?? []
+              if (!rows.length) return null
+              return (
+                <div key={g}>
+                  <div className="ewl-group">{mt(lang, `legacy.group.${g}`)}</div>
+                  {rows.map((c) => (
+                    <label className="ewl-row" key={c.id}>
+                      <input
+                        type="checkbox"
+                        checked={picked.includes(c.id)}
+                        disabled={!picked.includes(c.id) && picked.length >= MAX_PICK}
+                        onChange={() => toggle(c.id)}
+                      />
+                      <span className="ewl-name">{c.name}</span>
+                      <span className="ewl-meta">
+                        {c.relations?.length
+                          ? c.relations
+                              .map(
+                                (r) =>
+                                  `${r.type}${r.value ? ` ${r.value}` : r.level ? ` ${r.level > 0 ? '+' : ''}${r.level}` : ''}`,
+                              )
+                              .join(' · ')
+                          : c.kind === 'thread'
+                            ? mt(
+                                lang,
+                                c.open ? 'star.detail.thread.open' : 'star.detail.thread.done',
+                              )
+                            : c.summary}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )
+            })
+          : null}
       </div>
 
       <div className="ewl-foot">

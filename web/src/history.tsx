@@ -36,25 +36,30 @@ export function History({ runId }: { runId: string }) {
   // jump lands on the real last page instead.
   const latestRef = useRef(0)
 
-  const load = useCallback(async (before: number, replace = false, q = '') => {
-    setBusy(true)
-    setFailed(false)
-    try {
-      const out = await api.chronicle(runId, before, q)
-      const newest = out.turns[0]
-      if (before === 0 && !q && newest) {
-        latestRef.current = Math.max(latestRef.current, newest.turn)
+  const load = useCallback(
+    async (before: number, replace = false, q = '') => {
+      setBusy(true)
+      setFailed(false)
+      try {
+        const out = await api.chronicle(runId, before, q)
+        const newest = out.turns[0]
+        if (before === 0 && !q && newest) {
+          latestRef.current = Math.max(latestRef.current, newest.turn)
+        }
+        // Paging further back appends; a jump, a search, or a fresh open replaces.
+        setTurns((have) => (before > 0 && !replace ? [...have, ...out.turns] : out.turns))
+        setMore(out.more)
+      } catch {
+        setFailed(true)
       }
-      // Paging further back appends; a jump, a search, or a fresh open replaces.
-      setTurns((have) => (before > 0 && !replace ? [...have, ...out.turns] : out.turns))
-      setMore(out.more)
-    } catch {
-      setFailed(true)
-    }
-    setBusy(false)
-  }, [runId])
+      setBusy(false)
+    },
+    [runId],
+  )
 
-  useEffect(() => { void load(0) }, [load])
+  useEffect(() => {
+    void load(0)
+  }, [load])
 
   const jumpTo = () => {
     const n = parseInt(jump, 10)
@@ -114,7 +119,9 @@ export function History({ runId }: { runId: string }) {
           value={jump}
           placeholder={t('history.jumpPlaceholder')}
           onChange={(e) => setJump(e.target.value.replace(/[^0-9]/g, ''))}
-          onKeyDown={(e) => { if (e.key === 'Enter') jumpTo() }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') jumpTo()
+          }}
         />
         <button className="ew-btn ew-btn-sm" type="button" onClick={jumpTo}>
           {t('history.jump')}
@@ -124,7 +131,9 @@ export function History({ runId }: { runId: string }) {
           value={search}
           placeholder={t('history.searchPlaceholder')}
           onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') runSearch() }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') runSearch()
+          }}
         />
         <button className="ew-btn ew-btn-sm" type="button" onClick={runSearch}>
           {t('history.search')}
@@ -140,9 +149,7 @@ export function History({ runId }: { runId: string }) {
         <div className="ew-meta">{t('history.noMatches', { q: query })}</div>
       ) : null}
 
-      {eventsOnly && !rows.length ? (
-        <div className="ew-meta">{t('history.noEvents')}</div>
-      ) : null}
+      {eventsOnly && !rows.length ? <div className="ew-meta">{t('history.noEvents')}</div> : null}
 
       {rows.map((p) => (
         <div className="ew-past" key={p.turn}>
@@ -153,7 +160,9 @@ export function History({ runId }: { runId: string }) {
               alt=""
               aria-hidden="true"
               draggable={false}
-              onError={(e) => { e.currentTarget.style.display = 'none' }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none'
+              }}
             />
           ) : null}
           <div className="ew-past-head">
@@ -168,11 +177,14 @@ export function History({ runId }: { runId: string }) {
           {p.events.length || p.gains.length ? (
             <div className="ew-marks">
               {p.events.map((ev, i) => (
-                <div className="ew-mark" key={`e${i}`}>{ev}</div>
+                <div className="ew-mark" key={`e${i}`}>
+                  {ev}
+                </div>
               ))}
               {p.gains.map((g, i) => (
                 <div className="ew-mark ew-mark-gain" key={`g${i}`}>
-                  {g.field}{g.amount ? ` ${g.amount}` : ''}
+                  {g.field}
+                  {g.amount ? ` ${g.amount}` : ''}
                   {g.source ? (
                     <span className="ew-sub">{t('history.via', { source: g.source })}</span>
                   ) : null}
@@ -213,7 +225,8 @@ export function LifeSummary({ runId }: { runId: string }) {
 
   useEffect(() => {
     let alive = true
-    api.chronicle(runId, 0, '', 100)
+    api
+      .chronicle(runId, 0, '', 100)
       .then((out) => {
         if (!alive) return
         const flat: Array<{ turn: number; text: string }> = []
@@ -224,8 +237,12 @@ export function LifeSummary({ runId }: { runId: string }) {
         setEvents(flat)
         setLoaded(true)
       })
-      .catch(() => { if (alive) setLoaded(true) })
-    return () => { alive = false }
+      .catch(() => {
+        if (alive) setLoaded(true)
+      })
+    return () => {
+      alive = false
+    }
   }, [runId])
 
   if (!loaded || !events.length) return null

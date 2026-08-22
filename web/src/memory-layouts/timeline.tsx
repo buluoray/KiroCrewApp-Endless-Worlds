@@ -14,7 +14,11 @@ import type { StarNode, StarPayload } from '../api'
 import { mt, nodeLabel, nodeVisible, type StarFilters } from '../memory-state'
 
 export function TimelineLens({
-  payload, lang, focus, setFocus, filters,
+  payload,
+  lang,
+  focus,
+  setFocus,
+  filters,
 }: {
   payload: StarPayload
   lang: string
@@ -59,9 +63,9 @@ export function TimelineLens({
             <div className="ews-tl-spine" aria-hidden="true">
               <span
                 className={
-                  'ews-tl-dot'
-                  + (ev.importance === 'major' ? ' ews-tl-dot-major' : '')
-                  + (selected ? ' ews-tl-dot-sel' : '')
+                  'ews-tl-dot' +
+                  (ev.importance === 'major' ? ' ews-tl-dot-major' : '') +
+                  (selected ? ' ews-tl-dot-sel' : '')
                 }
               />
             </div>
@@ -95,8 +99,7 @@ export function TimelineLens({
                   {(attached.get(ev.id) ?? []).map((n) => (
                     <button
                       className={
-                        'ews-chip ews-chip-' + n.kind
-                        + (n.id === focus ? ' ews-chip-sel' : '')
+                        'ews-chip ews-chip-' + n.kind + (n.id === focus ? ' ews-chip-sel' : '')
                       }
                       type="button"
                       key={n.id}

@@ -47,7 +47,11 @@ function readDraft(key: string): Draft {
  * offering a choice the world already made would be a lie about who decided.
  */
 function Group({
-  group, value, custom, onPick, onCustom,
+  group,
+  value,
+  custom,
+  onPick,
+  onCustom,
 }: {
   group: OpeningGroup
   value: string | undefined
@@ -70,9 +74,7 @@ function Group({
   return (
     <div className="ew-group">
       <div className="ew-glabel">{group.label}</div>
-      <div className="ew-ghint">
-        {picking ? t('opening.hintPick') : t('opening.hintText')}
-      </div>
+      <div className="ew-ghint">{picking ? t('opening.hintPick') : t('opening.hintText')}</div>
 
       {picking ? (
         <div>
@@ -127,7 +129,9 @@ function Group({
 }
 
 export function OpeningScreen({
-  world, onBack, onLive,
+  world,
+  onBack,
+  onLive,
 }: {
   world: WorldDetail
   onBack: () => void
@@ -154,11 +158,12 @@ export function OpeningScreen({
   const run: string | null = draft.run ?? null
   // Whether this screen came back to answers the player left behind, so it can say
   // so once rather than silently pre-filling and looking like the world chose.
-  const [restored, setRestored] = useState<boolean>(() =>
-    Object.keys(draft.answers ?? {}).length > 0
-    || Object.keys(draft.customs ?? {}).length > 0
-    || !!draft.run
-    || (draft.page ?? 0) > 0,
+  const [restored, setRestored] = useState<boolean>(
+    () =>
+      Object.keys(draft.answers ?? {}).length > 0 ||
+      Object.keys(draft.customs ?? {}).length > 0 ||
+      !!draft.run ||
+      (draft.page ?? 0) > 0,
   )
 
   // Saved on every change rather than on leave: there is no reliable "leaving"
@@ -260,7 +265,10 @@ export function OpeningScreen({
     setFailed(null)
     try {
       const created = await api.createRun({
-        worldId: world.worldId, style, answers: payload(), language: world.language,
+        worldId: world.worldId,
+        style,
+        answers: payload(),
+        language: world.language,
         role: role || undefined,
       })
       // The life exists now, with its own id already handed to the narrator by the
@@ -307,7 +315,9 @@ export function OpeningScreen({
 
   return (
     <div>
-      <button className="ew-back" type="button" onClick={onBack}>{t('world.back')}</button>
+      <button className="ew-back" type="button" onClick={onBack}>
+        {t('world.back')}
+      </button>
       <h3 className="ew-detail-title">{world.title}</h3>
       <div className="ew-meta" style={{ marginBottom: '18px' }}>
         {t('opening.page', { page: page + 1, pages })}
@@ -316,11 +326,7 @@ export function OpeningScreen({
       {restored ? (
         <div className="ew-note ew-note-row">
           <span>{t('opening.restored')}</span>
-          <button
-            className="ew-btn ew-btn-quiet"
-            type="button"
-            onClick={() => setRestored(false)}
-          >
+          <button className="ew-btn ew-btn-quiet" type="button" onClick={() => setRestored(false)}>
             {t('note.dismiss')}
           </button>
         </div>
@@ -438,11 +444,7 @@ export function OpeningScreen({
             {busy ? t('opening.beginning') : t('opening.begin')}
           </button>
         ) : (
-          <button
-            className="ew-btn ew-btn-go"
-            type="button"
-            onClick={() => setPage((p) => p + 1)}
-          >
+          <button className="ew-btn ew-btn-go" type="button" onClick={() => setPage((p) => p + 1)}>
             {t('opening.next')}
           </button>
         )}

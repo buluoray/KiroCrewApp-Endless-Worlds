@@ -74,16 +74,30 @@ function lifeWhere(run: LifeRowData): string {
 }
 
 export function WorldRail({
-  worlds, runs, activeRunId, activeWorldId, onWorld, onLife, onHome, atShelf,
-  open, onClose, width, onWidth,
+  worlds,
+  runs,
+  activeRunId,
+  activeWorldId,
+  onWorld,
+  onLife,
+  onHome,
+  atShelf,
+  open,
+  onClose,
+  width,
+  onWidth,
 }: RailProps) {
   // Escape closes it. A drawer that covers the story and can only be dismissed by
   // aiming at a scrim is a trap for anyone reading with the keyboard.
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
     window.addEventListener('keydown', onKey)
-    return () => { window.removeEventListener('keydown', onKey) }
+    return () => {
+      window.removeEventListener('keydown', onKey)
+    }
   }, [open, onClose])
 
   // Unmounted while closed, not merely hidden: a resize from desktop to phone
@@ -102,7 +116,9 @@ export function WorldRail({
   return (
     <nav className="ew-rail" aria-label={t('rail.label')}>
       <div className="ew-rail-top">
-        {atShelf ? <span /> : (
+        {atShelf ? (
+          <span />
+        ) : (
           <button className="ew-rail-home" type="button" onClick={onHome}>
             {t('rail.shelf')}
           </button>
@@ -120,15 +136,11 @@ export function WorldRail({
               key={r.runId}
               type="button"
               disabled={!!r.unreadable}
-              className={
-                'ew-rail-row' + (r.runId === activeRunId ? ' ew-rail-row-on' : '')
-              }
+              className={'ew-rail-row' + (r.runId === activeRunId ? ' ew-rail-row-on' : '')}
               onClick={() => onLife(r.runId)}
               aria-current={r.runId === activeRunId ? 'page' : undefined}
             >
-              <span className="ew-rail-name">
-                {r.label || r.subtitle || r.title || r.worldId}
-              </span>
+              <span className="ew-rail-name">{r.label || r.subtitle || r.title || r.worldId}</span>
               <span className="ew-rail-sub">{lifeWhere(r)}</span>
             </button>
           ))}
@@ -142,21 +154,16 @@ export function WorldRail({
             key={w.worldId}
             type="button"
             className={
-              'ew-rail-row'
-              + (w.worldId === activeWorldId && !activeRunId ? ' ew-rail-row-on' : '')
+              'ew-rail-row' + (w.worldId === activeWorldId && !activeRunId ? ' ew-rail-row-on' : '')
             }
             onClick={() => onWorld(w.worldId)}
             aria-current={w.worldId === activeWorldId ? 'page' : undefined}
           >
             <span className="ew-rail-name">{w.title}</span>
-            <span className="ew-rail-sub">
-              {t('rail.styles', { n: w.styles?.length ?? 0 })}
-            </span>
+            <span className="ew-rail-sub">{t('rail.styles', { n: w.styles?.length ?? 0 })}</span>
           </button>
         ))}
-        {broken > 0 ? (
-          <div className="ew-rail-note">{t('rail.broken', { n: broken })}</div>
-        ) : null}
+        {broken > 0 ? <div className="ew-rail-note">{t('rail.broken', { n: broken })}</div> : null}
       </div>
 
       {/* The reading measure, set where it is reachable from every page. It lives

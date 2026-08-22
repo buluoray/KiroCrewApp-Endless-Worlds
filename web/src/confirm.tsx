@@ -16,14 +16,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { DeletionFacts, LifeDeletionFacts } from './api'
+import type { DeletionFacts } from './api'
 import { ApiError, api } from './api'
 import { t } from './strings'
 
 type Phase = 'loading' | 'asking' | 'working' | 'failed'
 
 export function DeleteWorldDialog({
-  worldId, onCancel, onDeleted,
+  worldId,
+  onCancel,
+  onDeleted,
 }: {
   worldId: string
   onCancel: () => void
@@ -35,12 +37,16 @@ export function DeleteWorldDialog({
   const panel = useRef<HTMLDivElement | null>(null)
 
   const look = () => {
-    api.worldDeletion(worldId)
+    api
+      .worldDeletion(worldId)
       .then((f) => {
         setFacts(f)
         setPhase('asking')
       })
-      .catch((e: Error) => { setProblem(e.message); setPhase('failed') })
+      .catch((e: Error) => {
+        setProblem(e.message)
+        setPhase('failed')
+      })
   }
 
   useEffect(() => {
@@ -53,7 +59,9 @@ export function DeleteWorldDialog({
   // Escape cancels, and focus moves into the panel so the keyboard is not still
   // driving the shelf behind an open modal.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
     window.addEventListener('keydown', onKey)
     panel.current?.focus()
     return () => window.removeEventListener('keydown', onKey)
@@ -71,7 +79,8 @@ export function DeleteWorldDialog({
     if (!facts || !armed) return
     setPhase('working')
     setProblem('')
-    api.deleteWorld(worldId, facts.liveCount)
+    api
+      .deleteWorld(worldId, facts.liveCount)
       .then((out) => onDeleted({ restorable: out.restorable, lives: out.livesRemoved.length }))
       .catch((e: Error) => {
         const code = e instanceof ApiError ? e.code : ''
@@ -96,7 +105,7 @@ export function DeleteWorldDialog({
   // own (0,1,0) `position: fixed`. The wrap therefore laid out as an ordinary block
   // at the END of the page — a scrim over nothing and a panel far below the fold,
   // which is exactly how it was reported. At body level the rule cannot reach it.
-  return createPortal((
+  return createPortal(
     <div className="ew-modal-wrap" role="presentation" onClick={onCancel}>
       <div
         className="ew-modal"
@@ -111,9 +120,7 @@ export function DeleteWorldDialog({
           {t('delete.title', { world: facts?.title ?? worldId })}
         </div>
 
-        {phase === 'loading' ? (
-          <div className="ew-meta">{t('delete.counting')}</div>
-        ) : null}
+        {phase === 'loading' ? <div className="ew-meta">{t('delete.counting')}</div> : null}
 
         {facts ? (
           <>
@@ -127,9 +134,7 @@ export function DeleteWorldDialog({
               <ul className="ew-doomed">
                 {facts.lives.map((l) => (
                   <li key={l.runId}>
-                    <span className="ew-doomed-name">
-                      {l.subtitle || l.title || l.runId}
-                    </span>
+                    <span className="ew-doomed-name">{l.subtitle || l.title || l.runId}</span>
                     <span className="ew-doomed-where">
                       {l.unreadable
                         ? t('life.unreadable')
@@ -147,7 +152,6 @@ export function DeleteWorldDialog({
             <div className="ew-meta ew-modal-note">
               {facts.restorable ? t('delete.restorable') : t('delete.forever')}
             </div>
-
           </>
         ) : null}
 
@@ -171,6 +175,7 @@ export function DeleteWorldDialog({
           </button>
         </div>
       </div>
-    </div>
-  ), document.body)
+    </div>,
+    document.body,
+  )
 }

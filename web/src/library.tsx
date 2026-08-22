@@ -2,15 +2,23 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import type {
-  LifeDeletionFacts, LifeRowData, LoreEntry, OpeningGroup, WorldDetail, WorldRow,
+  LifeDeletionFacts,
+  LifeRowData,
+  LoreEntry,
+  OpeningGroup,
+  WorldDetail,
+  WorldRow,
 } from './api'
 import { ApiError, api, API } from './api'
 import { t } from './strings'
 import { Chip, Prose } from './ui'
 
 const TURN_UNITS: Record<string, string> = {
-  month: 'unit.month', year: 'unit.year', day: 'unit.day',
-  week: 'unit.week', season: 'unit.season',
+  month: 'unit.month',
+  year: 'unit.year',
+  day: 'unit.day',
+  week: 'unit.week',
+  season: 'unit.season',
 }
 
 /**
@@ -19,8 +27,15 @@ const TURN_UNITS: Record<string, string> = {
  * uppercased rather than nothing.
  */
 const LANGUAGE_ENDONYM: Record<string, string> = {
-  en: 'English', zh: '中文', ja: '日本語', ko: '한국어', fr: 'Français',
-  de: 'Deutsch', es: 'Español', 'pt-br': 'Português', ru: 'Русский',
+  en: 'English',
+  zh: '中文',
+  ja: '日本語',
+  ko: '한국어',
+  fr: 'Français',
+  de: 'Deutsch',
+  es: 'Español',
+  'pt-br': 'Português',
+  ru: 'Русский',
 }
 
 export function languageName(tag: string): string {
@@ -32,9 +47,33 @@ export function languageName(tag: string): string {
 function MenuGlyph() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <line x1="3" y1="5" x2="15" y2="5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <line x1="3" y1="9" x2="15" y2="9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <line x1="3" y1="13" x2="15" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line
+        x1="3"
+        y1="5"
+        x2="15"
+        y2="5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <line
+        x1="3"
+        y1="9"
+        x2="15"
+        y2="9"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <line
+        x1="3"
+        y1="13"
+        x2="15"
+        y2="13"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   )
 }
@@ -53,7 +92,9 @@ export function turnPhrase(unit: string | undefined): string {
 
 /** A world on the shelf. Its own words, never the app's vocabulary. */
 export function WorldCard({
-  world, onOpen, plays = 0,
+  world,
+  onOpen,
+  plays = 0,
 }: {
   world: WorldRow
   onOpen: (id: string) => void
@@ -63,12 +104,15 @@ export function WorldCard({
   if (!world.usable) {
     return (
       <div className="ew-card ew-card-broken">
-        <div className="ew-title" style={{ marginBottom: '4px' }}>{world.title}</div>
+        <div className="ew-title" style={{ marginBottom: '4px' }}>
+          {world.title}
+        </div>
         <div className="ew-meta">
           {world.needsCore
             ? t('world.needsNewerCore', {
-              needed: world.needsCore, local: world.localCore ?? '?',
-            })
+                needed: world.needsCore,
+                local: world.localCore ?? '?',
+              })
             : t('world.unopenable', { problem: world.problem ?? '' })}
         </div>
       </div>
@@ -89,7 +133,9 @@ export function WorldCard({
         {possibilities.length ? (
           <div className="ew-world-possibilities">
             {possibilities.map((possibility) => (
-              <span className="ew-world-possibility" key={possibility}>{possibility}</span>
+              <span className="ew-world-possibility" key={possibility}>
+                {possibility}
+              </span>
             ))}
           </div>
         ) : null}
@@ -112,7 +158,11 @@ export function WorldCard({
  * left it.
  */
 export function LifeRow({
-  run, onOpen, onDeleted, onArchive, onRename,
+  run,
+  onOpen,
+  onDeleted,
+  onArchive,
+  onRename,
 }: {
   run: LifeRowData
   onOpen: (runId: string) => void
@@ -136,7 +186,10 @@ export function LifeRow({
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
-  const commit = () => { onRename?.(run.runId, draft.trim()); setEditing(false) }
+  const commit = () => {
+    onRename?.(run.runId, draft.trim())
+    setEditing(false)
+  }
 
   // Ending this life: `null` until asked, then the strip under the card.
   const [doom, setDoom] = useState<'asking' | 'working' | null>(null)
@@ -149,16 +202,25 @@ export function LifeRow({
   useEffect(() => {
     if (doom !== 'asking' || facts) return
     let alive = true
-    api.lifeDeletion(run.runId)
-      .then((f) => { if (alive) setFacts(f) })
-      .catch((e: Error) => { if (alive) setProblem(e.message) })
-    return () => { alive = false }
+    api
+      .lifeDeletion(run.runId)
+      .then((f) => {
+        if (alive) setFacts(f)
+      })
+      .catch((e: Error) => {
+        if (alive) setProblem(e.message)
+      })
+    return () => {
+      alive = false
+    }
   }, [doom, facts, run.runId])
 
   const endThisLife = () => {
     if (!facts || doom === 'working') return
-    setDoom('working'); setProblem('')
-    api.deleteLife(run.runId, facts.turn)
+    setDoom('working')
+    setProblem('')
+    api
+      .deleteLife(run.runId, facts.turn)
       .then((out) => onDeleted?.(out.turn))
       .catch((e: Error) => {
         const code = e instanceof ApiError ? e.code : ''
@@ -167,9 +229,12 @@ export function LifeRow({
         // retrying against the stale one.
         if (code === 'turn_changed' || code === 'turn_in_flight') {
           setProblem(t(code === 'turn_changed' ? 'life.delete.changed' : 'life.delete.inFlight'))
-          setFacts(null); setDoom('asking'); return
+          setFacts(null)
+          setDoom('asking')
+          return
         }
-        setProblem(e.message); setDoom('asking')
+        setProblem(e.message)
+        setDoom('asking')
       })
   }
 
@@ -216,20 +281,32 @@ export function LifeRow({
   const actions: Array<{ key: string; label: string; aria?: string; onClick: () => void }> = []
   if (onRename) {
     actions.push({
-      key: 'rename', label: t('life.rename.short'), aria: t('life.rename.aria', { name }),
-      onClick: () => { setDraft(run.label || ''); setEditing(true) },
+      key: 'rename',
+      label: t('life.rename.short'),
+      aria: t('life.rename.aria', { name }),
+      onClick: () => {
+        setDraft(run.label || '')
+        setEditing(true)
+      },
     })
   }
   if (onArchive) {
     actions.push({
-      key: 'archive', label: run.archived ? t('life.unarchive') : t('life.archive'),
+      key: 'archive',
+      label: run.archived ? t('life.unarchive') : t('life.archive'),
       onClick: () => onArchive(run.runId, !run.archived),
     })
   }
   if (onDeleted) {
     actions.push({
-      key: 'delete', label: t('life.delete.short'), aria: t('life.delete.aria', { name }),
-      onClick: () => { setProblem(''); setFacts(null); setDoom('asking') },
+      key: 'delete',
+      label: t('life.delete.short'),
+      aria: t('life.delete.aria', { name }),
+      onClick: () => {
+        setProblem('')
+        setFacts(null)
+        setDoom('asking')
+      },
     })
   }
 
@@ -339,9 +416,10 @@ export function LifeRow({
               >
                 <MenuGlyph />
               </button>
-              {menuOpen && menuAt ? createPortal((
-                <>
-                  {/* Portalled to body, with the backdrop, for a reason no z-index could
+              {menuOpen && menuAt
+                ? createPortal(
+                    <>
+                      {/* Portalled to body, with the backdrop, for a reason no z-index could
                       solve: inside the card these sat in a stacking context the content
                       wrapper created, so the menu painted UNDER the phone's bottom bars
                       however high its own z-index went. At body level it competes with
@@ -351,44 +429,50 @@ export function LifeRow({
                       The backdrop absorbs a tap that lands outside the menu (and the
                       iOS ghost click after choosing an item), which would otherwise
                       fall through and open the life beneath. */}
-                  <div
-                    className="ew-menu-backdrop"
-                    aria-hidden="true"
-                    onClick={() => setMenuOpen(false)}
-                  />
-                  <div
-                    className="ew-menu"
-                    role="menu"
-                    ref={panelRef}
-                    style={{ top: `${menuAt.top}px`, right: `${menuAt.right}px` }}
-                  >
-                    {actions.map((a) => (
-                      <button
-                        key={a.key}
-                        className="ew-menu-item"
-                        role="menuitem"
-                        type="button"
-                        aria-label={a.aria}
-                        onClick={(e) => { e.stopPropagation(); setMenuOpen(false); a.onClick() }}
-                        onTouchEnd={(e) => {
-                          // iOS/WKWebView: a tap that unmounts this item lets the
-                          // trailing synthetic click fall through to the life row's
-                          // open button beneath — the "click-through" bug. preventDefault
-                          // on touchend cancels that synthetic click sequence entirely
-                          // (touchend is not a React passive listener), so we run the
-                          // action here for touch and let onClick handle mouse.
-                          e.preventDefault()
-                          e.stopPropagation()
-                          setMenuOpen(false)
-                          a.onClick()
-                        }}
+                      <div
+                        className="ew-menu-backdrop"
+                        aria-hidden="true"
+                        onClick={() => setMenuOpen(false)}
+                      />
+                      <div
+                        className="ew-menu"
+                        role="menu"
+                        ref={panelRef}
+                        style={{ top: `${menuAt.top}px`, right: `${menuAt.right}px` }}
                       >
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ), document.body) : null}
+                        {actions.map((a) => (
+                          <button
+                            key={a.key}
+                            className="ew-menu-item"
+                            role="menuitem"
+                            type="button"
+                            aria-label={a.aria}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setMenuOpen(false)
+                              a.onClick()
+                            }}
+                            onTouchEnd={(e) => {
+                              // iOS/WKWebView: a tap that unmounts this item lets the
+                              // trailing synthetic click fall through to the life row's
+                              // open button beneath — the "click-through" bug. preventDefault
+                              // on touchend cancels that synthetic click sequence entirely
+                              // (touchend is not a React passive listener), so we run the
+                              // action here for touch and let onClick handle mouse.
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setMenuOpen(false)
+                              a.onClick()
+                            }}
+                          >
+                            {a.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>,
+                    document.body,
+                  )
+                : null}
             </div>
           </>
         ) : null}
@@ -401,8 +485,10 @@ export function LifeRow({
               : facts.unreadable
                 ? t('life.delete.unreadable')
                 : facts.turn > 0
-                  ? t(facts.turn === 1 ? 'life.delete.monthsOne' : 'life.delete.months',
-                      { name, n: facts.turn })
+                  ? t(facts.turn === 1 ? 'life.delete.monthsOne' : 'life.delete.months', {
+                      name,
+                      n: facts.turn,
+                    })
                   : t('life.delete.unborn', { name })}
           </div>
           <div className="ew-meta ew-rowdoom-note">{t('life.delete.forever')}</div>
@@ -411,7 +497,10 @@ export function LifeRow({
             <button
               className="ew-btn ew-btn-sm"
               type="button"
-              onClick={() => { setDoom(null); setProblem('') }}
+              onClick={() => {
+                setDoom(null)
+                setProblem('')
+              }}
             >
               {t('delete.cancel')}
             </button>
@@ -440,7 +529,10 @@ function WorldSetting({ lore }: { lore: LoreEntry[] }) {
   const groups = new Map<string, LoreEntry[]>()
   for (const e of lore) {
     const cat = e.category || t('world.settingOther')
-    if (!groups.has(cat)) { groups.set(cat, []); order.push(cat) }
+    if (!groups.has(cat)) {
+      groups.set(cat, [])
+      order.push(cat)
+    }
     groups.get(cat)!.push(e)
   }
   return (
@@ -468,7 +560,8 @@ function WorldSetting({ lore }: { lore: LoreEntry[] }) {
                     <div className="ew-setting-rel">
                       {e.relations.map((r, i) => (
                         <span className="ew-chip" key={`${r.to}-${i}`}>
-                          {r.label ? `${r.label} · ` : ''}{names.get(r.to) ?? r.to}
+                          {r.label ? `${r.label} · ` : ''}
+                          {names.get(r.to) ?? r.to}
                         </span>
                       ))}
                     </div>
@@ -484,7 +577,12 @@ function WorldSetting({ lore }: { lore: LoreEntry[] }) {
 }
 
 export function WorldDetailView({
-  worldId, onBack, onPlay, onDelete, onLanguage, initialLanguage,
+  worldId,
+  onBack,
+  onPlay,
+  onDelete,
+  onLanguage,
+  initialLanguage,
 }: {
   worldId: string
   onBack: () => void
@@ -515,10 +613,20 @@ export function WorldDetailView({
     setError(null)
     // The detail page shows structured `lore` AND, as "world laws", the cleaned
     // core-rule prose — so it fetches the prose too.
-    api.world(worldId, true, language)
-      .then((w) => { if (alive) { setWorld(w); if (w.language) onLanguage?.(w.language) } })
-      .catch((e: Error) => { if (alive) setError(e.message) })
-    return () => { alive = false }
+    api
+      .world(worldId, true, language)
+      .then((w) => {
+        if (alive) {
+          setWorld(w)
+          if (w.language) onLanguage?.(w.language)
+        }
+      })
+      .catch((e: Error) => {
+        if (alive) setError(e.message)
+      })
+    return () => {
+      alive = false
+    }
   }, [worldId, nonce, language])
 
   const back = (
@@ -586,7 +694,9 @@ export function WorldDetailView({
       <div className="ew-section">{t('world.opening')}</div>
       <div className="ew-chips ew-block">
         {groups.map((g) => (
-          <Chip key={g.id} accent={g.worldDecides}>{g.label}</Chip>
+          <Chip key={g.id} accent={g.worldDecides}>
+            {g.label}
+          </Chip>
         ))}
       </div>
       {groups.some((g) => g.worldDecides) ? (
@@ -607,7 +717,9 @@ export function WorldDetailView({
               </span>
             </div>
             <div className="ew-chips">
-              {p.fields.map((f) => <Chip key={f.id}>{f.label}</Chip>)}
+              {p.fields.map((f) => (
+                <Chip key={f.id}>{f.label}</Chip>
+              ))}
             </div>
           </div>
         ))}
@@ -617,7 +729,9 @@ export function WorldDetailView({
         <>
           <div className="ew-section">{t('world.digest')}</div>
           <div className="ew-chips ew-block">
-            {(world.digest ?? []).map((c) => <Chip key={c}>{c}</Chip>)}
+            {(world.digest ?? []).map((c) => (
+              <Chip key={c}>{c}</Chip>
+            ))}
           </div>
         </>
       ) : null}
@@ -658,7 +772,9 @@ export function WorldDetailView({
               <span className="ew-setting-caret" aria-hidden="true" />
             </button>
             {laws ? (
-              <div className="ew-setting-body"><Prose text={world.prose} /></div>
+              <div className="ew-setting-body">
+                <Prose text={world.prose} />
+              </div>
             ) : null}
           </div>
         </div>

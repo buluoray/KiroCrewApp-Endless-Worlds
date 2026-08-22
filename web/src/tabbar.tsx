@@ -61,7 +61,7 @@ export function buildTabs(scenes: SceneRow[], panels: PanelView[] = []): WorldTa
   }
   for (const p of panels) {
     const region = (p.region ?? '').trim()
-    if (!region) continue  // untagged panels stay in the reading drawer, not a tab
+    if (!region) continue // untagged panels stay in the reading drawer, not a tab
     bucket(region).labels.push(p.label ?? '')
   }
   const present = [...byRegion.keys()]
@@ -103,10 +103,12 @@ export function useScrollHide(enabled: boolean, pinUntil = 40): boolean {
     let last = -1
     const onScroll = (e: Event) => {
       const tgt = e.target as HTMLElement | Document | null
-      const el =
-        tgt && tgt instanceof HTMLElement ? tgt : document.scrollingElement
+      const el = tgt && tgt instanceof HTMLElement ? tgt : document.scrollingElement
       const y = el ? (el as HTMLElement).scrollTop : window.scrollY || 0
-      if (last < 0) { last = y; return }
+      if (last < 0) {
+        last = y
+        return
+      }
       const dy = y - last
       if (Math.abs(dy) < 8) return
       // Pinned near the top: the bar is TALLER than a small swipe, so a 40px
@@ -121,9 +123,8 @@ export function useScrollHide(enabled: boolean, pinUntil = 40): boolean {
       // as a side effect of the rubber band's spring-back producing an upward scroll;
       // resting on that meant the controls were unreachable the moment a pane did not
       // bounce.
-      const end = el instanceof HTMLElement
-        ? el.scrollHeight - el.clientHeight - y
-        : Number.POSITIVE_INFINITY
+      const end =
+        el instanceof HTMLElement ? el.scrollHeight - el.clientHeight - y : Number.POSITIVE_INFINITY
       if (y < pinUntil || end < pinUntil) setHidden(false)
       else if (dy > 0) setHidden(true)
       else setHidden(false)
@@ -144,28 +145,75 @@ function icon(tab: WorldTab): JSX.Element {
 export function tabIcon(id: string): JSX.Element {
   switch (id) {
     case 'reading':
-      return <svg viewBox="0 0 24 24"><path d="M12 6.5C10.5 5 8 4.5 4 4.7v13c4-.2 6.5.3 8 1.8 1.5-1.5 4-2 8-1.8v-13c-4-.2-6.5.3-8 1.8Z"/><path d="M12 6.5V19"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M12 6.5C10.5 5 8 4.5 4 4.7v13c4-.2 6.5.3 8 1.8 1.5-1.5 4-2 8-1.8v-13c-4-.2-6.5.3-8 1.8Z" />
+          <path d="M12 6.5V19" />
+        </svg>
+      )
     case 'starmap':
-      return <svg viewBox="0 0 24 24"><path d="M12 3.2l1.9 4.4 4.8.4-3.6 3.1 1.1 4.7L12 13.8 7.8 15.8l1.1-4.7L5.3 8l4.8-.4Z"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M12 3.2l1.9 4.4 4.8.4-3.6 3.1 1.1 4.7L12 13.8 7.8 15.8l1.1-4.7L5.3 8l4.8-.4Z" />
+        </svg>
+      )
     case 'status':
-      return <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c.6-3.6 3.2-5.5 6.5-5.5S18.4 16.4 19 20"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="8" r="3.4" />
+          <path d="M5.5 20c.6-3.6 3.2-5.5 6.5-5.5S18.4 16.4 19 20" />
+        </svg>
+      )
     case 'world':
-      return <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4M12 3.8c2.4 2.4 2.4 13.9 0 16.4M12 3.8c-2.4 2.4-2.4 13.9 0 16.4"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8.2" />
+          <path d="M3.8 12h16.4M12 3.8c2.4 2.4 2.4 13.9 0 16.4M12 3.8c-2.4 2.4-2.4 13.9 0 16.4" />
+        </svg>
+      )
     case 'pack':
-      return <svg viewBox="0 0 24 24"><path d="M7 9V7.5A5 5 0 0 1 17 7.5V9"/><rect x="4.5" y="9" width="15" height="11" rx="2.5"/><path d="M9.5 13h5"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <path d="M7 9V7.5A5 5 0 0 1 17 7.5V9" />
+          <rect x="4.5" y="9" width="15" height="11" rx="2.5" />
+          <path d="M9.5 13h5" />
+        </svg>
+      )
     case 'tasks':
-      return <svg viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <rect x="4.5" y="4.5" width="15" height="15" rx="3" />
+          <path d="M8.5 12.2l2.4 2.4 4.6-5" />
+        </svg>
+      )
     default:
-      return <svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+      return (
+        <svg viewBox="0 0 24 24">
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="4" width="7" height="7" rx="1.5" />
+          <rect x="4" y="13" width="7" height="7" rx="1.5" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      )
   }
 }
 
 function moreIcon(): JSX.Element {
-  return <svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>
+  return (
+    <svg viewBox="0 0 24 24">
+      <circle cx="6" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="18" cy="12" r="1.6" />
+    </svg>
+  )
 }
 
 export function WorldTabBar({
-  tabs, active, dots, hidden, onSelect,
+  tabs,
+  active,
+  dots,
+  hidden,
+  onSelect,
 }: {
   tabs: WorldTab[]
   active: string
@@ -188,7 +236,6 @@ export function WorldTabBar({
   // Portal to document.body so `position: fixed` resolves against the viewport, not
   // a transformed ancestor in the dashboard shell.
   return createPortal(
-    (
     <>
       {moreOpen && overflow.length ? (
         <>
@@ -205,9 +252,13 @@ export function WorldTabBar({
                 className={'ew-tabmore-item' + (o.id === active ? ' on' : '')}
                 type="button"
                 role="menuitem"
-                onClick={() => { onSelect(o.id); setMoreOpen(false) }}
+                onClick={() => {
+                  onSelect(o.id)
+                  setMoreOpen(false)
+                }}
               >
-                {icon(o)}<span>{o.label}</span>
+                {icon(o)}
+                <span>{o.label}</span>
                 {dots[o.id] ? <i className="ew-tabdot-inline" /> : null}
               </button>
             ))}
@@ -225,7 +276,10 @@ export function WorldTabBar({
             className={'ew-tab' + (tb.id === active ? ' on' : '')}
             type="button"
             aria-pressed={tb.id === active}
-            onClick={() => { setMoreOpen(false); onSelect(tb.id) }}
+            onClick={() => {
+              setMoreOpen(false)
+              onSelect(tb.id)
+            }}
           >
             {dots[tb.id] ? <span className="ew-tabdot" /> : null}
             {icon(tb)}
@@ -245,8 +299,7 @@ export function WorldTabBar({
           </button>
         ) : null}
       </nav>
-    </>
-    ),
+    </>,
     document.body,
   )
 }

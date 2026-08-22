@@ -8,7 +8,7 @@ import { t } from './strings'
  *  re-render (which would otherwise reload and lose what the player was looking at). */
 function sceneVersion(html: string): string {
   let h = 5381
-  for (let i = 0; i < html.length; i++) h = (((h << 5) + h) + html.charCodeAt(i)) | 0
+  for (let i = 0; i < html.length; i++) h = ((h << 5) + h + html.charCodeAt(i)) | 0
   return (h >>> 0).toString(36)
 }
 
@@ -44,7 +44,13 @@ const MAX_SCENE_H = 1400
  * see a scene at all.
  */
 export function SceneSlot({
-  runId, sceneId, asks, visible = true, onChoice, resetSignal = 0, locked = false,
+  runId,
+  sceneId,
+  asks,
+  visible = true,
+  onChoice,
+  resetSignal = 0,
+  locked = false,
 }: {
   runId: string | null
   sceneId: string
@@ -91,7 +97,8 @@ export function SceneSlot({
       return
     }
     let alive = true
-    api.scene(runId, sceneId)
+    api
+      .scene(runId, sceneId)
       .then((text) => {
         if (alive) {
           setHtml(text)
@@ -116,7 +123,7 @@ export function SceneSlot({
   const answered = useRef(false)
   useEffect(() => {
     answered.current = false
-    setSending(false)  // a fresh scene (or an updated one) clears the sending state
+    setSending(false) // a fresh scene (or an updated one) clears the sending state
   }, [sceneId, html, resetSignal])
 
   // The lock must be readable inside the message handler without re-subscribing
@@ -153,7 +160,7 @@ export function SceneSlot({
       }
       if (typeof d.choice !== 'string' || !d.choice) return
       if (answered.current) return
-      if (lockedRef.current) return  // a turn is already in flight somewhere
+      if (lockedRef.current) return // a turn is already in flight somewhere
       answered.current = true
       setSending(true)
       onChoice(sceneId, d.choice, d.nonce)
@@ -170,10 +177,11 @@ export function SceneSlot({
   // `srcdoc`, which blank-rendered on WebKit). The `v` token changes only when the
   // compiled html changes, so the frame reloads on a real content change but not on
   // a tab switch. The fetched `html` above is still what tells us loading vs failed.
-  const src = on && runId
-    ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}`
-      + `?v=${sceneVersion(html)}`
-    : undefined
+  const src =
+    on && runId
+      ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}` +
+        `?v=${sceneVersion(html)}`
+      : undefined
 
   return (
     <div
@@ -183,10 +191,14 @@ export function SceneSlot({
     >
       {failed && sceneId ? <div className="ew-note">{t('play.sceneFailed')}</div> : null}
       {loading ? (
-        <div className="ew-note" role="status" aria-live="polite">{t('play.sceneLoading')}</div>
+        <div className="ew-note" role="status" aria-live="polite">
+          {t('play.sceneLoading')}
+        </div>
       ) : null}
       {sending ? (
-        <div className="ew-note" role="status" aria-live="polite">{t('play.sceneSending')}</div>
+        <div className="ew-note" role="status" aria-live="polite">
+          {t('play.sceneSending')}
+        </div>
       ) : null}
 
       {/* Once it exists it is never removed, never re-keyed and never moved — hidden

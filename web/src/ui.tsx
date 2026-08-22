@@ -78,7 +78,9 @@ const Bar = ({ pct }: { pct: number }) => (
 )
 
 const Lines = ({
-  entries, primary, secondary,
+  entries,
+  primary,
+  secondary,
 }: {
   entries: Array<Record<string, unknown>>
   primary: string
@@ -180,7 +182,9 @@ export function Value({ f }: { f: ShapedField }) {
     case 'lines':
       return (
         <div className="ew-lines">
-          {(f.lines ?? []).map((ln, i) => <div key={`${ln}-${i}`}>{ln}</div>)}
+          {(f.lines ?? []).map((ln, i) => (
+            <div key={`${ln}-${i}`}>{ln}</div>
+          ))}
         </div>
       )
 

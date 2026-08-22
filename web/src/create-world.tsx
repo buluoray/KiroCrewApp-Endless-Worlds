@@ -23,12 +23,13 @@ const CREATE_DRAFT_KEY = 'endless-worlds:create-draft'
  *  the play page's GENERATING_POLL_MS. */
 export const DRAFT_POLL_MS = 3000
 
-
 /** The always-present entry at the top of the worlds shelf. */
 export function CreateWorldCard({ onClick }: { onClick: () => void }) {
   return (
     <button className="ew-card ew-card-create" type="button" onClick={onClick}>
-      <span className="ew-create-plus" aria-hidden="true">+</span>
+      <span className="ew-create-plus" aria-hidden="true">
+        +
+      </span>
       <span className="ew-create-text">
         <span className="ew-create-title">{t('create.title')}</span>
         <span className="ew-create-sub">{t('create.subtitle')}</span>
@@ -36,7 +37,6 @@ export function CreateWorldCard({ onClick }: { onClick: () => void }) {
     </button>
   )
 }
-
 
 function draftWhere(d: WorldDraftRow): string {
   if (d.status === 'ready') return t('worldDraft.ready')
@@ -46,10 +46,11 @@ function draftWhere(d: WorldDraftRow): string {
   return d.steps > 0 ? `${stage} · ${t('worldDraft.steps', { n: d.steps })}` : stage
 }
 
-
 /** A world being built (or one that finished and is waiting to be reviewed). */
 export function WorldDraftCard({
-  draft, onOpen, onDiscard,
+  draft,
+  onOpen,
+  onDiscard,
 }: {
   draft: WorldDraftRow
   onOpen: (draftId: string) => void
@@ -94,10 +95,10 @@ export function WorldDraftCard({
   )
 }
 
-
 /** The paste screen (view === 'create'). */
 export function CreateWorldScreen({
-  onCancel, onCreated,
+  onCancel,
+  onCreated,
 }: {
   onCancel: () => void
   /** Called with the new draftId once the compile job is dispatched. */
@@ -178,7 +179,6 @@ export function CreateWorldScreen({
   )
 }
 
-
 /** The worldsmith agent, as registered by app.json — the agent a jump-to-chat
  *  launches so the player keeps adjusting the SAME draft (its tools act by
  *  draftId, so a fresh chat carrying the id can read and re-submit it). */
@@ -186,17 +186,21 @@ const WORLDSMITH_AGENT = 'endless-worldsmith'
 
 /** The host App SDK, reached defensively through the window module map (an older
  *  host may not expose the chat launcher — the UI degrades to an inline hint). */
-const appSdk = (window as unknown as {
-  __kirocrew_modules?: Record<string, unknown>
-}).__kirocrew_modules?.['@kirocrew/app-sdk'] as
+const appSdk = (
+  window as unknown as {
+    __kirocrew_modules?: Record<string, unknown>
+  }
+).__kirocrew_modules?.['@kirocrew/app-sdk'] as
   | { useChatLauncher?: () => { openChat: (opts?: { agent?: string; message?: string }) => void } }
   | undefined
-
 
 /** The review screen (view === 'draft'). Polls until the worldsmith is done, then
  *  shows what the world will contain and offers accept / discard / jump-to-chat. */
 export function WorldDraftReview({
-  draftId, onInstalled, onDiscarded, onBack,
+  draftId,
+  onInstalled,
+  onDiscarded,
+  onBack,
 }: {
   draftId: string
   onInstalled: (worldId: string) => void
@@ -261,7 +265,9 @@ export function WorldDraftReview({
   const generating = draft?.status === 'generating' || draft?.status === 'new'
   useEffect(() => {
     if (!generating) return undefined
-    const timer = window.setInterval(() => { void load() }, DRAFT_POLL_MS)
+    const timer = window.setInterval(() => {
+      void load()
+    }, DRAFT_POLL_MS)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generating, draftId])
@@ -348,21 +354,12 @@ export function WorldDraftReview({
         <div className="ew-section">{t('worldDraft.failed')}</div>
         <div className="ew-note">{draft.problem || t('review.failedGeneric')}</div>
         <div className="ew-create-hint">{t('review.failedHint')}</div>
-        <button
-          className="ew-draft-jump"
-          type="button"
-          onClick={jumpToChat}
-        >
+        <button className="ew-draft-jump" type="button" onClick={jumpToChat}>
           {t('review.jump')}
         </button>
         {chatHint ? <div className="ew-create-hint">{t('review.jumpHint')}</div> : null}
         <div className="ew-bar">
-          <button
-            className="ew-btn"
-            type="button"
-            onClick={() => void retry()}
-            disabled={!!busy}
-          >
+          <button className="ew-btn" type="button" onClick={() => void retry()} disabled={!!busy}>
             {t('review.retry')}
           </button>
           <button
@@ -392,29 +389,44 @@ export function WorldDraftReview({
         className="ew-title-edit"
         value={title}
         maxLength={80}
-        onChange={(e) => { titleTouched.current = true; setTitle(e.target.value) }}
+        onChange={(e) => {
+          titleTouched.current = true
+          setTitle(e.target.value)
+        }}
       />
 
       {p ? (
         <div className="ew-review">
           {p.promise ? (
-            <div className="ew-kv"><span className="ew-k">{t('review.promise')}</span>
-              <span>{p.promise}</span></div>
+            <div className="ew-kv">
+              <span className="ew-k">{t('review.promise')}</span>
+              <span>{p.promise}</span>
+            </div>
           ) : null}
-          <div className="ew-kv"><span className="ew-k">{t('review.clock')}</span>
-            <span>{p.clock}</span></div>
+          <div className="ew-kv">
+            <span className="ew-k">{t('review.clock')}</span>
+            <span>{p.clock}</span>
+          </div>
           {p.styles.length ? (
-            <div className="ew-kv"><span className="ew-k">{t('review.styles')}</span>
+            <div className="ew-kv">
+              <span className="ew-k">{t('review.styles')}</span>
               <span className="ew-chips">
-                {p.styles.map((s) => <Chip key={s}>{s}</Chip>)}
-              </span></div>
+                {p.styles.map((s) => (
+                  <Chip key={s}>{s}</Chip>
+                ))}
+              </span>
+            </div>
           ) : null}
           {p.opening.length ? (
-            <div className="ew-kv"><span className="ew-k">{t('review.opening')}</span>
-              <span>{p.opening.join(' · ')}</span></div>
+            <div className="ew-kv">
+              <span className="ew-k">{t('review.opening')}</span>
+              <span>{p.opening.join(' · ')}</span>
+            </div>
           ) : null}
-          <div className="ew-kv"><span className="ew-k">{t('review.endings')}</span>
-            <span>{t('review.endingsN', { n: p.endings })}</span></div>
+          <div className="ew-kv">
+            <span className="ew-k">{t('review.endings')}</span>
+            <span>{t('review.endingsN', { n: p.endings })}</span>
+          </div>
         </div>
       ) : null}
 
@@ -422,7 +434,9 @@ export function WorldDraftReview({
         <div className="ew-review-warn">
           <div className="ew-review-warn-h">{t('review.dropped')}</div>
           <ul className="ew-list">
-            {draft.dropped.map((d, i) => <li key={i}>{d}</li>)}
+            {draft.dropped.map((d, i) => (
+              <li key={i}>{d}</li>
+            ))}
           </ul>
         </div>
       ) : null}
@@ -430,16 +444,14 @@ export function WorldDraftReview({
         <div className="ew-review-warn">
           <div className="ew-review-warn-h">{t('review.warnings')}</div>
           <ul className="ew-list">
-            {draft.warnings.map((wn, i) => <li key={i}>{wn}</li>)}
+            {draft.warnings.map((wn, i) => (
+              <li key={i}>{wn}</li>
+            ))}
           </ul>
         </div>
       ) : null}
 
-      <button
-        className="ew-draft-jump"
-        type="button"
-        onClick={jumpToChat}
-      >
+      <button className="ew-draft-jump" type="button" onClick={jumpToChat}>
         {t('review.jump')}
       </button>
       {chatHint ? <div className="ew-create-hint">{t('review.jumpHint')}</div> : null}

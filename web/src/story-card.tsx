@@ -18,7 +18,10 @@ import { api } from './api'
 import { mt } from './memory-state'
 
 export function StoryCardEditor({
-  runId, keepsake, lang, onClose,
+  runId,
+  keepsake,
+  lang,
+  onClose,
 }: {
   runId: string
   keepsake: Keepsake
@@ -35,7 +38,8 @@ export function StoryCardEditor({
 
   useEffect(() => {
     let alive = true
-    api.previewStoryCard(runId, keepsake.id)
+    api
+      .previewStoryCard(runId, keepsake.id)
       .then(({ card: c, preview: p }) => {
         if (!alive) return
         setCard(c)
@@ -44,8 +48,12 @@ export function StoryCardEditor({
         setCover(c.coverLine)
         setThought(c.thought)
       })
-      .catch((e) => { if (alive) setError((e as Error).message) })
-    return () => { alive = false }
+      .catch((e) => {
+        if (alive) setError((e as Error).message)
+      })
+    return () => {
+      alive = false
+    }
   }, [runId, keepsake.id])
 
   const patch = async (body: Parameters<typeof api.editStoryCard>[2]) => {
@@ -94,8 +102,12 @@ export function StoryCardEditor({
   }
 
   return (
-    <div className="ewc-overlay" role="dialog" aria-modal="true"
-      aria-label={mt(lang, 'card.title')}>
+    <div
+      className="ewc-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={mt(lang, 'card.title')}
+    >
       <div className="ewc-head">
         <div className="ewc-title">{mt(lang, 'card.title')}</div>
         <div className="ewc-exports">
@@ -120,18 +132,24 @@ export function StoryCardEditor({
           <label className="ewc-field">
             <span>{mt(lang, 'card.field.title')}</span>
             <input
-              value={title} maxLength={120}
+              value={title}
+              maxLength={120}
               onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => { if (title.trim() && title !== card.title) void patch({ title }) }}
+              onBlur={() => {
+                if (title.trim() && title !== card.title) void patch({ title })
+              }}
             />
           </label>
           <label className="ewc-field">
             <span>{mt(lang, 'card.field.cover')}</span>
             <input
-              value={cover} maxLength={200}
+              value={cover}
+              maxLength={200}
               placeholder={mt(lang, 'card.field.coverHint')}
               onChange={(e) => setCover(e.target.value)}
-              onBlur={() => { if (cover !== card.coverLine) void patch({ coverLine: cover }) }}
+              onBlur={() => {
+                if (cover !== card.coverLine) void patch({ coverLine: cover })
+              }}
             />
           </label>
 
@@ -144,19 +162,28 @@ export function StoryCardEditor({
                   checked={ev.included}
                   onChange={() => void patch({ events: { [ev.id]: !ev.included } })}
                 />
-                <span className="ewc-row-turn">
-                  {mt(lang, 'star.detail.turn', { n: ev.turn })}
-                </span>
+                <span className="ewc-row-turn">{mt(lang, 'star.detail.turn', { n: ev.turn })}</span>
                 <span className="ewc-row-title">{ev.title}</span>
               </label>
               <span className="ewc-move">
-                <button className="ews-btn" type="button" disabled={i === 0}
+                <button
+                  className="ews-btn"
+                  type="button"
+                  disabled={i === 0}
                   aria-label={mt(lang, 'card.moveUp')}
-                  onClick={() => move(ev.id, -1)}>↑</button>
-                <button className="ews-btn" type="button"
+                  onClick={() => move(ev.id, -1)}
+                >
+                  ↑
+                </button>
+                <button
+                  className="ews-btn"
+                  type="button"
                   disabled={i === card.events.length - 1}
                   aria-label={mt(lang, 'card.moveDown')}
-                  onClick={() => move(ev.id, 1)}>↓</button>
+                  onClick={() => move(ev.id, 1)}
+                >
+                  ↓
+                </button>
               </span>
             </div>
           ))}
@@ -170,7 +197,8 @@ export function StoryCardEditor({
                   type="checkbox"
                   checked={ent.included}
                   onChange={() =>
-                    void patch({ entities: { [ent.id]: { included: !ent.included } } })}
+                    void patch({ entities: { [ent.id]: { included: !ent.included } } })
+                  }
                 />
                 <span className="ewc-row-title">{ent.name}</span>
               </label>
@@ -183,8 +211,7 @@ export function StoryCardEditor({
                   const display = e.target.value
                   setCard({
                     ...card,
-                    entities: card.entities.map((x) =>
-                      x.id === ent.id ? { ...x, display } : x),
+                    entities: card.entities.map((x) => (x.id === ent.id ? { ...x, display } : x)),
                   })
                 }}
                 onBlur={(e) => {
@@ -211,9 +238,13 @@ export function StoryCardEditor({
           <label className="ewc-field">
             <span>{mt(lang, 'card.field.thought')}</span>
             <textarea
-              rows={2} value={thought} maxLength={1000}
+              rows={2}
+              value={thought}
+              maxLength={1000}
               onChange={(e) => setThought(e.target.value)}
-              onBlur={() => { if (thought !== card.thought) void patch({ thought }) }}
+              onBlur={() => {
+                if (thought !== card.thought) void patch({ thought })
+              }}
             />
           </label>
           <div className="ewc-langrow">
@@ -221,7 +252,8 @@ export function StoryCardEditor({
             {(['zh', 'en'] as const).map((l) => (
               <button
                 className={'ews-lens' + (card.language === l ? ' ews-lens-on' : '')}
-                type="button" key={l}
+                type="button"
+                key={l}
                 onClick={() => void patch({ language: l })}
               >
                 {l === 'zh' ? '中文' : 'English'}
@@ -233,15 +265,11 @@ export function StoryCardEditor({
         {/* The resolved preview — exactly the export's content (§11). */}
         <div className="ewc-preview">
           <h2 className="ewc-p-title">{preview.title}</h2>
-          {preview.coverLine ? (
-            <p className="ewc-p-cover">{preview.coverLine}</p>
-          ) : null}
+          {preview.coverLine ? <p className="ewc-p-cover">{preview.coverLine}</p> : null}
           {preview.events.map((ev) => (
             <section className="ewc-p-event" key={ev.id}>
               <div className="ewc-p-head">
-                <span className="ewc-row-turn">
-                  {mt(lang, 'star.detail.turn', { n: ev.turn })}
-                </span>
+                <span className="ewc-row-turn">{mt(lang, 'star.detail.turn', { n: ev.turn })}</span>
                 <strong>{ev.title}</strong>
               </div>
               <p>{ev.excerpt || ev.summary}</p>
@@ -251,13 +279,13 @@ export function StoryCardEditor({
           {preview.entities.length ? (
             <div className="ewc-p-cast">
               {preview.entities.map((e) => (
-                <span className="ews-chip" key={e.id}>{e.display}</span>
+                <span className="ews-chip" key={e.id}>
+                  {e.display}
+                </span>
               ))}
             </div>
           ) : null}
-          {preview.thought ? (
-            <p className="ewc-p-thought">{preview.thought}</p>
-          ) : null}
+          {preview.thought ? <p className="ewc-p-thought">{preview.thought}</p> : null}
         </div>
       </div>
       <style>{CSS_TEXT}</style>
