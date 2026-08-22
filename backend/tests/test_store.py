@@ -185,6 +185,40 @@ def test_index_upsert_replaces_and_promotes(store: RunStore) -> None:
     assert "lastPlayed" in rows[0]
 
 
+def test_created_at_is_written_once_and_survives_being_played(store: RunStore) -> None:
+    """The shelf offers two orderings, and they are only different if one of the two
+    timestamps stands still. `lastPlayed` moves with every month written; `createdAt`
+    is the life's beginning and must not, or "by when I started it" would be a second
+    spelling of "most recent" and the toggle would do nothing."""
+    a = store.create_run(_state(1), {"templateId": "t", "character": "甲"})
+    born = next(r for r in store.read_index() if r["runId"] == a)["createdAt"]
+    assert born > 0
+
+    store.upsert_index({"runId": a, "templateId": "t", "character": "甲", "turn": 9})
+    row = next(r for r in store.read_index() if r["runId"] == a)
+    assert row["createdAt"] == born, "a month written does not move the beginning"
+    assert row["lastPlayed"] > born or row["lastPlayed"] >= born
+    assert row["turn"] == 9, "the rest of the row still refreshes"
+
+
+def test_a_row_from_before_created_at_existed_gets_one_without_losing_its_place(
+    store: RunStore,
+) -> None:
+    """No migration: Endless Worlds' lives are throwaway test data. But a row already
+    on disk must not be dropped or reordered by the new field appearing — it simply
+    gains one on its next write, and until then the client falls back to lastPlayed."""
+    a = store.create_run(_state(1), {"templateId": "t", "character": "甲"})
+    rows = store.read_index()
+    for row in rows:
+        row.pop("createdAt", None)  # a row as an older build wrote it
+    store._kv.set("index", {"runs": rows})
+    assert "createdAt" not in store.read_index()[0], "the old shape is what we start from"
+
+    store.upsert_index({"runId": a, "templateId": "t", "character": "甲", "turn": 2})
+    row = next(r for r in store.read_index() if r["runId"] == a)
+    assert row["createdAt"] > 0, "the next write supplies one"
+
+
 def test_patch_index_merges_metadata_without_reordering(store: RunStore) -> None:
     a = store.create_run(_state(1), {"templateId": "t", "character": "甲"})
     b = store.create_run(_state(1), {"templateId": "t", "character": "乙"})

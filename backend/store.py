@@ -484,12 +484,24 @@ class RunStore:
         return []
 
     def upsert_index(self, summary: dict[str, Any]) -> None:
-        """Record or refresh one run's Lives-view row."""
+        """Record or refresh one run's Lives-view row.
+
+        ``lastPlayed`` is rewritten on every call — it is what the shelf sorts by,
+        so it must track the most recent month written. ``createdAt`` is written
+        ONCE and then carried forward from the row already on file: a life's
+        beginning does not change, and the shelf's "oldest first / by when I started
+        it" ordering is only meaningful if this field stays put while `lastPlayed`
+        moves. A row from before the field existed keeps `lastPlayed` as its
+        stand-in, which orders it no worse than it was ordered before.
+        """
         run_id = summary.get("runId")
         if not isinstance(run_id, str):
             raise StoreError("index summary needs a runId")
         _check_run_id(run_id)
-        summary = {**summary, "lastPlayed": time.time()}
+        now = time.time()
+        prior = next((r for r in self.read_index() if r.get("runId") == run_id), None)
+        created = (prior or {}).get("createdAt") or summary.get("createdAt") or now
+        summary = {**summary, "lastPlayed": now, "createdAt": float(created)}
         rows = [r for r in self.read_index() if r.get("runId") != run_id]
         rows.insert(0, summary)
         self._kv.set(_INDEX_KEY, {"runs": rows})

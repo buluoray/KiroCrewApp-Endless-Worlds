@@ -484,6 +484,22 @@
 @media (min-width: 768px) { .ew-detail-title { font-size: 22px; } }
 
 .ew-section { font-size: 13px; font-weight: 600; margin: 0 0 7px; }
+/* A heading with one control on its right. The heading keeps its own margin, so
+   the row does not add another and shift every list below it. */
+.ew-section-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+/* Names the order it would switch TO, so it needs no separate label. Quiet by
+   default because it is a preference, not an action the page is asking for. */
+.ew-order-toggle {
+  margin: 0 0 7px; padding: 0; background: transparent; border: 0; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--muted, #6b7280);
+  letter-spacing: .02em; white-space: nowrap;
+}
+.ew-order-toggle:hover { color: var(--text, #e2e8f0); }
+.ew-order-toggle:focus-visible {
+  outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px; border-radius: 4px;
+}
 .ew-block { margin-bottom: 18px; }
 /* A small explanatory caption under a block, e.g. what the accented chips mean. */
 .ew-hint { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.6; margin-top: -10px; }
@@ -916,7 +932,25 @@
 @media (hover: hover) { .ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); } }
 .ew-pager-arw:disabled { opacity: .35; cursor: default; }
 
-.ew-digest { margin: 0 0 20px; }
+/* The standing summary above the prose. It had no surface at all — 13px muted rows
+   sitting directly on the page's backdrop art, which is where it became hard to
+   read: a photograph or a motif behind small grey type takes the contrast with it.
+   A faint tint plus a border gives it a surface without turning it into a card that
+   competes with the story: deliberately quieter than `.ew-story-moment` (no accent
+   in the border, less tint), because the recap is a one-time notice and this is
+   permanent furniture the eye should pass over on its way to the prose. */
+.ew-digest {
+  margin: 0 0 20px; padding: 10px 12px 4px; border-radius: 10px;
+  /* Fixed dark values, NOT var(--card)/var(--border): those come from the DASHBOARD's
+     theme, and under a light dashboard `--card` is white — measured, a 42% mix of it
+     laid a white wash over this app's own dark canvas. The same rgba(6,7,14) family
+     the tab bar uses is correct on that canvas whatever theme surrounds it. */
+  border: 1px solid rgba(255, 255, 255, .09);
+  background: rgba(6, 7, 14, .42);
+}
+/* The last row's rule would otherwise sit a hair above the new bottom padding and
+   read as an unfinished edge. */
+.ew-digest .ew-drow:last-child { border-bottom: 0; }
 /* Page-turn: the story slides+fades in — from the right going forward, from the
    left going back. Keyed remount per turn runs it once; motion-reduce opts out. */
 @keyframes ew-page-fwd { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
@@ -1299,6 +1333,44 @@
   pointer-events: auto;
 }
 .ew-tabbar-hidden { transform: translateY(96px); }
+
+/* The phone's reading controls — back to the shelf, and the page pager — floating
+   just above the tab bar instead of sitting at the top of the page.
+   At the foot of a long month the top of the page is a full swipe away, so paging
+   on meant scrolling back up first. This rides the same scroll signal as the tab
+   bar: gone while you read downward, back on the first upward swipe, so one gesture
+   returns every control at once.
+   `bottom` clears the 60px tab bar plus the iOS home indicator, so the two stack
+   rather than overlap. Fixed AND portalled to body, because in the dashboard shell a
+   transformed ancestor would otherwise capture `fixed` and strand this mid-screen. */
+.ew-readerbar {
+  position: fixed; left: 0; right: 0; z-index: 29;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  max-width: 900px; margin-inline: auto;  /* match the centred .ew-root column */
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 16px;
+  /* Nearly opaque, not a soft gradient. Measured on a real render: a ramp from 0 to
+     .74 across 60px left the top half transparent enough for the prose to run
+     straight through the controls — the back label and the pager were being read
+     against moving body text. The row now owns its band, and the fade lives ABOVE it
+     (::before) so the story dissolves into the bar instead of meeting a hard edge. */
+  background: rgba(6, 7, 14, .9);
+  backdrop-filter: blur(7px);
+  transition: transform .28s ease, opacity .28s ease;
+  pointer-events: auto;
+}
+.ew-readerbar::before {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 26px;
+  background: linear-gradient(180deg, rgba(6, 7, 14, 0), rgba(6, 7, 14, .9));
+  pointer-events: none;
+}
+/* Slides DOWN behind the tab bar rather than up over the prose: it belongs to the
+   foot of the screen, and travelling far enough to clear its own height plus the bar
+   keeps a half-visible sliver from hanging under the story. */
+.ew-readerbar-hidden { transform: translateY(120px); opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ew-readerbar { transition: none; }
+}
 .ew-tab {
   flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: flex-end; gap: 3px; padding: 0 0 9px;

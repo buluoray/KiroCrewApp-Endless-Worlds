@@ -299,5 +299,7 @@
   "world.summary": "{groups} 项开局设定 · {panels} 组面板 · {turn}",
   "world.turnUnit": "以{unit}为一回合",
   "world.unopenable": "这个世界打不开：{problem}",
-  "world.unreadableDetail": "这次没能读取：{error}"
+  "world.unreadableDetail": "这次没能读取：{error}",
+  "shelf.orderRecent": "最近更新",
+  "shelf.orderStarted": "开始时间"
 }
