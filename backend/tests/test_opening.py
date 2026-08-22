@@ -198,6 +198,19 @@ def test_the_opening_prompt_names_the_run(tpl):
     assert "9856fa638614440fbc7171ba8fe896c5" in prompt
 
 
+def test_the_opening_prompt_nudges_the_first_backdrop_toward_a_scene(tpl):
+    """The first page is the slowest wait in the app: a hand-drawn LANE: motif is
+    two illustrator attempts of up to three minutes. The opening prompt biases the
+    FIRST backdrop toward a traced LANE: scene so the player opens on a real place
+    faster — while still leaving motif as the fallback for a non-photographable
+    opening. This lever lives only in the opening prompt, not the per-turn one."""
+    prompt = compose_opening_prompt(template=tpl, run_id="run-1")
+    assert "LANE: scene" in prompt
+    # The fallback must survive, or a purely fantastical opening is forced onto a
+    # blank procedural base instead of a hand-drawn motif.
+    assert "LANE: motif" in prompt
+
+
 # -- roles preset the opening and land grants -----------------------------
 
 ZOMBIE = _BACKEND.parent / "seeds" / "last-echoes-zombie-sim.md"
