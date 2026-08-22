@@ -378,7 +378,14 @@ sees is produced locally from a closed, code-owned vocabulary.
   the actual decoded format, per-axis dimensions, and total pixels before full
   conversion. Pillow/vtracer work runs in a killable child process bounded by
   `TRACE_TIMEOUT_SECS`; the parent also caps input/output bytes and validates the
-  returned fragment through `compile_backdrop` before trusting it.
+  returned fragment through `compile_backdrop` before trusting it. A fetch/trace
+  pass that fails EVERY candidate is retried a bounded `_FETCH_RETRY_ATTEMPTS` times
+  with a short `_FETCH_RETRY_BACKOFF_SECS` pause before the lane records
+  `fetch-failed` — the search is not repeated, only the fetch. A backdrop is never
+  re-fetched on a later turn, so without this a one-second network blip or a 429 on
+  the image host would cost that page its photo permanently; the happy path breaks on
+  the first success and never sleeps. Pinned by
+  `test_a_transient_fetch_failure_is_retried_before_settling_for_base`.
 
   The resulting fragments are the Illustrator's to choose among. Up to
   `TRACE_CANDIDATE_COUNT` (3) references are traced and stashed in `CandidateStore`
