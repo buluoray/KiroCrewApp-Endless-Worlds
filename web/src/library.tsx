@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { LifeRowData, LoreEntry, OpeningGroup, WorldDetail, WorldRow } from './api'
 import { api, API } from './api'
@@ -140,14 +141,35 @@ export function LifeRow({
   // feeds both, so the two renderings can never drift apart.
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const kebabRef = useRef<HTMLButtonElement>(null)
+  // Where to put the portalled menu: measured from the kebab, because once the menu
+  // leaves the card it can no longer be positioned relative to it.
+  const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null)
   useEffect(() => {
     if (!menuOpen) return undefined
     const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+      const inMenu = menuRef.current?.contains(e.target as Node)
+      const onKebab = kebabRef.current?.contains(e.target as Node)
+      if (!inMenu && !onKebab) setMenuOpen(false)
     }
+    // A scroll or resize moves the kebab out from under a menu anchored to where it
+    // WAS, so the menu closes rather than floating somewhere unrelated.
+    const drop = () => setMenuOpen(false)
     document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
+    window.addEventListener('scroll', drop, true)
+    window.addEventListener('resize', drop)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', drop, true)
+      window.removeEventListener('resize', drop)
+    }
   }, [menuOpen])
+
+  const openMenu = () => {
+    const r = kebabRef.current?.getBoundingClientRect()
+    if (r) setMenuAt({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) })
+    setMenuOpen((o) => !o)
+  }
   const actions: Array<{ key: string; label: string; aria?: string; onClick: () => void }> = []
   if (onRename) {
     actions.push({
@@ -210,16 +232,22 @@ export function LifeRow({
   // click can be swallowed by the outer one.
   return (
     <div className="ew-card ew-card-row">
+      {/* The backdrop and its scrim live in their OWN clipping box rather than
+          relying on the card to clip them. The card used to carry
+          `overflow: hidden` for this, which also silently cut the row's action menu
+          off at the card's edge — one property serving two purposes, and the menu
+          lost. Clipping here is exact (the layers round themselves) and local. */}
       {run.backdrop ? (
-        <img
-          className="ew-card-bg"
-          src={`${API}/runs/${encodeURIComponent(run.runId)}/backdrop?v=${run.backdrop.version}`}
-          alt=""
-          aria-hidden="true"
-          draggable={false}
-        />
+        <div className="ew-card-bgclip" aria-hidden="true">
+          <img
+            className="ew-card-bg"
+            src={`${API}/runs/${encodeURIComponent(run.runId)}/backdrop?v=${run.backdrop.version}`}
+            alt=""
+            draggable={false}
+          />
+          <div className="ew-card-bg-scrim" />
+        </div>
       ) : null}
-      {run.backdrop ? <div className="ew-card-bg-scrim" aria-hidden="true" /> : null}
       <button
         className="ew-card-open"
         type="button"
@@ -254,29 +282,38 @@ export function LifeRow({
           {/* Mobile: one kebab that opens the same actions as a menu. */}
           <div className="ew-life-menu" ref={menuRef}>
             <button
+              ref={kebabRef}
               className="ew-kebab"
               type="button"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-label={t('life.actions', { name })}
-              onClick={() => setMenuOpen((o) => !o)}
+              onClick={openMenu}
             >
               <MenuGlyph />
             </button>
-            {menuOpen ? (
+            {menuOpen && menuAt ? createPortal((
               <>
-                {/* A full-viewport backdrop under the menu. Without it a tap that
-                    lands outside the menu (or an iOS remove-on-tap ghost click after
-                    choosing an item) falls straight through to the life row beneath
-                    and opens it — the "click-through to the row below" bug. The
-                    backdrop sits above every row (z-index) and below the menu, so it
-                    absorbs those taps and closes the menu. */}
+                {/* Portalled to body, with the backdrop, for a reason no z-index could
+                    solve: inside the card these sat in a stacking context the content
+                    wrapper created, so the menu painted UNDER the phone's bottom bars
+                    however high its own z-index went. At body level it competes with
+                    them directly — and it also escapes the card's own box, which used
+                    to cut it off a few rows short.
+
+                    The backdrop absorbs a tap that lands outside the menu (and the
+                    iOS ghost click after choosing an item), which would otherwise
+                    fall through and open the life beneath. */}
                 <div
                   className="ew-menu-backdrop"
                   aria-hidden="true"
                   onClick={() => setMenuOpen(false)}
                 />
-                <div className="ew-menu" role="menu">
+                <div
+                  className="ew-menu"
+                  role="menu"
+                  style={{ top: `${menuAt.top}px`, right: `${menuAt.right}px` }}
+                >
                   {actions.map((a) => (
                     <button
                       key={a.key}
@@ -303,7 +340,7 @@ export function LifeRow({
                   ))}
                 </div>
               </>
-            ) : null}
+            ), document.body) : null}
           </div>
         </>
       ) : null}
