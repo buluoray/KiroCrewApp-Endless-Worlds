@@ -523,6 +523,7 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
         "Never wrap either SVG in a Markdown code fence",
         "Adding animation is recommended in BOTH lanes",
         "the only requirement is that the motion has genuine artistic quality",
+        "set the scene's own elements in motion",
         "Follow the lane-specific visual feedback loop before publication",
         "endless_submit_backdrop_draft",
         "does not publish them",
