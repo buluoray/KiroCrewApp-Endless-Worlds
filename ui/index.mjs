@@ -7310,10 +7310,13 @@ function EndlessWorlds() {
 			}, "removed-" + id))
 		] });
 	}
+	const viewClass = "ew-root ew-view-" + view;
+	const widthClass = " ew-w-" + readWidth;
+	const rootClass = viewClass + (narrowLive ? " ew-root-flushtop" : "") + widthClass + (view === "library" ? " ew-home" : "");
 	return /* @__PURE__ */ jsx(LanguageContext.Provider, {
 		value: applyLanguage,
 		children: /* @__PURE__ */ jsxs("div", {
-			className: "ew-root ew-view-" + view + (narrowLive ? " ew-root-flushtop" : "") + " ew-w-" + readWidth + (view === "library" ? " ew-home" : ""),
+			className: rootClass,
 			lang,
 			ref: rootRef,
 			children: [

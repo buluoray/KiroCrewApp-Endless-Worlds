@@ -892,20 +892,21 @@ export default function EndlessWorlds() {
     )
   }
 
+  // Published as separate class fragments (not one literal): the view and the
+  // read measure are distinct facts the stylesheet keys off, and other state (the
+  // phone's flush-top reading page) can contribute a class between them. Kept as
+  // dedicated statements so each concatenation stays intact and self-documenting.
+  const viewClass = 'ew-root ew-view-' + view
+  const widthClass = ' ew-w-' + readWidth
+  const rootClass =
+    viewClass +
+    (narrowLive ? ' ew-root-flushtop' : '') +
+    widthClass +
+    (view === 'library' ? ' ew-home' : '')
+
   return (
     <LanguageContext.Provider value={applyLanguage}>
-      <div
-        className={
-          'ew-root ew-view-' +
-          view +
-          (narrowLive ? ' ew-root-flushtop' : '') +
-          ' ew-w-' +
-          readWidth +
-          (view === 'library' ? ' ew-home' : '')
-        }
-        lang={lang}
-        ref={rootRef}
-      >
+      <div className={rootClass} lang={lang} ref={rootRef}>
         {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
           instead of outliving it in the page's stylesheet list. */}
