@@ -298,7 +298,11 @@ function StarStyles() {
 
 const CSS_TEXT = `
 .ews-overlay {
-  position: absolute; inset: 0; min-height: 100%; z-index: 60;
+  /* fixed, not absolute: the app mounts inside the dashboard's own scroll
+     container, so an absolute overlay scrolls away with the content and the play
+     page's story prose shows past it. Pin it to the viewport like the other
+     full-screen modals (legacy recap, story card) so it always covers. */
+  position: fixed; inset: 0; min-height: 100%; z-index: 60;
   display: flex; flex-direction: column;
   background: var(--bg, #14151f); color: var(--fg, #e5e7eb); overflow: hidden;
 }
