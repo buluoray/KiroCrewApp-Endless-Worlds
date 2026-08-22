@@ -112,6 +112,21 @@ guarantee.
   `test_the_scene_is_loaded_as_a_sandboxed_src_document`, and
   `test_the_scene_has_no_fullscreen_affordance`.
 
+- **A scene frame is sized by its own document, and clears the phone's tab bar.**
+  The frame's origin is opaque, so the document reports its content height and
+  `SceneSlot` applies it clamped; the stylesheet height is only the pre-report
+  fallback. Its surface uses fixed dark values rather than `var(--card)`/
+  `var(--border)`, which a light dashboard theme resolves to white behind a scene
+  sitting on the world's own dark canvas. Because the frames render after the shell
+  and outside it, the shell's bottom padding cannot reach them: the tab-bar
+  clearance goes to whatever the page ends with — `.ew-scenes-clear` when frames are
+  on screen, and the region pane's own padding otherwise, so the gap never lands
+  between the panels and the map instead of under it. Pinned by
+  `test_scene_slot.py::test_the_frame_is_sized_from_the_documents_own_report`,
+  `test_a_height_report_is_not_an_answer`,
+  `test_the_slot_surface_does_not_follow_the_dashboard_theme`, and
+  `test_the_scene_frames_clear_the_phones_tab_bar`.
+
 - **A scene answer takes the same road as any turn.** A scene posts its answer
   back via `postMessage` carrying a nonce that names this app, this scene, and a
   choice; `main.tsx` routes it through `api.answerScene` (which validates the

@@ -628,6 +628,11 @@ export default function EndlessWorlds() {
   // On a phone a system region hides the story column and shows its frames; the
   // desktop shows everything and never hides the body.
   const hideBody = narrowLive && tab !== 'reading' && tab !== 'starmap'
+  /** Whether a scene frame is actually on screen below the shell. The phone's
+   *  tab-bar clearance belongs to whatever the page ENDS with: when frames follow
+   *  the region pane, padding the pane only opens a gap between the panels and the
+   *  map, and leaves the last frame under the bar. */
+  const scenesShown = narrowLive && activeSceneIds.length > 0
 
   let body: React.ReactNode
   if (view === 'live' && live) {
@@ -941,7 +946,7 @@ export default function EndlessWorlds() {
               region's panels stand alone. Its mounted scenes render below, outside
               the shell, filtered to the same region. */}
           {hideBody ? (
-            <div className="ew-region-pane" style={{ paddingBottom: '72px' }}>
+            <div className="ew-region-pane" style={{ paddingBottom: scenesShown ? undefined : '72px' }}>
               {panels.filter((p) => (p.region ?? '') === tab).map((p) => (
                 <PanelBox key={p.id} panel={p} />
               ))}
@@ -953,19 +958,27 @@ export default function EndlessWorlds() {
       {/* Outside `body` on purpose, and one frame per mounted scene: each is
           created on first need and never moved or re-keyed, because moving an
           iframe reloads it. The order is the mount order and never re-sorted, so an
-          asking scene becoming answered does not shuffle a frame and reload it. */}
-      {live ? scenes.map((s) => (
-        <SceneSlot
-          key={s.sceneId}
-          runId={live}
-          sceneId={s.sceneId}
-          asks={s.asks}
-          visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
-          onChoice={onSceneChoice}
-          resetSignal={sceneEpoch}
-          locked={turnPending}
-        />
-      )) : null}
+          asking scene becoming answered does not shuffle a frame and reload it.
+
+          The wrapper is stable for the whole life of the run, so the frames are
+          created inside it and never move: it exists to carry the phone's tab-bar
+          clearance, which the shell's own padding cannot reach out here. */}
+      {live ? (
+        <div className={scenesShown ? 'ew-scenes-clear' : undefined}>
+          {scenes.map((s) => (
+            <SceneSlot
+              key={s.sceneId}
+              runId={live}
+              sceneId={s.sceneId}
+              asks={s.asks}
+              visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
+              onChoice={onSceneChoice}
+              resetSignal={sceneEpoch}
+              locked={turnPending}
+            />
+          ))}
+        </div>
+      ) : null}
       {doomed ? (
         <DeleteWorldDialog
           worldId={doomed}

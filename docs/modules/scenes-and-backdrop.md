@@ -45,8 +45,19 @@ sees is produced locally from a closed, code-owned vocabulary.
   (`test_tree_nests_children_under_parents_and_escapes`). The `grid` branch places
   cells from a validated integer column count and rejects one out of range
   (`test_grid_rejects_out_of_range_columns`,
-  `test_grid_lays_cells_into_columns_and_escapes_labels`). Node, edge, and depth
-  ceilings are legibility bounds pinned by the same tests, not restated here.
+  `test_grid_lays_cells_into_columns_and_escapes_labels`). A cell's `mark` carries
+  two separable intentions: a STRING is that cell's own symbol and renders as an
+  escaped badge, while `true` tints the whole cell. A symbol deliberately does not
+  also tint — a narrator marks every cell of a map with its own symbol, and tinting
+  on any mark rendered all of them identically while dropping the symbols entirely.
+  A string past `MAX_MARK` is dropped whole rather than cut, because truncating an
+  emoji's codepoint sequence renders a lone joiner or variation selector.
+  `test_a_cells_symbol_mark_is_rendered_and_does_not_tint_every_cell`,
+  `test_a_true_mark_still_tints_the_cell_and_draws_no_badge`,
+  `test_a_mark_that_is_not_a_symbol_draws_nothing_rather_than_a_cut_one`, and
+  `test_a_symbol_mark_is_escaped_like_any_other_narrator_text` pin it. Node, edge,
+  and depth ceilings are legibility bounds pinned by the same tests, not restated
+  here.
 
 - **A scene is validated whole before any byte is emitted.** `compile_scene` builds
   the entire body or raises `SceneSpecError`; a scene never mounts half-drawn, and
@@ -100,6 +111,25 @@ sees is produced locally from a closed, code-owned vocabulary.
   fullscreen affordance (`test_the_scene_has_no_fullscreen_affordance`): keeping it
   inline avoids covering dashboard chrome on desktop and colliding with the
   portalled tab bar on mobile.
+
+- **The frame is as tall as its picture, and the picture paints its own canvas.**
+  One fixed height for every spec was wrong in both directions: a three-row ledger
+  sat in a dead band, and a map taller than the frame lost its last row to
+  `overflow: hidden` with nothing to scroll. The frame has an opaque origin, so the
+  host cannot measure inside it — `SCENE_SCRIPT` reports `document.body`'s own
+  height (never `documentElement`, whose height tracks the frame's viewport and so
+  can never report a shrink) on load and through a `ResizeObserver`, and `SceneSlot`
+  applies it clamped between `MIN_SCENE_H` and `MAX_SCENE_H`; the stylesheet's
+  `.ew-slot-on` height stands in until the first report. A height message is not an
+  answer: it is handled before the answer guards, so it neither fires a turn nor
+  trips the first-result latch. `_STYLE` colours `html` as well as `body`, because
+  the part of a frame a short document does not cover is painted by the canvas —
+  left transparent, it showed the host page through. Pinned by
+  `test_widget.py::test_the_frame_reports_its_own_content_height`,
+  `test_the_documents_canvas_is_painted_not_just_its_body`,
+  `test_scene_slot.py::test_the_frame_is_sized_from_the_documents_own_report`,
+  `test_a_height_report_is_not_an_answer`, and
+  `test_the_slot_surface_does_not_follow_the_dashboard_theme`.
 
 - **The sandbox never gains `allow-same-origin`, and content loads through `src`.**
   The frame is `sandbox="allow-scripts allow-forms"`

@@ -12,13 +12,23 @@ function sceneVersion(html: string): string {
   return (h >>> 0).toString(36)
 }
 
-/** What a scene's frame posts back when the player acts. */
+/** What a scene's frame posts back: an answer when the player acts, and its own
+ *  content height whenever that changes. */
 interface SceneMessage {
   source?: unknown
   sceneId?: unknown
   nonce?: unknown
   choice?: unknown
+  height?: unknown
 }
+
+/** The band the frame is allowed to occupy, in px. Below the floor a one-line
+ *  ledger reads as a rendering failure; above the ceiling a runaway spec would
+ *  push the rest of the page out of reach. Between them the frame is exactly as
+ *  tall as its picture — no dead band under a short scene, and no map with its
+ *  last row clipped off by a frame that was one fixed height for every spec. */
+const MIN_SCENE_H = 96
+const MAX_SCENE_H = 1400
 
 /**
  * The frame a scene is drawn in.
@@ -63,6 +73,11 @@ export function SceneSlot({
    *  tap has immediate feedback instead of looking dead for the seconds a turn
    *  takes. (M0.4) */
   const [sending, setSending] = useState(false)
+  /** The frame's own reported content height, clamped. 0 until the first report,
+   *  where the stylesheet's fallback height stands in. A later scene keeps the
+   *  previous height until its own report lands, so a page turn resizes once
+   *  instead of collapsing to the fallback and growing back. */
+  const [fitH, setFitH] = useState(0)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -129,6 +144,13 @@ export function SceneSlot({
       if (!d || d.source !== 'endless-scene') return
       if (d.sceneId !== sceneId) return
       if (typeof d.nonce !== 'string' || !d.nonce) return
+      // A height report is not an answer: it carries no choice, arrives whenever
+      // the picture's own size changes, and is never gated on the turn lock — a
+      // frame must be allowed to resize while a turn is in flight.
+      if (typeof d.height === 'number' && Number.isFinite(d.height)) {
+        setFitH(Math.min(MAX_SCENE_H, Math.max(MIN_SCENE_H, Math.round(d.height))))
+        return
+      }
       if (typeof d.choice !== 'string' || !d.choice) return
       if (answered.current) return
       if (lockedRef.current) return  // a turn is already in flight somewhere
@@ -181,6 +203,7 @@ export function SceneSlot({
         <iframe
           title={t('play.sceneTitle')}
           className={`ew-slot${on ? ' ew-slot-on' : ''}`}
+          style={on && fitH ? { height: `${fitH}px` } : undefined}
           sandbox="allow-scripts allow-forms"
           src={src}
           allow=""

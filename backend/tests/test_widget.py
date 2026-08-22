@@ -84,6 +84,35 @@ def test_the_only_script_is_the_apps_own_constant():
     assert SCENE_SCRIPT in out
 
 
+def test_the_frame_reports_its_own_content_height():
+    """The host cannot measure inside the frame — it has an opaque origin — so a
+    scene that is not exactly the stylesheet's fallback height can only be sized
+    from the document's own report. Without it every scene is one fixed height: a
+    short ledger sits in a dead band, and a map's last row is clipped off with no
+    way to scroll to it.
+
+    Measured on ``body``, not ``documentElement``: the latter's height tracks the
+    frame's viewport when content is shorter, so it can never report a shrink.
+    """
+    out = compile_scene("map", SIMPLE, STATE)
+    assert "height:" in SCENE_SCRIPT and "ResizeObserver" in SCENE_SCRIPT
+    assert "document.body.getBoundingClientRect().height" in SCENE_SCRIPT
+    assert "documentElement.getBoundingClientRect" not in SCENE_SCRIPT
+    assert SCENE_SCRIPT in out
+
+
+def test_the_documents_canvas_is_painted_not_just_its_body():
+    """A document shorter than its frame leaves the remainder painted by the CANVAS.
+    With only ``body`` coloured, that remainder is transparent and the host page
+    shows through — which under a light dashboard theme put the scene on a pale
+    slab. The canvas has to carry the colour too."""
+    out = compile_scene("map", SIMPLE, STATE)
+    style = out.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert re.search(r"html\s*\{[^}]*background:\s*#0b0c10", style), (
+        "the scene's canvas has no background of its own"
+    )
+
+
 def test_narrator_text_never_reaches_script_context():
     spec = {
         "title": "</script><script>alert(1)</script>",
@@ -375,6 +404,13 @@ def _scene(el: dict) -> str:
     return compile_scene("map", {"elements": [el]}, STATE)
 
 
+def _body(out: str) -> str:
+    """The rendered half only. A negative assertion about a CLASS has to be made
+    here: the stylesheet names every class it styles, so `"gmk" not in out` fails on
+    the rule that draws it rather than on any element."""
+    return out.split("<body>", 1)[1]
+
+
 def test_grid_lays_cells_into_columns_and_escapes_labels():
     out = _scene({"kind": "grid", "columns": 3, "cells": [
         {"label": "王庭", "mark": True}, {"label": "<b>矿脉</b>", "note": "危险"},
@@ -384,6 +420,58 @@ def test_grid_lays_cells_into_columns_and_escapes_labels():
     assert "<b>矿脉</b>" not in out             # label escaped
     assert "&lt;b&gt;矿脉&lt;/b&gt;" in out
     assert "危险" in out
+
+
+def test_a_cells_symbol_mark_is_rendered_and_does_not_tint_every_cell():
+    """A map's cells are told apart by their own symbols. Treating any mark as a
+    whole-cell tint dropped those symbols on the floor AND, because a narrator marks
+    every cell of a map, tinted all of them identically — a highlight that highlights
+    everything says nothing.
+    """
+    out = _scene({"kind": "grid", "columns": 3, "cells": [
+        {"label": "市区", "mark": "⚠"},
+        {"label": "据点", "mark": "🏠", "note": "楼梯已封"},
+        {"label": "安置点", "mark": "🔥"},
+    ]})
+    for glyph in ("⚠", "🏠", "🔥"):
+        assert f'<span class="gmk">{glyph}</span>' in out
+    assert "gc gm" not in _body(out), "a symbol must not also tint the cell"
+
+
+def test_a_symbol_mark_passes_the_same_stripper_as_any_narrator_text():
+    """`_esc` runs the shared framing stripper, which removes a variation selector —
+    so an emoji written as ``☠️`` (U+2620 U+FE0F) renders as its base codepoint. The
+    badge still appears; this pins that it is not silently lost, and that a mark takes
+    the same road every other narrator string takes rather than a private one.
+    """
+    out = _scene({"kind": "grid", "columns": 1, "cells": [{"label": "安置点", "mark": "☠️"}]})
+    assert '<span class="gmk">☠</span>' in out
+
+
+def test_a_true_mark_still_tints_the_cell_and_draws_no_badge():
+    """The other intention `mark` carries, kept separable: one cell called out of
+    several, with no symbol to show."""
+    out = _scene({"kind": "grid", "columns": 2,
+                  "cells": [{"label": "据点", "mark": True}, {"label": "巷子"}]})
+    assert "gc gm" in _body(out)
+    assert "gmk" not in _body(out)
+
+
+@pytest.mark.parametrize("mark", ["", "   ", "这里很危险千万不要过去", "DANGEROUS-ROAD"])
+def test_a_mark_that_is_not_a_symbol_draws_nothing_rather_than_a_cut_one(mark):
+    """A mark past the cap is dropped WHOLE, never truncated: an emoji is a
+    codepoint sequence, so cutting one renders a lone joiner or variation selector.
+    The cell still renders — a misused field costs its badge, not the map."""
+    out = _scene({"kind": "grid", "columns": 1, "cells": [{"label": "巷子", "mark": mark}]})
+    assert "巷子" in out
+    assert "gmk" not in _body(out) and "gc gm" not in _body(out)
+
+
+def test_a_symbol_mark_is_escaped_like_any_other_narrator_text():
+    out = _scene({"kind": "grid", "columns": 1,
+                  "cells": [{"label": "巷子", "mark": "<b>!"}]})
+    assert "<b>!" not in _body(out)
+    assert "&lt;b&gt;!" in out
 
 
 def test_grid_clamps_out_of_range_columns_into_range():

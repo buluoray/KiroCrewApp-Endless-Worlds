@@ -1279,15 +1279,28 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-slot {
   display: none;
   width: 100%;
-  border: 1px solid var(--border, #2d2f3d);
+  /* Fixed values, NOT var(--card)/var(--border): this frame sits on the world's own
+     dark canvas, so a light dashboard theme would resolve those to white and paint a
+     pale slab behind the scene. The background matches the compiled document's own
+     so the seam is invisible. */
+  border: 1px solid rgba(255, 255, 255, .10);
   border-radius: 10px;
-  background: var(--card, #1f2030);
-  /* A scene is a picture, not a page: it never becomes the scrolling thing. */
+  background: #0b0c10;
+  /* A scene is a picture, not a page: it never becomes the scrolling thing. The
+     frame is sized to the document's reported height instead, so there is nothing
+     left below the fold to scroll to. */
   overflow: hidden;
 }
+/* The height before the frame has reported its own: a scene mid-load, or one whose
+   report never arrives. Live scenes are sized in `scene.tsx` from the report. */
 .ew-slot-on { display: block; height: 320px; }
 
 .ew-slot-wrap { position: relative; margin: 16px 0 0; }
+
+/* The scene frames render after the app shell, outside it — so the shell's own
+   bottom clearance does not reach them, and the last scene on a phone ended up
+   under the fixed tab bar. This is that clearance for the frames. */
+.ew-scenes-clear { padding-bottom: 72px; }
 
 /* A shelf row that carries its own destructive control. The row is a div and the
    open action is a button INSIDE it, because a button cannot contain a button --
