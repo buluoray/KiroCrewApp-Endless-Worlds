@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { api } from './api'
+import { API, api } from './api'
 import { t } from './strings'
 
 /** What a scene's frame posts back: an answer when the player acts, and its own
@@ -20,6 +20,21 @@ interface SceneMessage {
  *  last row clipped off by a frame that was one fixed height for every spec. */
 const MIN_SCENE_H = 96
 const MAX_SCENE_H = 1400
+/** How long a frame may take to report its height before the slot calls it failed.
+ *  Generous on purpose: the document is a local request and reports on load, so
+ *  seconds of headroom cover a cold instance without ever making a working scene
+ *  flash an error. Too short shows a false failure; too long restores the silent
+ *  blank frame this exists to prevent. */
+const SCENE_RENDER_DEADLINE_MS = 6000
+
+/** A short, stable token that changes only when the scene's compiled HTML does, so
+ *  the iframe `src` reloads on a real content change but NOT on a tab switch or
+ *  re-render (which would otherwise reload and lose what the player was looking at). */
+function sceneVersion(html: string): string {
+  let h = 5381
+  for (let i = 0; i < html.length; i++) h = ((h << 5) + h + html.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
 
 /**
  * The frame a scene is drawn in.
@@ -164,39 +179,51 @@ export function SceneSlot({
   // A scene that has been asked for but whose picture has not arrived yet: say so,
   // rather than leaving a blank slot that reads as broken.
   const loading = !!sceneId && !html && !failed
-  // The frame renders the BYTES ALREADY FETCHED above, handed over as a blob:
-  // document — it does not ask the network a second time.
+  // The frame loads the scene as a real DOCUMENT from the scene route, with a
+  // content-version token so it reloads on a content change and not on a tab
+  // switch. Three forms have been tried on the surfaces this app actually runs on,
+  // and this is the only one that renders on all of them:
   //
-  // It used to point `src` at the scene route. That made the picture depend on a
-  // SECOND request, a document navigation, authenticated by whatever the browser
-  // chose to attach to it rather than by the fetch that had already succeeded — and
-  // when that navigation came back as anything other than our document (an auth
-  // refusal, a shell, a JSON body the frame will not render), the result was a
-  // blank frame at the stylesheet's fallback height with no error anywhere: the app
-  // had its html, so it believed the scene was fine. Nothing in the UI could
-  // report a failure it never saw.
+  //   `srcdoc`  — blank-renders in WebKit / iOS WKWebView (observed: an empty box
+  //               where the local map should be).
+  //   `blob:`   — renders in Chromium, and in an iOS WKWebView shell (AEA) it fails
+  //               the load with "invalid url or response" and takes the page down
+  //               with it (observed on a real device). A blob URL is not a form
+  //               every embedder resolves; a plain https document is.
+  //   route src — renders on both. It is what shipped for two days while scene maps
+  //               were being fixed FROM phone screenshots, which is the evidence
+  //               that this shape loads there.
   //
-  // `srcdoc` is still not an option (WebKit / iOS WKWebView blank-render a
-  // sandboxed srcdoc frame, which is what the route existed to work around); a
-  // blob: document is a real document load, which is why the dashboard's own widget
-  // frames use one, and its CSP allows `frame-src blob:`.
+  // The cost of the route is that the picture depends on a request the app does not
+  // read: the frame owns that response. That is a real hole — a refusal or a shell
+  // instead of our document leaves a blank frame — but it is closed below by a
+  // watchdog rather than by avoiding the request, because the frame already tells us
+  // when it ran: it reports its own height. No height means it did not render.
   //
   // The boundary is unchanged: the sandbox attribute still omits allow-same-origin,
   // so the document keeps an opaque origin and its postMessage origin is the string
-  // "null" the handler below checks; its own <meta> CSP travels in the bytes, and
-  // where the parent's policy also applies the stricter of the two wins per
-  // directive. The blob URL doubles as the reload key — it changes exactly when the
-  // compiled html does, so a tab switch or re-render does not reload the frame.
-  const [src, setSrc] = useState<string | undefined>(undefined)
+  // "null" the handler below checks.
+  const src =
+    on && runId
+      ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}` +
+        `?v=${sceneVersion(html)}`
+      : undefined
+
+  // The watchdog that closes the route's hole. The frame's document reports its own
+  // height as soon as it runs, so a frame that has not reported by the deadline did
+  // not render — an auth refusal, an SPA shell, a JSON body, an embedder that
+  // refused the URL. Without this the slot sits blank at the stylesheet's fallback
+  // height and says nothing, which is the failure mode that cost two rounds of
+  // guessing: the app holds valid html and believes the scene is fine.
+  //
+  // Keyed on `src`, so a new scene gets a fresh deadline; a height report clears it
+  // by re-running with fitH set. Cleared rather than latched, because a slow first
+  // paint on a cold instance must not be reported as a failure forever.
   useEffect(() => {
-    if (!html || !sceneId) {
-      setSrc(undefined)
-      return undefined
-    }
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
-    setSrc(url)
-    return () => URL.revokeObjectURL(url)
-  }, [html, sceneId])
+    if (!src || fitH) return undefined
+    const timer = setTimeout(() => setFailed(true), SCENE_RENDER_DEADLINE_MS)
+    return () => clearTimeout(timer)
+  }, [src, fitH])
 
   return (
     <div
@@ -230,8 +257,8 @@ export function SceneSlot({
       {everNeeded ? (
         <iframe
           title={t('play.sceneTitle')}
-          className={`ew-slot${on ? ' ew-slot-on' : ''}`}
-          style={on && fitH ? { height: `${fitH}px` } : undefined}
+          className={`ew-slot${on && !failed ? ' ew-slot-on' : ''}`}
+          style={failed ? { display: 'none' } : on && fitH ? { height: `${fitH}px` } : undefined}
           sandbox="allow-scripts allow-forms"
           src={src}
           allow=""
