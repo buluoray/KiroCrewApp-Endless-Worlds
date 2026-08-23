@@ -83,6 +83,21 @@ know or branch on system kinds.
   Enforced by `systems._matched_sum`; pinned by
   `test_systems.test_accrual_ignores_gains_for_other_fields`.
 
+- **A gain's field names exactly one ledger.** Because a gain carries only a field —
+  no path, no system id — that final segment is a gain-fed system's whole identity on
+  the wire, so two `accrual`/`resource` systems whose paths end in the same segment
+  (`state.hero.gold` and `state.sect.gold`) would each bank the same declared gain,
+  compounding every turn with nothing in the record able to separate them. The kinds
+  that read gains are `template.GAIN_FED_SYSTEM_KINDS`; a pack declaring a colliding
+  pair is refused, and a compiled header drops the later system instead of losing the
+  world. `decay` and `unlock` never read gains, so they may share a segment freely.
+  Enforced by `template._parse_systems` + `compile._dedup_system_targets`; pinned by
+  `test_template.test_two_gain_fed_systems_may_not_share_the_last_path_segment`,
+  `test_template.test_a_gain_fed_system_may_share_a_segment_with_a_kind_that_ignores_gains`,
+  `test_compile.test_a_second_system_claiming_the_same_gain_name_is_dropped`, and
+  `test_systems.test_only_the_declared_gain_fed_kinds_read_gains` (which measures
+  which kinds actually respond to a gain, so the tuple cannot drift).
+
 - **One malformed system never blocks a turn or a valid sibling.**
   `apply_systems` isolates every entry, and `_apply_systems` is an enrichment pass
   inside the commit path. This is fail-soft by design: mechanics may degrade, but

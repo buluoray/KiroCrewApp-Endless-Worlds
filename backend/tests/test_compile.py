@@ -448,6 +448,37 @@ def test_a_bad_system_entry_is_dropped_and_the_good_one_survives() -> None:
     assert any("dropped systems" in w for w in res.warnings)
 
 
+def test_a_second_system_claiming_the_same_gain_name_is_dropped() -> None:
+    """Each entry is valid alone, so only the cross-entry pass catches it. A compiled
+    world loses the later ledger rather than the whole pack."""
+    h = json.loads(json.dumps(GOOD))
+    h["systems"] = [
+        {"id": "purse", "kind": "resource", "into": "state.hero.gold"},
+        {"id": "treasury", "kind": "resource", "into": "state.sect.gold"},
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert [s.id for s in res.pack.template.systems] == ["purse"]
+    assert any("gains named 'gold'" in w for w in res.warnings)
+
+
+def test_a_second_system_writing_the_same_path_is_dropped() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["systems"] = [
+        {"id": "xp", "kind": "accrual", "into": "state.hero.mark"},
+        {
+            "id": "awoken",
+            "kind": "unlock",
+            "into": "state.hero.mark",
+            "when": "state.trials.done == true",
+        },
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert [s.id for s in res.pack.template.systems] == ["xp"]
+    assert any("already owned by 'xp'" in w for w in res.warnings)
+
+
 def test_a_non_list_optional_field_is_dropped_whole() -> None:
     h = json.loads(json.dumps(GOOD))
     h["lore"] = "this should have been a list"

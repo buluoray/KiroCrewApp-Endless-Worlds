@@ -142,13 +142,18 @@ systems, roles, hand_to_agent, milestones`.
   numbers.** `_parse_systems` takes `id` + `kind` (one of `SYSTEM_KINDS` =
   accrual/resource/decay/unlock) + `into` (a dotted `state.…` path the system owns),
   plus per-kind knobs (`tiers`/`tierInto`, `floor`/`cap`/`perTurn`, `when`). An
-  unknown kind is refused and an `unlock` without a `when` is refused; the world's
-  own concepts (tier names, what a system models) are not validated. Load-bearing
-  because it is the boundary that keeps every world number the app's rather than the
-  model's. Enforced by `template._parse_systems`; pinned by
+  unknown kind is refused and an `unlock` without a `when` is refused; two systems
+  writing the same `into`, or two gain-fed systems (`GAIN_FED_SYSTEM_KINDS`) whose
+  paths end in the same segment, are refused as well — see the gain-identity
+  invariant in [systems.md](systems.md) for why a shared segment silently
+  double-credits. The world's own concepts (tier names, what a system models) are not
+  validated. Load-bearing because it is the boundary that keeps every world number
+  the app's rather than the model's. Enforced by `template._parse_systems`; pinned by
   `test_template.test_systems_parse_and_validate_structure`,
   `test_template.test_an_unknown_system_kind_is_refused`,
-  `test_template.test_an_unlock_without_a_condition_is_refused`, and
+  `test_template.test_an_unlock_without_a_condition_is_refused`,
+  `test_template.test_two_gain_fed_systems_may_not_share_the_last_path_segment`,
+  `test_template.test_two_systems_may_not_write_the_same_path`, and
   `test_template.test_absent_systems_is_not_an_error`. Runtime transitions,
   ownership, and extension workflows live in [systems.md](systems.md).
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from systems import _get, apply_systems
-from template import Condition, System
+from template import GAIN_FED_SYSTEM_KINDS, SYSTEM_KINDS, Condition, System
 
 
 def _apply(systems, state, prev, gains):
@@ -77,3 +77,26 @@ def test_backend_owns_the_value_over_the_narrator_declaration() -> None:
     st = {"hero": {"xp": 999}}
     _apply([xp], st, {"hero": {"xp": 10}}, [{"field": "xp", "amount": "5"}])
     assert _get(st, "state.hero.xp") == 15
+
+
+def test_only_the_declared_gain_fed_kinds_read_gains() -> None:
+    """`template.GAIN_FED_SYSTEM_KINDS` is what `_parse_systems` uses to decide whose
+    `into` segments must be unique, so it has to keep naming exactly the kinds that
+    actually consume a gain. Measured rather than asserted: feed each kind a matching
+    gain and see which values move."""
+    responds: list[str] = []
+    for kind in SYSTEM_KINDS:
+        s = System(
+            id="probe",
+            kind=kind,
+            into="state.probe.amount",
+            # An unlock needs a condition; keep it false so only a gain could move it.
+            when=Condition.parse("state.never == true") if kind == "unlock" else None,
+        )
+        without: dict = {}
+        _apply([s], without, {"probe": {"amount": 5}}, [])
+        with_gain: dict = {}
+        _apply([s], with_gain, {"probe": {"amount": 5}}, [{"field": "amount", "amount": "3"}])
+        if _get(without, "state.probe.amount") != _get(with_gain, "state.probe.amount"):
+            responds.append(kind)
+    assert responds == list(GAIN_FED_SYSTEM_KINDS)
