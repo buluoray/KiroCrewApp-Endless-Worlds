@@ -33,14 +33,8 @@ const report = {
   violations: [],
   pending: [],
 }
-/** Requests the dashboard itself makes that are expected to fail on a headless,
- *  non-desktop instance. An ignore list, not a blanket filter: anything else that
- *  fails must stay visible, since that is how a blank frame explains itself. */
-const IGNORED_FAILURES = [/\/api\/instances\b/]
-/** The app's own API prefix — its calls are reported in full (status included), and
- *  any that never settle are reported as pending. A surface stuck on a loading
- *  placeholder is otherwise indistinguishable from one that rendered nothing. */
-const APP_API = /\/api\/apps\/[^/]+\//
+/** Where a failed request is judged — see failures.mjs for which are noise and why. */
+const { APP_API, isNoiseFailure } = await import(new URL('./failures.mjs', import.meta.url))
 const inflight = new Map()
 
 const browser = await chromium.launch()
@@ -73,8 +67,8 @@ const page = await context.newPage()
 page.on('console', (m) => {
   if (m.type() === 'error') report.consoleErrors.push(m.text().slice(0, 300))
 })
-const note = (line, url) => {
-  if (!IGNORED_FAILURES.some((re) => re.test(url))) report.badRequests.push(line)
+const note = (line, url, errorText = '') => {
+  if (!isNoiseFailure(url, errorText)) report.badRequests.push(line)
 }
 page.on('request', (r) => {
   if (APP_API.test(r.url())) inflight.set(r, { path: r.url().replace(/\?.*/, ''), at: Date.now() })
@@ -95,7 +89,8 @@ page.on('response', (r) => {
 })
 page.on('requestfailed', (r) => {
   inflight.delete(r)
-  note(`FAILED ${r.failure()?.errorText} ${r.url().slice(0, 180)}`, r.url())
+  const err = r.failure()?.errorText || ''
+  note(`FAILED ${err || 'unknown'} ${r.url().slice(0, 180)}`, r.url(), err)
 })
 
 /** Return to the shelf if a life is currently open.

@@ -145,6 +145,14 @@ jobs:
           npm install --no-save
           npx playwright install --with-deps chromium
 
+      # The rule that decides whether a failed request fails the run. It is the one
+      # piece of the driver with no browser in it, and getting it wrong is silent in
+      # both directions — too loose hides the defect the gate exists for, too tight
+      # reds a run for something the app did not do.
+      - name: Unit-test the harness's failure rules
+        working-directory: devtools
+        run: node --test failures.test.mjs
+
       - name: Bring up a seeded instance
         env:
           UISHOT_WORK: ${{ runner.temp }}/uishot

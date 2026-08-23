@@ -81,10 +81,18 @@ is still queryable, and "it stepped aside" has to mean it stopped rendering.
 
 ```
 26 shots, 1 needing attention
-  BROKE starmap 1440/dark: .ew-slot-on: is visible (1156x175) but must have stepped aside
+  starmap 1440/dark
+      BROKE: .ew-slot-on: is visible (1156x175) but must have stepped aside
 report: …/review/report.json
 sheet:  …/review/sheet-1440-dark-1.png  1600x1807px
 ```
+
+**One predicate decides both the count and the explanation** (`_attention`), because
+those were written separately once and drifted: a shot whose only problem was a failed
+request got counted in "N needing attention" while the printer explained only violations
+and unreached shots. The run went red and named nothing, which costs an artifact download
+to read one line. `backend/tests/test_devtools_review_explains.py` pins it — every signal
+that can turn a run red must also be able to explain itself.
 
 Sheets are sized to stay under 2000px on every side, because a reviewing agent's image
 API refuses anything larger — a sheet nobody can open is worse than no sheet. They
@@ -139,6 +147,17 @@ looking at is a 403 body. So each shot also reports:
 
 A shot with a pending or failed request is printed `WARN`, and the command exits
 non-zero.
+
+**An aborted request is judged by whose it is** (`failures.mjs`, unit-tested). The
+dashboard fires its own boot calls — agents, theme, approvals, its project icon — while
+the driver is still navigating to the app, and the browser cancels whatever is in flight
+when it navigates. Those aborts are a race against the host's cold start, not a defect,
+and they are nondeterministic: one commit passed a run and failed the next on nothing but
+runner speed, which is the kind of red that teaches people to hit rerun. So a non-app
+abort is dropped. **An abort of the app's own request is still a failure**, and that
+distinction is the point — a scene frame whose second document request was cancelled is
+exactly the defect class this harness was built for, so a blanket ignore-all-aborts rule
+would have hidden it.
 
 ## What a screenshot cannot decide: whether text is legible
 

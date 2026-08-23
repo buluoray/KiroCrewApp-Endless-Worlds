@@ -348,13 +348,10 @@ def cmd_review(args: argparse.Namespace) -> int:
                 if args.width and width != args.width:
                     continue
                 rep = _run_one(got, shot, width, height, theme, out)
-                bad = (
-                    bool(rep.get("violations"))
-                    or bool(rep.get("badRequests"))
-                    or bool(rep.get("pending"))
-                    or not rep.get("reached")
-                )
-                failed += 1 if bad else 0
+                # One predicate for the count, the printed reasons, and the sheet's own
+                # red marker — three readers that must never disagree about what is red.
+                reasons = _attention(rep)
+                failed += 1 if reasons else 0
                 rep["shotKey"] = shot.key
                 rep["width"] = width
                 rep["theme"] = theme
@@ -362,7 +359,7 @@ def cmd_review(args: argparse.Namespace) -> int:
                 lanes.setdefault((width, theme), []).append(
                     {
                         "png": rep.get("shot"),
-                        "bad": bad,
+                        "bad": bool(reasons),
                         "caption": _caption(shot, rep),
                     }
                 )
@@ -416,25 +413,38 @@ def cmd_review(args: argparse.Namespace) -> int:
 
     print(f"\n{len(report)} shots, {failed} needing attention")
     for rep in report:
-        where = f"{rep['shotKey']} {rep['width']}/{rep['theme']}"
-        for line in rep.get("violations") or []:
-            print(f"  BROKE {where}: {line}")
-        # The reason a shot never reached its surface matters more than the violations
-        # that follow from it — without this the log says 52 things are missing and not
-        # one word about why, which is a diagnosis you have to download an artifact for.
-        if not rep.get("reached"):
-            print(f"  UNREACHED {where}: {rep.get('failure') or 'unknown'}")
-            for step in rep.get("steps") or []:
-                if step.startswith("FAILED"):
-                    print(f"      step: {step}")
-            for line in (rep.get("consoleErrors") or [])[:3]:
-                print(f"      console: {line}")
-            for line in (rep.get("badRequests") or [])[:3]:
-                print(f"      request: {line}")
+        reasons = _attention(rep)
+        if not reasons:
+            continue
+        print(f"  {rep['shotKey']} {rep['width']}/{rep['theme']}")
+        for line in reasons:
+            print(f"      {line}")
     print("\nreport: " + str(out / "report.json"))
     for sheet in sheets:
         print("sheet:  " + sheet)
     return 1 if failed else 0
+
+
+def _attention(rep: dict) -> list[str]:
+    """Every reason this shot needs a human, as printable lines. Empty means clean.
+
+    The counter and the printer both read THIS list, because the two used to be written
+    separately and drifted: a shot with a failed request was counted in "N needing
+    attention" while the printer explained only violations and unreached shots, so a red
+    run said something was wrong and refused to say what. A gate that withholds the
+    reason costs an artifact download to read one line.
+    """
+    out: list[str] = []
+    # Why a shot never reached its surface comes first: the violations that follow from
+    # it are consequences, and reading them first sends you to the wrong place.
+    if not rep.get("reached"):
+        out.append(f"UNREACHED: {rep.get('failure') or 'unknown'}")
+        out += [f"  step: {s}" for s in rep.get("steps") or [] if s.startswith("FAILED")]
+        out += [f"  console: {line}" for line in (rep.get("consoleErrors") or [])[:3]]
+    out += [f"BROKE: {line}" for line in rep.get("violations") or []]
+    out += [f"REQUEST: {line}" for line in rep.get("badRequests") or []]
+    out += [f"PENDING: {line}" for line in rep.get("pending") or []]
+    return out
 
 
 def _caption(shot: shotdefs.Shot, rep: dict) -> str:
