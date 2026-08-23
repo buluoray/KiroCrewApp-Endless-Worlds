@@ -58,8 +58,8 @@ CANON_SPEC = {
 #: The pinned pair. Both halves move together, deliberately: re-pinning the digest
 #: without bumping the compiler leaves every mounted scene on the old bytes, and
 #: bumping the compiler without re-pinning means the output was not actually checked.
-PINNED_COMPILER = 2
-PINNED_SHA256 = "5da7f6c0200e70db8a13c7ae9c9382779cd13d14adaf0de6d0c63e9d5bcc16cf"
+PINNED_COMPILER = 5
+PINNED_SHA256 = "4926926975a283409cae91271d6a10a9a343f82478e6b7909b9d70251d4061ef"
 
 
 def _compiled() -> str:

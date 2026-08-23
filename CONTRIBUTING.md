@@ -51,13 +51,29 @@ kirocrew app install /absolute/path/to/endless-worlds
 kirocrew app enable endless-worlds
 ```
 
+Or let [`devtools/`](devtools/README.md) do it in a throwaway instance, with a seeded
+life story you did not have to write, and screenshot the result:
+
+```bash
+python3 devtools/uishot.py up                    # own data home, own port, 5 seeded lives
+python3 devtools/uishot.py shot starmap --theme light --width 390
+```
+
+The same seeding works on its own, so you can load a playable life in seconds without
+asking an LLM to write one:
+
+```bash
+python3 devtools/uishot.py seed --data-dir ~/.kiro/crew/apps/endless-worlds/data
+```
+
 ## Quality gates (what CI enforces)
 
 Every PR into `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 1. **Backend tests** — `cd backend && python -m pytest`.
 2. **Backend lint + types** (the `backend-lint` job) — `ruff check backend`,
-   `ruff format --check backend`, and `mypy` (config in `backend/pyproject.toml`).
+   `ruff format --check backend`, and `mypy` (config in `backend/pyproject.toml`), plus
+   the same three over `devtools/` (config in `devtools/pyproject.toml`).
 3. **Frontend lint** — `cd web && npm run lint`. ESLint (`web/eslint.config.js`)
    with `typescript-eslint` recommended plus `react-hooks/rules-of-hooks` as an
    **error**, so a hook after an early return (React #310) fails CI instead of

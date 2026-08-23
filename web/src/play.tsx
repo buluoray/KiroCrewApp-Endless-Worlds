@@ -183,6 +183,7 @@ export function PlayPage({
   readerBar = false,
   openStar,
   onStarClose,
+  onSheetOpen,
   onLiveTurn,
   narrow,
   onPanels,
@@ -209,6 +210,13 @@ export function PlayPage({
    *  undefined the play page's own control owns it (desktop). */
   openStar?: boolean
   onStarClose?: () => void
+  /** Whether a sheet (the star map, the legacy picker) is covering this column.
+   *
+   *  Reported upward because the mounted scene frames are rendered at the ROOT, not
+   *  in this column: they must never be re-parented (that reloads them), so a sheet
+   *  anchored to this column cannot cover them and only the root can take them off
+   *  the page while one is open. */
+  onSheetOpen?: (open: boolean) => void
   /** Report the live turn upward so the bottom bar can dot 书页 on a new month
    *  while the player is reading a system tab. */
   onLiveTurn?: (turn: number) => void
@@ -253,6 +261,13 @@ export function PlayPage({
   const asideSeenRef = useRef<Record<string, string>>({})
   // The legacy bridge picker (§9): offered on the ending page of a lineage world.
   const [legacyOpen, setLegacyOpen] = useState(false)
+  // One signal for both sheets: the root only needs to know that SOMETHING is
+  // covering this column, and reporting it here keeps the two sheets from each
+  // having to remember to do it.
+  const sheetOpen = starOpen || legacyOpen
+  useEffect(() => {
+    onSheetOpen?.(sheetOpen)
+  }, [sheetOpen, onSheetOpen])
   const [back, setBack] = useState(false)
   // A recap belongs to entering a life, not to every poll or newly written turn.
   // The ref distinguishes the first load of this run from subsequent refreshes.

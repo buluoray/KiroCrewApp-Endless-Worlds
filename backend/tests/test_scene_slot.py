@@ -134,9 +134,14 @@ def test_a_height_report_is_not_an_answer(slot: str) -> None:
 
 
 def test_the_slot_surface_does_not_follow_the_dashboard_theme() -> None:
-    """The frame sits on the world's own dark canvas. Resolved against a LIGHT
-    dashboard theme, `var(--card)`/`var(--border)` are white, which painted a pale
-    slab behind the scene — visible wherever the document did not cover the frame.
+    """The frame is read on the world's own art, never on the host's palette.
+
+    Resolved against a LIGHT dashboard theme, `var(--card)`/`var(--border)` are white,
+    which painted a pale slab behind the scene. The frame is now FROSTED rather than
+    opaque — a fixed dark scrim at partial alpha plus a blur, so the world's backdrop
+    tints it — but the rule that matters is unchanged and stated the same way: no host
+    theme variable decides this surface. The contrast that alpha has to keep is
+    computed in ``tests/test_widget_contrast.py``.
     """
     slot_css = uisrc.styles().split(".ew-slot {", 1)[1].split("}", 1)[0]
     # Comments stripped first: the comment that explains this rule necessarily
@@ -144,7 +149,14 @@ def test_the_slot_surface_does_not_follow_the_dashboard_theme() -> None:
     # (the same trap `test_same_origin_is_never_granted` documents).
     decls = re.sub(r"/\*.*?\*/", "", slot_css, flags=re.S)
     assert "var(--card" not in decls and "var(--border" not in decls
-    assert "background: #0b0c10" in decls
+    found = re.search(r"background:\s*rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)", decls)
+    assert found, "the slot's scrim is not a fixed rgba colour: " + decls
+    red, green, blue, alpha = (float(v) for v in found.groups())
+    assert max(red, green, blue) < 60, "the scrim is not dark, so bright art decides legibility"
+    assert 0.3 <= alpha < 1.0, f"scrim alpha {alpha} is outside the frosted range"
+    assert re.search(r"(?:^|\s)backdrop-filter:\s*[^;]*blur", decls), (
+        "the slot has no backdrop blur, so sharp art competes with the text on it"
+    )
 
 
 def test_the_scene_frames_clear_the_phones_tab_bar() -> None:

@@ -200,6 +200,13 @@ export default function EndlessWorlds() {
       : false,
   )
   const [tab, setTab] = useState('reading')
+  /** Whether a sheet in the play column (star map, legacy picker) is open.
+   *
+   *  The mounted scene frames render HERE, outside that column, because
+   *  re-parenting an iframe reloads it — so a sheet anchored to the column cannot
+   *  cover them and they would otherwise stay on the page underneath it. Held as
+   *  state rather than derived, since only the play column knows its own sheets. */
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [liveTurn, setLiveTurn] = useState(0)
   /** tabId → the content signature last seen, so a tab dots only on an UNSEEN
    *  change. A ref (not state) because it is bookkeeping, not render input. */
@@ -621,9 +628,12 @@ export default function EndlessWorlds() {
     mq.addEventListener?.('change', on)
     return () => mq.removeEventListener?.('change', on)
   }, [])
-  // A new life always opens on its story, never on a stale system tab.
+  // A new life always opens on its story, never on a stale system tab — and never
+  // with the previous life's sheet still counted as open, which would leave this
+  // life's scene frames hidden with nothing on top of them.
   useEffect(() => {
     setTab('reading')
+    setSheetOpen(false)
   }, [live])
 
   const tabs = useMemo(() => buildTabs(scenes, panels), [scenes, panels])
@@ -689,6 +699,7 @@ export default function EndlessWorlds() {
         refresh={refresh}
         openStar={narrowLive ? tab === 'starmap' : undefined}
         onStarClose={() => setTab('reading')}
+        onSheetOpen={setSheetOpen}
         onLiveTurn={setLiveTurn}
         narrow={narrowLive}
         readerBar={narrowLive && !hideBody}
@@ -1051,7 +1062,7 @@ export default function EndlessWorlds() {
                 runId={live}
                 sceneId={s.sceneId}
                 asks={s.asks}
-                visible={!narrowLive || activeSceneIds.includes(s.sceneId)}
+                visible={!sheetOpen && (!narrowLive || activeSceneIds.includes(s.sceneId))}
                 onChoice={onSceneChoice}
                 resetSignal={sceneEpoch}
                 locked={turnPending}

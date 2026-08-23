@@ -1,0 +1,10 @@
+{
+  "name": "endless-worlds-devtools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser driver for the uishot UI screenshot harness. Not shipped with the app.",
+  "type": "module",
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

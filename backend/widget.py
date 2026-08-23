@@ -53,7 +53,7 @@ from view import strip_terminal_framing
 #: rows, and every already-mounted 物资账本 kept serving the blank one it had been
 #: compiled into. ``test_widget_output_is_pinned.py`` fails when the output changes
 #: without this moving, so the next fix cannot repeat it.
-COMPILER = 2
+COMPILER = 5
 
 #: A spec is a description, not a document. Anything past this is a narrator
 #: trying to write a page.
@@ -170,34 +170,46 @@ SCENE_SCRIPT = """<script>
 </script>"""
 
 _STYLE = """<style>
-:root { color-scheme: dark light; }
-/* On the canvas as well as the body: a document shorter than its frame leaves the
-   rest of the frame painted by the CANVAS, and an unpainted canvas shows the host
-   page through it — which is how a scene came to sit on a pale slab under a light
-   dashboard theme. */
-html { background: #0b0c10; }
+/* `dark`, NOT `dark light`: this document paints no ground of its own (below), and a
+   canvas that advertises BOTH schemes gets the browser's LIGHT base colour painted
+   under it — which rendered the whole frame as a white sheet with pale text. Caught by
+   screenshot, and the reason the first frosted build looked broken. */
+:root { color-scheme: dark; }
+/* TRANSPARENT on purpose, canvas included: the world's own backdrop art is painted
+   by the host behind this frame, and a scene that paints its own ground hides it —
+   a flat slab in the middle of the page the illustrator drew. The host's `.ew-slot`
+   carries a low-alpha dark scrim plus a blur, so what shows through here is the
+   world's colour and never the dashboard's: the light-theme white-slab bug this
+   replaces came from resolving var(--card), not from transparency.
+
+   `backdrop-filter` cannot live in here — an iframe's backdrop root is its OWN
+   document, so blurring the page behind it is impossible from inside. */
+html, body { background: transparent; }
 body {
   margin: 0; padding: 12px;
   font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #e2e8f0; background: #0b0c10;
+  color: #e9eef7;
 }
 h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
 .r { display: flex; gap: 10px; padding: 4px 0; align-items: baseline; }
-.k { color: #6b7280; flex: 0 0 6em; }
+/* Alpha, not a fixed grey: a muted label sitting on the world's art has to keep its
+   relationship to the text beside it whatever colour shows through. */
+.k { color: rgba(233, 238, 247, .66); flex: 0 0 6em; }
 .v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.n { color: #6b7280; }
-.t { border-radius: 2px; height: 4px; background: #2d2f3d; margin-top: 5px; }
+.n { color: rgba(233, 238, 247, .66); }
+.t { border-radius: 2px; height: 4px; background: rgba(255, 255, 255, .14); margin-top: 5px; }
 .f { height: 100%; background: #7c3aed; }
 ul { margin: 6px 0; padding-left: 1.3em; }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #2d2f3d; }
-th { color: #6b7280; font-weight: 500; }
-hr { border: none; border-top: 1px solid #2d2f3d; margin: 10px 0; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+th { color: rgba(233, 238, 247, .66); font-weight: 500; }
+hr { border: none; border-top: 1px solid rgba(255, 255, 255, .12); margin: 10px 0; }
 button {
   display: block; width: 100%; text-align: left; margin: 6px 0;
   padding: 10px 12px; min-height: 44px;
   font: inherit; color: inherit; cursor: pointer;
-  background: #1f2030; border: 1px solid #2d2f3d; border-radius: 8px;
+  background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 8px;
 }
 /* Rows are sized by what is IN them and never by the room around them. THREE
    latches now, because iOS WebKit still ballooned cells with the first two: it
@@ -218,24 +230,25 @@ button {
    cells into a tall airy block, and at phone width a column is ~100px wide, so a
    name that does not break lands outside its own box. */
 .gc {
-  background: #1f2030; border: 1px solid #2d2f3d; border-radius: 6px;
+  background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 6px;
   padding: 8px; min-height: 44px; font-size: 12px; box-sizing: border-box;
   line-height: 1.3; min-width: 0; overflow-wrap: anywhere;
 }
-.gc.gm { border-color: #7c3aed; background: #241d3a; }
+.gc.gm { border-color: rgba(154, 122, 255, .85); background: rgba(124, 58, 237, .22); }
 /* The cell's own symbol, inline before its name so it rides the label's first line
    and cannot be orphaned by a wrap. */
 .gmk { margin-inline-end: 4px; font-size: 13px; }
-.gn { display: block; color: #6b7280; font-size: 11px; line-height: 1.3; margin-top: 3px; }
+.gn { display: block; color: rgba(233, 238, 247, .66); font-size: 11px; line-height: 1.3; margin-top: 3px; }
 .lkwrap { margin: 8px 0; }
 svg.lk { width: 100%; height: auto; display: block; }
-.lke { stroke: #2d2f3d; stroke-width: 1.2; }
-.lkl { fill: #6b7280; font-size: 9px; text-anchor: middle; }
+.lke { stroke: rgba(255, 255, 255, .20); stroke-width: 1.2; }
+.lkl { fill: rgba(233, 238, 247, .66); font-size: 9px; text-anchor: middle; }
 .lkn { fill: #7c3aed; }
-.lknt { fill: #e2e8f0; font-size: 10px; text-anchor: middle; }
-ul.tree, ul.tree ul { list-style: none; margin: 4px 0; padding-left: 14px; border-left: 1px solid #2d2f3d; }
+.lknt { fill: #e9eef7; font-size: 10px; text-anchor: middle; }
+ul.tree, ul.tree ul { list-style: none; margin: 4px 0; padding-left: 14px; border-left: 1px solid rgba(255, 255, 255, .12); }
 ul.tree li { padding: 3px 0; }
-.tn { color: #6b7280; font-size: 11px; }
+.tn { color: rgba(233, 238, 247, .66); font-size: 11px; }
 </style>"""
 
 

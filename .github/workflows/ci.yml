@@ -77,6 +77,110 @@ jobs:
         working-directory: backend
         run: mypy .
 
+      # The dev screenshot harness is not shipped with the app, but it is read and
+      # edited like source and it drives the app's real writers — a rotted harness
+      # costs an afternoon at exactly the moment someone reaches for it. Its own
+      # pyproject.toml carries the same conservative rule set as the backend's.
+      - name: Ruff lint + format + mypy (devtools)
+        working-directory: devtools
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy .
+
+  ui-shots:
+    name: UI shots (real instance)
+    runs-on: ubuntu-latest
+    # The gate the unit tests structurally cannot be: it installs this app into a
+    # throwaway gateway, seeds fixture lives through the app's own writers, drives the
+    # REAL dashboard in a browser and asserts where things landed. Every defect this
+    # repo shipped to a player on the play surface was invisible to a test that did not
+    # render it — a scene frame blank because a second authenticated request failed
+    # unseen, a ledger empty from a stale compiled-bytes cache, a sheet that left the
+    # story's widgets on screen underneath it.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the host gateway
+        # A RELEASED WHEEL, into THIS job's own interpreter. Two separate requirements
+        # meet here, and missing either one costs a full job:
+        #
+        #   1. It must be a released build, not a git source install. `pip install
+        #      git+…KiroCrew` gives the Python package WITHOUT the dashboard bundle (the
+        #      SPA is built by that repo's own build step and is not in the source
+        #      tree), so the gateway comes up serving "Dashboard HTML not found" and
+        #      every shot photographs an error page. The wheel carries the built SPA.
+        #   2. It must land where `sys.executable` can import it. The official installer
+        #      prefers pipx, which puts the package in its own managed venv — correct
+        #      for a user, useless here, because the harness then has no interpreter
+        #      that can import the gateway and cannot start one at all.
+        #
+        # So resolve the channel's own signed feed for the version and its sha256, and
+        # let pip verify the bytes against it. The feed is the same pointer the
+        # installer reads, so this tracks the channel instead of pinning a version that
+        # silently rots; the hash means a wheel swapped underneath us fails the install
+        # rather than the assertions.
+        #
+        # kiro-cli is deliberately NOT installed: no shot starts an agent session, and
+        # the gateway reaches ready and serves the dashboard without it.
+        run: |
+          set -euo pipefail
+          feed=$(curl -fsS https://updates.crew.kiro.dev/feed/stable/latest-cli.json)
+          ver=$(printf '%s' "$feed" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          sha=$(printf '%s' "$feed" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])')
+          echo "host gateway: $ver ($sha)"
+          pip install "https://download.crew.kiro.dev/cli/stable/$ver/kirocrew-$ver-py3-none-any.whl#sha256=$sha"
+
+      - name: Install the browser driver
+        working-directory: devtools
+        run: |
+          npm install --no-save
+          npx playwright install --with-deps chromium
+
+      # The rule that decides whether a failed request fails the run. It is the one
+      # piece of the driver with no browser in it, and getting it wrong is silent in
+      # both directions — too loose hides the defect the gate exists for, too tight
+      # reds a run for something the app did not do.
+      - name: Unit-test the harness's failure rules
+        working-directory: devtools
+        run: node --test failures.test.mjs
+
+      - name: Bring up a seeded instance
+        env:
+          UISHOT_WORK: ${{ runner.temp }}/uishot
+        run: python3 devtools/uishot.py up
+
+      - name: Capture and assert every shot
+        # Non-zero on a violated UI-position expectation, a failed step, a non-2xx app
+        # request, or a request still pending — see devtools/shots.py for what each shot
+        # claims and devtools/README.md for why the assertions are relationships rather
+        # than pinned pixels.
+        env:
+          UISHOT_WORK: ${{ runner.temp }}/uishot
+        run: python3 devtools/uishot.py review
+
+      - name: Upload the contact sheets and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-shots
+          path: ${{ runner.temp }}/uishot/shots
+          if-no-files-found: warn
+
+      - name: Tear down
+        if: always()
+        env:
+          UISHOT_WORK: ${{ runner.temp }}/uishot
+        run: python3 devtools/uishot.py down
+
   frontend-build:
     name: Frontend typecheck + build
     runs-on: ubuntu-latest

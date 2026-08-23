@@ -131,15 +131,34 @@ def test_a_grid_row_is_sized_by_its_content_not_by_the_room_around_it():
     assert "align-items: start" in grid
 
 
-def test_the_documents_canvas_is_painted_not_just_its_body():
-    """A document shorter than its frame leaves the remainder painted by the CANVAS.
-    With only ``body`` coloured, that remainder is transparent and the host page
-    shows through — which under a light dashboard theme put the scene on a pale
-    slab. The canvas has to carry the colour too."""
+def test_the_documents_canvas_declares_a_dark_colour_scheme():
+    """A transparent canvas needs `color-scheme: dark`, or the browser paints WHITE.
+
+    The scene document deliberately paints no ground of its own so the world's backdrop
+    shows through the host's frosted frame. What makes that safe is this one
+    declaration: with no colour scheme declared, the browser puts its LIGHT base colour
+    under the transparent canvas and the frame renders as a white sheet with pale text
+    — the first frosted build did exactly that, and a screenshot is what caught it.
+
+    So the invariant that replaced "the canvas must be painted" is this: the canvas may
+    be transparent, but the colour scheme it is composited under must be dark.
+    """
     out = compile_scene("map", SIMPLE, STATE)
     style = out.split("<style>", 1)[1].split("</style>", 1)[0]
-    assert re.search(r"html\s*\{[^}]*background:\s*#0b0c10", style), (
-        "the scene's canvas has no background of its own"
+    # Comments stripped: the rule's own comment explains `color-scheme: dark`, and the
+    # declaration check is otherwise satisfied by that prose — this test passed with the
+    # declaration deleted until the comments came out.
+    decls = re.sub(r"/\*.*?\*/", "", style, flags=re.S)
+    # `dark;` and not merely `dark`: `dark light` also contains "dark" and is exactly
+    # the value that produced the white sheet, so a looser pattern passes the bug.
+    assert re.search(r"color-scheme:\s*dark\s*;", decls), (
+        "the scene document does not declare `color-scheme: dark` on its own (a "
+        "`dark light` canvas gets the browser's LIGHT base colour), so its transparent "
+        "canvas reads as a pale slab"
+    )
+    assert re.search(r"html[^{]*\{[^}]*background:\s*transparent", decls), (
+        "the canvas is painted again; the frosted frame only shows the world's art "
+        "through a transparent document"
     )
 
 

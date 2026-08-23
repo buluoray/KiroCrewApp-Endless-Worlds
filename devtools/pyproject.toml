@@ -1,0 +1,36 @@
+# Lint + type config for the dev-only screenshot harness.
+#
+# Same conservative rule set as backend/pyproject.toml, so one habit covers both
+# trees. CI runs (see .github/workflows/ci.yml):
+#   ruff check devtools && ruff format --check devtools && mypy devtools
+#
+# This tool is not shipped with the app, but it is read and edited like source, so it
+# is gated like source.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    # Line width is the formatter's job; a long URL or string it cannot split would
+    # otherwise trip E501 with no clean fix.
+    "E501",
+    "B008",
+    "B905",
+]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = false
+check_untyped_defs = false
+
+# The app's backend modules are imported by path at runtime (they are not a package),
+# and the host gateway package ships no stubs. Neither needs to be resolvable for this
+# tool to type-check.
+[[tool.mypy.overrides]]
+module = ["kiro_crew.*", "mcp_server", "library", "scenes", "backdrop", "keepsakes", "memory_graph"]
+ignore_missing_imports = true
