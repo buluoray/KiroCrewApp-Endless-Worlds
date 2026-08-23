@@ -506,7 +506,9 @@ _TOOLS: list[dict[str, Any]] = [
             "the turn's irreversible change or mood, one dominant image, a small "
             "palette, at most one motion verb (or none), and how it should differ "
             "from the previous backdrop — plus, if you want one, the common motif for "
-            "the choice buttons. Describe the picture; never write SVG here. Setting a "
+            "the choice buttons. An optional `STYLE:` line picks the painting style — "
+            "photo (traced photograph, the scene default), watercolor, oil, or "
+            "minimal. Describe the picture; never write SVG here. Setting a "
             "new one replaces the old, so ask for a fresh backdrop at a major turning "
             "point or a real jump in time or place, and simply omit this call when the "
             "current background still fits."
@@ -1922,8 +1924,16 @@ def _require_scene_underlay(run_id: str, turn: int, request: dict[str, Any]) -> 
     A base underlay satisfies this: the gate is "the lane ran", not "a photograph was
     found". The refusal names the one call that fixes it, and it fires at draft time
     as well as commit so the Illustrator learns before it renders previews.
+
+    A brief that declares a painterly STYLE (watercolor/oil/minimal) opts OUT of the
+    trace pipeline by design: the scene is hand-drawn in that style, so requiring a
+    trace record would force a search the narrator explicitly routed around. Only the
+    ``photo`` style — and the historical style-less scene brief, which keeps its old
+    meaning — must run the trace lane.
     """
     if str(request.get("lane") or "") != "scene":
+        return
+    if str(request.get("style") or "") in {"watercolor", "oil", "minimal"}:
         return
     if isinstance(_trace_store(run_id).load(turn), dict):
         return
@@ -1979,9 +1989,10 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
             "base is NOT the finished image; it is a tonal GROUND. Put one "
             '<g id="etr-underlay"/> in each SVG for that ground, then author a real '
             "hand-drawn scene above it — architecture, light, and evidence composed "
-            "with the same care as any scene, never a few bars over bare tone — and "
-            "take it through the full review pass before committing. Do not settle "
-            "for the bare base."
+            "with the same care as any scene, never a few bars over bare tone. Paint "
+            "it in a painterly style (watercolor suits most scenes; read that style's "
+            "skill file if your task names one) and take it through the full review "
+            "pass before committing. Do not settle for the bare base."
         )
     if reason == "search-failed":
         return (

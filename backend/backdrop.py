@@ -316,24 +316,21 @@ RENDER_TIMEOUT_SECS = 20
 def _render_thumbnail_backends(svg: str, tmp: Path, width: int, height: int) -> list[str]:
     """Try each local renderer in turn; return the per-backend error trail.
 
-    CairoSVG and ``rsvg-convert`` are optional compatibility paths; the app's Linux
-    runtime normally reaches librsvg directly through ``ctypes`` and needs no Python
-    package. Every backend receives only the already-compiled, off-box-reference-free
-    SVG. Runs inside the render child process, never in the gateway process.
+    Order is by FILTER FIDELITY, not availability: librsvg (2.50+) implements the
+    SVG filter primitives the painterly styles are built on (feTurbulence,
+    feDisplacementMap, lighting), so it runs first — through ``ctypes`` directly,
+    then via ``rsvg-convert``. CairoSVG is the portable last resort only: it
+    silently SKIPS those filter primitives, which renders every painterly style as
+    the same flat vector — an illustrator reviewing such a preview would tune its
+    brush parameters blind. Every backend receives only the already-compiled,
+    off-box-reference-free SVG. Runs inside the render child process, never in the
+    gateway process.
     """
     errors: list[str] = []
     try:
-        import cairosvg  # type: ignore[import-not-found]  # optional runtime
-
-        cairosvg.svg2png(
-            bytestring=svg.encode("utf-8"),
-            write_to=str(tmp),
-            output_width=width,
-            output_height=height,
-            unsafe=False,
-        )
-    except Exception as exc:  # noqa: BLE001 — try the next local renderer
-        errors.append(f"CairoSVG:{type(exc).__name__}")
+        _render_with_librsvg(svg, tmp, width, height)
+    except Exception as exc:  # noqa: BLE001 — try rsvg-convert
+        errors.append(f"librsvg:{type(exc).__name__}")
         tmp.unlink(missing_ok=True)
 
     converter = shutil.which("rsvg-convert")
@@ -355,15 +352,23 @@ def _render_thumbnail_backends(svg: str, tmp: Path, width: int, height: int) -> 
                 check=True,
                 timeout=RENDER_TIMEOUT_SECS,
             )
-        except Exception as exc:  # noqa: BLE001 — try direct librsvg
+        except Exception as exc:  # noqa: BLE001 — fall back to CairoSVG
             errors.append(f"rsvg-convert:{type(exc).__name__}")
             tmp.unlink(missing_ok=True)
 
     if not tmp.is_file():
         try:
-            _render_with_librsvg(svg, tmp, width, height)
+            import cairosvg  # type: ignore[import-not-found]  # optional runtime
+
+            cairosvg.svg2png(
+                bytestring=svg.encode("utf-8"),
+                write_to=str(tmp),
+                output_width=width,
+                output_height=height,
+                unsafe=False,
+            )
         except Exception as exc:  # noqa: BLE001 — normalized by the caller
-            errors.append(f"librsvg:{type(exc).__name__}")
+            errors.append(f"CairoSVG:{type(exc).__name__}")
             tmp.unlink(missing_ok=True)
     return errors
 
