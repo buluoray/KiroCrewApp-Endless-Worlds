@@ -557,6 +557,53 @@ def test_absent_systems_is_not_an_error() -> None:
     assert parse_template(build()).systems == []
 
 
+def test_two_gain_fed_systems_may_not_share_the_last_path_segment() -> None:
+    """A gain names only a field, matched against the last segment of `into`, so a
+    shared segment makes one declared gain bank into both ledgers with no way for a
+    later turn to tell them apart. Refused at the pack boundary instead."""
+    import pytest
+
+    with pytest.raises(TemplateError) as exc:
+        parse_template(
+            _with_block(
+                "systems:\n"
+                "  - { id: purse, kind: resource, into: state.hero.gold }\n"
+                "  - { id: treasury, kind: resource, into: state.sect.gold }"
+            )
+        )
+    assert exc.value.field == "systems[treasury].into"
+
+
+def test_a_gain_fed_system_may_share_a_segment_with_a_kind_that_ignores_gains() -> None:
+    """`decay` and `unlock` never read gains, so the collision cannot happen and the
+    pack is not punished for a coincidental name."""
+    t = parse_template(
+        _with_block(
+            "systems:\n"
+            "  - { id: purse, kind: resource, into: state.hero.gold }\n"
+            "  - { id: rot, kind: decay, into: state.sect.gold, perTurn: -1 }"
+        )
+    )
+    assert [s.id for s in t.systems] == ["purse", "rot"]
+
+
+def test_two_systems_may_not_write_the_same_path() -> None:
+    """Both compute from the prior state, so the one applied last would silently
+    discard the other's result."""
+    import pytest
+
+    with pytest.raises(TemplateError) as exc:
+        parse_template(
+            _with_block(
+                "systems:\n"
+                "  - { id: xp, kind: accrual, into: state.hero.mark }\n"
+                "  - { id: awoken, kind: unlock, into: state.hero.mark,"
+                " when: state.trials.done == true }"
+            )
+        )
+    assert exc.value.field == "systems[awoken].into"
+
+
 # -- roles + opening hand-off ---------------------------------------------
 
 

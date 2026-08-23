@@ -27,6 +27,7 @@ from typing import Any
 from chapters import bodies, brief
 from template import (
     FIELD_PRIMITIVES,
+    GAIN_FED_SYSTEM_KINDS,
     OPENING_KINDS,
     Condition,
     TemplateError,
@@ -136,10 +137,16 @@ REQUIRED FIELDS
                          optional per-turn "perTurn" drift (money, food, troops).
                 decay    a per-turn "perTurn" drift toward "floor"/"cap", no gains.
                 unlock   sets `into` true, and keeps it true, the turn "when" holds.
-              A gain matches a system by the LAST segment of its `into`
-              (into: state.hero.xp gets a gain whose field is "xp"). Put every NUMBER
-              the world tracks here: the narrator declares what happened, never the
-              total, so a duel is deadly in the fiction and the numbers are the app's.
+              A gain matches a system by the LAST SEGMENT of its `into`
+              (into: state.hero.xp gets a gain whose field is "xp"). That segment is
+              the system's NAME on the wire, so it must be unique across every
+              accrual and resource you declare: `state.hero.gold` and
+              `state.sect.gold` both answer to a gain named "gold" and one declared
+              gain would bank into both. Give each its own segment
+              (`state.sect.sectGold`), and never point two systems at the same path.
+              Put every NUMBER the world tracks here: the narrator declares what
+              happened, never the total, so a duel is deadly in the fiction and the
+              numbers are the app's.
               A declared system is INERT until the narrator feeds it: whenever you
               declare one, ALSO add a short PROSE rule that tells the narrator, in the
               world's own terms, to declare the matching gain (its `field` = the LAST
@@ -622,6 +629,48 @@ def _dedup_by_id(entries: list[Any], label: str, warnings: list[str]) -> list[An
     return out
 
 
+def _dedup_system_targets(entries: list[Any], warnings: list[str]) -> list[Any]:
+    """Drop a system that would share a target with one already declared, keeping the
+    first. Two collisions, both invisible once a life is running:
+
+    * the same ``into`` path — the systems overwrite each other's number;
+    * the same LAST SEGMENT of ``into`` between two gain-fed systems — a gain names
+      only a field, so one declared gain silently banks into both ledgers.
+
+    `_parse_systems` refuses either outright, which is right for a hand-written pack
+    but would sink a whole compiled world over one enrichment mistake. Dropping the
+    later system leaves the world playable and names the loss in the review.
+    """
+    seen_into: dict[str, str] = {}
+    seen_tail: dict[str, str] = {}
+    out: list[Any] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            out.append(entry)
+            continue
+        sid = str(entry.get("id") or "").strip()
+        into = str(entry.get("into") or "").strip()
+        kind = str(entry.get("kind") or "").strip()
+        if into and into in seen_into:
+            warnings.append(
+                f"dropped system {sid!r} (writes {into}, already owned by {seen_into[into]!r})"
+            )
+            continue
+        tail = into.split(".")[-1] if into else ""
+        if tail and kind in GAIN_FED_SYSTEM_KINDS:
+            if tail in seen_tail:
+                warnings.append(
+                    f"dropped system {sid!r} (gains named {tail!r} already feed "
+                    f"{seen_tail[tail]!r})"
+                )
+                continue
+            seen_tail[tail] = sid
+        if into:
+            seen_into[into] = sid
+        out.append(entry)
+    return out
+
+
 def _salvage_ids_and_scalars(body: dict[str, Any], prose: str, warnings: list[str]) -> None:
     """(5) world id, (6) the scalars the brief already says to default."""
     wid = str(body.get("id") or "").strip()
@@ -791,6 +840,8 @@ def _salvage_optional_lists(body: dict[str, Any], prose: str, warnings: list[str
         good = _keep_valid_entries(raw, validate_one, key, warnings)
         if key != "handToAgent":
             good = _dedup_by_id(good, key, warnings)
+        if key == "systems":
+            good = _dedup_system_targets(good, warnings)
         body[key] = good
 
 

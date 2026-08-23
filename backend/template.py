@@ -464,6 +464,15 @@ class Lore:
 #: an unknown kind is a structural error (surfaced in warnings, never silent).
 SYSTEM_KINDS = ("accrual", "resource", "decay", "unlock")
 
+#: The kinds that consume the narrator's declared ``gains``. A gain names only a
+#: FIELD, matched against the last segment of a system's ``into`` — it carries no
+#: path and no system id — so two gain-fed systems whose paths end in the same
+#: segment would both bank the same gain, and no later turn could tell them apart.
+#: `_parse_systems` refuses that pair; `systems.apply_systems` is what defines the
+#: membership, and `test_systems.test_only_the_declared_gain_fed_kinds_read_gains`
+#: fails if a kind starts or stops reading gains without this tuple moving.
+GAIN_FED_SYSTEM_KINDS = ("accrual", "resource")
+
 
 @dataclass
 class System:
@@ -675,6 +684,13 @@ def _parse_systems(raw: Any) -> list[System]:
 
     out: list[System] = []
     seen: set[str] = set()
+    #: dotted path -> owning system id. Two systems writing one path fight over it:
+    #: each computes from the prior state independently, so whichever is applied last
+    #: silently discards the other's result.
+    seen_into: dict[str, str] = {}
+    #: gain field (the last segment of `into`) -> owning system id. See
+    #: GAIN_FED_SYSTEM_KINDS for why a shared segment is refused.
+    seen_tail: dict[str, str] = {}
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             raise TemplateError(f"systems[{i}]", "an object with id, kind, and into")
@@ -692,6 +708,22 @@ def _parse_systems(raw: Any) -> list[System]:
         into = _state_path(
             _require(item, "into", str, f"system {sid} into"), f"systems[{sid}].into"
         )
+        if into in seen_into:
+            raise TemplateError(
+                f"systems[{sid}].into",
+                f"a path no other system owns (systems[{seen_into[into]}] already writes {into})",
+            )
+        seen_into[into] = sid
+        if kind in GAIN_FED_SYSTEM_KINDS:
+            tail = into.split(".")[-1]
+            if tail in seen_tail:
+                raise TemplateError(
+                    f"systems[{sid}].into",
+                    "a path whose last segment no other gain-fed system uses "
+                    f"(systems[{seen_tail[tail]}] already claims gains named {tail!r}; "
+                    "rename one target, e.g. state.sect.sectGold)",
+                )
+            seen_tail[tail] = sid
         source = str(item.get("source") or "gains").strip()
         if source != "gains":
             raise TemplateError(f"systems[{sid}].source", "only 'gains' is supported for now")
