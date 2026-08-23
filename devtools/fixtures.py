@@ -43,6 +43,9 @@ def _import_backend() -> Any:
 
 #: The world every fixture life is lived in — a real shipped pack, not a toy.
 WORLD_ID = "last-echoes-zombie-sim"
+#: The other shipped pack, and the only one that declares `lineage` — so the
+#: cross-generation fixtures have to live here rather than in the one above.
+LINEAGE_WORLD_ID = "age-of-sword-and-flame"
 
 
 @dataclass
@@ -58,7 +61,12 @@ class Scenario:
     label: str
     #: What this scenario exists to exercise, in one line (printed by `uishot list`).
     exercises: str
-    build: Callable[[Any, Path], str]
+    #: ``(srv, data_dir, already_built)`` -> runId. The third argument carries the
+    #: runIds of the scenarios built before this one, which is how the heir reaches
+    #: the ended life it inherits from — a lineage fixture cannot be built in
+    #: isolation, and faking one would mean hand-writing the bridge record the app
+    #: builds itself.
+    build: Callable[[Any, Path, dict[str, str]], str]
     #: Filled in at seed time with the runId the build produced.
     run_id: str = field(default="", compare=False)
 
@@ -180,11 +188,11 @@ def _advance(
         raise RuntimeError(f"turn {turn} refused: {out}")
 
 
-def _new_run(srv: Any, title: str, *, language: str = "zh") -> str:
+def _new_run(srv: Any, title: str, *, language: str = "zh", world: str = WORLD_ID) -> str:
     store = srv._store()
     return store.create_run(
-        {"turn": 0, "worldId": WORLD_ID, "language": language, "alive": True},
-        {"runId": "", "worldId": WORLD_ID, "title": title, "turn": 0},
+        {"turn": 0, "worldId": world, "language": language, "alive": True},
+        {"runId": "", "worldId": world, "title": title, "turn": 0},
     )
 
 
@@ -199,7 +207,7 @@ def _label(srv: Any, run: str, label: str) -> None:
 WORLD_TITLE = "末世残响"
 
 
-def _build_rich(srv: Any, data: Path) -> str:
+def _build_rich(srv: Any, data: Path, built: dict[str, str]) -> str:
     """The workhorse: a life deep enough to have every surface populated."""
     from backdrop import BackdropStore  # noqa: PLC0415
     from keepsakes import KeepsakeStore  # noqa: PLC0415
@@ -324,7 +332,7 @@ def _event_ids(srv: Any, run: str) -> list[str]:
     return sorted(index.get("events") or {})
 
 
-def _build_short_turn(srv: Any, data: Path) -> str:
+def _build_short_turn(srv: Any, data: Path, built: dict[str, str]) -> str:
     """A page barely taller than the viewport — the geometry that exposes a sheet or
     a scene frame sized from the story rather than from itself."""
     run = _new_run(srv, WORLD_TITLE)
@@ -332,7 +340,7 @@ def _build_short_turn(srv: Any, data: Path) -> str:
     return run
 
 
-def _build_ended(srv: Any, data: Path) -> str:
+def _build_ended(srv: Any, data: Path, built: dict[str, str]) -> str:
     """A closed life: the shelf marks it, and the ending recap is reachable."""
     run = _new_run(srv, WORLD_TITLE)
     _advance(srv, run, 1, _PROSE_SHORT, {"alive": True, "turn": 1, "language": "zh"})
@@ -346,7 +354,7 @@ def _build_ended(srv: Any, data: Path) -> str:
     return run
 
 
-def _build_long_title(srv: Any, data: Path) -> str:
+def _build_long_title(srv: Any, data: Path, built: dict[str, str]) -> str:
     """A title no shelf card was designed for — the cheapest way to find a clamp that
     was never applied."""
     run = _new_run(srv, WORLD_TITLE)
@@ -354,7 +362,7 @@ def _build_long_title(srv: Any, data: Path) -> str:
     return run
 
 
-def _build_english(srv: Any, data: Path) -> str:
+def _build_english(srv: Any, data: Path, built: dict[str, str]) -> str:
     """The same app in English: label widths differ enough to break a row that fits
     in Chinese, and this app ships both."""
     run = _new_run(srv, "Last Echoes", language="en")
@@ -364,6 +372,105 @@ def _build_english(srv: Any, data: Path) -> str:
         1,
         "The pump gave muddy water twice, then ran clear.",
         {"alive": True, "turn": 1, "language": "en"},
+    )
+    return run
+
+
+def _build_lineage_ended(srv: Any, data: Path, built: dict[str, str]) -> str:
+    """A finished life in the world that declares lineage — the source an heir needs.
+
+    Kept separate from the plain `ended` life because inheritance has real
+    preconditions: only the lineage world offers it, and only entities the finished
+    life VISIBLY held are inheritable, so this life has to have actually lived with
+    the people it passes on.
+    """
+    run = _new_run(srv, LINEAGE_WORLD_ID, world=LINEAGE_WORLD_ID)
+    base = {"alive": True, "worldId": LINEAGE_WORLD_ID, "language": "zh"}
+    _advance(
+        srv,
+        run,
+        1,
+        "洪水冲垮石桥的那晚，你把艾琳从水里拉上岸。她的手一直没有松开。",
+        {**base, "turn": 1},
+        memory={
+            "entities": [
+                {"id": "elin", "kind": "character", "name": "艾琳", "summary": "洪水那夜救下的人"},
+                {"id": "bridge", "kind": "place", "name": "石桥渡口", "summary": "旧桥垮塌处"},
+                {"id": "ring", "kind": "object", "name": "母亲的银环", "summary": "家中仅剩的旧物"},
+            ],
+            "events": [
+                {
+                    "id": "e-flood",
+                    "title": "洪水与石桥",
+                    "summary": "把艾琳从水里拉上岸",
+                    "participants": ["player", "elin"],
+                    "place": "bridge",
+                    "importance": "major",
+                    "threads": [{"id": "t-debt", "effect": "opened"}],
+                }
+            ],
+            "relations": [
+                {"from": "player", "to": "elin", "type": "恩义", "value": "她认下这条命的分量"}
+            ],
+        },
+    )
+    _advance(
+        srv,
+        run,
+        2,
+        "许多年后，你把银环留在她手里，说了最后一句话。",
+        {**base, "turn": 2, "alive": False, "ended": "died"},
+        memory={
+            "events": [
+                {
+                    "id": "e-last",
+                    "title": "银环易主",
+                    "summary": "把母亲的银环交给艾琳",
+                    # The ring is listed as a participant, not merely declared as an
+                    # entity: `legacy.candidates` only offers what a known event
+                    # actually touched, so a declared-but-untouched heirloom is
+                    # refused by the bridge — correctly.
+                    "participants": ["player", "elin", "ring"],
+                    "importance": "major",
+                    "threads": [{"id": "t-debt", "effect": "resolved"}],
+                }
+            ],
+        },
+    )
+    return run
+
+
+def _build_heir(srv: Any, data: Path, built: dict[str, str]) -> str:
+    """The next generation: a life whose FIRST chronicle record is a legacy bridge.
+
+    Built the way the app builds it — ``legacy.build_bridge_record`` over the source
+    life's own graph index, appended as turn 0 — so the inherited entities and the
+    relation they arrive with are exactly what a player's heir would carry, and the
+    ending page's own gates (lineage world, source life over, same world) hold.
+    """
+    from legacy import build_bridge_record  # noqa: PLC0415
+    from memory_graph import build_index  # noqa: PLC0415
+
+    source = built.get("lineage-ended")
+    if not source:
+        raise RuntimeError("the heir needs the finished lineage life built first")
+    store = srv._store()
+    index = build_index(store.read_chronicle(source))
+
+    run = _new_run(srv, LINEAGE_WORLD_ID, world=LINEAGE_WORLD_ID)
+    bridge = build_bridge_record(
+        index,
+        source_run_id=source,
+        selected=["elin", "ring"],
+        language="zh",
+    )
+    store.append_turn(run, bridge)
+    _advance(
+        srv,
+        run,
+        1,
+        "你在祖母的名字下长大。银环挂在门后，艾琳还记得那条命是谁给的。",
+        {"alive": True, "worldId": LINEAGE_WORLD_ID, "language": "zh", "turn": 1},
     )
     return run
 
@@ -392,6 +499,21 @@ SCENARIOS: list[Scenario] = [
         "the English pack: wider labels than the Chinese one",
         _build_english,
     ),
+    # Order matters from here down: the heir is built FROM the finished life above it.
+    Scenario(
+        "lineage-ended",
+        "石桥那一夜",
+        "a finished life in the lineage world — the source of an inheritance, with "
+        "entities a player visibly lived with",
+        _build_lineage_ended,
+    ),
+    Scenario(
+        "heir",
+        "银环的下一代",
+        "the next generation: a life whose first record is a legacy bridge carrying a "
+        "person and an object across from the life above",
+        _build_heir,
+    ),
 ]
 
 
@@ -418,7 +540,7 @@ def seed_all(data_dir: Path) -> dict[str, str]:
 
     out: dict[str, str] = {}
     for sc in SCENARIOS:
-        sc.run_id = sc.build(srv, data_dir)
+        sc.run_id = sc.build(srv, data_dir, out)
         _label(srv, sc.run_id, sc.label)
         out[sc.key] = sc.run_id
     return out

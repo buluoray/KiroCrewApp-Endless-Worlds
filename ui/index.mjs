@@ -5441,7 +5441,7 @@ function EchoMark({ e, lang, runId, onJump }) {
 		}) : null]
 	});
 }
-function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh, readerBar = false, openStar, onStarClose, onLiveTurn, narrow, onPanels, turnPending = false }) {
+function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame, onEnterLife, refresh, readerBar = false, openStar, onStarClose, onSheetOpen, onLiveTurn, narrow, onPanels, turnPending = false }) {
 	const [v, setV] = useState(null);
 	const [error, setError] = useState(null);
 	const [action, setAction] = useState("");
@@ -5458,6 +5458,10 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 	*  an unseen change — the same notification affordance the phone bottom bar has. */
 	const asideSeenRef = useRef({});
 	const [legacyOpen, setLegacyOpen] = useState(false);
+	const sheetOpen = starOpen || legacyOpen;
+	useEffect(() => {
+		onSheetOpen?.(sheetOpen);
+	}, [sheetOpen, onSheetOpen]);
 	const [back, setBack] = useState(false);
 	const loadedRun = useRef(null);
 	const [recapOpen, setRecapOpen] = useState(false);
@@ -6811,6 +6815,13 @@ function EndlessWorlds() {
 	const [backdrop, setBackdrop] = useState(null);
 	const [isNarrow, setIsNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(max-width: 1100px)").matches : false);
 	const [tab, setTab] = useState("reading");
+	/** Whether a sheet in the play column (star map, legacy picker) is open.
+	*
+	*  The mounted scene frames render HERE, outside that column, because
+	*  re-parenting an iframe reloads it — so a sheet anchored to the column cannot
+	*  cover them and they would otherwise stay on the page underneath it. Held as
+	*  state rather than derived, since only the play column knows its own sheets. */
+	const [sheetOpen, setSheetOpen] = useState(false);
 	const [liveTurn, setLiveTurn] = useState(0);
 	/** tabId → the content signature last seen, so a tab dots only on an UNSEEN
 	*  change. A ref (not state) because it is bookkeeping, not render input. */
@@ -7110,6 +7121,7 @@ function EndlessWorlds() {
 	}, []);
 	useEffect(() => {
 		setTab("reading");
+		setSheetOpen(false);
 	}, [live]);
 	const tabs = useMemo(() => buildTabs(scenes, panels), [scenes, panels]);
 	const narrowLive = isNarrow && view === "live" && !!live;
@@ -7172,6 +7184,7 @@ function EndlessWorlds() {
 		refresh,
 		openStar: narrowLive ? tab === "starmap" : void 0,
 		onStarClose: () => setTab("reading"),
+		onSheetOpen: setSheetOpen,
 		onLiveTurn: setLiveTurn,
 		narrow: narrowLive,
 		readerBar: narrowLive && !hideBody,
@@ -7456,7 +7469,7 @@ function EndlessWorlds() {
 						runId: live,
 						sceneId: s.sceneId,
 						asks: s.asks,
-						visible: !narrowLive || activeSceneIds.includes(s.sceneId),
+						visible: !sheetOpen && (!narrowLive || activeSceneIds.includes(s.sceneId)),
 						onChoice: onSceneChoice,
 						resetSignal: sceneEpoch,
 						locked: turnPending

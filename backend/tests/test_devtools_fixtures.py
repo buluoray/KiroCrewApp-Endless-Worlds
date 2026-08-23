@@ -122,3 +122,49 @@ def test_the_ended_life_reads_as_ended(seeded: tuple[dict[str, str], Path]) -> N
     state = srv._store().read_state(runs["ended"])
     assert state.get("ended"), "the `ended` shot waits for the closed-life badge"
     assert state.get("alive") is False
+
+
+def test_the_heir_actually_inherits(seeded: tuple[dict[str, str], Path]) -> None:
+    """The cross-generation fixture is the one nobody can reach by playing.
+
+    Getting there in a real game means finishing a life in a lineage world and then
+    choosing what carries over, which is why it has to be seeded — and why it is worth
+    pinning: the bridge is the only place the app stamps `inheritsFrom`, and an heir
+    whose first record is an ordinary turn silently exercises nothing.
+    """
+    from memory_graph import build_index  # noqa: PLC0415
+
+    runs, data = seeded
+    srv = fixtures._import_backend()
+    srv._DATA = data
+    store = srv._store()
+
+    source_state = store.read_state(runs["lineage-ended"])
+    assert source_state.get("ended"), "an inheritance is settled at an ending"
+    assert source_state.get("worldId") == fixtures.LINEAGE_WORLD_ID, (
+        "only that world declares lineage, so a bridge from anywhere else is refused"
+    )
+
+    chronicle = store.read_chronicle(runs["heir"])
+    assert chronicle, "the heir has no records at all"
+    first = chronicle[0]
+    # NOT `... or -1`: the bridge's turn IS 0, which is falsy, and that spelling reads
+    # every correct fixture as broken.
+    assert int(first.get("turn", -1)) == 0, (
+        f"the bridge must be the heir's FIRST record (turn 0), got turn {first.get('turn')}"
+    )
+    carried = {
+        e["id"]: e for e in (first.get("memory") or {}).get("entities") or [] if isinstance(e, dict)
+    }
+    assert {"elin", "ring"} <= set(carried), f"nothing carried across: {sorted(carried)}"
+    for eid, ent in carried.items():
+        assert ent.get("inheritsFrom", {}).get("runId") == runs["lineage-ended"], (
+            f"{eid} does not point back at the life it came from — `inheritsFrom` is "
+            "stamped by the app and is what makes an inheritance visible as one"
+        )
+
+    index = build_index(chronicle)
+    assert {"elin", "ring"} <= set(index["entities"]), (
+        "the heir's graph does not hold the inherited nodes, so the star-map shot has "
+        "nothing to show"
+    )

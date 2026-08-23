@@ -191,6 +191,19 @@ def _run_one(
         # layout at two sizes.
         "steps": [*shot.steps, *(shot.phone_steps if width < 500 else shot.desktop_steps)],
         "measure": list(shot.measure),
+        # UI-position expectations travel with the job so the browser judges them where
+        # the boxes are, and the CLI only has to report the verdict.
+        "expects": [
+            {
+                "selector": e.selector,
+                "presence": e.presence,
+                "min_w": e.min_w,
+                "min_h": e.min_h,
+                "covers_x": e.covers_x,
+                "why": e.why,
+            }
+            for e in shot.expects
+        ],
     }
     proc = subprocess.run(
         ["node", str(Path(__file__).resolve().parent / "driver.mjs")],
@@ -207,7 +220,12 @@ def _run_one(
 
 
 def _print_report(rep: dict) -> bool:
-    ok = bool(rep.get("reached")) and not rep.get("badRequests") and not rep.get("pending")
+    ok = (
+        bool(rep.get("reached"))
+        and not rep.get("badRequests")
+        and not rep.get("pending")
+        and not rep.get("violations")
+    )
     mark = "ok  " if ok else "WARN"
     print(f"  {mark} {rep.get('shot')}")
     measured = rep.get("measured") or {}
@@ -221,6 +239,8 @@ def _print_report(rep: dict) -> bool:
         print(f"       app:     {line}")
     for line in rep.get("pending") or []:
         print(f"       PENDING: {line}")
+    for line in rep.get("violations") or []:
+        print(f"       BROKE:   {line}")
     for line in rep.get("badRequests") or []:
         print(f"       request: {line}")
     for line in rep.get("consoleErrors") or []:
@@ -235,11 +255,49 @@ def _print_report(rep: dict) -> bool:
     return ok
 
 
+def _sync_app_code(got: inst.Instance) -> list[str]:
+    """Copy the worktree's current app code over the installed copy.
+
+    `install_app` COPIES, so after any edit the instance is still serving the bytes it
+    was installed with — a shot then shows the old UI and reports the old geometry,
+    which is the most expensive failure this harness can have (it says a change is
+    inert when it was never loaded). Syncing before every shot run removes the
+    possibility rather than documenting it.
+
+    The UI bundle takes effect immediately (the app is installed in dev mode, which
+    serves it no-store). Backend files are copied too and are reported, because those
+    need the instance restarted to take effect and the caller has to know.
+    """
+    installed = got.home / "apps" / inst.APP_NAME
+    notes: list[str] = []
+    bundle = ROOT / "ui" / "index.mjs"
+    target = installed / "ui" / "index.mjs"
+    if bundle.exists() and (not target.exists() or bundle.read_bytes() != target.read_bytes()):
+        shutil.copy2(bundle, target)
+        notes.append("synced ui/index.mjs (dev mode serves it no-store, no restart needed)")
+    stale_backend = [
+        p.name
+        for p in sorted((ROOT / "backend").glob("*.py"))
+        if not (installed / "backend" / p.name).exists()
+        or p.read_bytes() != (installed / "backend" / p.name).read_bytes()
+    ]
+    if stale_backend:
+        for name in stale_backend:
+            shutil.copy2(ROOT / "backend" / name, installed / "backend" / name)
+        notes.append(
+            f"synced backend/{{{','.join(stale_backend[:4])}{'…' if len(stale_backend) > 4 else ''}}}"
+            " — a running gateway keeps the code it imported, so `uishot up` to load it"
+        )
+    return notes
+
+
 def cmd_shot(args: argparse.Namespace) -> int:
     if not STATE.exists():
         print("no instance running — `uishot up` first", file=sys.stderr)
         return 2
     got = inst.Instance.from_json(STATE.read_text(encoding="utf-8"))
+    for note in _sync_app_code(got):
+        print(note)
     wanted = args.names or [s.key for s in shotdefs.SHOTS]
     unknown = [n for n in wanted if n not in shotdefs.BY_KEY]
     if unknown:
@@ -256,6 +314,131 @@ def cmd_shot(args: argparse.Namespace) -> int:
                 rep = _run_one(got, shot, width, height, theme, args.out or OUT)
                 all_ok &= _print_report(rep)
     return 0 if all_ok else 1
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """Capture everything and reduce it to one sheet per (width, theme) plus a report.
+
+    This is the shape an agent can actually review: reading forty PNGs costs about as
+    much as reading the app's source, and a per-file loop encourages skimming the
+    filenames instead of the pixels. One sheet is one read, the numbers and the
+    verdicts are in `report.json` next to it, and a failing tile is outlined so it is
+    found before it is read.
+    """
+    if not STATE.exists():
+        print("no instance running — `uishot up` first", file=sys.stderr)
+        return 2
+    got = inst.Instance.from_json(STATE.read_text(encoding="utf-8"))
+    for note in _sync_app_code(got):
+        print(note)
+    out = args.out or (OUT / "review")
+    out.mkdir(parents=True, exist_ok=True)
+    wanted = args.names or [s.key for s in shotdefs.SHOTS]
+
+    lanes: dict[tuple[int, str], list[dict]] = {}
+    report: list[dict] = []
+    failed = 0
+    for name in wanted:
+        shot = shotdefs.BY_KEY[name]
+        for width, height in shot.sizes:
+            for theme in shot.themes:
+                if args.theme and theme != args.theme:
+                    continue
+                if args.width and width != args.width:
+                    continue
+                rep = _run_one(got, shot, width, height, theme, out)
+                bad = (
+                    bool(rep.get("violations"))
+                    or bool(rep.get("badRequests"))
+                    or bool(rep.get("pending"))
+                    or not rep.get("reached")
+                )
+                failed += 1 if bad else 0
+                rep["shotKey"] = shot.key
+                rep["width"] = width
+                rep["theme"] = theme
+                report.append(rep)
+                lanes.setdefault((width, theme), []).append(
+                    {
+                        "png": rep.get("shot"),
+                        "bad": bad,
+                        "caption": _caption(shot, rep),
+                    }
+                )
+
+    (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), "utf-8")
+    sheets: list[str] = []
+    for (width, theme), tiles in sorted(lanes.items()):
+        # Fewer columns = bigger tiles = readable app text, at the cost of more sheets.
+        # The default is a TRIAGE density: enough to spot an empty pane or a white-on-
+        # white surface, not enough to read the app's own 13px body text (measured, not
+        # assumed — at 3 columns a 1440px shot lands at ~0.35x and CJK body text is a
+        # smudge). Read the individual PNG once a tile looks wrong; at 1440x900 it is
+        # within the image-size cap and fully legible.
+        columns = args.cols or (4 if width < 500 else 3)
+        # Rows per sheet are budgeted by TILE SHAPE, not by count: a phone capture is
+        # taller than it is wide, so the same grid that fits on a desktop sheet runs
+        # past the 2000px cap and gets downscaled until nothing is legible. Fewer rows
+        # of narrow tiles keeps the scale near 1.
+        per_sheet = columns * (2 if width < 500 else 4)
+        pages = [tiles[i : i + per_sheet] for i in range(0, len(tiles), per_sheet)]
+        for n, group in enumerate(pages, 1):
+            suffix = f"-{n}" if len(pages) > 1 else ""
+            sheet = out / f"sheet-{width}-{theme}{suffix}.png"
+            proc = subprocess.run(
+                ["node", str(Path(__file__).resolve().parent / "sheet.mjs")],
+                input=json.dumps(
+                    {
+                        "out": str(sheet),
+                        "title": (
+                            f"uishot · {width}px · {theme} · {len(group)} shots"
+                            + (f" · sheet {n}/{len(pages)}" if len(pages) > 1 else "")
+                        ),
+                        "columns": columns,
+                        "tiles": group,
+                    }
+                ),
+                env={**os.environ, "PLAYWRIGHT_PKG": _node_playwright()},
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            lines = (proc.stdout or "").strip().splitlines()[-1:] or [""]
+            try:
+                meta = json.loads(lines[0])
+                sheets.append(f"{meta['out']}  {meta['px'][0]}x{meta['px'][1]}px")
+            except ValueError:
+                print(
+                    f"sheet failed for {width}/{theme}{suffix}: {(proc.stderr or '')[-300:]}",
+                    file=sys.stderr,
+                )
+
+    print(f"\n{len(report)} shots, {failed} needing attention")
+    for rep in report:
+        for line in rep.get("violations") or []:
+            print(f"  BROKE {rep['shotKey']} {rep['width']}/{rep['theme']}: {line}")
+    print("\nreport: " + str(out / "report.json"))
+    for sheet in sheets:
+        print("sheet:  " + sheet)
+    return 1 if failed else 0
+
+
+def _caption(shot: shotdefs.Shot, rep: dict) -> str:
+    """One tile's caption: what it is, then only the facts a picture cannot carry."""
+    parts = [f"{shot.key} — {shot.describe.split('—')[0].strip()[:70]}"]
+    for sel, box in (rep.get("measured") or {}).items():
+        if sel.startswith("#") or not box:
+            continue
+        parts.append(f"{sel} {box['w']}x{box['h']}")
+    for line in rep.get("violations") or []:
+        parts.append("BROKE " + line.split(" — ")[0])
+    for line in rep.get("badRequests") or []:
+        parts.append("req " + line[:60])
+    for line in rep.get("pending") or []:
+        parts.append("pending " + line[:60])
+    if rep.get("failure"):
+        parts.append("failed: " + str(rep["failure"])[:70])
+    return "\n".join(parts)
 
 
 def cmd_compare(args: argparse.Namespace) -> int:
@@ -342,6 +525,19 @@ def main() -> int:
     sh.add_argument("--height", type=int, default=900)
     sh.add_argument("--out", type=Path)
     sh.set_defaults(fn=cmd_shot)
+
+    rv = sub.add_parser("review", help="capture everything as contact sheets + a report")
+    rv.add_argument("names", nargs="*")
+    rv.add_argument("--theme", choices=("dark", "light"))
+    rv.add_argument("--width", type=int)
+    rv.add_argument("--out", type=Path)
+    rv.add_argument(
+        "--cols",
+        type=int,
+        help="tiles per row (default 3, or 2 at phone width). Use 1-2 when you need to "
+        "read the app's own text in the sheet rather than just spot a broken surface",
+    )
+    rv.set_defaults(fn=cmd_review)
 
     cp = sub.add_parser("compare", help="shoot a baseline ref and the working tree")
     cp.add_argument("ref")

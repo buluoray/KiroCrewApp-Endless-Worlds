@@ -129,11 +129,17 @@ def _install_into(home: Path, interpreter: Path) -> None:
     script = (
         "import json,sys\n"
         "from kiro_crew.apps.manager import install_app, enable_app\n"
+        "from kiro_crew.apps.dev_mode import set_dev_mode\n"
         "src = sys.argv[1]\n"
         "got = install_app(src)\n"
         "if not got.ok: raise SystemExit('install failed: ' + (got.error or ''))\n"
         f"en = enable_app({APP_NAME!r})\n"
         "if not en.ok: raise SystemExit('enable failed: ' + (en.error or ''))\n"
+        # Dev mode serves the app's UI with no-store, so a bundle swapped in after the
+        # instance is up is actually the bundle the next shot renders. Without it a
+        # cached module can make a real change look inert — the failure this harness
+        # exists to prevent.
+        f"set_dev_mode({APP_NAME!r}, True)\n"
         "print('installed')\n"
     )
     got = subprocess.run(

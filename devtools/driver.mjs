@@ -30,6 +30,7 @@ const report = {
   consoleErrors: [],
   badRequests: [],
   appRequests: [],
+  violations: [],
   pending: [],
 }
 /** Requests the dashboard itself makes that are expected to fail on a headless,
@@ -202,10 +203,15 @@ report.measured = await page.evaluate((selectors) => {
     const all = [...document.querySelectorAll(sel)]
     const el = all.find((e) => e.getClientRects().length > 0) || all[0] || null
     out[sel] = el
-      ? (({ width, height, top }) => ({
+      ? (({ width, height, top, left, right }) => ({
           w: Math.round(width),
           h: Math.round(height),
           top: Math.round(top),
+          left: Math.round(left),
+          right: Math.round(right),
+          // Presence means VISIBLE, not merely in the DOM: a display:none slot is
+          // still queryable, and "it stepped aside" has to mean it stopped rendering.
+          shown: el.getClientRects().length > 0,
         }))(el.getBoundingClientRect())
       : null
   }
@@ -214,10 +220,43 @@ report.measured = await page.evaluate((selectors) => {
   return out
 }, job.measure || [])
 
+/** Judge this shot's expectations against the boxes just measured.
+ *
+ *  Relationships and floors only, never pinned pixel values: a gate that fails on
+ *  every innocent content edit is a gate everyone learns to ignore.
+ */
+report.violations = []
+const TOL = 4
+for (const exp of job.expects || []) {
+  const box = report.measured[exp.selector]
+  const shown = !!(box && box.shown)
+  const fail = (what) =>
+    report.violations.push(`${exp.selector}: ${what}${exp.why ? ` — ${exp.why}` : ''}`)
+  if (exp.presence === 'absent') {
+    if (shown) fail(`is visible (${box.w}x${box.h}) but must have stepped aside`)
+    continue
+  }
+  if (!shown) {
+    fail('is missing or not visible')
+    continue
+  }
+  if (exp.min_w && box.w < exp.min_w) fail(`is ${box.w}px wide, under the ${exp.min_w}px floor`)
+  if (exp.min_h && box.h < exp.min_h) fail(`is ${box.h}px tall, under the ${exp.min_h}px floor`)
+  if (exp.covers_x) {
+    const other = report.measured[exp.covers_x]
+    if (!other) fail(`cannot be compared with ${exp.covers_x}, which was not measured`)
+    else if (box.left > other.left + TOL || box.right < other.right - TOL)
+      fail(
+        `spans ${box.left}-${box.right} but must cover ${exp.covers_x} ` +
+          `(${other.left}-${other.right})`,
+      )
+  }
+}
+
 await page.screenshot({ path: job.out, fullPage: !!job.fullPage })
 report.pending = [...inflight.values()].map((r) => `${Date.now() - r.at}ms ${r.path.slice(-64)}`)
 if (job.session && report.reached) await context.storageState({ path: job.session })
 if (failure) report.failure = failure
 console.log(JSON.stringify(report, null, 2))
 await browser.close()
-process.exit(failure ? 1 : 0)
+process.exit(failure || report.violations.length ? 1 : 0)

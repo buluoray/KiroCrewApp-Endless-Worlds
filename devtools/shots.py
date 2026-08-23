@@ -18,6 +18,34 @@ PHONE = (390, 844)
 
 
 @dataclass(frozen=True)
+class Expect:
+    """One assertion about where a surface is, checked against the measured boxes.
+
+    Screenshots are for a person; these are for CI. They are deliberately about
+    RELATIONSHIPS and presence, not pixel values: `.ews-overlay` covering the app
+    panel is a property the layout must keep, while its exact height is a number that
+    changes for legitimate reasons every time content does. A pinned pixel value would
+    fail on every innocent edit and teach everyone to ignore the gate.
+    """
+
+    #: The element this expectation is about.
+    selector: str
+    #: `present` / `absent` — is it in the DOM and visible at all.
+    presence: str = "present"
+    #: Must be at least this wide/tall (px). A frame collapsed to its fallback height
+    #: or a pane squeezed to zero is the failure this catches.
+    min_w: int = 0
+    min_h: int = 0
+    #: Must horizontally cover this other element (same left/right within tolerance):
+    #: how "the sheet covers the app panel" is stated without pinning a width.
+    covers_x: str = ""
+    #: Must NOT be visible while this shot's surface is up — a control that should
+    #: have stepped aside.
+    hidden_when_shot: bool = False
+    why: str = ""
+
+
+@dataclass(frozen=True)
 class Shot:
     key: str
     describe: str
@@ -31,6 +59,9 @@ class Shot:
     desktop_steps: list[dict[str, Any]] = field(default_factory=list)
     phone_steps: list[dict[str, Any]] = field(default_factory=list)
     measure: tuple[str, ...] = (".ew-root",)
+    #: What must hold about those boxes. Empty means "this shot is for looking at",
+    #: which is a legitimate choice; a shot with expectations is also a test.
+    expects: tuple[Expect, ...] = ()
     sizes: tuple[tuple[int, int], ...] = (DESKTOP, PHONE)
     themes: tuple[str, ...] = ("dark", "light")
     full_page: bool = False
@@ -78,18 +109,45 @@ SHOTS: list[Shot] = [
         # it — "背包" for `pack`), not by the label the scene was mounted with.
         phone_steps=[{"click": "背包"}, {"wait": ".ew-slot-on:visible"}, {"seconds": 1}],
         measure=(".ew-slot-on", ".ew-scenes-clear"),
+        expects=(
+            Expect(
+                ".ew-slot-on",
+                min_h=140,
+                why="a scene frame near 320px tall is sitting at the stylesheet's "
+                "FALLBACK height, which means the document never reported its own — "
+                "the signature of a frame that never ran our script",
+            ),
+        ),
     ),
     Shot(
         "starmap",
         "the life star map as an in-panel sheet: it must cover the app and nothing "
-        "outside it, and bring itself into view when opened",
+        "outside it, and take the scene frames off the page while it is up",
         steps=[
             *_open("第三天 · 井边"),
             {"click": _STAR_TAB, "exact": False},
             {"wait": ".ews-overlay"},
             {"seconds": 1},
         ],
-        measure=(".ews-overlay", ".ews-lens-pane", ".ew-root"),
+        measure=(".ews-overlay", ".ews-lens-pane", ".ew-root", ".ew-play-root", ".ew-slot-on"),
+        expects=(
+            Expect(
+                ".ews-overlay",
+                min_w=280,
+                min_h=300,
+                covers_x=".ew-play-root",
+                why="the sheet must span the column it covers; narrower means it is "
+                "anchored to something else and the story shows past its edge",
+            ),
+            Expect(
+                ".ew-slot-on",
+                presence="absent",
+                why="the mounted scene frames render OUTSIDE the play column, so a "
+                "sheet anchored to that column cannot cover them — they have to step "
+                "aside while it is open, or the story's widgets stay on screen "
+                "underneath the star map",
+            ),
+        ),
     ),
     Shot(
         "starmap-people",
@@ -144,6 +202,44 @@ SHOTS: list[Shot] = [
         scenario="english",
         steps=_open("Day Three"),
         measure=(".ew-play-root", ".ew-prose"),
+    ),
+    Shot(
+        "heir",
+        "the next generation: an inherited person and heirloom carried across from a "
+        "finished life, on the heir's own first page",
+        scenario="heir",
+        steps=_open("银环的下一代"),
+        measure=(".ew-play-root", ".ew-prose"),
+        expects=(Expect(".ew-play-root", min_w=280, min_h=200),),
+    ),
+    Shot(
+        "heir-starmap",
+        "the heir's star map — an inheritance is only visible to a player as graph "
+        "nodes that predate the life",
+        scenario="heir",
+        steps=[
+            *_open("银环的下一代"),
+            {"click": _STAR_TAB, "exact": False},
+            {"wait": ".ews-overlay"},
+            {"seconds": 1},
+        ],
+        measure=(".ews-overlay", ".ews-lens-pane"),
+        expects=(
+            Expect(
+                ".ews-lens-pane",
+                min_h=160,
+                why="an heir whose inherited graph renders empty is the failure mode "
+                "worth a shot of its own",
+            ),
+        ),
+    ),
+    Shot(
+        "lineage-ending",
+        "the finished life an heir inherits from: its epilogue is where the bridge is offered",
+        scenario="lineage-ended",
+        steps=[{"home": True}, {"click": "石桥那一夜"}, {"wait": ".ew-note-live"}],
+        measure=(".ew-root", ".ew-note-live"),
+        expects=(Expect(".ew-note-live", min_h=20),),
     ),
 ]
 
