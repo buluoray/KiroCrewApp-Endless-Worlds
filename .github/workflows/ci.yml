@@ -91,10 +91,6 @@ jobs:
   ui-shots:
     name: UI shots (real instance)
     runs-on: ubuntu-latest
-    env:
-      # Named explicitly so the artifact step and the harness agree on one path
-      # instead of both assuming the default temp dir.
-      UISHOT_WORK: ${{ runner.temp }}/uishot
     # The gate the unit tests structurally cannot be: it installs this app into a
     # throwaway gateway, seeds fixture lives through the app's own writers, drives the
     # REAL dashboard in a browser and asserts where things landed. Every defect this
@@ -128,6 +124,8 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Bring up a seeded instance
+        env:
+          UISHOT_WORK: ${{ runner.temp }}/uishot
         run: python3 devtools/uishot.py up
 
       - name: Capture and assert every shot
@@ -135,6 +133,8 @@ jobs:
         # request, or a request still pending — see devtools/shots.py for what each shot
         # claims and devtools/README.md for why the assertions are relationships rather
         # than pinned pixels.
+        env:
+          UISHOT_WORK: ${{ runner.temp }}/uishot
         run: python3 devtools/uishot.py review
 
       - name: Upload the contact sheets and report
@@ -147,6 +147,8 @@ jobs:
 
       - name: Tear down
         if: always()
+        env:
+          UISHOT_WORK: ${{ runner.temp }}/uishot
         run: python3 devtools/uishot.py down
 
   frontend-build:
