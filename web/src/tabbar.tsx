@@ -2,8 +2,8 @@
  *
  * Narrow-viewport only (the desktop keeps the WorldRail). The bar is `position:
  * fixed` and rendered through a PORTAL to document.body, so it escapes any
- * transformed/containing ancestor in the dashboard shell (which in the AEA iOS
- * WKWebView captured a plain `fixed` and pinned it to the app's content box, not
+ * transformed/containing ancestor in the dashboard shell (which in some iOS in-app
+ * WebViews captured a plain `fixed` and pinned it to the app's content box, not
  * the viewport — the bar then only appeared at the scroll bottom). Its colour is
  * the app background (a soft top fade lifts it off the story text), it hides on
  * scroll-down and returns on scroll-up, and a gold dot marks a tab whose contents

@@ -186,9 +186,9 @@ export function SceneSlot({
   //
   //   `srcdoc`  — blank-renders in WebKit / iOS WKWebView (observed: an empty box
   //               where the local map should be).
-  //   `blob:`   — renders in Chromium, and in an iOS WKWebView shell (AEA) it fails
-  //               the load with "invalid url or response" and takes the page down
-  //               with it (observed on a real device). A blob URL is not a form
+  //   `blob:`   — renders in Chromium, and in some WebKit-based in-app browsers it
+  //               fails the load with "invalid url or response" and takes the page
+  //               down with it (observed on a real device). A blob URL is not a form
   //               every embedder resolves; a plain https document is.
   //   route src — renders on both. It is what shipped for two days while scene maps
   //               were being fixed FROM phone screenshots, which is the evidence
