@@ -210,6 +210,36 @@ _BACKDROP_STALE_SECS = 900.0
 #: replacement brief writes a fresh record, so real progress resets the budget.
 _BACKDROP_NARRATOR_CYCLES = 3
 
+#: Painterly styles whose technique ships as a per-style skill file in the app.
+#: ``photo`` deliberately has no entry: its "skill" is the trace tool chain, which
+#: the illustrator's own contract already teaches.
+_STYLE_SKILLS = {
+    "watercolor": "svg-style-watercolor",
+    "oil": "svg-style-oil",
+    "minimal": "svg-style-minimal",
+}
+
+
+def _style_directive(style: str) -> str:
+    """The task lines that make a declared painterly style teachable.
+
+    The illustrator's system prompt is static JSON and cannot know where the app
+    was installed, so the absolute path of the style's skill file is resolved HERE
+    (the backend knows its own location) and handed to the illustrator's ``read``
+    tool. The skill teaches technique and parameter RANGES, never fixed numbers —
+    the illustrator is expected to look at its draft previews and tune.
+    """
+    name = _STYLE_SKILLS.get(style)
+    if not name:
+        return ""
+    skill = Path(__file__).resolve().parent.parent / "skills" / name / "SKILL.md"
+    return (
+        f"\nSTYLE: {style} — before drawing, read {skill} with the read tool. "
+        "It teaches the technique and parameter RANGES, not fixed values: after "
+        "endless_submit_backdrop_draft, judge the painterly texture in the preview "
+        "PNGs and tune your filter numbers in your one revision.\n"
+    )
+
 
 def _backdrop_is_pending(
     ctx: AppContext, store: RunStore, run_id: str, state: dict[str, Any] | None = None
@@ -304,12 +334,16 @@ async def _recover_backdrop(
                     "Follow the ART BRIEF's declared lane exactly. In LANE: scene, "
                     "first call endless_trace_reference with its REFERENCE keywords "
                     "and inspect both trace previews; in LANE: motif, draw directly "
-                    "without tracing. Then call endless_submit_backdrop_draft with "
-                    "EXACTLY this runId and turn, read every returned preview PNG "
-                    "together as images, revise at most once, and publish the final "
-                    "pair with endless_commit_backdrop using the returned draftId. "
-                    f"This is invisible recovery attempt {attempt}; use only the "
-                    "brief and the lane's provided tools, with no external research.\n"
+                    "without tracing. A declared painterly STYLE (watercolor/oil/"
+                    "minimal) replaces the trace requirement — hand-draw the scene "
+                    "in that style instead. Then call endless_submit_backdrop_draft "
+                    "with EXACTLY this runId and turn, read every returned preview "
+                    "PNG together as images, revise at most once, and publish the "
+                    "final pair with endless_commit_backdrop using the returned "
+                    f"draftId. This is invisible recovery attempt {attempt}; use "
+                    "only the brief and the lane's provided tools, with no external "
+                    "research.\n"
+                    f"{_style_directive(str(request.get('style') or ''))}"
                     f"runId: {run_id}\nturn: {turn}\n\nBrief:\n"
                     f"{str(request.get('brief') or '')}"
                 )

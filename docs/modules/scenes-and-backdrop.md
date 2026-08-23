@@ -186,6 +186,26 @@ sees is produced locally from a closed, code-owned vocabulary.
   treats a missing lane line as MOTIF. Pinned by the lane pins in
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
 
+- **A `STYLE:` line makes the photo pipeline one style among several.** The brief
+  may declare `STYLE: photo | watercolor | oil | minimal` (parsed as leniently as
+  the lane by `store.brief_style`, stored beside it). `photo` is the traced
+  pipeline below and stays the scene default, so style-less briefs keep their
+  historical meaning. A painterly style opts a SCENE brief *out* of the trace
+  gate (`_require_scene_underlay` skips it): the illustrator hand-paints the
+  place in that style instead — the right route for stylized/anime/fantasy worlds
+  where no free-license photograph will ever match, while ink-wash/水墨
+  atmospheres deliberately route to `photo` (a photograph carries them better
+  than drawn filters). Each painterly style's technique lives in a per-style
+  skill file (`skills/svg-style-*`, with shared sketch-to-solid-painting
+  principles in `skills/svg-style-core`), which teaches parameter RANGES plus a
+  look-and-adjust loop, never fixed numbers. The spawn task resolves the skill's
+  absolute path (`routes._style_directive`) because the static agent prompt
+  cannot know the install dir. The draft-preview rasterizer therefore runs
+  **librsvg first** (it implements feTurbulence/feDisplacementMap; CairoSVG
+  silently skips them, which would leave the illustrator tuning blind on a flat
+  preview) — CairoSVG stays only as the portable last resort. Pinned by
+  `test_styles.py`.
+
 - **The SCENE lane's underlay never enters the model's context.** For pages that
   need a concrete place, `endless_trace_reference` searches attribution-free
   archives by lane. The default `photo` lane queries **Openverse** — a

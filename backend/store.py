@@ -62,10 +62,27 @@ def new_run_id() -> str:
 #: enforcing the lane on that one page.
 _LANE_RE = re.compile(r"^\s*LANE\s*:\s*(scene|motif)\b", re.IGNORECASE | re.MULTILINE)
 
+#: The brief may also declare a painting STYLE. ``photo`` is the traced-photograph
+#: pipeline (the historical scene path, now just one style among several);
+#: ``watercolor``/``oil``/``minimal`` are hand-drawn painterly styles whose
+#: technique lives in a per-style skill file the illustrator reads before drawing.
+#: Parsed as leniently as the lane, and unknown spellings become ``""`` (no style)
+#: rather than a refusal, for the same reason: losing a page's art over a header
+#: is worse than not enforcing it on that one page.
+_STYLE_RE = re.compile(
+    r"^\s*STYLE\s*:\s*(photo|watercolor|oil|minimal)\b", re.IGNORECASE | re.MULTILINE
+)
+
 
 def brief_lane(brief: str) -> str:
     """``"scene"``, ``"motif"``, or ``""`` when the brief declares no usable lane."""
     match = _LANE_RE.search(brief or "")
+    return match.group(1).lower() if match else ""
+
+
+def brief_style(brief: str) -> str:
+    """The declared painting style, or ``""`` when the brief names none usable."""
+    match = _STYLE_RE.search(brief or "")
     return match.group(1).lower() if match else ""
 
 
@@ -413,6 +430,7 @@ class RunStore:
                 "turn": int(turn),
                 "brief": str(brief),
                 "lane": brief_lane(brief),
+                "style": brief_style(brief),
                 "askedAt": time.time(),
                 "attempts": 0,
                 "fallbackAllowed": recovering,
