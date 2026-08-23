@@ -48,6 +48,14 @@ lighter, warmer MIX of its own color, the shadow side darker and cooler.
 Apply to the whole scene group. Crisp subjects (a face, lettering) go in an
 unfiltered sibling group or one with scale 6–10.
 
+## Pattern-based motifs: mostly hands off
+
+A motif built on pattern or geometric repetition keeps its precision — crisp
+edges and exact rhythm ARE its beauty, and paint-drag displacement destroys
+them. Express oil there through PALETTE (rich, saturated, layered hues) with NO
+filter — or, when a hint of material is genuinely earned, the very lowest
+values: scale 4–8, tooth alpha ≤ 0.08, no blur.
+
 ## Judging the preview
 
 - GOOD: stroke direction is visible in broad areas, boundaries mix like dragged

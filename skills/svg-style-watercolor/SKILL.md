@@ -48,6 +48,14 @@ Apply to the whole scene group (`<g filter="url(#wc)">`). For a subject that mus
 stay crisp (a face, an emblem), draw it in a SEPARATE group outside the filtered
 one, or give it its own filter instance with a gentler scale (8–14).
 
+## Pattern-based motifs: mostly hands off
+
+A motif built on pattern or geometric repetition keeps its precision — crisp
+edges and exact rhythm ARE its beauty, and displacement destroys them. Express
+watercolor there through PALETTE (transparent overlapping tints, paper-white
+ground) with NO filter — or, when a hint of wash is genuinely earned, the very
+lowest values: blur ≤ 1.5, scale 4–8, no paper grain over fine lines.
+
 ## Judging the preview
 
 - GOOD: edges wobble organically, washes melt into each other, grain reads as
