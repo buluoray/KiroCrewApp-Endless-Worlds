@@ -140,6 +140,44 @@ looking at is a 403 body. So each shot also reports:
 A shot with a pending or failed request is printed `WARN`, and the command exits
 non-zero.
 
+## What a screenshot cannot decide: whether text is legible
+
+The tempting next step is to make a shot prove the captured frame is *readable*, so the
+white-on-white class of regression cannot ship. **Two pixel statistics were tried and
+both failed; they are recorded here so the next person does not re-derive them.**
+
+- **Luminance spread** (the p2/p98 gap of the frame) — the idea being that a frame whose
+  text vanished collapses toward one tone.
+- **Edge density** (the share of pixels on a detected edge) — the idea being that
+  glyphs are edges.
+
+Neither separated a legible frame from one whose text had been deliberately forced
+invisible. The reason is structural rather than a bad threshold: the world's backdrop art
+showing through the frosted surface carries **more** variance and **more** edges than the
+text does. A frame with invisible text measured 0.054 edge density where a healthy frame
+measured 0.024 — the broken one scored higher, so no threshold can order them.
+
+A second trap sits under any attempt to fix that by cropping to the element:
+**an element screenshot of a `backdrop-filter` surface does not composite against the
+page behind it.** Captured alone, the frame renders over a blank base, and a frame that
+is dark on screen measured 98% white. A pixel gate there is grading a surface that does
+not exist.
+
+**What replaced it is static and deterministic** — `backend/tests/test_widget_contrast.py`
+computes the WCAG contrast of the widget's own declared text colours against its own
+scrim, composited over the brightest and darkest ground the art can supply (white and
+black), and holds 4.5:1 for body text and 3.0:1 for labels. No browser, no flake, and it
+fails on the exact bug the pixel metrics let through.
+
+It also earned its place during design rather than after: at a scrim alpha of `.58` the
+body text came to 4.20:1 and the labels to 2.50:1 over white art — both under AA. The
+shipped values (`.66` scrim, `.66` label alpha) were solved to satisfy it, giving 5.63:1
+and 3.47:1.
+
+The rule that generalises: a legibility question with a numeric answer belongs in a
+static test over the declared colours. A screenshot's job is to prove the surface exists,
+is positioned, and carries the content it should — not to grade its contrast.
+
 ## Adding a shot
 
 Recipes are data in `shots.py`, so a reviewer can see what a shot claims to show:
@@ -169,9 +207,12 @@ the shelf renders first. The labels are in `fixtures.py`.
 - **The instance's ready line is how it is reached.** `--test-mode` prints port and a
   dashboard credential on stdout; there is no other supported way into a fresh
   instance's dashboard without a browser session.
-- **Seeding runs under the gateway's interpreter**, discovered from the installed
-  console script, because the app's store is built on the host's `AppStorage`. Override
-  with `UISHOT_GATEWAY_PYTHON`.
+- **Seeding runs under an interpreter that can import the host gateway package**,
+  because the app's store is built on the host's `AppStorage`. Search order: the
+  `UISHOT_GATEWAY_PYTHON` override, the current interpreter if it already has the
+  package, then the interpreter behind the installed console script. A pipx install
+  satisfies only the third of those, which is why CI installs the wheel into its own
+  interpreter instead.
 - **Playwright** is discovered from `devtools/node_modules`, then from a global install
   (the browser automation Kiro Crew installs ships one). `UISHOT_PLAYWRIGHT` overrides.
   `npm install` here is only needed when neither exists.
@@ -184,6 +225,40 @@ The `ui-shots` job installs the app into a throwaway gateway, seeds the fixtures
 `review`, and uploads the sheets and `report.json` as an artifact. `kiro-cli` is absent
 there and is not needed: the gateway reaches ready and serves the dashboard without it
 (verified by probe), and no shot starts an agent session.
+
+**Installing the host gateway is the part that has cost the most, and it has two
+requirements that are easy to satisfy one at a time.**
+
+1. **It must be a released wheel, not a git source install.** The host's dashboard
+   bundle is produced by that repo's own build step and is not in its source tree, so
+   `pip install git+…` yields the Python package with no SPA: the gateway comes up and
+   serves a "Dashboard HTML not found" page, and every shot photographs an error page.
+   A wheel carries the built bundle — measured, not assumed: a wheel-installed package
+   holds `static/dist/index.html` and its 479 asset files, where a source checkout
+   holds none.
+2. **It must land where the job's own interpreter can import it.** The official
+   installer prefers pipx, which puts the package in its own managed venv. That is
+   correct for a person and useless here: `gateway_interpreter()` then finds nothing
+   that can import the host package, and `up` cannot start an instance at all.
+
+So the job resolves the release channel's own signed feed for the version and its
+sha256, then installs that exact wheel with the hash in the URL fragment. The feed is
+the same pointer the installer reads, so this tracks the channel instead of pinning a
+version that rots silently, and a wheel swapped underneath us fails the install rather
+than the assertions.
+
+**`instance.py` refuses to start against a gateway serving the no-dashboard marker**,
+naming the remedy. That check is not a nicety, because the failure it catches is not
+naturally fast: with no dashboard, each shot waits out its own locator timeout, so a
+wrong install spent **33 minutes** producing 52 identical "element missing" lines and no
+cause. The same 52 shots against a real dashboard capture and assert in about **4
+minutes**, which is what makes this affordable as a PR gate — the 33 minutes measured
+the failure mode, not the gate.
+
+For the same reason `review` prints `UNREACHED <shot>: <failure>` plus the failing step,
+console output and requests, not only the violated expectations. The first CI failure
+here was diagnosable only by downloading the artifact and looking at a PNG, which is a
+diagnosis nobody makes at 2am.
 
 ## Not covered
 
