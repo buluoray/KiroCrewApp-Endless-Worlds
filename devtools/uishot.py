@@ -214,9 +214,10 @@ def _run_one(
         timeout=300,
     )
     try:
-        return json.loads(proc.stdout or "{}")
+        rep = json.loads(proc.stdout or "{}")
     except ValueError:
         return {"shot": str(png), "reached": False, "failure": (proc.stderr or "")[-400:]}
+    return rep
 
 
 def _print_report(rep: dict) -> bool:
@@ -415,8 +416,21 @@ def cmd_review(args: argparse.Namespace) -> int:
 
     print(f"\n{len(report)} shots, {failed} needing attention")
     for rep in report:
+        where = f"{rep['shotKey']} {rep['width']}/{rep['theme']}"
         for line in rep.get("violations") or []:
-            print(f"  BROKE {rep['shotKey']} {rep['width']}/{rep['theme']}: {line}")
+            print(f"  BROKE {where}: {line}")
+        # The reason a shot never reached its surface matters more than the violations
+        # that follow from it — without this the log says 52 things are missing and not
+        # one word about why, which is a diagnosis you have to download an artifact for.
+        if not rep.get("reached"):
+            print(f"  UNREACHED {where}: {rep.get('failure') or 'unknown'}")
+            for step in rep.get("steps") or []:
+                if step.startswith("FAILED"):
+                    print(f"      step: {step}")
+            for line in (rep.get("consoleErrors") or [])[:3]:
+                print(f"      console: {line}")
+            for line in (rep.get("badRequests") or [])[:3]:
+                print(f"      request: {line}")
     print("\nreport: " + str(out / "report.json"))
     for sheet in sheets:
         print("sheet:  " + sheet)

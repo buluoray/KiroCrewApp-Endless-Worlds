@@ -1279,13 +1279,26 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-slot {
   display: none;
   width: 100%;
-  /* Fixed values, NOT var(--card)/var(--border): this frame sits on the world's own
-     dark canvas, so a light dashboard theme would resolve those to white and paint a
-     pale slab behind the scene. The background matches the compiled document's own
-     so the seam is invisible. */
-  border: 1px solid rgba(255, 255, 255, .10);
+  /* FROSTED, not a slab. The scene's own document is transparent, so what fills this
+     box is the world's backdrop art seen through a low-alpha dark scrim and a blur —
+     each world tints its own widgets, and no colour decision is ever handed to the
+     narrator (it sends structure; style is the app's).
+
+     The scrim is a fixed dark rgba and NOT var(--card): resolving a host theme
+     variable here is what once painted a pale slab under a light dashboard. The alpha
+     is what keeps the frame legible over whatever the illustrator drew — the same
+     treatment the phone reader bar uses over the same art. The alpha is SOLVED, not
+     picked: at .58 a scene's body text measured 4.20:1 against this scrim over a white
+     illustration and its labels 2.50:1, both under WCAG AA —
+     backend/tests/test_widget_contrast.py computes it and fails below the floor.
+
+     `backdrop-filter` belongs HERE rather than inside the frame: an iframe's backdrop
+     root is its own document, so it cannot blur the page behind itself. */
+  border: 1px solid rgba(255, 255, 255, .12);
   border-radius: 10px;
-  background: #0b0c10;
+  background: rgba(9, 10, 14, .66);
+  -webkit-backdrop-filter: blur(16px) saturate(1.08);
+  backdrop-filter: blur(16px) saturate(1.08);
   /* A scene is a picture, not a page: it never becomes the scrolling thing. The
      frame is sized to the document's reported height instead, so there is nothing
      left below the fold to scroll to. */

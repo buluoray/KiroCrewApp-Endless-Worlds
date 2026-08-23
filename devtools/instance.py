@@ -20,6 +20,8 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,6 +155,34 @@ def _install_into(home: Path, interpreter: Path) -> None:
         raise InstanceError((got.stderr or got.stdout).strip()[-600:])
 
 
+#: Marker the gateway serves INSTEAD of the dashboard when it cannot read the SPA
+#: bundle (`kiro_crew.dashboard.handlers.core.DASHBOARD_HTML_NOT_FOUND_MARKER`). A
+#: source install that never built the frontend serves this with HTTP 200, so nothing
+#: below fails on its own — the shots just come back as a blank page with no app in it.
+#: Checked at startup because the alternative is what actually happened: 52 shots and
+#: 33 CI-minutes spent photographing an error page.
+_NO_DASHBOARD = "Dashboard HTML not found"
+
+
+def _assert_dashboard_is_served(inst: Instance) -> None:
+    """Fail now, with the remedy, if this gateway has no dashboard to drive."""
+    url = f"{inst.base_url}/?token={inst.token}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 — loopback
+            body = resp.read().decode("utf-8", "replace")
+    except OSError as exc:
+        raise InstanceError(f"the gateway did not serve its dashboard: {exc}") from exc
+    if _NO_DASHBOARD in body:
+        raise InstanceError(
+            "this Kiro Crew install has no built dashboard — the gateway is serving its "
+            f'"{_NO_DASHBOARD}" page, so there is no app to photograph.\n'
+            "A pip install straight from the KiroCrew git source does NOT build the SPA. "
+            "Install a released wheel instead (the one-line installer at "
+            "https://download.crew.kiro.dev/cli.sh does), or build the frontend and "
+            "stage it into the package before starting the gateway."
+        )
+
+
 def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instance:
     """Create the throwaway home, install this app into it, and start a gateway.
 
@@ -191,7 +221,9 @@ def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instan
             continue
         if line.startswith(prefix):
             got = json.loads(line[len(prefix) :])
-            return Instance(home, int(got["port"]), str(got["token"]), proc.pid)
+            inst = Instance(home, int(got["port"]), str(got["token"]), proc.pid)
+            _assert_dashboard_is_served(inst)
+            return inst
     tail = (
         log_file.read_text(encoding="utf-8", errors="replace")[-800:] if log_file.exists() else ""
     )

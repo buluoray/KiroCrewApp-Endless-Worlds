@@ -110,12 +110,20 @@ jobs:
           node-version: "22"
 
       - name: Install the host gateway
-        # The app runs inside Kiro Crew, so the harness needs the real thing. kiro-cli
-        # is NOT needed and is absent here: the gateway reaches ready and serves the
-        # dashboard without it (verified), and no shot starts an agent session.
+        # A RELEASED build, not a git source install: `pip install git+…KiroCrew` gives
+        # the Python package WITHOUT the dashboard bundle (the SPA is built by that
+        # repo's own build step and is not in the source tree), so the gateway comes up
+        # and serves a "Dashboard HTML not found" page — every shot then photographs an
+        # error page and the job burns half an hour before failing. The official
+        # installer resolves the channel feed and installs a wheel that carries the
+        # built dashboard. devtools/instance.py checks for that marker at startup, so
+        # this can only ever fail fast now.
+        #
+        # kiro-cli is deliberately NOT installed: no shot starts an agent session, and
+        # the gateway reaches ready and serves the dashboard without it.
         run: |
-          python -m pip install --upgrade pip
-          pip install "git+https://github.com/kirodotdev/KiroCrew.git"
+          curl -fsSL https://download.crew.kiro.dev/cli.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install the browser driver
         working-directory: devtools
