@@ -110,20 +110,34 @@ jobs:
           node-version: "22"
 
       - name: Install the host gateway
-        # A RELEASED build, not a git source install: `pip install git+…KiroCrew` gives
-        # the Python package WITHOUT the dashboard bundle (the SPA is built by that
-        # repo's own build step and is not in the source tree), so the gateway comes up
-        # and serves a "Dashboard HTML not found" page — every shot then photographs an
-        # error page and the job burns half an hour before failing. The official
-        # installer resolves the channel feed and installs a wheel that carries the
-        # built dashboard. devtools/instance.py checks for that marker at startup, so
-        # this can only ever fail fast now.
+        # A RELEASED WHEEL, into THIS job's own interpreter. Two separate requirements
+        # meet here, and missing either one costs a full job:
+        #
+        #   1. It must be a released build, not a git source install. `pip install
+        #      git+…KiroCrew` gives the Python package WITHOUT the dashboard bundle (the
+        #      SPA is built by that repo's own build step and is not in the source
+        #      tree), so the gateway comes up serving "Dashboard HTML not found" and
+        #      every shot photographs an error page. The wheel carries the built SPA.
+        #   2. It must land where `sys.executable` can import it. The official installer
+        #      prefers pipx, which puts the package in its own managed venv — correct
+        #      for a user, useless here, because the harness then has no interpreter
+        #      that can import the gateway and cannot start one at all.
+        #
+        # So resolve the channel's own signed feed for the version and its sha256, and
+        # let pip verify the bytes against it. The feed is the same pointer the
+        # installer reads, so this tracks the channel instead of pinning a version that
+        # silently rots; the hash means a wheel swapped underneath us fails the install
+        # rather than the assertions.
         #
         # kiro-cli is deliberately NOT installed: no shot starts an agent session, and
         # the gateway reaches ready and serves the dashboard without it.
         run: |
-          curl -fsSL https://download.crew.kiro.dev/cli.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          feed=$(curl -fsS https://updates.crew.kiro.dev/feed/stable/latest-cli.json)
+          ver=$(printf '%s' "$feed" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          sha=$(printf '%s' "$feed" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])')
+          echo "host gateway: $ver ($sha)"
+          pip install "https://download.crew.kiro.dev/cli/stable/$ver/kirocrew-$ver-py3-none-any.whl#sha256=$sha"
 
       - name: Install the browser driver
         working-directory: devtools
