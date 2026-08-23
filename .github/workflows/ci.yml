@@ -77,6 +77,17 @@ jobs:
         working-directory: backend
         run: mypy .
 
+      # The dev screenshot harness is not shipped with the app, but it is read and
+      # edited like source and it drives the app's real writers — a rotted harness
+      # costs an afternoon at exactly the moment someone reaches for it. Its own
+      # pyproject.toml carries the same conservative rule set as the backend's.
+      - name: Ruff lint + format + mypy (devtools)
+        working-directory: devtools
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy .
+
   frontend-build:
     name: Frontend typecheck + build
     runs-on: ubuntu-latest
