@@ -699,7 +699,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 @media (hover: hover) { .ew-echo-line:hover { text-decoration: underline; } }
 .ew-echo-body {
   margin-top: 6px; display: flex; flex-direction: column; gap: 6px;
-  font-size: 13px; line-height: 1.6; color: var(--fg, #e5e7eb);
+  font-size: 13px; line-height: 1.6; color: var(--text, #e5e7eb);
 }
 .ew-echo-row { display: flex; gap: 8px; align-items: baseline; }
 .ew-echo-label {

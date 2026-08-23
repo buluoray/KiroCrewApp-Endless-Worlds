@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { API, api } from './api'
+import { api } from './api'
 import { t } from './strings'
-
-/** A short, stable token that changes only when the scene's compiled HTML does, so
- *  the iframe `src` reloads on a real content change but NOT on a tab switch or
- *  re-render (which would otherwise reload and lose what the player was looking at). */
-function sceneVersion(html: string): string {
-  let h = 5381
-  for (let i = 0; i < html.length; i++) h = ((h << 5) + h + html.charCodeAt(i)) | 0
-  return (h >>> 0).toString(36)
-}
 
 /** What a scene's frame posts back: an answer when the player acts, and its own
  *  content height whenever that changes. */
@@ -173,15 +164,39 @@ export function SceneSlot({
   // A scene that has been asked for but whose picture has not arrived yet: say so,
   // rather than leaving a blank slot that reads as broken.
   const loading = !!sceneId && !html && !failed
-  // The iframe loads the scene as a real same-origin DOCUMENT via `src` (not
-  // `srcdoc`, which blank-rendered on WebKit). The `v` token changes only when the
-  // compiled html changes, so the frame reloads on a real content change but not on
-  // a tab switch. The fetched `html` above is still what tells us loading vs failed.
-  const src =
-    on && runId
-      ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}` +
-        `?v=${sceneVersion(html)}`
-      : undefined
+  // The frame renders the BYTES ALREADY FETCHED above, handed over as a blob:
+  // document — it does not ask the network a second time.
+  //
+  // It used to point `src` at the scene route. That made the picture depend on a
+  // SECOND request, a document navigation, authenticated by whatever the browser
+  // chose to attach to it rather than by the fetch that had already succeeded — and
+  // when that navigation came back as anything other than our document (an auth
+  // refusal, a shell, a JSON body the frame will not render), the result was a
+  // blank frame at the stylesheet's fallback height with no error anywhere: the app
+  // had its html, so it believed the scene was fine. Nothing in the UI could
+  // report a failure it never saw.
+  //
+  // `srcdoc` is still not an option (WebKit / iOS WKWebView blank-render a
+  // sandboxed srcdoc frame, which is what the route existed to work around); a
+  // blob: document is a real document load, which is why the dashboard's own widget
+  // frames use one, and its CSP allows `frame-src blob:`.
+  //
+  // The boundary is unchanged: the sandbox attribute still omits allow-same-origin,
+  // so the document keeps an opaque origin and its postMessage origin is the string
+  // "null" the handler below checks; its own <meta> CSP travels in the bytes, and
+  // where the parent's policy also applies the stricter of the two wins per
+  // directive. The blob URL doubles as the reload key — it changes exactly when the
+  // compiled html does, so a tab switch or re-render does not reload the frame.
+  const [src, setSrc] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (!html || !sceneId) {
+      setSrc(undefined)
+      return undefined
+    }
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+    setSrc(url)
+    return () => URL.revokeObjectURL(url)
+  }, [html, sceneId])
 
   return (
     <div
@@ -205,12 +220,13 @@ export function SceneSlot({
           with display instead. Before the first scene there is nothing to protect,
           so it is not created at all.
 
-          Loaded via `src` (a real same-origin document), NOT `srcdoc`: WebKit /
-          iOS WKWebView blank-render a sandboxed srcdoc frame. The sandbox is
-          unchanged — allow-scripts allow-forms, and NEVER allow-same-origin, so the
-          document stays null-origin (its postMessage origin is the string "null"
-          the handler checks) and cannot reach the dashboard; its CSP travels in the
-          document itself. */}
+          Loaded from a blob: document built out of the bytes already fetched, NOT
+          from `srcdoc` (WebKit / iOS WKWebView blank-render a sandboxed srcdoc
+          frame) and no longer from the scene route (see the note on `src` above).
+          The sandbox is unchanged — allow-scripts allow-forms, and NEVER
+          allow-same-origin, so the document stays null-origin (its postMessage
+          origin is the string "null" the handler checks) and cannot reach the
+          dashboard; its CSP travels in the document itself. */}
       {everNeeded ? (
         <iframe
           title={t('play.sceneTitle')}

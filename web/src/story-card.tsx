@@ -11,7 +11,7 @@
  * allowlist, and this editor simply has no control that would try.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { CardPreview, Keepsake, StoryCard } from './api'
 import { api } from './api'
@@ -35,6 +35,13 @@ export function StoryCardEditor({
   const [title, setTitle] = useState('')
   const [cover, setCover] = useState('')
   const [thought, setThought] = useState('')
+  const sheet = useRef<HTMLDivElement>(null)
+
+  // Covers the app's panel rather than the window, so it has to bring itself into
+  // view on open — see the note on .ewc-overlay.
+  useEffect(() => {
+    sheet.current?.scrollIntoView({ block: 'start' })
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -82,7 +89,7 @@ export function StoryCardEditor({
 
   if (error) {
     return (
-      <div className="ewc-overlay" role="dialog" aria-modal="true">
+      <div className="ewc-overlay" ref={sheet} role="dialog" aria-modal="true">
         <div className="ewc-head">
           <div className="ewc-title">{mt(lang, 'card.title')}</div>
           <button className="ews-btn" type="button" onClick={onClose}>
@@ -95,7 +102,7 @@ export function StoryCardEditor({
   }
   if (!card || !preview) {
     return (
-      <div className="ewc-overlay" role="dialog" aria-modal="true">
+      <div className="ewc-overlay" ref={sheet} role="dialog" aria-modal="true">
         <div className="ews-empty">…</div>
       </div>
     )
@@ -104,6 +111,7 @@ export function StoryCardEditor({
   return (
     <div
       className="ewc-overlay"
+      ref={sheet}
       role="dialog"
       aria-modal="true"
       aria-label={mt(lang, 'card.title')}
@@ -295,8 +303,12 @@ export function StoryCardEditor({
 
 const CSS_TEXT = `
 .ewc-overlay {
-  position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
-  background: var(--bg, #14151f); color: var(--fg, #e5e7eb);
+  /* Absolute, NOT fixed — same reason as the legacy sheet: a fixed sheet resolves
+     against the window and covers the dashboard's own chrome. This one anchors to
+     the star map page it opens from, and scrolls itself into view on open. */
+  position: absolute; inset: 0; min-height: 100%; z-index: 20;
+  display: flex; flex-direction: column;
+  background: var(--bg, #14151f); color: var(--text, #e5e7eb);
 }
 .ewc-head {
   display: flex; align-items: center; gap: 10px; padding: 10px 16px;

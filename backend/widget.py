@@ -44,7 +44,16 @@ from typing import Any
 from view import strip_terminal_framing
 
 #: Bumped when the compiled shape changes in a way a cached file cannot satisfy.
-COMPILER = 1
+#:
+#: This is not bookkeeping — it is the ONLY thing that makes a compiler fix reach a
+#: scene that is already mounted. The cache key is (COMPILER, spec, bound state,
+#: nonce), and a mounted scene's spec/state/nonce do not move on their own, so a fix
+#: that leaves this number alone is served the OLD bytes forever. That is exactly
+#: what happened to the keyvalue-``pairs`` ledger: the compiler learned to render the
+#: rows, and every already-mounted 物资账本 kept serving the blank one it had been
+#: compiled into. ``test_widget_output_is_pinned.py`` fails when the output changes
+#: without this moving, so the next fix cannot repeat it.
+COMPILER = 2
 
 #: A spec is a description, not a document. Anything past this is a narrator
 #: trying to write a page.
