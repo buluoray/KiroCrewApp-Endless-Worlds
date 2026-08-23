@@ -6411,6 +6411,20 @@ function WorldRail({ worlds, runs, activeRunId, activeWorldId, onWorld, onLife, 
 *  last row clipped off by a frame that was one fixed height for every spec. */
 var MIN_SCENE_H = 96;
 var MAX_SCENE_H = 1400;
+/** How long a frame may take to report its height before the slot calls it failed.
+*  Generous on purpose: the document is a local request and reports on load, so
+*  seconds of headroom cover a cold instance without ever making a working scene
+*  flash an error. Too short shows a false failure; too long restores the silent
+*  blank frame this exists to prevent. */
+var SCENE_RENDER_DEADLINE_MS = 6e3;
+/** A short, stable token that changes only when the scene's compiled HTML does, so
+*  the iframe `src` reloads on a real content change but NOT on a tab switch or
+*  re-render (which would otherwise reload and lose what the player was looking at). */
+function sceneVersion(html) {
+	let h = 5381;
+	for (let i = 0; i < html.length; i++) h = (h << 5) + h + html.charCodeAt(i) | 0;
+	return (h >>> 0).toString(36);
+}
 /**
 * The frame a scene is drawn in.
 *
@@ -6512,16 +6526,12 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice, resetSignal
 	]);
 	const on = !!(html && sceneId);
 	const loading = !!sceneId && !html && !failed;
-	const [src, setSrc] = useState(void 0);
+	const src = on && runId ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}?v=${sceneVersion(html)}` : void 0;
 	useEffect(() => {
-		if (!html || !sceneId) {
-			setSrc(void 0);
-			return;
-		}
-		const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-		setSrc(url);
-		return () => URL.revokeObjectURL(url);
-	}, [html, sceneId]);
+		if (!src || fitH) return void 0;
+		const timer = setTimeout(() => setFailed(true), SCENE_RENDER_DEADLINE_MS);
+		return () => clearTimeout(timer);
+	}, [src, fitH]);
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-slot-wrap",
 		ref: wrapRef,
@@ -6545,8 +6555,8 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice, resetSignal
 			}) : null,
 			everNeeded ? /* @__PURE__ */ jsx("iframe", {
 				title: t("play.sceneTitle"),
-				className: `ew-slot${on ? " ew-slot-on" : ""}`,
-				style: on && fitH ? { height: `${fitH}px` } : void 0,
+				className: `ew-slot${on && !failed ? " ew-slot-on" : ""}`,
+				style: failed ? { display: "none" } : on && fitH ? { height: `${fitH}px` } : void 0,
 				sandbox: "allow-scripts allow-forms",
 				src,
 				allow: "",
@@ -7453,7 +7463,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.6.1" })
+								children: t("app.version", { version: "0.6.2" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",
