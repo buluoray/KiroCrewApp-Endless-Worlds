@@ -7,7 +7,7 @@
  * with provenance; nothing here can widen what the ending screen offered.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { api } from './api'
 import { mt } from './memory-state'
@@ -42,6 +42,7 @@ export function LegacyPicker({
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const sheet = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let alive = true
@@ -63,11 +64,19 @@ export function LegacyPicker({
       p.includes(id) ? p.filter((x) => x !== id) : p.length < MAX_PICK ? [...p, id] : p,
     )
 
+  // The sheet covers the app's panel, not the window, so where the reader is
+  // scrolled decides whether they can see it at all. Bring it to the top of the
+  // viewport as it opens — the one thing viewport-fixed positioning did for free.
+  useEffect(() => {
+    sheet.current?.scrollIntoView({ block: 'start' })
+  }, [])
+
   const total = groups ? GROUP_ORDER.reduce((n, g) => n + (groups[g]?.length ?? 0), 0) : 0
 
   return (
     <div
       className="ewl-overlay"
+      ref={sheet}
       role="dialog"
       aria-modal="true"
       aria-label={mt(lang, 'legacy.title')}
@@ -169,8 +178,14 @@ export function LegacyPicker({
 
 const CSS_TEXT = `
 .ewl-overlay {
-  position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
-  background: var(--bg, #14151f); color: var(--fg, #e5e7eb);
+  /* Absolute, NOT fixed. This app is mounted in the dashboard's own document, so a
+     fixed sheet resolves against the WINDOW and paints over the crew's chrome —
+     its left menu included. Anchored to .ew-root (the app's positioning box) it
+     covers the app and nothing else. The open handler scrolls it to the top of the
+     viewport, which is what a fixed sheet was standing in for. */
+  position: absolute; inset: 0; min-height: 100%; z-index: 20;
+  display: flex; flex-direction: column;
+  background: var(--bg, #14151f); color: var(--text, #e5e7eb);
 }
 .ewl-head {
   display: flex; align-items: center; justify-content: space-between;

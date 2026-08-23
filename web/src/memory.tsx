@@ -11,7 +11,7 @@
  * (main.tsx, styles.css) — the container is self-contained by construction.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { MemoryView, StarPayload } from './api'
 import { api } from './api'
@@ -75,6 +75,16 @@ export function StarMap({
   // count jumps from N to N+1 and React throws #310 ("rendered more hooks than
   // during the previous render"). All hooks live before the first conditional return.
   const [keepFailed, setKeepFailed] = useState(false)
+  const sheet = useRef<HTMLDivElement>(null)
+
+  // The overlay covers the app's panel, not the window, so where the reader is
+  // scrolled decides whether they see it at all — and an overlay left behind by the
+  // scroll is how the story used to show past its edges. Bring it to the top of the
+  // viewport as it opens; that is the one thing viewport-fixed positioning did for
+  // free, and the only reason it was ever reached for.
+  useEffect(() => {
+    sheet.current?.scrollIntoView({ block: 'start' })
+  }, [])
 
   const load = useCallback(async () => {
     const got = await api.star(runId)
@@ -95,7 +105,7 @@ export function StarMap({
 
   if (!payload || !lens) {
     return (
-      <div className="ews-overlay" role="dialog" aria-modal="true">
+      <div className="ews-overlay" ref={sheet} role="dialog" aria-modal="true">
         <StarStyles />
         {backdrop ? (
           <Backdrop runId={runId} version={backdrop.version} mobile={backdrop.mobile} />
@@ -136,6 +146,7 @@ export function StarMap({
   return (
     <div
       className="ews-overlay"
+      ref={sheet}
       role="dialog"
       aria-modal="true"
       aria-label={mt(lang, 'star.title')}
@@ -298,13 +309,15 @@ function StarStyles() {
 
 const CSS_TEXT = `
 .ews-overlay {
-  /* fixed, not absolute: the app mounts inside the dashboard's own scroll
-     container, so an absolute overlay scrolls away with the content and the play
-     page's story prose shows past it. Pin it to the viewport like the other
-     full-screen modals (legacy recap, story card) so it always covers. */
-  position: fixed; inset: 0; min-height: 100%; z-index: 60;
+  /* Absolute, NOT fixed. It is still the same overlay over the same play page —
+     only its BOX changes: fixed resolved against the WINDOW, so it painted over the
+     dashboard's own chrome, its left menu included. Anchored to .ew-root (the app's
+     positioning box) it covers the app and nothing outside it. The open handler
+     scrolls it to the top of the viewport, which is what fixed was doing for free
+     and why absolute alone once let the story show past it. */
+  position: absolute; inset: 0; min-height: 100%; z-index: 60;
   display: flex; flex-direction: column;
-  background: var(--bg, #14151f); color: var(--fg, #e5e7eb); overflow: hidden;
+  background: var(--bg, #14151f); color: var(--text, #e2e8f0); overflow: hidden;
 }
 /* When a life backdrop is mounted it sits at z-index 0 inside the overlay (same
  * as .ew-backdrop at the root); lift every other child above it so the map reads
@@ -405,7 +418,7 @@ const CSS_TEXT = `
 .ews-star { cursor: pointer; }
 .ews-star circle { fill: var(--card, #1f2030); stroke: var(--border, #2d2f3d); stroke-width: 1.5; }
 .ews-star-centre circle, .ews-star-sel circle { stroke: var(--accent, #7c3aed); stroke-width: 2.5; }
-.ews-star text { fill: var(--fg, #e5e7eb); font-size: 12px; }
+.ews-star text { fill: var(--text, #e5e7eb); font-size: 12px; }
 .ews-rel-list { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
 .ews-rel-row {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
@@ -477,7 +490,7 @@ const CSS_TEXT = `
   transition: color .16s ease, background .16s ease, border-color .16s ease;
 }
 .ews-lens-on {
-  color: var(--fg, #e5e7eb); border-color: color-mix(in srgb, var(--accent, #7c3aed) 46%, transparent);
+  color: var(--text, #e5e7eb); border-color: color-mix(in srgb, var(--accent, #7c3aed) 46%, transparent);
   background: color-mix(in srgb, var(--accent, #7c3aed) 20%, transparent);
 }
 .ews-btn,
@@ -515,11 +528,11 @@ const CSS_TEXT = `
   border-radius: 16px;
 }
 .ews-detail-name { font-size: 15px; margin-bottom: 8px; }
-.ews-detail-meta { color: color-mix(in srgb, var(--fg, #e5e7eb) 68%, var(--muted, #9ca3af)); }
+.ews-detail-meta { color: color-mix(in srgb, var(--text, #e5e7eb) 68%, var(--muted, #9ca3af)); }
 .ews-detail-actions { margin: 14px 0; }
 .ews-foot {
   margin: 0 16px 10px; padding: 7px 10px; border-radius: 10px;
-  color: color-mix(in srgb, var(--fg, #e5e7eb) 62%, var(--muted, #6b7280));
+  color: color-mix(in srgb, var(--text, #e5e7eb) 62%, var(--muted, #6b7280));
   box-shadow: none;
 }
 .ews-orbit {
