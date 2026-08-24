@@ -640,6 +640,31 @@ function send<T>(method: 'PATCH' | 'DELETE', path: string, body?: unknown): Prom
   })
 }
 
+/**
+ * What asking for a turn (or a birth) answers.
+ *
+ * `reason` is a machine token, never player-facing text — the phrasing lives in
+ * the string tables. It is typed as a union so that a backend that grows a new
+ * token breaks the comparisons here at compile time instead of falling through
+ * whichever branch happened to be last.
+ *
+ * - `''` with `advanced` — the month committed inside this request.
+ * - `already` — it was already on disk; returned rather than re-narrated.
+ * - `ended` — the life is over.
+ * - `writing` — the ask was RECORDED and dispatched and outran the request's short
+ *   inline wait. Nothing is lost and nothing may be re-sent: the pending record is
+ *   on disk and the play view's poll finishes the month. This is the ordinary
+ *   answer for a rich turn, not a failure.
+ * - `generating` — nothing was taken, because the app is still finishing the
+ *   CURRENT page (a narration already in flight, or its requested art). The
+ *   player's words are still theirs and the ask has to be made again.
+ */
+export type TurnAck = {
+  advanced: boolean
+  reason: '' | 'already' | 'ended' | 'writing' | 'generating'
+  turn: number
+}
+
 export type PerfTurn = {
   turn: number
   at?: number
@@ -857,17 +882,10 @@ export const api = {
       >
     }>(`/runs/${encodeURIComponent(runId)}/legacy/candidates`),
 
-  openRun: (id: string) =>
-    post<{ advanced: boolean; reason: string; turn: number }>(
-      `/runs/${encodeURIComponent(id)}/open`,
-      {},
-    ),
+  openRun: (id: string) => post<TurnAck>(`/runs/${encodeURIComponent(id)}/open`, {}),
 
   takeTurn: (id: string, body: { turn?: number; action?: string }) =>
-    post<{ advanced: boolean; reason: string; turn: number }>(
-      `/runs/${encodeURIComponent(id)}/turn`,
-      body,
-    ),
+    post<TurnAck>(`/runs/${encodeURIComponent(id)}/turn`, body),
 
   scene: async (runId: string, sceneId: string): Promise<string> => {
     const res = await fetch(

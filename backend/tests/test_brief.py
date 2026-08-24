@@ -100,7 +100,7 @@ def _advance(state_obj, store, run_id, dispatch):
             run_id=run_id,
             rulebook=RULEBOOK,
             dispatch=dispatch,
-            deadline_secs=0.3,
+            inline_wait_secs=0.3,
             shape="declare state in this shape: status",
         )
     )

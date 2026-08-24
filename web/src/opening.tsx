@@ -153,7 +153,7 @@ export function OpeningScreen({
   )
   const [role, setRole] = useState<string>(draft.role ?? '')
   const [page, setPage] = useState(draft.page ?? 0)
-  const [busy, setBusy] = useState<'' | 'creating' | 'opening'>('')
+  const [busy, setBusy] = useState<'' | 'creating'>('')
   const [failed, setFailed] = useState<string | null>(null)
   const run: string | null = draft.run ?? null
   // Whether this screen came back to answers the player left behind, so it can say
@@ -242,22 +242,17 @@ export function OpeningScreen({
     return out
   }
 
-  // Separate from creation so a retry never produces a second life.
-  const openRun = async (runId: string) => {
-    setBusy('opening')
+  // Separate from creation so a retry never produces a second life. Fired and
+  // handed off, never awaited — the same reasoning as `begin` below. A birth is the
+  // heaviest turn a life ever asks for, the server records the ask before it speaks
+  // to the narrator, and the play page owns the arranging screen and the poll that
+  // finishes it. Awaiting it here would also mean reading "the month is being
+  // written" as a failure the moment a birth ran past the request's inline wait.
+  const openRun = (runId: string) => {
     setFailed(null)
-    try {
-      const out = await api.openRun(runId)
-      if (out.advanced || out.reason === 'already') {
-        clearDraft()
-        onLive(runId)
-        return
-      }
-      setFailed(t('opening.silent'))
-    } catch {
-      setFailed(t('opening.silent'))
-    }
-    setBusy('')
+    void api.openRun(runId).catch(() => {})
+    clearDraft()
+    onLive(runId)
   }
 
   const begin = async () => {
@@ -283,15 +278,6 @@ export function OpeningScreen({
       setFailed((e as Error).message)
       setBusy('')
     }
-  }
-
-  if (busy === 'opening' && !failed) {
-    return (
-      <div>
-        <div className="ew-detail-title">{world.title}</div>
-        <div className="ew-meta">{t('opening.arranging')}</div>
-      </div>
-    )
   }
 
   // A life already exists at this point, so the offer is to retry its first turn —

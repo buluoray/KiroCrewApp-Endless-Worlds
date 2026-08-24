@@ -1632,7 +1632,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         prompt_override=prompt,
         model=_cfg["model"],
         reasoning_effort=_cfg["reasoningEffort"],
-        deadline_secs=OPENING_DEADLINE_SECS,
+        budget_secs=OPENING_DEADLINE_SECS,
     )
     if outcome.advanced:
         _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)
@@ -1651,7 +1651,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
             "state": visible_state,
             # A failed opening leaves the run retryable rather than half-created.
             "retryable": not outcome.advanced,
-            "generating": outcome.reason in ("generating", "timeout"),
+            "generating": outcome.reason in ("generating", "writing"),
         }
     )
 

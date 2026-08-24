@@ -15,7 +15,7 @@ turn 200 as at turn 1.
 
 | Path | What it is |
 |---|---|
-| `backend/turn.py` | the turn loop: `advance_turn()` (dispatch + poll), `compose_prompt()`, `_addressing()`, `declaration_shape()`, `already_committed()`, the briefing state machine, and the deadline / stale constants |
+| `backend/turn.py` | the turn loop: `advance_turn()` (dispatch + poll), `compose_prompt()`, `_addressing()`, `declaration_shape()`, `already_committed()`, the briefing state machine, and the wait / budget / stale constants |
 | `backend/opening.py` | `compose_opening_prompt()` — the opening turn's prompt, passed to the same `advance_turn()` via `prompt_override` so the wait and idempotence are not forked |
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
 | `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
@@ -39,7 +39,7 @@ turn 200 as at turn 1.
 - **A narrator that never touched the world is not ours — the slot self-heals.**
   A slot created while agent registration was broken binds a fallback agent, and
   slot reuse never re-resolves the binding, so the poisoning persists across
-  every turn and retry. The signature is a dispatched turn whose full deadline
+  every turn and retry. The signature is a dispatched turn whose full BUDGET
   expired with the pending record's `steps` counter still at zero (the MCP
   server stamps every `endless_*` call via `note_tool_call`, and a healthy
   narrator opens every turn with `endless_read_runtime`). `advance_turn` then
@@ -48,7 +48,7 @@ turn 200 as at turn 1.
   through the existing `fresh_slot` path. Capped at one heal per turn
   (`_MAX_SLOT_HEALS_PER_TURN`, per-turn counter in the store) so a fresh slot
   that also fails surfaces as a failure instead of churning a new conversation
-  every deadline. One endless_* call is proof of the right narrator: slow is
+  every budget. One endless_* call is proof of the right narrator: slow is
   never healed. Pinned by
   `test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs`,
   `test_a_turn_with_tool_activity_is_never_healed`, and
@@ -154,22 +154,49 @@ turn 200 as at turn 1.
   `test_the_record_exists_before_the_narrator_is_spoken_to` and
   `test_asking_twice_while_in_flight_does_not_dispatch_twice`.
 
-- **A timeout neither rolls back nor clears the pending record.** The narrator may
-  still commit validly after the caller stops waiting, so undoing anything would
-  throw away a month of a life. `advance_turn()` returns a `generating` outcome and
-  leaves the pending record in place. Pinned by
-  `test_a_silent_narrator_times_out_without_rolling_anything_back`; marking a turn
+- **A request is never held for the length of a turn.** `advance_turn()` waits
+  `TURN_INLINE_WAIT_SECS` for the commit, not the turn's budget, and a month that
+  outruns that wait is handed back as `reason="writing"` with the pending record
+  intact — the play view's poll finishes it. Holding the connection until the commit
+  instead was correct on loopback and wrong everywhere else: any intermediary
+  between the browser and the gateway (an SSO tunnel, a reverse proxy, a load
+  balancer, a phone's NAT) drops a connection that has carried no bytes for a
+  minute, and a waiting turn carries none — so the server finished the month,
+  committed it, cleared the pending record, and answered into a socket nobody held.
+  The page then reported that the page had not come through, over a month that was
+  on disk, and only remounting the view found it. The two un-advanced reasons are
+  NOT interchangeable: `writing` means this request recorded and dispatched the ask
+  (the player's words are spent, and re-asking would be the double narration the
+  pending record exists to prevent), while `generating` means nothing was taken
+  because the app is still finishing the current page. Pinned by
+  `test_an_ask_this_request_dispatched_reports_itself_as_taken`,
+  `test_asking_twice_while_in_flight_does_not_dispatch_twice`, and
+  `test_no_request_is_held_anywhere_near_an_intermediarys_idle_timeout`.
+
+- **A handover neither rolls back nor clears the pending record.** The narrator is
+  still writing after the caller stops waiting, so undoing anything would throw away
+  a month of a life, and clearing the record would throw away the only evidence the
+  month was ever asked for. Pinned by
+  `test_a_month_that_outruns_the_wait_is_handed_over_not_rolled_back`; marking a turn
   in flight also does not spend the store's rollback point
   (`test_marking_a_turn_in_flight_does_not_spend_the_rollback_point`).
 
-- **The stale window is more than twice the turn deadline.** `PENDING_STALE_SECS`
-  is the escape hatch that lets an abandoned pending record be re-dispatched, and
-  it is deliberately larger than two full turn deadlines so a turn that merely
-  overran one request is never mistaken for abandoned — which would dispatch the
-  exact duplicate the pending record exists to prevent. The turn and opening
-  deadlines are equal. The relationship is pinned by
-  `test_the_deadline_is_the_one_the_player_was_promised`; do not copy the numbers
-  into prose, the test owns them.
+- **Three bounds, in this order: the request's wait, the turn's budget, the stale
+  window.** `TURN_INLINE_WAIT_SECS` is how long ONE request waits before handing the
+  turn to the poll. `TURN_DEADLINE_SECS` is the turn's BUDGET — how long a dispatched
+  narration is believed to be legitimately running — and every judgement about a turn
+  in flight is measured against it, never against the wait: the poisoned-slot
+  signature handed the shorter bound reads every ordinary slow month as a narrator
+  that never touched the world and drops a live conversation mid-turn.
+  `PENDING_STALE_SECS` is the escape hatch that lets an abandoned pending record be
+  re-dispatched, and it is deliberately larger than two full budgets so a turn that
+  merely overran one request is never mistaken for abandoned — which would dispatch
+  the exact duplicate the pending record exists to prevent. The turn and opening
+  budgets are equal. Pinned by
+  `test_the_deadline_is_the_one_the_player_was_promised`,
+  `test_no_request_is_held_anywhere_near_an_intermediarys_idle_timeout`, and
+  `test_an_ordinary_slow_month_does_not_lose_its_conversation`; do not copy the
+  numbers into prose, the tests own them.
 
 - **Dispatch goes through the background-turn cap, and queued is not failure.** A
   turn is charged against `run_background_turn` rather than awaiting the chat
@@ -241,7 +268,7 @@ turn 200 as at turn 1.
   `test_a_living_turn_left_with_no_usable_choice_is_still_refused`.
 - **The opening turn reuses the same loop.** `compose_opening_prompt()` builds a
   different prompt but hands it to the same `advance_turn()` via `prompt_override`,
-  so the deadline and the idempotence live in one place and cannot drift apart. The
+  so the wait and the idempotence live in one place and cannot drift apart. The
   opening prompt takes its language from the world it is quoting, not from a caller
   argument — `compose_opening_prompt()` has no `language` parameter — pinned by
   `test_the_opening_prompt_takes_its_language_from_the_world_not_the_caller`. The

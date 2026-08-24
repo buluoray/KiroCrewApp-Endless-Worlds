@@ -3136,21 +3136,11 @@ function OpeningScreen({ world, onBack, onLive }) {
 		});
 		return out;
 	};
-	const openRun = async (runId) => {
-		setBusy("opening");
+	const openRun = (runId) => {
 		setFailed(null);
-		try {
-			const out = await api.openRun(runId);
-			if (out.advanced || out.reason === "already") {
-				clearDraft();
-				onLive(runId);
-				return;
-			}
-			setFailed(t("opening.silent"));
-		} catch {
-			setFailed(t("opening.silent"));
-		}
-		setBusy("");
+		api.openRun(runId).catch(() => {});
+		clearDraft();
+		onLive(runId);
 	};
 	const begin = async () => {
 		setBusy("creating");
@@ -3171,13 +3161,6 @@ function OpeningScreen({ world, onBack, onLive }) {
 			setBusy("");
 		}
 	};
-	if (busy === "opening" && !failed) return /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("div", {
-		className: "ew-detail-title",
-		children: world.title
-	}), /* @__PURE__ */ jsx("div", {
-		className: "ew-meta",
-		children: t("opening.arranging")
-	})] });
 	if (failed && run) return /* @__PURE__ */ jsxs("div", { children: [
 		/* @__PURE__ */ jsx("div", {
 			className: "ew-detail-title",
@@ -6027,8 +6010,22 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 	const [arm, setArm] = useState("");
 	const [phrase, setPhrase] = useState("");
 	const [arrange, setArrange] = useState("");
-	const [stalled, setStalled] = useState(false);
-	const [retry, setRetry] = useState(null);
+	/** The ask that has not landed yet, kept so it can be resent with the exact same
+	*  intent instead of making the player retype it — and so the page can tell the
+	*  difference between "a month is on its way" and "nothing is coming".
+	*
+	*  There is deliberately NO local "it failed" boolean. A request that never came
+	*  back proves nothing about whether the ask was taken: the pending record is
+	*  written before the narrator is spoken to, so a dropped response can sit on top
+	*  of a month that is being written perfectly well. Whether this ask is still
+	*  alive is therefore read from the SERVER every poll (`stalled` below), which is
+	*  also what makes the page converge on its own instead of needing a remount. */
+	const [ask, setAsk] = useState(null);
+	/** Whether the player asked for this life to be born, and whether that ask has
+	*  since gone silent. Separate from the per-turn ask above because a birth is
+	*  requested on a different screen, with no month to compare against. */
+	const [openAsked, setOpenAsked] = useState(false);
+	const [openSilent, setOpenSilent] = useState(false);
 	const [drawer, setDrawer] = useState(false);
 	const [starOpen, setStarOpen] = useState(false);
 	const [asideTab, setAsideTab] = useState("");
@@ -6050,6 +6047,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 		if (!v || v.turn < 1) return void 0;
 		let alive = true;
 		setViewTurn(null);
+		setAsk(null);
 		api.chronicle(runId).then((c) => {
 			if (alive) setChron(c.turns);
 		}).catch(() => {});
@@ -6124,6 +6122,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 			ticks += 1;
 			if (!generating && ticks > AWAITING_POLL_CAP) {
 				window.clearInterval(timer);
+				if (openAsked) setOpenSilent(true);
 				return;
 			}
 			load();
@@ -6132,9 +6131,25 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 	}, [
 		generating,
 		awaiting,
-		load
+		load,
+		openAsked
 	]);
 	const busy = !!tapped || generating || turnPending;
+	/** The ask that is still outstanding, and whether it has gone quiet.
+	*
+	*  Both are DERIVED from the server's own answer rather than remembered from
+	*  what a request returned. `ask` names the month that was asked for; the life
+	*  has either reached it (landed — nothing outstanding), or has a narrator in
+	*  flight (on its way), or neither — and only that last case owes the player a
+	*  retry. A local "it failed" flag could not tell those apart, because the
+	*  request that would have set it is exactly the thing that goes missing.
+	*
+	*  `busy` gates the quiet verdict: while this page's own tap is in flight the
+	*  view on screen predates the ask, and judging it would call every month dead
+	*  the instant it was asked for. `take` reloads before it clears `tapped`, so by
+	*  the time this is judged the view has seen the ask. */
+	const outstanding = ask && v && ask.turn > v.turn ? ask : null;
+	const stalled = !!outstanding && !busy;
 	const gAction = v?.generating?.action ?? "";
 	const genChoice = generating && gAction ? (v?.choices ?? []).find((c) => c.label === gAction) : void 0;
 	useEffect(() => {
@@ -6198,29 +6213,25 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 		onBackdrop
 	]);
 	const take = async (payload, what) => {
+		const wanted = payload.turn ?? (v?.turn ?? 0) + 1;
 		setTapped(what);
 		setPhrase(pick("play.waiting"));
-		setStalled(false);
 		try {
 			const out = await api.takeTurn(runId, payload);
-			if (out.advanced || out.reason === "already" || out.reason === "ended") {
-				setAction("");
-				setRetry(null);
-			} else {
-				setStalled(true);
-				setRetry({
-					payload,
-					what
-				});
-			}
-			await load();
+			if (out.reason !== "generating") setAction("");
+			setAsk(out.advanced ? null : {
+				turn: wanted,
+				payload,
+				what
+			});
 		} catch {
-			setStalled(true);
-			setRetry({
+			setAsk({
+				turn: wanted,
 				payload,
 				what
 			});
 		}
+		await load();
 		setTapped("");
 	};
 	if (error && !v) return /* @__PURE__ */ jsxs("div", { children: [
@@ -6282,7 +6293,7 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 				className: "ew-note",
 				children: busy ? t("opening.arranging") : t("opening.notStarted")
 			}),
-			stalled && !busy ? /* @__PURE__ */ jsx("div", {
+			openSilent && !busy ? /* @__PURE__ */ jsx("div", {
 				className: "ew-note",
 				children: t("opening.silent")
 			}) : null,
@@ -6295,14 +6306,10 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 					onClick: async () => {
 						setTapped(OPEN);
 						setPhrase(pick("opening.waiting"));
-						setStalled(false);
-						try {
-							const out = await api.openRun(runId);
-							if (!out.advanced && out.reason !== "already") setStalled(true);
-							await load();
-						} catch {
-							setStalled(true);
-						}
+						setOpenAsked(true);
+						setOpenSilent(false);
+						api.openRun(runId).catch(() => {});
+						await load();
 						setTapped("");
 					},
 					children: [t("opening.continueBirth"), tapped === OPEN ? /* @__PURE__ */ jsx(Waiting, { label: phrase }) : null]
@@ -6557,18 +6564,18 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 				label: phrase || t("play.generating")
 			})]
 		}) : null,
-		stalled && !generating ? /* @__PURE__ */ jsxs("div", {
+		stalled && outstanding ? /* @__PURE__ */ jsxs("div", {
 			className: "ew-note",
 			role: "status",
 			"aria-live": "polite",
-			children: [t("play.stalled"), retry ? /* @__PURE__ */ jsx("button", {
+			children: [t("play.stalled"), /* @__PURE__ */ jsx("button", {
 				className: "ew-btn ew-btn-sm",
 				type: "button",
 				disabled: busy,
 				style: { marginInlineStart: "8px" },
-				onClick: () => void take(retry.payload, retry.what),
+				onClick: () => void take(outstanding.payload, outstanding.what),
 				children: t("play.retry")
-			}) : null]
+			})]
 		}) : null,
 		isLive && (v.choices ?? []).length ? /* @__PURE__ */ jsx("div", {
 			className: "ew-choices",
@@ -8124,7 +8131,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.11.0" })
+								children: t("app.version", { version: "0.11.1" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",

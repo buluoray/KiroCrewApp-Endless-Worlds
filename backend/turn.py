@@ -35,14 +35,40 @@ from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from perf import TurnPerf
 from store import RunStore
 
-#: R4.2 — how long a waited turn runs before the request returns un-advanced and
-#: the UI offers "retry". Set to 300s: rich mid-life turns on a slower model ran
-#: past shorter deadlines, surfacing the retry button while the narrator was still
-#: writing. Must stay under half of PENDING_STALE_SECS so a turn that overran one
-#: request is never mistaken for abandoned.
 logger = logging.getLogger(__name__)
 
+#: R4.2 — a turn's BUDGET: how long a dispatched narration is believed to be
+#: legitimately running. Set to 300s because rich mid-life turns on a slower model
+#: take that long, and must stay under half of PENDING_STALE_SECS so a turn that
+#: overran one request is never mistaken for abandoned.
+#:
+#: This is not how long a request waits — see TURN_INLINE_WAIT_SECS. What it bounds
+#: is judgement about a turn already in flight: the slot-health signature
+#: (`_slot_never_touched_world`) needs the full budget to elapse before calling a
+#: narrator absent, and shortening it there would call a healthy slow turn poisoned.
 TURN_DEADLINE_SECS = 300.0
+
+#: How long ONE request waits inline for the commit before handing the turn over to
+#: the play view's poll.
+#:
+#: A request is never held anywhere near an intermediary's idle timeout. Anything
+#: between the browser and the gateway — an SSO tunnel, a reverse proxy, a load
+#: balancer, a phone's NAT — drops a connection that has carried no bytes for a
+#: minute (60s is the common default), and a waiting turn carries none while the
+#: narrator writes. The server then finishes the turn, commits it, and answers into
+#: a socket no one is holding: the month exists and the page never hears of it.
+#:
+#: That was observable, not theoretical. A life whose turns took 55-115s reported
+#: "this page did not come through" on every turn that ran past a minute, while the
+#: month itself had committed — the pending record was cleared, no handler errored,
+#: and only leaving the life and re-entering showed the page.
+#:
+#: Waiting inline at all is a courtesy, not the mechanism: `mark_pending` is on disk
+#: before dispatch and the play view already polls it, so a month that outruns this
+#: wait is handed over rather than lost. Short enough to stay well under the 60s
+#: floor with room for TLS and queueing; long enough that a quick month still lands
+#: in the request that asked for it.
+TURN_INLINE_WAIT_SECS = 20.0
 
 #: Turn budget for one narrator conversation before a planned rotation, the
 #: backstop for worlds that never open a chapter. Sized from a measured life:
@@ -77,10 +103,12 @@ def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed:
 #: freshly built slot means the problem is not the conversation.
 _MAX_SLOT_HEALS_PER_TURN = 1
 
-#: The opening turn gets longer. It is the heaviest turn a life ever asks for — the
-#: narrator reads the whole opening brief and invents a world's first moment from
-#: nothing — and unlike a mid-life turn the player is not mid-story, so waiting for
-#: a richer birth is the right trade. Still well under PENDING_STALE_SECS.
+#: The opening turn's BUDGET, equal to a mid-life turn's. It is the heaviest turn a
+#: life ever asks for — the narrator reads the whole opening brief and invents a
+#: world's first moment from nothing — so it is believed to be running for just as
+#: long. Still well under PENDING_STALE_SECS. Its inline wait is the ordinary one:
+#: begin() fires the opening in the background and the arranging screen polls, so
+#: holding a request open for a birth buys nothing and risks the answer.
 OPENING_DEADLINE_SECS = 300.0
 
 #: How long an in-flight record is believed. It must exceed TURN_DEADLINE_SECS by a
@@ -111,7 +139,29 @@ _POLL_SECS = 0.25
 class TurnOutcome:
     """What the route learned. Phrasing for the player lives in the UI, never
     here — the backend reports a machine reason so R25's no-implementation-words
-    rule is enforced in one place instead of every error path."""
+    rule is enforced in one place instead of every error path.
+
+    The reason vocabulary, which the play view branches on:
+
+    ``""`` (with ``advanced``)
+        The month committed inside this request.
+    ``"already"``
+        It was on disk before this request; returned rather than re-narrated.
+    ``"ended"``
+        The life is over; no further month is written.
+    ``"writing"``
+        THIS request's ask was recorded and dispatched, and outran the inline
+        wait. The pending record stands, so the ask is not lost and must not be
+        re-sent — the play view's poll finishes it. The player's words are spent.
+    ``"generating"``
+        Nothing was taken: the app is still finishing the CURRENT page (a
+        narration already in flight, or its requested art), so the player's words
+        are still theirs and the ask has to be made again.
+
+    The distinction between the last two is the whole reason there are two tokens.
+    Collapsing them either loses an ask the player made (treating ``generating``
+    as accepted) or duplicates a month (re-sending a ``writing`` one).
+    """
 
     advanced: bool
     turn: int
@@ -313,7 +363,8 @@ async def advance_turn(
     dispatch: Callable[..., bool],
     action: str = "",
     style: str = "",
-    deadline_secs: float = TURN_DEADLINE_SECS,
+    budget_secs: float = TURN_DEADLINE_SECS,
+    inline_wait_secs: float = TURN_INLINE_WAIT_SECS,
     project: str = "",
     prompt_override: str = "",
     language: Any = "en",
@@ -322,17 +373,24 @@ async def advance_turn(
     reasoning_effort: str = "",
     chapter_crossed: bool = False,
 ) -> TurnOutcome:
-    """Ask for one turn and wait for the narrator to commit it.
+    """Ask for one turn and wait, briefly, for the narrator to commit it.
 
     Idempotent per ``(runId, turn)``: a repeated request for a turn that is
     already on disk returns it instead of asking for it again. That matters more
     than it looks — a player who taps twice, or a phone that retries a request on
     a flaky connection, must not get two different versions of the same month.
 
+    The wait is bounded by ``inline_wait_secs``, NOT by the turn's budget. A month
+    that outruns it is handed back as ``reason="writing"`` with the pending record
+    intact, and the play view's poll finishes what this request started. Holding
+    the request for the whole budget instead is what let an intermediary drop the
+    answer to a turn that had already committed (see TURN_INLINE_WAIT_SECS);
+    ``budget_secs`` still bounds judgement about a turn in flight.
+
     ``prompt_override`` is how the opening turn reuses this loop: a life's first
     turn is composed differently (there is no state and no history yet) but is
-    dispatched, waited for and timed out identically. Two copies of the wait would
-    be two places for the deadline and the idempotence to drift apart.
+    dispatched, waited for and handed over identically. Two copies of the wait
+    would be two places for the wait and the idempotence to drift apart.
     """
     run_state = store.read_state(run_id)
     baseline = int(run_state.get("turn") or 0)
@@ -397,8 +455,12 @@ async def advance_turn(
     # the current registration; the fresh slot re-briefs the rulebook by the
     # existing fresh_slot path. Capped per turn so a fresh slot that ALSO fails
     # surfaces as a failure instead of churning conversations every deadline.
+    #
+    # Measured against the BUDGET, never against the inline wait: this request
+    # stops waiting long before a healthy turn is done, and judging absence on
+    # that would call every ordinary slow month a poisoned slot.
     if not fresh_slot and _slot_never_touched_world(
-        store.read_pending(run_id), wanted, deadline_secs
+        store.read_pending(run_id), wanted, budget_secs
     ):
         if store.count_slot_heals(run_id, wanted) < _MAX_SLOT_HEALS_PER_TURN and (
             release_narrator_slot(state_obj, run_id)
@@ -461,8 +523,11 @@ async def advance_turn(
         store.clear_pending(run_id)
         live = None
     if live is not None:
-        prose = await _await_commit(store, run_id, wanted, deadline_secs)
+        prose = await _await_commit(store, run_id, wanted, inline_wait_secs)
         if prose is None:
+            # Someone else's ask is being written, and this one was not taken: the
+            # in-flight record may name a different action entirely, so reporting
+            # it as this request's own would clear words the player still owns.
             return TurnOutcome(
                 advanced=False,
                 turn=baseline,
@@ -502,25 +567,29 @@ async def advance_turn(
         # queued prompt will run, and the store is the thing we are watching.
         pass
 
-    prose = await _await_commit(store, run_id, wanted, deadline_secs)
+    prose = await _await_commit(store, run_id, wanted, inline_wait_secs)
     if prose is not None:
         store.clear_pending(run_id)
         _note_turn_context(state_obj, store, run_id, wanted, slot_key)
         return TurnOutcome(advanced=True, turn=wanted, prose=prose)
 
-    # Nothing is rolled back, and the in-flight record is deliberately LEFT. The
-    # narrator may still commit after this returns, and that commit is valid — the
-    # next request will find the turn already there and return it. Undoing a turn
-    # we merely stopped waiting for would throw away a life's month to make an HTTP
-    # response tidier; clearing the record would throw away the only evidence that
-    # the month is being written.
-    return TurnOutcome(advanced=False, turn=baseline, reason="timeout")
+    # The month outran this request's inline wait. Nothing is rolled back and the
+    # in-flight record is deliberately LEFT: the narrator is still writing, that
+    # commit is valid, and the record is the only evidence the month was asked for
+    # — it is what the play view polls and what makes a returning player converge.
+    #
+    # This is the ORDINARY outcome for a rich turn, not a failure, so it says the
+    # ask is being written rather than that the caller gave up. The alternative —
+    # holding the connection until the commit — produced a server that answered
+    # correctly into a socket an intermediary had already dropped.
+    return TurnOutcome(advanced=False, turn=baseline, reason="writing")
 
 
-async def _await_commit(
-    store: RunStore, run_id: str, wanted: int, deadline_secs: float
-) -> str | None:
-    """Poll the store until ``wanted`` lands, or the deadline passes.
+async def _await_commit(store: RunStore, run_id: str, wanted: int, wait_secs: float) -> str | None:
+    """Poll the store until ``wanted`` lands, or ``wait_secs`` passes.
+
+    Returning ``None`` means "not yet", never "not going to": the caller hands the
+    turn to the play view's poll and the narrator keeps writing.
 
     The store is what is watched, not the narrator: a commit is the only thing that
     counts as a turn, so a narrator that finishes talking without committing has
@@ -532,7 +601,7 @@ async def _await_commit(
     wanted turn itself, rather than trusting ``[-1]``, is what keeps a poll in
     that gap from returning the previous month's prose as if it were this one.
     """
-    deadline = time.monotonic() + deadline_secs
+    deadline = time.monotonic() + wait_secs
     while time.monotonic() < deadline:
         await asyncio.sleep(_POLL_SECS)
         now = store.read_state(run_id)
@@ -546,16 +615,18 @@ async def _await_commit(
 
 
 def _slot_never_touched_world(
-    pending: dict[str, Any] | None, wanted: int, deadline_secs: float
+    pending: dict[str, Any] | None, wanted: int, budget_secs: float
 ) -> bool:
     """The poisoned-slot signature: dispatched, expired, and zero tool calls.
 
     ``steps`` is stamped by the MCP server on EVERY endless_* call while a turn
     is pending, and a healthy narrator opens every turn with
-    ``endless_read_runtime`` — so a record whose full deadline passed with the
+    ``endless_read_runtime`` — so a record whose full BUDGET passed with the
     counter still at zero was answered by something that never had (or never
-    used) this app's tools. Judged only against the wanted turn: an old record
-    for another month proves nothing about this one.
+    used) this app's tools. The budget, not one request's inline wait: a request
+    stops waiting while an ordinary rich month is still being written, and judging
+    on that would call a healthy slow turn poisoned. Judged only against the
+    wanted turn: an old record for another month proves nothing about this one.
     """
     if not pending or int(pending.get("turn") or 0) != wanted:
         return False
@@ -564,7 +635,7 @@ def _slot_never_touched_world(
     asked_at = pending.get("askedAt")
     if not isinstance(asked_at, (int, float)):
         return False
-    return (time.time() - asked_at) > deadline_secs
+    return (time.time() - asked_at) > budget_secs
 
 
 def _in_flight(store: RunStore, run_id: str, wanted: int) -> dict[str, Any] | None:

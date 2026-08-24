@@ -180,6 +180,21 @@ guarantee.
   `test_waiting_is_not_only_a_local_boolean`, and
   `test_a_life_being_written_is_not_shown_as_one_that_stalled`.
 
+- **No ask is judged by its own request.** A turn's HTTP request is an
+  acknowledgement, not a verdict: the ask is on disk before the narrator is spoken
+  to, so a request that never answers proves nothing about whether the month is
+  being written. `play.tsx` therefore holds no "it failed" flag — the outstanding
+  ask names the month it wants and the stall verdict is DERIVED each poll from
+  whether the life has reached that month or has a narrator in flight — and the
+  reload after an ask sits at the top level of `take`, so it runs whether the
+  request answered, refused, or threw. A birth is fired and handed off rather than
+  awaited, in every caller, for the same reason. Latching the verdict instead left a
+  permanent "this page did not come through" over a month that had committed, which
+  only remounting the view could clear. Pinned by
+  `test_pending.py::test_a_request_that_never_answered_does_not_freeze_the_page` and
+  `test_a_birth_is_fired_and_handed_off_never_waited_on`; the two un-advanced reasons
+  it branches on are specified in [turn-loop](turn-loop.md).
+
 - **Turn progress is a tool-call count; retry preserves the input; paging is by
   turn number.** The progress bar advances by the narrator's tool-call count
   (capped short of completion until the commit lands) rather than a timer; a

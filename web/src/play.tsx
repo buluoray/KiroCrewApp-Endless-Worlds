@@ -243,13 +243,26 @@ export function PlayPage({
   // A rotating "the world is being made" line, cycled while a life is being born so
   // the arranging screen reads as generation rather than a frozen spinner.
   const [arrange, setArrange] = useState('')
-  const [stalled, setStalled] = useState(false)
-  // The last action that did not land, kept so a stall can be retried with the
-  // exact same intent instead of making the player retype it.
-  const [retry, setRetry] = useState<{
+  /** The ask that has not landed yet, kept so it can be resent with the exact same
+   *  intent instead of making the player retype it — and so the page can tell the
+   *  difference between "a month is on its way" and "nothing is coming".
+   *
+   *  There is deliberately NO local "it failed" boolean. A request that never came
+   *  back proves nothing about whether the ask was taken: the pending record is
+   *  written before the narrator is spoken to, so a dropped response can sit on top
+   *  of a month that is being written perfectly well. Whether this ask is still
+   *  alive is therefore read from the SERVER every poll (`stalled` below), which is
+   *  also what makes the page converge on its own instead of needing a remount. */
+  const [ask, setAsk] = useState<{
+    turn: number
     payload: { turn?: number; action?: string }
     what: string
   } | null>(null)
+  /** Whether the player asked for this life to be born, and whether that ask has
+   *  since gone silent. Separate from the per-turn ask above because a birth is
+   *  requested on a different screen, with no month to compare against. */
+  const [openAsked, setOpenAsked] = useState(false)
+  const [openSilent, setOpenSilent] = useState(false)
   const [drawer, setDrawer] = useState(false)
   // The life star map overlay (§8.3): opened from the secondary action area,
   // never from the per-turn controls — it reads the life, it does not play it.
@@ -288,6 +301,11 @@ export function PlayPage({
     // A newly written turn snaps the pager back to live, and refetches so the new
     // month is pageable.
     setViewTurn(null)
+    // It also settles whatever was outstanding. `outstanding` already reads as
+    // landed once the life reaches that month, so this only keeps the state from
+    // looking live when it is not — a stale record that renders nothing is still a
+    // trap for the next reader of this component.
+    setAsk(null)
     api
       .chronicle(runId)
       .then((c) => {
@@ -390,16 +408,39 @@ export function PlayPage({
       ticks += 1
       if (!generating && ticks > AWAITING_POLL_CAP) {
         window.clearInterval(timer)
+        // Giving up IS the answer, and it is the only honest source of one: the
+        // birth is fired without waiting for its response, so the request cannot
+        // report failure. Past the cap the server has had the whole opening budget
+        // and never recorded a narrator in flight, so a life the player did ask for
+        // is not being born. A life merely sitting un-born (nobody asked yet) is
+        // not accused of anything.
+        if (openAsked) setOpenSilent(true)
         return
       }
       void load()
     }, GENERATING_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [generating, awaiting, load])
+  }, [generating, awaiting, load, openAsked])
 
   // Either reason the player cannot act: their own tap, or a narrator already at
   // work — including one asked for by a page they have since closed.
   const busy = !!tapped || generating || turnPending
+
+  /** The ask that is still outstanding, and whether it has gone quiet.
+   *
+   *  Both are DERIVED from the server's own answer rather than remembered from
+   *  what a request returned. `ask` names the month that was asked for; the life
+   *  has either reached it (landed — nothing outstanding), or has a narrator in
+   *  flight (on its way), or neither — and only that last case owes the player a
+   *  retry. A local "it failed" flag could not tell those apart, because the
+   *  request that would have set it is exactly the thing that goes missing.
+   *
+   *  `busy` gates the quiet verdict: while this page's own tap is in flight the
+   *  view on screen predates the ask, and judging it would call every month dead
+   *  the instant it was asked for. `take` reloads before it clears `tapped`, so by
+   *  the time this is judged the view has seen the ask. */
+  const outstanding = ask && v && ask.turn > v.turn ? ask : null
+  const stalled = !!outstanding && !busy
 
   // What the in-flight turn is about, from the SERVER's pending record — so it
   // survives leaving and returning mid-generation. When it matches a choice
@@ -515,27 +556,33 @@ export function PlayPage({
   }, [backdropSig, chron, onBackdrop])
 
   const take = async (payload: { turn?: number; action?: string }, what: string) => {
+    const wanted = payload.turn ?? (v?.turn ?? 0) + 1
     setTapped(what)
     setPhrase(pick('play.waiting'))
-    setStalled(false)
     try {
       const out = await api.takeTurn(runId, payload)
-      // A month that actually happened — or was already written, or ended the life
-      // — is the only outcome that clears what the player typed. A narrator that
-      // did not answer keeps their words and offers to resend the same action.
-      const settled = out.advanced || out.reason === 'already' || out.reason === 'ended'
-      if (settled) {
-        setAction('')
-        setRetry(null)
-      } else {
-        setStalled(true)
-        setRetry({ payload, what })
-      }
-      await load()
+      // What the player typed is spent only once the ask is RECORDED — the month
+      // committed, was already there, ended the life, or is on disk and being
+      // written. `generating` is the one outcome that took nothing: the app is still
+      // finishing the CURRENT page, so their words stay theirs and the ask has to be
+      // made again.
+      if (out.reason !== 'generating') setAction('')
+      // Kept in every case except a landed month: while a month is being written
+      // this is what the page compares against to tell "on its way" from "gone
+      // quiet", and if it did go quiet it is what the retry button resends.
+      setAsk(out.advanced ? null : { turn: wanted, payload, what })
     } catch {
-      setStalled(true)
-      setRetry({ payload, what })
+      // The response never arrived. That decides NOTHING — the record is written
+      // before the narrator is spoken to, so the month may be well underway — so
+      // nothing is concluded here and the reload below asks the server what is
+      // true. The player's words are kept, because this is the one path where the
+      // app genuinely does not know whether they were taken.
+      setAsk({ turn: wanted, payload, what })
     }
+    // Always, on every path. This is what turns a dropped response into a progress
+    // bar that finishes on its own rather than a page that has to be remounted to
+    // discover the month it was already told about.
+    await load()
     setTapped('')
   }
 
@@ -592,7 +639,7 @@ export function PlayPage({
         ) : (
           <>
             <div className="ew-note">{busy ? t('opening.arranging') : t('opening.notStarted')}</div>
-            {stalled && !busy ? <div className="ew-note">{t('opening.silent')}</div> : null}
+            {openSilent && !busy ? <div className="ew-note">{t('opening.silent')}</div> : null}
             <div className="ew-bar">
               <button
                 className="ew-btn ew-btn-go"
@@ -601,14 +648,16 @@ export function PlayPage({
                 onClick={async () => {
                   setTapped(OPEN)
                   setPhrase(pick('opening.waiting'))
-                  setStalled(false)
-                  try {
-                    const out = await api.openRun(runId)
-                    if (!out.advanced && out.reason !== 'already') setStalled(true)
-                    await load()
-                  } catch {
-                    setStalled(true)
-                  }
+                  setOpenAsked(true)
+                  setOpenSilent(false)
+                  // Fired, not awaited. A birth is the heaviest turn a life ever
+                  // asks for, and holding a request open for it buys nothing: the
+                  // server records the ask before it speaks to the narrator, this
+                  // screen already polls that record, and a held request is the one
+                  // thing an intermediary can drop — leaving a life that IS being
+                  // born looking like one that refused to start.
+                  void api.openRun(runId).catch(() => {})
+                  await load()
                   setTapped('')
                 }}
               >
@@ -885,23 +934,23 @@ export function PlayPage({
         </div>
       ) : null}
 
-      {/* The retry is shown ONLY when the narrator has truly stopped — no fresh
-          pending record (`generating` is null). While it is still writing, the block
-          above shows instead, so a slow month never reads as a failed one. */}
-      {stalled && !generating ? (
+      {/* Shown ONLY when the ask has gone quiet: the life has not reached the month
+          that was asked for and the server reports no narrator in flight. While one
+          is still writing the block above shows instead, so a slow month never
+          reads as a failed one — and a month that landed while the answer to its
+          own request went missing never reads as one at all. */}
+      {stalled && outstanding ? (
         <div className="ew-note" role="status" aria-live="polite">
           {t('play.stalled')}
-          {retry ? (
-            <button
-              className="ew-btn ew-btn-sm"
-              type="button"
-              disabled={busy}
-              style={{ marginInlineStart: '8px' }}
-              onClick={() => void take(retry.payload, retry.what)}
-            >
-              {t('play.retry')}
-            </button>
-          ) : null}
+          <button
+            className="ew-btn ew-btn-sm"
+            type="button"
+            disabled={busy}
+            style={{ marginInlineStart: '8px' }}
+            onClick={() => void take(outstanding.payload, outstanding.what)}
+          >
+            {t('play.retry')}
+          </button>
         </div>
       ) : null}
 

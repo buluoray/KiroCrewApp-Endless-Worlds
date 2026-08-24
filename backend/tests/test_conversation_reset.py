@@ -346,7 +346,7 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
                 run_id=run,
                 rulebook=RULEBOOK,
                 dispatch=dispatch,
-                deadline_secs=0.3,
+                inline_wait_secs=0.3,
                 shape="declare state in this shape: status",
             )
         )
@@ -409,7 +409,7 @@ def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
                 run_id=run,
                 rulebook="rules",
                 dispatch=dispatch,
-                deadline_secs=0.3,
+                inline_wait_secs=0.3,
                 shape="declare state in this shape: status",
             )
         )

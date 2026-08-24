@@ -279,7 +279,7 @@ def test_a_double_tap_cannot_produce_two_versions_of_one_month(store):
                 run_id=run,
                 rulebook="r",
                 dispatch=commit_once,
-                deadline_secs=3,
+                inline_wait_secs=3,
             ),
             advance_turn(
                 state_obj=state,
@@ -287,7 +287,7 @@ def test_a_double_tap_cannot_produce_two_versions_of_one_month(store):
                 run_id=run,
                 rulebook="r",
                 dispatch=commit_once,
-                deadline_secs=3,
+                inline_wait_secs=3,
             ),
         )
 
@@ -310,7 +310,12 @@ def test_a_committed_turn_is_returned_with_its_prose(store):
 
     out = asyncio.run(
         advance_turn(
-            state_obj=state, store=store, run_id=run, rulebook="r", dispatch=commit, deadline_secs=3
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=commit,
+            inline_wait_secs=3,
         )
     )
     assert out.advanced is True
@@ -318,10 +323,11 @@ def test_a_committed_turn_is_returned_with_its_prose(store):
     assert out.prose == PROSE
 
 
-def test_a_silent_narrator_times_out_without_rolling_anything_back(store):
-    """The narrator may still commit after we stop waiting, and that commit is
-    valid — the next request finds the turn already there. Undoing a turn to make
-    an HTTP response tidier would throw away a month of a life."""
+def test_a_month_that_outruns_the_wait_is_handed_over_not_rolled_back(store):
+    """The narrator is still writing after we stop waiting, and its commit will be
+    valid — the next read finds the month there. Undoing a turn to make an HTTP
+    response tidier would throw away a month of a life, and the reason says the ask
+    is being written rather than that anything failed."""
     state = FakeState()
     run = store.create_run({"turn": 7, "keep": "me"}, {"runId": "r1"})
     before = store.read_state(run)
@@ -333,12 +339,12 @@ def test_a_silent_narrator_times_out_without_rolling_anything_back(store):
             run_id=run,
             rulebook="r",
             dispatch=lambda *a: True,
-            deadline_secs=0.6,
+            inline_wait_secs=0.6,
         )
     )
 
     assert out.advanced is False
-    assert out.reason == "timeout"
+    assert out.reason == "writing"
     assert out.turn == 7
     assert store.read_state(run) == before, "state was touched"
     assert store.read_chronicle(run) == [], "a turn was recorded that never happened"
@@ -365,17 +371,68 @@ def test_a_queued_turn_is_still_waited_for(store):
             run_id=run,
             rulebook="r",
             dispatch=queued_then_commits,
-            deadline_secs=3,
+            inline_wait_secs=3,
         )
     )
     assert out.advanced is True and out.turn == 2
 
 
 def test_the_deadline_is_the_one_the_player_was_promised():
-    # A waited turn gets 300s before the UI offers retry, and must stay under half
-    # the stale window so a turn running past one request is never called abandoned.
+    # A turn is BELIEVED to be running for 300s, and that budget must stay under
+    # half the stale window so a turn running past one request is never called
+    # abandoned. The opening is believed for just as long.
     assert turn_mod.TURN_DEADLINE_SECS == 300.0
+    assert turn_mod.OPENING_DEADLINE_SECS == turn_mod.TURN_DEADLINE_SECS
     assert turn_mod.PENDING_STALE_SECS > turn_mod.TURN_DEADLINE_SECS * 2
+
+
+def test_no_request_is_held_anywhere_near_an_intermediarys_idle_timeout():
+    """The wait a request performs is not the budget, and is far below the point a
+    proxy, tunnel, or load balancer drops a connection carrying no bytes.
+
+    Held to the whole budget instead, the server finished turns and answered into
+    sockets nobody held: the month committed and the page reported that the page had
+    not come through. The margin is generous on purpose — the floor below is the
+    COMMON default, not a measured property of any one path, and TLS setup and
+    queueing are spent inside the same window.
+    """
+    # The idle timeout an ordinary HTTP intermediary applies, in seconds.
+    common_idle_floor = 60.0
+    assert turn_mod.TURN_INLINE_WAIT_SECS <= common_idle_floor / 2
+    assert turn_mod.TURN_INLINE_WAIT_SECS < turn_mod.TURN_DEADLINE_SECS
+
+
+def test_an_ordinary_slow_month_does_not_lose_its_conversation(store):
+    """Wiring, not arithmetic: the poisoned-slot signature is handed the BUDGET.
+
+    A request now stops waiting long before an ordinary rich month is finished, so
+    handing that wait to the signature instead would read every slow turn as "this
+    narrator never touched the world" and drop a live conversation mid-month — on
+    the first turn that ran past the inline wait, and on every one after it.
+    """
+    state = _fake_state_with_release()
+    run = store.create_run({"turn": 0}, {"runId": "r1"})
+
+    # A wait that expires at once, inside a budget that has barely started.
+    waited = {"inline_wait_secs": 0.01, "budget_secs": 30.0}
+    first = asyncio.run(
+        advance_turn(
+            state_obj=state, store=store, run_id=run, rulebook="r", dispatch=_silent, **waited
+        )
+    )
+    assert first.reason == "writing"
+    original = next(iter(state.slots.values()))
+    time.sleep(0.05)  # older than the request's wait; nowhere near the budget
+
+    asyncio.run(
+        advance_turn(
+            state_obj=state, store=store, run_id=run, rulebook="r", dispatch=_silent, **waited
+        )
+    )
+    assert next(iter(state.slots.values())) is original, (
+        "a month still inside its budget is being written, not answered by the wrong "
+        "narrator — replacing the conversation here throws away the turn in flight"
+    )
 
 
 # -- the slot the turn runs in -------------------------------------------
@@ -392,7 +449,7 @@ def test_the_turn_runs_in_a_sealed_app_owned_slot(store):
             run_id=run,
             rulebook="r",
             dispatch=lambda *a: True,
-            deadline_secs=0.4,
+            inline_wait_secs=0.4,
             project="/tmp/whatever",
         )
     )
@@ -411,10 +468,10 @@ def test_the_outcome_carries_a_machine_reason_not_player_facing_text():
     enforced in one place rather than on every error path."""
     from turn import TurnOutcome
 
-    out = TurnOutcome(advanced=False, turn=3, reason="timeout")
-    assert out.reason == "timeout"
+    out = TurnOutcome(advanced=False, turn=3, reason="writing")
+    assert out.reason == "writing"
     src = inspect.getsource(turn_mod)
-    assert out.reason == "timeout", "the reason must be a machine token"
+    assert out.reason == "writing", "the reason must be a machine token"
     # No player-facing apology anywhere: phrasing belongs to the UI, which is
     # where the language table lives.
     for leak in ("please try again", "sorry", "try once more"):
@@ -597,10 +654,11 @@ def test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs(store):
             run_id=run,
             rulebook="THE LAW",
             dispatch=_silent,
-            deadline_secs=0.01,
+            inline_wait_secs=0.01,
+            budget_secs=0.01,
         )
     )
-    assert first.advanced is False and first.reason == "timeout"
+    assert first.advanced is False and first.reason == "writing"
     poisoned = next(iter(state.slots.values()))
     time.sleep(0.05)  # let the pending record age past the deadline
 
@@ -611,10 +669,11 @@ def test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs(store):
             run_id=run,
             rulebook="THE LAW",
             dispatch=_silent,
-            deadline_secs=0.01,
+            inline_wait_secs=0.01,
+            budget_secs=0.01,
         )
     )
-    assert second.reason == "timeout"
+    assert second.reason == "writing"
     healed = next(iter(state.slots.values()))
     assert healed is not poisoned, "the poisoned conversation must be replaced"
     # A fresh conversation has no rulebook; the heal path must re-brief it.
@@ -633,7 +692,8 @@ def test_a_turn_with_tool_activity_is_never_healed(store):
             run_id=run,
             rulebook="r",
             dispatch=_silent,
-            deadline_secs=0.01,
+            inline_wait_secs=0.01,
+            budget_secs=0.01,
         )
     )
     original = next(iter(state.slots.values()))
@@ -647,7 +707,8 @@ def test_a_turn_with_tool_activity_is_never_healed(store):
             run_id=run,
             rulebook="r",
             dispatch=_silent,
-            deadline_secs=0.01,
+            inline_wait_secs=0.01,
+            budget_secs=0.01,
         )
     )
     assert next(iter(state.slots.values())) is original
@@ -665,7 +726,8 @@ def test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop(store):
                 run_id=run,
                 rulebook="r",
                 dispatch=_silent,
-                deadline_secs=0.01,
+                inline_wait_secs=0.01,
+                budget_secs=0.01,
             )
         )
         time.sleep(0.05)
