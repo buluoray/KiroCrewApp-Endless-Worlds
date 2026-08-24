@@ -406,7 +406,13 @@ _TOOLS: list[dict[str, Any]] = [
             "words, and nothing else about the life reaches you any other way. "
             "Pass the `fingerprint` you were given last turn as `since` and you get "
             "only what changed, with the rest named as unchanged; omit it and you "
-            "get the whole state."
+            "get the whole state. A `since` read also stops re-sending what you are "
+            "already holding: the months you wrote come back empty, and a `lore` "
+            "entry or `memoryCandidates` event whose body reached you earlier in "
+            "this conversation comes back marked `held: true` with the body left "
+            "out. A held entry is still being surfaced BECAUSE it bears on this "
+            "month — read it from where it was first given rather than asking "
+            "again. Lose your baseline (a compaction) and everything arrives whole."
         ),
         "inputSchema": {
             "type": "object",
@@ -414,7 +420,17 @@ _TOOLS: list[dict[str, Any]] = [
             "additionalProperties": False,
             "properties": {
                 "runId": _RUN_ID,
-                "recentTurns": {"type": "integer", "minimum": 0, "maximum": 50},
+                "recentTurns": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50,
+                    "description": (
+                        "How many recent months to re-read. Applies to a FULL read "
+                        "only — on a `since` read you wrote those months and they "
+                        "are not sent back at any depth. To reach one specific "
+                        "older month, name it in `memoryEvents`."
+                    ),
+                },
                 "includeProse": {"type": "boolean"},
                 "chapters": {
                     "type": "array",
@@ -1669,6 +1685,10 @@ RECENT_TURNS = 12
 #: the narrator's prompt forbids; the cap keeps only the most relevant few.
 MAX_LORE = 4
 
+#: The fields that let a narrator RECOGNISE a recall candidate it is already
+#: holding. Everything else is body, which a held candidate does not re-send.
+_RECALL_IDENTITY = ("id", "turn", "title")
+
 
 def _pluck_paths(state: dict[str, Any], paths: list[str]) -> dict[str, Any]:
     """A nested dict holding only the leaves ``paths`` name, read from ``state``.
@@ -1738,6 +1758,15 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     baseline = store.baseline_for(run_id, since) if since else None
     full_read = baseline is None
 
+    # Recall material the narrator is already holding. A delta read is the narrator
+    # CERTIFYING that its context survived (it could not otherwise name the
+    # baseline), so every body delivered earlier in this conversation is still in
+    # front of it and re-sending it buys nothing. On a full read it is holding
+    # nothing, so everything goes in full and the record is replaced.
+    held = set() if full_read else store.recall_sent(run_id)
+    # Bodies actually delivered by THIS read, recorded once at the end.
+    delivered: list[str] = []
+
     out: dict[str, Any] = {
         "runId": run_id,
         "turn": int(state.get("turn") or 0),
@@ -1787,14 +1816,22 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                         elif e.always and full_read:
                             ranked.append((2, e))
                     ranked.sort(key=lambda t: t[0])
-                    matched = [
-                        {
-                            "id": e.id,
-                            **({"name": e.name} if e.name else {}),
-                            "text": e.text,
-                        }
-                        for _, e in ranked[:MAX_LORE]
-                    ]
+                    # A held entry still SURFACES — the keyword matched, so this
+                    # month is about it and the narrator should know that — but its
+                    # body is omitted and named as held instead. The world's standing
+                    # setting does not change, so the text it received earlier in
+                    # this conversation is still the current text.
+                    matched = []
+                    for _, e in ranked[:MAX_LORE]:
+                        row: dict[str, Any] = {"id": e.id}
+                        if e.name:
+                            row["name"] = e.name
+                        if e.id in held:
+                            row["held"] = True
+                        else:
+                            row["text"] = e.text
+                            delivered.append(e.id)
+                        matched.append(row)
                     if matched:
                         out["lore"] = matched
     except Exception:  # noqa: BLE001
@@ -1819,16 +1856,37 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             # event's id/title/summary. The "declare echoes when you use one" rule
             # lives in the endless_advance_turn tool description, so no per-turn
             # memoryNote is needed.
-            out["memoryCandidates"] = [
-                {k: v for k, v in c.items() if k not in ("reasons", "lastEchoedTurn")}
-                for c in candidates
-                if isinstance(c, dict)
-            ]
+            #
+            # A held candidate keeps the fields the narrator needs to RECOGNISE it
+            # (`id`, `turn`, `title`) and loses the body it already has. A committed
+            # event is immutable, so the summary it received earlier in this
+            # conversation is still the whole truth about that month — which is why
+            # omitting it costs nothing, while re-sending it cost a measured 43
+            # deliveries of one event on a single life.
+            rows: list[dict[str, Any]] = []
+            for c in candidates:
+                if not isinstance(c, dict):
+                    continue
+                cid = str(c.get("id") or "")
+                if cid and cid in held:
+                    row = {k: c[k] for k in _RECALL_IDENTITY if k in c}
+                    row["held"] = True
+                else:
+                    row = {k: v for k, v in c.items() if k not in ("reasons", "lastEchoedTurn")}
+                    if cid:
+                        delivered.append(cid)
+                rows.append(row)
+            out["memoryCandidates"] = rows
     wanted_events = args.get("memoryEvents") or []
     if wanted_events:
         out["memoryEvents"] = memory_graph.event_neighbourhood(
             graph, [str(e) for e in wanted_events]
         )
+
+    # Written AFTER both recall blocks, so it records what this read actually put in
+    # front of the narrator rather than what was merely selected. A full read replaces
+    # the set: the narrator has just proved it is holding nothing.
+    store.mark_recall_sent(run_id, delivered, reset=full_read)
 
     if baseline is not None:
         delta = store.diff(baseline, state)
@@ -1872,9 +1930,17 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # baseline that means "this narrator was compacted and needs re-anchoring" (and
     # the life's first read). An explicit recentTurns request is always honoured —
     # that is how the narrator deliberately pages back through older history.
-    if "recentTurns" in args:
-        out["recentTurns"] = lived[-recent:] if recent else []
-    elif baseline is None:
+    # ``recentTurns`` used to have an escape hatch — an explicit request was always
+    # honoured, on the theory that it was how a narrator deliberately paged back
+    # through older history. Measured on a real life, that hatch was the whole
+    # behaviour: the narrator supplied the parameter on 48 calls and every one asked
+    # for the TAIL (1, 2, 3 or 5), never once for anything older. A gate keyed on a
+    # parameter's ABSENCE is dead the moment the model helpfully fills it in, and this
+    # one was. So the certification is now the only rule: a narrator that can name its
+    # baseline is holding the months it wrote and gets none of them back. Reaching one
+    # specific old month already has its own door in ``memoryEvents``, which asks by
+    # id instead of by depth.
+    if full_read:
         out["recentTurns"] = lived[-recent:] if recent else []
     else:
         out["recentTurns"] = []

@@ -309,8 +309,15 @@ def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_
 def test_recent_turns_ride_only_on_a_full_read(store, run):
     """The narrator's session already holds the months it wrote, so a delta read
     (one that carried a baseline it could still name) gets no recent chronicle —
-    only a full snapshot (a lost baseline, or the first read) does, and an explicit
-    request is always honoured."""
+    only a full snapshot (a lost baseline, or the first read) does.
+
+    An explicit ``recentTurns`` no longer overrides that, and the override's removal
+    is the point of the last assertion. It existed for deliberate paging back
+    through older history, but measured on a real life the narrator supplied the
+    parameter on 48 calls and every one asked for the TAIL (1, 2, 3 or 5) — never
+    once for anything older. A gate keyed on a parameter's ABSENCE is dead as soon
+    as the model fills it in, so the certification is now the only rule. Paging to a
+    specific old month goes through ``memoryEvents``, which asks by id."""
     import mcp_server as srv
 
     srv._store = lambda: store  # type: ignore[assignment]
@@ -330,7 +337,10 @@ def test_recent_turns_ride_only_on_a_full_read(store, run):
     assert "restraint" not in delta, "a delta must not re-push the R7 reading"
 
     asked = srv._read_runtime({"runId": run, "since": since, "recentTurns": 1})
-    assert len(asked["recentTurns"]) == 1, "an explicit request is always honoured"
+    assert asked["recentTurns"] == [], (
+        "asking for the tail on a delta read must NOT reopen the gate — the narrator "
+        "wrote those months and is certifying that it still holds them"
+    )
 
 
 def test_a_commit_that_misnames_status_fields_lands_but_warns(store, tmp_path, monkeypatch):

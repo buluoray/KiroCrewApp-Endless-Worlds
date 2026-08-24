@@ -257,6 +257,44 @@ def test_store_has_no_process_lifetime_per_run_lock_table(store: RunStore) -> No
     assert not hasattr(store, "lock")
 
 
+# -- recall material already delivered ------------------------------------
+
+
+def test_the_held_recall_set_is_scoped_to_one_conversation(store: RunStore) -> None:
+    """The record stamps the rotation it was written under, so replacing the
+    conversation makes every earlier id read as unsent again — no explicit clear.
+
+    That is load-bearing rather than tidy: THREE separate paths rotate a narrator's
+    conversation (an install change, a chapter boundary, the turn budget), and a
+    clear wired into two of them would leave the third suppressing a body the new
+    conversation never received."""
+    run_id = store.create_run(_state(1), {"templateId": "t"})
+
+    store.mark_recall_sent(run_id, ["lore-a", "event-1"])
+    assert store.recall_sent(run_id) == {"lore-a", "event-1"}
+
+    store.mark_recall_sent(run_id, ["event-2"])
+    assert store.recall_sent(run_id) == {"lore-a", "event-1", "event-2"}, "adds, never replaces"
+
+    store.mark_rotation(run_id, turn=7)
+    assert store.recall_sent(run_id) == set(), "a replaced conversation is holding nothing"
+
+    store.mark_recall_sent(run_id, ["event-3"])
+    assert store.recall_sent(run_id) == {"event-3"}, "the new conversation starts its own set"
+
+
+def test_a_full_read_may_replace_the_held_set_not_extend_it(store: RunStore) -> None:
+    """``reset=True`` is what a full read passes. A compaction does NOT rotate the
+    conversation, so the rotation stamp cannot catch a narrator that lost its
+    context mid-conversation; without the replace, bodies it has just demonstrably
+    lost would stay suppressed for the rest of the life."""
+    run_id = store.create_run(_state(1), {"templateId": "t"})
+    store.mark_recall_sent(run_id, ["a", "b"])
+
+    store.mark_recall_sent(run_id, ["c"], reset=True)
+    assert store.recall_sent(run_id) == {"c"}
+
+
 # -- deletion -------------------------------------------------------------
 
 
