@@ -160,6 +160,8 @@ from narrator import (  # noqa: E402
     worldsmith_slot_key,
 )
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
+from perf import TurnPerf  # noqa: E402
+from perf import aggregate as perf_aggregate  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
 from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
 from store import CorruptRunState, RunStore, StoreError  # noqa: E402
@@ -1021,6 +1023,35 @@ async def life_deletion(request: web.Request, ctx: AppContext) -> web.Response:
     if not any(r.get("runId") == run_id for r in store.read_index()):
         return web.json_response({"error": "no such life"}, status=404)
     return web.json_response(_life_deletion_facts(ctx, run_id, _gateway_state(request)))
+
+
+async def life_perf(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/perf`` — the audit page's data: what each turn cost.
+
+    One aggregated row per committed turn since the ledger existed (older turns
+    are left out rather than shown half-empty): story latency (ask → commit),
+    the narrator's read time, tool-call count, declaration form and size, art
+    latency joined from the backdrop timeline, the context meter after the
+    turn, and any conversation rotation with its reason. ``creditNote`` says
+    out loud that tokens are a proxy: the harness exposes no billing signal to
+    an app, and a fabricated dollar figure would be unauditable.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    if not any(r.get("runId") == run_id for r in store.read_index()):
+        return web.json_response({"error": "no such life"}, status=404)
+    rows = TurnPerf(ctx.data_dir, run_id).rows()
+    timeline = BackdropTimeline(ctx.data_dir, run_id)
+    events = timeline.events()
+    return web.json_response(
+        {
+            "runId": run_id,
+            "turns": perf_aggregate(rows, events),
+            "creditNote": "tokens-not-credits",
+        }
+    )
 
 
 async def reset_life_conversation(request: web.Request, ctx: AppContext) -> web.Response:
@@ -2499,6 +2530,7 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
             path="/runs/{run_id}/reset-conversation",
             handler=reset_life_conversation,
         ),
+        AppRoute(method="GET", path="/runs/{run_id}/perf", handler=life_perf),
         AppRoute(method="POST", path="/runs/{run_id}/meta", handler=set_life_meta),
         AppRoute(method="GET", path="/runs/{run_id}/scenes/{scene_id}", handler=get_scene),
         AppRoute(method="GET", path="/runs/{run_id}/backdrop", handler=get_backdrop),

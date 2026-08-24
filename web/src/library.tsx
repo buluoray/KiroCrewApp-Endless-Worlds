@@ -163,6 +163,7 @@ export function LifeRow({
   onDeleted,
   onArchive,
   onRename,
+  onPerf,
 }: {
   run: LifeRowData
   onOpen: (runId: string) => void
@@ -179,6 +180,8 @@ export function LifeRow({
   onArchive?: (runId: string, archived: boolean) => void
   /** Give this life a player-chosen name. Managed-list only. */
   onRename?: (runId: string, label: string) => void
+  /** Open the per-turn performance page for this life. Managed-list only. */
+  onPerf?: (runId: string, name: string) => void
 }) {
   // The name the player reads: their own label first, then the answer-derived
   // subtitle, then the world's title.
@@ -318,6 +321,14 @@ export function LifeRow({
   // Offered wherever archive is (the managed shelf): a life that can be archived
   // is a life whose narrator can have drifted. Unreadable lives are excluded —
   // they cannot narrate at all, so a fresh conversation buys them nothing.
+  if (onPerf) {
+    actions.push({
+      key: 'perf',
+      label: t('life.perf.short'),
+      aria: t('life.perf.aria', { name }),
+      onClick: () => onPerf(run.runId, name),
+    })
+  }
   if (onArchive && !run.unreadable) {
     actions.push({
       key: 'resetChat',

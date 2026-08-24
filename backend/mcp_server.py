@@ -101,6 +101,7 @@ from chapters import (  # noqa: E402
 from compile import CLEANING_CONTRACT, COMPILER_BRIEF, accept_compiled_header, preview  # noqa: E402
 from drafts import DraftError, DraftStore  # noqa: E402
 from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
+from perf import TurnPerf  # noqa: E402
 from phototrace import (  # noqa: E402
     TRACE_CANDIDATE_COUNT,
     CandidateStore,
@@ -1551,6 +1552,27 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # a past month shows the outcome with the choice that caused it missing.
     asked = store.read_pending(run_id) or {}
     action = str(asked.get("action") or "") if int(asked.get("turn") or 0) == turn else ""
+
+    # The turn's cost, recorded where the commit happens (only this process sees
+    # it). storyMs runs from the app's own ask (mark_pending, written before
+    # dispatch) to this commit; readMs is how long the narrator took to look
+    # before it wrote. Advisory rows for the perf page — never a reason to fail
+    # the commit they measure.
+    if int(asked.get("turn") or 0) == turn:
+        now = time.time()
+        asked_at = float(asked.get("askedAt") or 0.0)
+        read_at = float(asked.get("readAt") or 0.0)
+        TurnPerf(_DATA, run_id).mark(
+            turn,
+            "commit",
+            storyMs=int((now - asked_at) * 1000) if asked_at else None,
+            readMs=int((read_at - asked_at) * 1000) if asked_at and read_at >= asked_at else None,
+            toolCalls=int(asked.get("steps") or 0) or None,
+            form="patch" if isinstance(patch, dict) else "full",
+            declaredBytes=len(
+                json.dumps(patch if isinstance(patch, dict) else args.get("state"), default=str)
+            ),
+        )
 
     entry: dict[str, Any] = {
         "turn": turn,

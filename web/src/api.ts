@@ -640,6 +640,29 @@ function send<T>(method: 'PATCH' | 'DELETE', path: string, body?: unknown): Prom
   })
 }
 
+export type PerfTurn = {
+  turn: number
+  at?: number
+  storyMs?: number
+  readMs?: number
+  toolCalls?: number
+  form?: 'patch' | 'full'
+  declaredBytes?: number
+  artMs?: number
+  outcome?: 'committed' | 'fallback' | 'pending'
+  pct?: number
+  usedTokens?: number
+  windowTokens?: number
+  model?: string
+  rotation?: string
+}
+
+export type PerfReport = {
+  runId: string
+  turns: PerfTurn[]
+  creditNote: string
+}
+
 export const api = {
   worlds: (language?: string) =>
     json<{ worlds: WorldRow[]; seeds: SeedReport }>(
@@ -717,6 +740,11 @@ export const api = {
       `/runs/${encodeURIComponent(runId)}/reset-conversation`,
       { confirm: runId },
     ),
+
+  /** Per-turn cost of a life, for the performance page: story/art latency,
+   *  declaration form and size, context meter, rotations. Tokens, not credits —
+   *  the server names the proxy explicitly in `creditNote`. */
+  perf: (runId: string) => json<PerfReport>(`/runs/${encodeURIComponent(runId)}/perf`),
 
   restoreWorld: (id: string) =>
     post<{ worldId: string; restored: boolean }>(`/worlds/${encodeURIComponent(id)}/restore`, {}),

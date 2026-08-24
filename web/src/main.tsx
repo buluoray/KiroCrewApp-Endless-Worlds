@@ -19,6 +19,7 @@ import {
   WorldDraftReview,
 } from './create-world'
 import { LifeRow, WorldCard, WorldDetailView } from './library'
+import { PerfPage } from './perf'
 import { DRAFT_PREFIX, OpeningScreen } from './opening'
 import { PlayPage } from './play'
 import { WorldRail, type ReadWidth } from './rail'
@@ -61,7 +62,7 @@ function crewLanguageDefault(): Lang {
   return asLang(code) ?? 'en'
 }
 
-type View = 'library' | 'detail' | 'opening' | 'live' | 'create' | 'draft'
+type View = 'library' | 'detail' | 'opening' | 'live' | 'create' | 'draft' | 'perf'
 
 interface Where {
   view: View
@@ -139,6 +140,8 @@ export default function EndlessWorlds() {
   const [reviewDraft, setReviewDraft] = useState<string | null>(null)
 
   const [view, setView] = useState<View>('library')
+  /** Which life the performance page is showing (view === 'perf'). */
+  const [perfRun, setPerfRun] = useState<{ runId: string; name: string } | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   /** The shelf. Remembered across loads and OPEN by default so the landing shows
    *  the lives in it; the reader can close it for more reading room (the story
@@ -686,7 +689,18 @@ export default function EndlessWorlds() {
   const scenesShown = narrowLive && activeSceneIds.length > 0
 
   let body: React.ReactNode
-  if (view === 'live' && live) {
+  if (view === 'perf' && perfRun) {
+    body = (
+      <PerfPage
+        runId={perfRun.runId}
+        name={perfRun.name}
+        onBack={() => {
+          setPerfRun(null)
+          setView('library')
+        }}
+      />
+    )
+  } else if (view === 'live' && live) {
     body = (
       <PlayPage
         runId={live}
@@ -783,6 +797,10 @@ export default function EndlessWorlds() {
       onDeleted: afterLifeDelete,
       onRename: renameLife,
       onArchive: archiveLife,
+      onPerf: (runId: string, name: string) => {
+        setPerfRun({ runId, name })
+        setView('perf')
+      },
     }
     body = (
       <>

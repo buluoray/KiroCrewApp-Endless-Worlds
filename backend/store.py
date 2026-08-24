@@ -108,6 +108,12 @@ class RunStore:
     def _prev_key(run_id: str) -> str:
         return f"run.{run_id}.prev"
 
+    @property
+    def data_dir(self) -> Path:
+        """The app data root this store writes under — for sibling per-run
+        ledgers (perf, backdrop timeline) that live beside the chronicle."""
+        return self._runs_dir.parent
+
     def _chronicle_path(self, run_id: str) -> Path:
         return self._runs_dir / run_id / "chronicle.jsonl"
 

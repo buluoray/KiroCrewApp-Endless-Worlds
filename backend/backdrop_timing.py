@@ -83,6 +83,10 @@ class BackdropTimeline:
             prev = now
         return events
 
+    def events(self) -> list[dict[str, Any]]:
+        """Every recorded event, oldest first — the perf page's join source."""
+        return self._all()
+
     def _all(self) -> list[dict[str, Any]]:
         if not self._path.is_file():
             return []
