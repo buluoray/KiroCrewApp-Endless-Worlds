@@ -928,6 +928,25 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   .ew-aside { display: block; position: sticky; top: 12px; }
 }
 
+/* A sheet over the column takes the story off screen with it, the way a phone's
+   region tab replaces the story rather than floating above it.
+
+   Needed because the star map is deliberately TRANSPARENT when a life backdrop is
+   mounted (.ews-overlay:has(> .ew-backdrop)) so the world's art becomes the room —
+   and that same transparency let the prose read through the sheet's negative space,
+   between and below its frosted instruments. Dimming it further was the wrong lever:
+   the text was legible enough to be noise at any scrim alpha that still let the art
+   through.
+
+   `visibility`, not `display`. The sheet is absolute with `inset: 0` against .ew-root,
+   so its box is the app panel's — a box .ew-root only has because this content is in
+   the layout. Removing the content collapses .ew-root and the sheet collapses with it
+   (measured: panel 873px tall, sheet 841px). Hiding it keeps the height and drops the
+   ink, and takes the story out of hit-testing and the a11y tree while a modal is up.
+   The backdrop is untouched: the app's own .ew-backdrop is a child of .ew-root, not of
+   this column, and the sheet mounts its own copy inside itself. */
+.ew-play-root:has(> .ews-overlay) > *:not(.ews-overlay) { visibility: hidden; }
+
 /* Title with the in-world date beside it (shown only when the world has one). */
 .ew-titleline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .ew-titleline .ew-clock { margin-bottom: 0; }

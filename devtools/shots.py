@@ -39,9 +39,6 @@ class Expect:
     #: Must horizontally cover this other element (same left/right within tolerance):
     #: how "the sheet covers the app panel" is stated without pinning a width.
     covers_x: str = ""
-    #: Must NOT be visible while this shot's surface is up — a control that should
-    #: have stepped aside.
-    hidden_when_shot: bool = False
     why: str = ""
 
 
@@ -129,7 +126,14 @@ SHOTS: list[Shot] = [
             {"wait": ".ews-overlay"},
             {"seconds": 1},
         ],
-        measure=(".ews-overlay", ".ews-lens-pane", ".ew-root", ".ew-play-root", ".ew-slot-on"),
+        measure=(
+            ".ews-overlay",
+            ".ews-lens-pane",
+            ".ew-root",
+            ".ew-play-root",
+            ".ew-slot-on",
+            ".ew-turnpage",
+        ),
         expects=(
             Expect(
                 ".ews-overlay",
@@ -138,6 +142,14 @@ SHOTS: list[Shot] = [
                 covers_x=".ew-play-root",
                 why="the sheet must span the column it covers; narrower means it is "
                 "anchored to something else and the story shows past its edge",
+            ),
+            Expect(
+                ".ew-turnpage",
+                presence="absent",
+                why="the sheet is transparent on purpose so the world's art shows "
+                "through it, which also let the month's prose read through its "
+                "negative space; the story has to go with the column, the way a "
+                "phone's region tab replaces it",
             ),
             Expect(
                 ".ew-slot-on",
