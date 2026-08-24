@@ -15,6 +15,12 @@ from typing import Any
 #: Wide desktop, and the phone the app is actually read on.
 DESKTOP = (1440, 900)
 PHONE = (390, 844)
+#: A real external monitor. Not a third breakpoint — the app has two layouts — but the
+#: only width where the reading track is wider than the prose measure (66ch, ~604px).
+#: At 1440 the aside and the rails leave the track NARROWER than that, so every cap on
+#: the story is inert there and a shot at 1440 cannot see one: the geometry that made
+#: the story stop short of its own column only exists past this width.
+WIDE = (1920, 1000)
 
 
 @dataclass(frozen=True)
@@ -91,7 +97,19 @@ SHOTS: list[Shot] = [
         "play",
         "a life mid-story: prose, choices, the status aside",
         steps=_open("第三天 · 井边"),
-        measure=(".ew-play-root", ".ew-prose", ".ew-aside"),
+        measure=(".ew-play-root", ".ew-prose", ".ew-turnpage", ".ew-aside"),
+        sizes=(WIDE, DESKTOP, PHONE),
+        expects=(
+            Expect(
+                ".ew-prose",
+                covers_x=".ew-turnpage",
+                why="the default reading width is `fluid`, which promises the story "
+                "the track. A measure left on the prose alone does not narrow the "
+                "recap, the digest or the echoes around it, so the story ends up the "
+                "one block that stops short — a dead margin down its right side that "
+                "reads as a broken layout rather than as a measure",
+            ),
+        ),
         full_page=True,
     ),
     Shot(

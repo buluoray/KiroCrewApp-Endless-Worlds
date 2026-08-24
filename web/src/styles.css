@@ -124,6 +124,14 @@
 @media (min-width: 1100px) {
   .ew-root.ew-view-live.ew-w-fluid .ew-main { max-width: none; }
 }
+/* The prose carries a second measure of its own (`.ew-prose`, 66ch) for the
+   narrow band where the track above is uncapped. Lifting only the track leaves
+   that one behind, and the result is the inverse of what the reader asked for:
+   the recap, the digest and the echoes take the window while the story alone
+   stops at 66ch, with a wide dead margin to its right. Unscoped by width on
+   purpose — below a 66ch viewport the cap cannot bind, so there is nothing to
+   guard against there. */
+.ew-root.ew-w-fluid .ew-prose { max-width: none; }
 
 .ew-rail-home {
   display: block; width: 100%; text-align: left;
