@@ -73,35 +73,56 @@ jobs:
         working-directory: backend
         run: ruff format --check .
 
-      # `tools/` is one generator script, so it rides along on the backend's config
-      # instead of carrying a third copy of the same rule set. Two things about this
-      # step are load-bearing:
-      #
-      #   1. `--config` is required, so the gate is the rule set this project
-      #      DECLARED rather than whatever the installed ruff defaults to — measured,
-      #      the same file is linted at line-length 100 with the flag and 88 without.
-      #   2. It must stay a SEPARATE step from the two above, not extra arguments on
-      #      them. `--config <file>` does not move ruff's `src` root, which follows the
-      #      working directory: linting `backend` from here reclassifies every
-      #      first-party backend import as third-party and reports 17 I001 errors that
-      #      `cd backend` does not. So `backend` is linted from inside `backend`, and
-      #      `tools` from the root — and `tools/` must be formatted to match THIS
-      #      invocation, which is also what a plain `ruff check .` at the root gives.
-      - name: Ruff lint + format check (tools)
-        run: |
-          ruff check --config backend/pyproject.toml tools
-          ruff format --check --config backend/pyproject.toml tools
-
       - name: Mypy (application modules)
         working-directory: backend
         run: mypy .
+
+      # `tools/` is one generator script, so it rides along on the backend's config
+      # instead of carrying a third copy of the same rule set. Three things about this
+      # step are load-bearing:
+      #
+      #   1. `--config` / `--config-file` is required, so the gate is the rule set this
+      #      repo DECLARED rather than whatever the installed tools default to —
+      #      measured, the same file is linted at line-length 100 with the flag and 88
+      #      without.
+      #   2. `MYPYPATH=backend` mirrors the script's own `sys.path.insert(0, "backend")`.
+      #      Without it `template` is unresolved, `ignore_missing_imports` turns it into
+      #      `Any`, and the file's ONE cross-module call goes unchecked: measured, a
+      #      `split_front_matter(raw, 123, "extra")` passes without it and is caught
+      #      with it. A mypy step that cannot see that call is not worth running.
+      #   3. It must stay a SEPARATE step from the backend ones above, not extra
+      #      arguments on them. Neither flag moves ruff's `src` root, which follows the
+      #      working directory: linting `backend` from here reclassifies every
+      #      first-party backend import as third-party and reports 17 I001 errors that
+      #      `cd backend` does not. So `backend` is checked from inside `backend`, and
+      #      `tools` from the root — and `tools/` must be formatted to match THIS
+      #      invocation, which is also what a plain `ruff check .` at the root gives.
+      - name: Ruff + mypy (tools)
+        env:
+          MYPYPATH: backend
+        run: |
+          ruff check --config backend/pyproject.toml tools
+          ruff format --check --config backend/pyproject.toml tools
+          mypy --config-file backend/pyproject.toml tools
 
       # The dev screenshot harness is not shipped with the app, but it is read and
       # edited like source and it drives the app's real writers — a rotted harness
       # costs an afternoon at exactly the moment someone reaches for it. Its own
       # pyproject.toml carries the same conservative rule set as the backend's.
+      #
+      # `MYPYPATH` for the same reason as the `tools/` step above, and it matters more
+      # here: driving the app's REAL writers is this harness's whole design, and its
+      # README's promise is that a schema change breaks seeding at the call that
+      # changed. Without the path those writers are unresolved, `ignore_missing_imports`
+      # turns every one of them into `Any`, and the promise is empty — measured, a
+      # `SceneLedger(data, run, 123, "bogus")` and a `set(..., turn="three")` both pass
+      # without it and are both caught with it. It breaks at RUNTIME instead, when
+      # someone reaches for the harness, which is the moment this gate exists to spare.
+      # Relative to the step's own working directory, like the one above.
       - name: Ruff lint + format + mypy (devtools)
         working-directory: devtools
+        env:
+          MYPYPATH: ../backend
         run: |
           ruff check .
           ruff format --check .
