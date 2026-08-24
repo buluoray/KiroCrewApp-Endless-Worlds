@@ -60,6 +60,18 @@ OPENING_DEADLINE_SECS = 300.0
 #: life looks busy for this long after a gateway dies mid-turn, then frees itself.
 PENDING_STALE_SECS = 900.0
 
+#: How long a backdrop request may keep a life in its waiting state. Same value and
+#: same judgement as PENDING_STALE_SECS, for the second half of one generation
+#: transaction — and it lives HERE, beside its twin, because ``generating`` and
+#: ``routes._backdrop_is_pending`` reading two different ceilings is what wedged a
+#: life permanently: the page was released at 900s while ``generating`` kept
+#: answering "painting" forever, since the durable request record is cleared only by
+#: an exact-turn commit that a dead recovery task never produces. The play view
+#: disables every choice while generating, so the reader saw its page with every
+#: control dead and no retry, and delete refused with ``turn_in_flight``. One
+#: constant, read by both, is the fix — not a second timeout somewhere else.
+BACKDROP_STALE_SECS = 900.0
+
 #: How often the store is checked for the narrator's commit. Small enough that a
 #: fast turn feels immediate, large enough not to spin a core for two minutes.
 _POLL_SECS = 0.25
@@ -508,21 +520,35 @@ def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str,
     # from the player's perspective: keep the ordinary waiting state active until
     # the exact-turn backdrop commit clears the request. No illustrator failure or
     # retry detail crosses this boundary.
+    #
+    # Bounded by BACKDROP_STALE_SECS, for the same reason the prose record is: the
+    # request is cleared ONLY by an exact-turn commit, so a recovery task that died
+    # with its gateway leaves a record no one will ever clear. Unbounded, this
+    # branch answered "painting" forever — the play view disables every choice while
+    # generating, so the life froze on a page it had already been shown, with no
+    # retry and no way to delete it. Past the ceiling the art becomes an enrichment
+    # that simply never arrived: the page stays, the controls come back.
     art = store.read_backdrop_request(run_id)
     if art and int(art.get("turn") or 0) == committed:
-        return {
-            "turn": committed,
-            "slot": "",
-            "askedAt": float(art.get("askedAt") or 0.0),
-            "readAt": float(art.get("askedAt") or 0.0),
-            "stage": "painting",
-            "action": "",
-            # Five steps maps to TurnProgress's existing 92% cap: the page is
-            # waiting on its final visual half, so progress must not jump backwards
-            # after the narrator already completed several tools.
-            "steps": 5,
-            "lastTool": "endless_paint_backdrop",
-        }
+        asked_at = art.get("askedAt")
+        fresh = (
+            isinstance(asked_at, (int, float))
+            and time.time() - float(asked_at) <= BACKDROP_STALE_SECS
+        )
+        if fresh:
+            return {
+                "turn": committed,
+                "slot": "",
+                "askedAt": float(art.get("askedAt") or 0.0),
+                "readAt": float(art.get("askedAt") or 0.0),
+                "stage": "painting",
+                "action": "",
+                # Five steps maps to TurnProgress's existing 92% cap: the page is
+                # waiting on its final visual half, so progress must not jump
+                # backwards after the narrator already completed several tools.
+                "steps": 5,
+                "lastTool": "endless_paint_backdrop",
+            }
 
     wanted = committed + 1
     live = _in_flight(store, run_id, wanted)
