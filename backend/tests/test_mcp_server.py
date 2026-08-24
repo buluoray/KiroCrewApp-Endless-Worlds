@@ -488,6 +488,28 @@ def test_lore_is_capped_and_carries_no_per_turn_note(app):
     assert "memoryNote" not in out, "the echoes rule lives in the tool description now"
 
 
+def test_a_held_lore_entry_surfaces_without_its_body(app):
+    """A lore entry still SURFACES on a delta read when its keyword matched — that is
+    the signal that this month is about it — but the world's standing setting does not
+    change, so the text delivered earlier in this conversation is still the current
+    text and is named as held instead of re-sent. Measured on one life: a single entry
+    delivered 26 times, byte-identical."""
+    (app / "worlds" / "wm.md").write_text(WORLD_MANY_LORE, encoding="utf-8")
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "wm"}, {"runId": "r1"})
+    store.mark_pending(run, turn=5, slot="", action="I hunt the dragon")
+
+    full = call("endless_read_runtime", runId=run)
+    assert all(e.get("text") for e in full["lore"]), "precondition: a full read carries bodies"
+
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert delta.get("basedOn") == full["fingerprint"], "precondition: this was a delta"
+    assert delta["lore"], "a matched entry must still surface — the month IS about it"
+    for e in delta["lore"]:
+        assert e["held"] is True and "text" not in e
+        assert e["id"], "it must still be identifiable"
+
+
 # -- scenes ---------------------------------------------------------------
 
 

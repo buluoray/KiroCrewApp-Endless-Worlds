@@ -1012,6 +1012,62 @@ def test_read_runtime_returns_candidates_from_this_life_only(app):
     assert "memoryCandidates" not in other_read
 
 
+def _aged_run_with_one_memory(store):
+    """A life whose single event is old enough to be recalled as a candidate."""
+    run = committed_run(store)
+    take_turn(run, 1, memory=bridge_memory())
+    take_turn(run, 2)
+    take_turn(run, 3)
+    return run
+
+
+def test_a_held_candidate_keeps_its_identity_and_loses_its_body(app):
+    """A committed event is immutable, so once its summary has reached the narrator
+    in this conversation, re-sending it every month buys nothing — measured on one
+    life, a single 40-turn-old event was delivered 43 times byte-identically. A delta
+    read is the narrator certifying its context survived, so it gets the fields it
+    needs to RECOGNISE the event and none of the body it is already holding."""
+    store = srv._store()
+    run = _aged_run_with_one_memory(store)
+
+    full = call("endless_read_runtime", runId=run)
+    (first,) = [c for c in full["memoryCandidates"] if c["id"] == "event-1-saved-elin"]
+    assert first.get("summary"), "precondition: a full read carries the body"
+    assert "held" not in first
+
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert delta.get("basedOn") == full["fingerprint"], "precondition: this was a delta"
+    (again,) = [c for c in delta["memoryCandidates"] if c["id"] == "event-1-saved-elin"]
+    assert again["held"] is True, "a held candidate must say so, not silently shrink"
+    assert "summary" not in again, "the body it is holding must not be re-sent"
+    assert again.get("title"), "it must still be able to tell WHICH event this is"
+
+
+def test_losing_the_baseline_brings_held_bodies_back(app):
+    """A full read means the narrator could not name a baseline — a compaction, or the
+    life's first turn — so it is holding nothing and every body arrives whole again.
+
+    This pins the READ path only: suppression is gated on the read's own kind, so a
+    full read re-delivers regardless of what the store remembers. That the full read
+    also REPLACES the stored set (rather than adding to it) is a store-level semantic
+    and is pinned there — see ``test_a_full_read_may_replace_the_held_set_not_extend_it``,
+    which is the assertion that actually falsifies a merge."""
+    store = srv._store()
+    run = _aged_run_with_one_memory(store)
+
+    full = call("endless_read_runtime", runId=run)
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert any(c.get("held") for c in delta["memoryCandidates"]), "precondition: suppressed"
+
+    recovered = call("endless_read_runtime", runId=run)  # no `since` = baseline gone
+    assert all("held" not in c for c in recovered["memoryCandidates"])
+    assert all(c.get("summary") for c in recovered["memoryCandidates"])
+
+    # And the replace stuck: the next delta suppresses again from the new set.
+    again = call("endless_read_runtime", runId=run, since=recovered["fingerprint"])
+    assert any(c.get("held") for c in again["memoryCandidates"])
+
+
 def test_read_runtime_serves_a_bounded_neighbourhood_by_id(app):
     store = srv._store()
     run = committed_run(store)

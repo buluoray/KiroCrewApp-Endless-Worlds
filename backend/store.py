@@ -424,6 +424,63 @@ class RunStore:
         _check_run_id(run_id)
         self._kv.set(self._rotation_key(run_id), {"turn": int(turn), "at": time.time()})
 
+    # -- recall material already delivered in this conversation -------------
+    #
+    # Lore entries and recall candidates are re-SELECTED every turn (the same
+    # keywords keep matching, the same old event keeps scoring), so a long life
+    # re-sends the same bodies dozens of times to a narrator that already has them
+    # in front of it. Measured on one life: a single lore entry delivered 26 times
+    # and one 40-turn-old event 43 times, all byte-identical.
+    #
+    # The record is stamped with the rotation it was written under, so it
+    # SELF-INVALIDATES: replacing the conversation makes every earlier id read as
+    # unsent again without anyone having to remember to clear it. That is
+    # load-bearing rather than tidy — THREE separate paths rotate a conversation
+    # (an install change, a chapter boundary, the turn budget), and a clear wired
+    # into two of them would leave the third suppressing a body the new
+    # conversation never received.
+
+    @staticmethod
+    def _recall_sent_key(run_id: str) -> str:
+        return f"recall-sent-{run_id}"
+
+    def recall_sent(self, run_id: str) -> set[str]:
+        """Ids whose full body was already delivered in the CURRENT conversation."""
+        _check_run_id(run_id)
+        raw = self._kv.get(self._recall_sent_key(run_id))
+        if not isinstance(raw, dict):
+            return set()
+        try:
+            stamped = int(raw.get("rotation") or 0)
+        except (TypeError, ValueError):
+            return set()
+        if stamped != self.rotation_turn(run_id):
+            return set()  # written under a conversation that no longer exists
+        ids = raw.get("ids")
+        return {str(i) for i in ids} if isinstance(ids, list) else set()
+
+    def mark_recall_sent(self, run_id: str, ids: list[str], *, reset: bool = False) -> None:
+        """Record that ``ids`` were delivered in full.
+
+        ``reset=True`` REPLACES the set instead of adding to it, and is what a full
+        read must pass. A full read means the narrator could not name a baseline — it
+        was compacted, or this is the life's first turn — so it is holding nothing,
+        and the rotation stamp cannot catch that case because a compaction does not
+        rotate. Merging there would keep suppressing bodies the narrator has just
+        demonstrably lost.
+        """
+        _check_run_id(run_id)
+        fresh = {str(i) for i in ids}
+        merged = fresh if reset else self.recall_sent(run_id) | fresh
+        self._kv.set(
+            self._recall_sent_key(run_id),
+            {
+                "rotation": self.rotation_turn(run_id),
+                "ids": sorted(merged),
+                "at": time.time(),
+            },
+        )
+
     # -- the turn in flight -----------------------------------------------
     #
     # A record that a turn was ASKED FOR, written before the narrator is spoken
