@@ -68,7 +68,6 @@ CHAPTERS: list[tuple[str, str, bool, str]] = [
 
 def main() -> int:
     import yaml
-
     from template import split_front_matter
 
     raw = SEED.read_text(encoding="utf-8")
@@ -103,7 +102,7 @@ def main() -> int:
     # chapter of the prose" — and re-serialising the parsed mapping would silently
     # delete all of them. A generator that destroys documentation to add a field is
     # not a generator anyone should run twice.
-    close = raw.index("\n---\n", raw.index("\n") )
+    close = raw.index("\n---\n", raw.index("\n"))
     head, tail = raw[:close], raw[close:]
     SEED.write_text(
         head + "\n\n# Which chapters the narrator is briefed with, and which the\n"

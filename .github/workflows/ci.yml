@@ -73,6 +73,25 @@ jobs:
         working-directory: backend
         run: ruff format --check .
 
+      # `tools/` is one generator script, so it rides along on the backend's config
+      # instead of carrying a third copy of the same rule set. Two things about this
+      # step are load-bearing:
+      #
+      #   1. `--config` is required, so the gate is the rule set this project
+      #      DECLARED rather than whatever the installed ruff defaults to — measured,
+      #      the same file is linted at line-length 100 with the flag and 88 without.
+      #   2. It must stay a SEPARATE step from the two above, not extra arguments on
+      #      them. `--config <file>` does not move ruff's `src` root, which follows the
+      #      working directory: linting `backend` from here reclassifies every
+      #      first-party backend import as third-party and reports 17 I001 errors that
+      #      `cd backend` does not. So `backend` is linted from inside `backend`, and
+      #      `tools` from the root — and `tools/` must be formatted to match THIS
+      #      invocation, which is also what a plain `ruff check .` at the root gives.
+      - name: Ruff lint + format check (tools)
+        run: |
+          ruff check --config backend/pyproject.toml tools
+          ruff format --check --config backend/pyproject.toml tools
+
       - name: Mypy (application modules)
         working-directory: backend
         run: mypy .
