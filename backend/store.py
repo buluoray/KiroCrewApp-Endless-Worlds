@@ -204,6 +204,75 @@ class RunStore:
         gone = sorted(k for k in before if k not in after)
         return {"changed": changed, "same": same, "gone": gone}
 
+    @staticmethod
+    def leaf_diff_paths(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+        """Dotted paths of every LEAF that differs between two nested dicts.
+
+        A leaf is any value that is not a dict on both sides; a key present on one
+        side only is a leaf too. Lists compare as whole values — a reordered list
+        is a change, and diffing inside one would invent an identity its items do
+        not have. Dots inside a key are left as-is: these paths are matched only
+        against paths produced by this same walk, never parsed back.
+        """
+        out: list[str] = []
+
+        def walk(prefix: str, b: Any, a: Any) -> None:
+            if isinstance(b, dict) and isinstance(a, dict):
+                for key in sorted(set(b) | set(a)):
+                    child = f"{prefix}.{key}" if prefix else str(key)
+                    if key not in b or key not in a:
+                        out.append(child)
+                    else:
+                        walk(child, b[key], a[key])
+                return
+            if b != a:
+                out.append(prefix)
+
+        walk("", before, after)
+        return out
+
+    # -- who wrote which leaf, per commit -----------------------------------
+    #
+    # The narrator declares the state; the backend then amends it (reserved keys,
+    # digest/relations merge-forward, turn, milestones, systems). A delta read
+    # wants to send back ONLY the amendments: the narrator remembers what it
+    # itself declared, and re-sending its own words is the bulk of a delta on a
+    # real life (measured: 4223 of 4696 bytes on turn 57 of one). One record per
+    # commit is enough — ``baseline_for`` never resolves anything older than the
+    # previous turn, so the only provenance a delta can need is the latest one.
+
+    @staticmethod
+    def _provenance_key(run_id: str) -> str:
+        return f"provenance-{run_id}"
+
+    def mark_provenance(self, run_id: str, *, turn: int, paths: list[str]) -> None:
+        """Record which leaf paths the backend (not the narrator) wrote on ``turn``."""
+        _check_run_id(run_id)
+        self._kv.set(
+            self._provenance_key(run_id),
+            {"turn": int(turn), "paths": sorted(paths), "at": time.time()},
+        )
+
+    def provenance(self, run_id: str) -> tuple[int, list[str]]:
+        """``(turn, backend-written leaf paths)`` of the latest commit, or ``(0, [])``.
+
+        A reader must trust this only when the recorded turn equals the state's
+        turn: an older record describes a commit whose amendments the narrator has
+        already been shown, and using it would suppress leaves it never saw.
+        """
+        _check_run_id(run_id)
+        raw = self._kv.get(self._provenance_key(run_id))
+        if not isinstance(raw, dict):
+            return 0, []
+        paths = raw.get("paths")
+        if not isinstance(paths, list):
+            return 0, []
+        try:
+            turn = int(raw.get("turn") or 0)
+        except (TypeError, ValueError):
+            return 0, []
+        return turn, [str(p) for p in paths]
+
     def baseline_for(self, run_id: str, fingerprint: str) -> dict[str, Any] | None:
         """The state that ``fingerprint`` names, if this store still holds it.
 
@@ -311,6 +380,16 @@ class RunStore:
         _check_run_id(run_id)
         raw = self._kv.get(self._brief_key(run_id))
         return str(raw.get("slot") or "") if isinstance(raw, dict) else ""
+
+    def clear_briefed(self, run_id: str) -> None:
+        """Forget that the rulebook was delivered — the next turn re-sends it.
+
+        The companion to a conversation reset that KEEPS the slot: the marker
+        names a slot, the slot survives, so without this the turn loop would
+        conclude the (brand-new) conversation already holds the world's law.
+        """
+        _check_run_id(run_id)
+        self._kv.delete(self._brief_key(run_id))
 
     # -- the turn in flight -----------------------------------------------
     #
@@ -586,6 +665,7 @@ class RunStore:
         self._kv.delete(self._prev_key(run_id))
         self._kv.delete(self._narrator_generation_key(run_id))
         self._kv.delete(self._brief_key(run_id))
+        self._kv.delete(self._provenance_key(run_id))
         self._kv.delete(self._pending_key(run_id))
         self._kv.delete(self._backdrop_request_key(run_id))
         rows = [r for r in self.read_index() if r.get("runId") != run_id]

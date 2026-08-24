@@ -156,6 +156,7 @@ from narrator import (  # noqa: E402
     purge_narrator_session,
     release_narrator_slot,
     release_worldsmith_slot,
+    reset_narrator_conversation,
     worldsmith_slot_key,
 )
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
@@ -1020,6 +1021,58 @@ async def life_deletion(request: web.Request, ctx: AppContext) -> web.Response:
     if not any(r.get("runId") == run_id for r in store.read_index()):
         return web.json_response({"error": "no such life"}, status=404)
     return web.json_response(_life_deletion_facts(ctx, run_id, _gateway_state(request)))
+
+
+async def reset_life_conversation(request: web.Request, ctx: AppContext) -> web.Response:
+    """``POST /runs/{run_id}/reset-conversation`` — a fresh storyteller, same story.
+
+    The player-facing "重开叙事" control: discards the narrator's accumulated
+    conversation (its context, its drift, its habits) while keeping every fact of
+    the life — state, chronicle, memory graph, backdrops all stay. The next turn
+    cold-starts a new conversation and re-delivers the world's rulebook.
+
+    ``confirm`` must equal the run id, same as the delete route and for the same
+    reason: it protects the ROUTE from a retried fetch. A month being written
+    blocks it — discarding the writer's session mid-commit would lose the turn.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+
+    run_id = request.match_info.get("run_id", "")
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    if not isinstance(body, dict):
+        return web.json_response({"error": "expected an object"}, status=400)
+
+    store = _store(ctx)
+    if not any(r.get("runId") == run_id for r in store.read_index()):
+        return web.json_response({"error": "no such life"}, status=404)
+
+    if body.get("confirm") != run_id:
+        return web.json_response(
+            {"field": "confirm", "expected": "the run id, to name the target"},
+            status=400,
+        )
+
+    facts = _life_deletion_facts(ctx, run_id, _gateway_state(request))
+    if facts.get("generating"):
+        return web.json_response(
+            {
+                "error": "a month is being written for this life right now",
+                "code": "turn_in_flight",
+                **facts,
+            },
+            status=409,
+        )
+
+    state_obj = _gateway_state(request)
+    if state_obj is None:
+        return web.json_response({"error": "gateway state unavailable"}, status=503)
+
+    done = await reset_narrator_conversation(state_obj, store, run_id)
+    return web.json_response({"runId": run_id, "reset": bool(done)})
 
 
 async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
@@ -2434,6 +2487,11 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         AppRoute(method="GET", path="/runs/{run_id}", handler=get_run),
         AppRoute(method="GET", path="/runs/{run_id}/deletion", handler=life_deletion),
         AppRoute(method="POST", path="/runs/{run_id}/delete", handler=delete_life),
+        AppRoute(
+            method="POST",
+            path="/runs/{run_id}/reset-conversation",
+            handler=reset_life_conversation,
+        ),
         AppRoute(method="POST", path="/runs/{run_id}/meta", handler=set_life_meta),
         AppRoute(method="GET", path="/runs/{run_id}/scenes/{scene_id}", handler=get_scene),
         AppRoute(method="GET", path="/runs/{run_id}/backdrop", handler=get_backdrop),

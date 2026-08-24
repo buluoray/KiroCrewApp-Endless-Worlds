@@ -406,9 +406,14 @@ _TOOLS: list[dict[str, Any]] = [
                     "description": (
                         "A `fingerprint` from an earlier call. If you can still "
                         "produce one you still hold the state it named, so only the "
-                        "difference is sent. If you have lost it, leave this out — "
-                        "asking with a baseline you no longer hold is how a turn "
-                        "ends up inventing the parts it cannot see."
+                        "difference is sent — and of the difference, only what the "
+                        "APP computed (system-derived values, merged panels, "
+                        "milestones). Panels that changed only because of your own "
+                        "declaration are NAMED in `yours` rather than re-sent: you "
+                        "wrote them this turn and still hold them. If you have lost "
+                        "the fingerprint, leave this out — asking with a baseline "
+                        "you no longer hold is how a turn ends up inventing the "
+                        "parts it cannot see."
                     ),
                 },
                 "memoryEvents": {
@@ -1340,6 +1345,11 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     events = [str(e)[:200] for e in (args.get("events") or [])][:12]
 
     state = dict(args["state"])
+    # Snapshot of what the NARRATOR declared, taken before any backend amendment.
+    # Compared with the final committed state, it yields the leaf paths the
+    # backend wrote — which is exactly what a delta read is allowed to send back
+    # (the narrator remembers its own declarations; it cannot know these).
+    declared = json.loads(json.dumps(state, default=str))
     # The declaration is the story's whole state, so it REPLACES the previous one
     # — a field the narrator stops declaring is a fact that stopped being true.
     # The app's own keys are the exception: they were never the narrator's to
@@ -1429,6 +1439,14 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                 "detail": detail,
             }
     store.commit_state(run_id, state)
+    # Provenance rides with the commit: leaves where the final state differs from
+    # the narrator's declaration were backend-written (reserved-key carry,
+    # digest/relations merge results, turn, milestones, systems). A failure here
+    # only degrades the next delta read to whole-panel resends — never the commit.
+    try:
+        store.mark_provenance(run_id, turn=turn, paths=store.leaf_diff_paths(declared, state))
+    except Exception:  # noqa: BLE001
+        pass
     # What the player asked for, recovered from the in-flight record the app wrote
     # before speaking. The narrator is told the intent in prose and never echoes it
     # back, so this is the only place it can be preserved — and without it, reviewing
@@ -1530,6 +1548,40 @@ RECENT_TURNS = 12
 #: keyword entries at once (measured: 9 full entries), which is the wholesale dump
 #: the narrator's prompt forbids; the cap keeps only the most relevant few.
 MAX_LORE = 4
+
+
+def _pluck_paths(state: dict[str, Any], paths: list[str]) -> dict[str, Any]:
+    """A nested dict holding only the leaves ``paths`` name, read from ``state``.
+
+    Paths are the dotted form ``RunStore.leaf_diff_paths`` produces. A path that
+    no longer resolves (a backend-retired leaf: present in the baseline, absent
+    now) is skipped — its retirement was the narrator's own declared null, so
+    there is nothing new to show it.
+    """
+    root: dict[str, Any] = {}
+    for path in paths:
+        parts = path.split(".")
+        src: Any = state
+        for part in parts:
+            if isinstance(src, dict) and part in src:
+                src = src[part]
+            else:
+                src = _PLUCK_MISS
+                break
+        if src is _PLUCK_MISS:
+            continue
+        dst = root
+        for part in parts[:-1]:
+            nxt = dst.setdefault(part, {})
+            if not isinstance(nxt, dict):
+                nxt = dst[part] = {}
+            dst = nxt
+        dst[parts[-1]] = src
+    return root
+
+
+#: Sentinel for a path that stopped resolving mid-walk (never a real state value).
+_PLUCK_MISS = object()
 
 
 def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
@@ -1660,7 +1712,25 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
 
     if baseline is not None:
         delta = store.diff(baseline, state)
-        out["changed"] = delta["changed"]
+        prov_turn, prov_paths = store.provenance(run_id)
+        # Provenance is trusted only when it describes THIS state's commit: an
+        # older record would suppress amendments the narrator has never seen.
+        # Without trustworthy provenance the whole changed panel is sent — the
+        # fail-safe direction is more data, never a silently missing fact.
+        if prov_paths and prov_turn == int(state.get("turn") or 0):
+            prov = set(prov_paths)
+            changed_leaves = store.leaf_diff_paths(baseline, state)
+            computed = [p for p in changed_leaves if p in prov and p != "turn"]
+            out["changed"] = _pluck_paths(state, computed)
+            # Panels the narrator changed by its OWN declaration: named, not
+            # re-sent. It wrote those words this turn; within a surviving session
+            # (which a resolvable baseline proves) it still holds them, and
+            # echoing them back was the bulk of a delta on a real life.
+            out["yours"] = sorted(
+                {p.split(".", 1)[0] for p in changed_leaves if p not in prov and p != "turn"}
+            )
+        else:
+            out["changed"] = delta["changed"]
         # Named rather than sent. "The rest is as it was" is only a sentence the
         # narrator can trust because it named the state that "was" refers to.
         out["unchanged"] = delta["same"]
