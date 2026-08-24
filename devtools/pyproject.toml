@@ -28,9 +28,16 @@ follow_imports = "silent"
 warn_unused_ignores = false
 check_untyped_defs = false
 
-# The app's backend modules are imported by path at runtime (they are not a package),
-# and the host gateway package ships no stubs. Neither needs to be resolvable for this
-# tool to type-check.
+# The app's backend modules ARE resolvable, and must be: this harness drives them,
+# so a call into one is the main thing worth type-checking here. They are not a
+# package, so CI puts them on `MYPYPATH` (see the devtools step in
+# .github/workflows/ci.yml) exactly as the harness itself puts them on `sys.path`.
+# They were listed here as unresolvable, which is what let every call into them go
+# unchecked as `Any`.
+#
+# What genuinely has no stubs is the host gateway package. Listed for the reader, and
+# the same shape backend/pyproject.toml uses; the blanket
+# `ignore_missing_imports` above is what actually answers for it.
 [[tool.mypy.overrides]]
-module = ["kiro_crew.*", "mcp_server", "library", "scenes", "backdrop", "keepsakes", "memory_graph"]
+module = ["kiro_crew.*"]
 ignore_missing_imports = true
