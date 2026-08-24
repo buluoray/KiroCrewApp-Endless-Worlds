@@ -284,11 +284,20 @@ async def advance_turn(
     # core slot object (which is intentionally slotted and cannot accept app
     # attributes). A mismatch includes legacy lives with no marker. Replace only
     # the validated app-owned conversation; narrative state is never touched.
-    install_generation = narrator.APP_INSTALL_GENERATION
+    # Evaluated per call — App Store Sync swaps the files without re-importing
+    # the module, so an import-time constant would keep naming the old install.
+    install_generation = narrator.app_install_generation()
     install_changed = store.narrator_generation(run_id) != install_generation
     if install_changed:
         narrator.release_stale_narrator_slot(state_obj, run_id)
         await narrator.purge_narrator_session(state_obj, run_id)
+    elif narrator.consume_closed_slot(state_obj, run_id):
+        # The player closed this run's tab since the last turn. Core deliberately
+        # preserves a closed slot's resume pointer (a reopened tab continues), but
+        # for a narrator that contract inverts: closing the story's tab is the
+        # player saying "start me a fresh storyteller". Conversation only — the
+        # life's state and chronicle continue exactly where they were.
+        await narrator.reset_narrator_conversation(state_obj, store, run_id)
 
     slot, fresh_slot = ensure_narrator_slot_ex(
         state_obj, run_id, project=project, model=model, reasoning_effort=reasoning_effort

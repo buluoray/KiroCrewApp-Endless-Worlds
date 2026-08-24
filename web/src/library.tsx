@@ -242,6 +242,24 @@ export function LifeRow({
   // collapse into a kebab menu (inline on desktop, unchanged). One list of actions
   // feeds both, so the two renderings can never drift apart.
   const [menuOpen, setMenuOpen] = useState(false)
+  // "重开叙事" runs its whole flow inside the card, like delete: an ask strip under
+  // the card, then the call, then a one-line outcome. Distinct state from `doom`
+  // so an open delete ask and an open reset ask can never wear each other's text.
+  const [resetAsk, setResetAsk] = useState<null | 'asking' | 'working' | 'done'>(null)
+  const [resetProblem, setResetProblem] = useState('')
+  const resetStoryteller = () => {
+    if (resetAsk === 'working') return
+    setResetAsk('working')
+    setResetProblem('')
+    api
+      .resetConversation(run.runId)
+      .then(() => setResetAsk('done'))
+      .catch((e: Error) => {
+        const code = e instanceof ApiError ? e.code : ''
+        setResetProblem(code === 'turn_in_flight' ? t('life.resetChat.busy') : e.message)
+        setResetAsk('asking')
+      })
+  }
   // The ref must be on the PORTALLED panel, not on the card's menu container: once
   // the panel moved to `document.body` it stopped being a descendant of the card, so
   // a containment test against the container answered false for the panel's own
@@ -295,6 +313,20 @@ export function LifeRow({
       key: 'archive',
       label: run.archived ? t('life.unarchive') : t('life.archive'),
       onClick: () => onArchive(run.runId, !run.archived),
+    })
+  }
+  // Offered wherever archive is (the managed shelf): a life that can be archived
+  // is a life whose narrator can have drifted. Unreadable lives are excluded —
+  // they cannot narrate at all, so a fresh conversation buys them nothing.
+  if (onArchive && !run.unreadable) {
+    actions.push({
+      key: 'resetChat',
+      label: t('life.resetChat.short'),
+      aria: t('life.resetChat.aria', { name }),
+      onClick: () => {
+        setResetProblem('')
+        setResetAsk('asking')
+      },
     })
   }
   if (onDeleted) {
@@ -512,6 +544,42 @@ export function LifeRow({
             >
               {doom === 'working' ? t('delete.working') : t('life.delete.go')}
             </button>
+          </div>
+        </div>
+      ) : null}
+      {resetAsk ? (
+        <div className="ew-rowdoom" role="group" aria-label={t('life.resetChat.short')}>
+          <div className="ew-rowdoom-say">
+            {resetAsk === 'done' ? t('life.resetChat.done') : t('life.resetChat.confirm')}
+          </div>
+          {resetProblem ? <div className="ew-modal-problem">{resetProblem}</div> : null}
+          <div className="ew-rowdoom-bar">
+            {resetAsk === 'done' ? (
+              <button className="ew-btn ew-btn-sm" type="button" onClick={() => setResetAsk(null)}>
+                {t('life.resetChat.ok')}
+              </button>
+            ) : (
+              <>
+                <button
+                  className="ew-btn ew-btn-sm"
+                  type="button"
+                  onClick={() => {
+                    setResetAsk(null)
+                    setResetProblem('')
+                  }}
+                >
+                  {t('life.resetChat.cancel')}
+                </button>
+                <button
+                  className="ew-btn ew-btn-sm"
+                  type="button"
+                  disabled={resetAsk === 'working'}
+                  onClick={resetStoryteller}
+                >
+                  {resetAsk === 'working' ? t('life.resetChat.working') : t('life.resetChat.short')}
+                </button>
+              </>
+            )}
           </div>
         </div>
       ) : null}

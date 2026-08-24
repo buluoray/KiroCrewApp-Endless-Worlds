@@ -73,9 +73,62 @@ def _installation_generation(root: Path = _APP_ROOT) -> str:
     return digest.hexdigest()[:20]
 
 
-#: Persisted per life by RunStore. A different value means the existing narrator
-#: conversation belongs to another installed build and must be replaced.
-APP_INSTALL_GENERATION = _installation_generation()
+#: Metadata-only signature of the install: cheap enough to recompute on every
+#: turn (stat calls, no file reads). It deliberately over-triggers relative to
+#: the content digest — any metadata wobble re-runs the full hash below, which
+#: then answers whether the install REALLY changed.
+def _metadata_signature(root: Path = _APP_ROOT) -> str:
+    digest = hashlib.sha256(str(root.resolve()).encode("utf-8"))
+    files = {path for pattern in _GENERATION_GLOBS for path in root.glob(pattern) if path.is_file()}
+    for path in sorted(files, key=lambda item: item.as_posix()):
+        try:
+            stat = path.stat()
+        except OSError:
+            digest.update(f"missing:{path.relative_to(root)}".encode())
+            continue
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(
+            f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:"
+            f"{stat.st_mtime_ns}:{stat.st_ctime_ns}".encode("ascii")
+        )
+    return digest.hexdigest()[:20]
+
+
+#: ``(metadata signature, full content digest)`` of the last computation.
+_GENERATION_CACHE: tuple[str, str] | None = None
+
+
+def app_install_generation() -> str:
+    """The CURRENT install's generation, evaluated per call.
+
+    Persisted per life by RunStore; a different value means the existing narrator
+    conversation belongs to another installed build and must be replaced.
+
+    This is a function, not a module constant, for a reason proven on a live
+    gateway: App Store Sync replaces the app's files WITHOUT re-importing this
+    module (the gateway process survives the disable/enable pair), so a constant
+    evaluated at import time keeps naming the pre-update install. Every turn after
+    the update then compared stale-to-stale, concluded "no change", and the very
+    reset the update should have triggered never fired — and worse, the first turn
+    after the update PERSISTED the stale value as the run's marker, so even a
+    restart would not have caught up that run.
+
+    The full digest reads every governed file's bytes, so it is memoized on a
+    stat-only metadata signature: unchanged metadata reuses the previous answer,
+    and the 40-file byte read happens only when something actually moved.
+    """
+    global _GENERATION_CACHE
+    # Root read from the module attribute AT CALL TIME — the helpers' default
+    # arguments were bound at def time, which is exactly the frozen-at-import
+    # failure this function exists to end.
+    root = _APP_ROOT
+    signature = _metadata_signature(root)
+    if _GENERATION_CACHE is not None and _GENERATION_CACHE[0] == signature:
+        return _GENERATION_CACHE[1]
+    generation = _installation_generation(root)
+    _GENERATION_CACHE = (signature, generation)
+    return generation
+
 
 #: Must equal app.json's ``name`` — it is what ``_app`` is compared against.
 APP_NAME = "endless-worlds"
@@ -230,6 +283,78 @@ async def purge_narrator_session(state: Any, run_id: str) -> bool:
     return True
 
 
+async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bool:
+    """Give this run a FRESH narrator conversation while keeping everything else.
+
+    Unlike ``purge_narrator_session`` (a deletion's scorched-earth companion), this
+    is the seam for a life that continues: the live session is torn down and its
+    resume pointer cleared through the running manager's ``discard_conversation``
+    — never a detached map, whose whole-file write both misses the live manager's
+    in-memory copy and can clobber entries it never loaded — so the next turn
+    cold-starts a new conversation. The session-map ENTRY survives (channel
+    linkage stays), the slot survives (the tab stays open), and narrative state is
+    untouched.
+
+    The briefed marker is cleared IN THE SAME seam, not left to callers: the turn
+    loop re-sends the world's rulebook only when ``fresh_slot or briefed !=
+    slot_key`` (turn.py), and a discard that keeps the slot leaves both false — a
+    new conversation that was never told the rules of its world. One seam, one
+    invariant: a discarded conversation always re-briefs.
+
+    Best-effort like its siblings: a missing runtime or a bad id is a no-op.
+    """
+    try:
+        slot_key = narrator_slot_key(run_id)
+    except BadRunId:
+        return False
+    sessions = getattr(state, "sessions", None)
+    if sessions is None:
+        return False
+    try:
+        from kiro_crew.dashboard.chat_utils import _history_key_for  # noqa: PLC0415
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        await sessions.discard_conversation(_history_key_for(slot_key))
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        store.clear_briefed(run_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+#: Narrator slot keys THIS process created (or validated as its own). Exists for
+#: close-detection only: a key registered here whose slot is gone from ``_slots``
+#: was closed by the player, because nothing else removes an app slot mid-process.
+#: Deliberately process-local — a gateway restart clears it, so a restart (where
+#: the temporary-mode slot is simply absent, not closed) never reads as a close
+#: and resumes the conversation exactly as it does today.
+_LIVE_SLOT_KEYS: set[str] = set()
+
+
+def consume_closed_slot(state: Any, run_id: str) -> bool:
+    """True once per close: this process made the run's slot, and it is gone.
+
+    ``consume`` because the answer resets on read — the caller acts on it (one
+    conversation reset), and the key re-registers when the slot is re-created, so
+    a second close later is detected again. Guarded like every sibling: a bad id
+    or an unreadable runtime answers False, failing toward "continue".
+    """
+    try:
+        slot_key = narrator_slot_key(run_id)
+    except BadRunId:
+        return False
+    if slot_key not in _LIVE_SLOT_KEYS:
+        return False
+    slots = getattr(state, "_slots", None)
+    if not isinstance(slots, dict) or slot_key in slots:
+        return False
+    _LIVE_SLOT_KEYS.discard(slot_key)
+    return True
+
+
 def _validate_existing_narrator_slot(slot: Any, slot_key: str) -> None:
     """Refuse slots that this app cannot safely reuse or replace."""
     owner = getattr(slot, "_app", "") or ""
@@ -294,6 +419,9 @@ def ensure_narrator_slot_ex(
     existing = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
     if existing is not None:
         _validate_existing_narrator_slot(existing, slot_key)
+        # Registered on the reuse path too: a slot that predates this module's
+        # import (module reload) must still be close-detectable afterwards.
+        _LIVE_SLOT_KEYS.add(slot_key)
         # Re-applied on an EXISTING slot too, so a player who changes model or
         # effort sees it take on the very next turn.
         _apply_choice(existing, model, reasoning_effort)
@@ -318,6 +446,7 @@ def ensure_narrator_slot_ex(
 
     # Deliberately absent: slot._trust / slot._trusted_patterns. See the module
     # docstring. A test asserts this file never assigns them.
+    _LIVE_SLOT_KEYS.add(slot_key)
     return slot, True
 
 

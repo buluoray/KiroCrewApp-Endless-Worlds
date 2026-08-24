@@ -119,6 +119,10 @@ var api = {
 	/** A player's own name and shelf state for a life — metadata only, never the
 	*  story. Pass `label: ""` to clear a custom name. */
 	setLifeMeta: (runId, body) => post(`/runs/${encodeURIComponent(runId)}/meta`, body),
+	/** A fresh storyteller for the same story: discards the narrator's accumulated
+	*  conversation while keeping every fact of the life. `confirm` echoes the run
+	*  id, same retried-fetch guard as deleteLife. */
+	resetConversation: (runId) => post(`/runs/${encodeURIComponent(runId)}/reset-conversation`, { confirm: runId }),
 	restoreWorld: (id) => post(`/worlds/${encodeURIComponent(id)}/restore`, {}),
 	worldDrafts: () => json("/world-drafts"),
 	worldDraft: (id) => json(`/world-drafts/${encodeURIComponent(id)}`),
@@ -306,6 +310,14 @@ var TABLES$1 = {
 		"life.delete.unreadable": "这条人生已经读不出来了。它打不开，所以只能从这里删掉。",
 		"life.ended": "已落幕",
 		"life.generating": "这一页正在写…",
+		"life.resetChat.short": "清理缓存",
+		"life.resetChat.cancel": "先不清理",
+		"life.resetChat.working": "正在清理…",
+		"life.resetChat.ok": "好",
+		"life.resetChat.aria": "清理「{name}」的叙事缓存",
+		"life.resetChat.confirm": "清理叙事缓存？故事、状态和历史都会保留——只清掉叙事者积累的对话缓存，下一回合会重新阅读世界规则。",
+		"life.resetChat.done": "已清理——下一回合将以干净的缓存继续。",
+		"life.resetChat.busy": "这个月正在书写中，落笔后再试。",
 		"life.rename.aria": "重命名人生：{name}",
 		"life.rename.cancel": "取消",
 		"life.rename.placeholder": "给这条人生起个名字",
@@ -614,6 +626,14 @@ var TABLES$1 = {
 		"life.delete.unreadable": "This life can no longer be read. Since it cannot be opened, this is the only place you can delete it.",
 		"life.ended": "Ended",
 		"life.generating": "This page is being written…",
+		"life.resetChat.short": "Clear cache",
+		"life.resetChat.cancel": "Not now",
+		"life.resetChat.working": "Clearing…",
+		"life.resetChat.ok": "OK",
+		"life.resetChat.aria": "Clear the narrator cache for: {name}",
+		"life.resetChat.confirm": "Clear the narrator cache? The story, its state and history all stay — only the narrator's accumulated conversation is discarded, and the next turn re-reads the world's rules.",
+		"life.resetChat.done": "Cleared — the next turn continues on a clean cache.",
+		"life.resetChat.busy": "A month is being written right now; try again when it lands.",
 		"life.rename.aria": "Rename the life: {name}",
 		"life.rename.cancel": "Cancel",
 		"life.rename.placeholder": "Give this life a name",
@@ -1891,6 +1911,18 @@ function LifeRow({ run, onOpen, onDeleted, onArchive, onRename }) {
 		});
 	};
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [resetAsk, setResetAsk] = useState(null);
+	const [resetProblem, setResetProblem] = useState("");
+	const resetStoryteller = () => {
+		if (resetAsk === "working") return;
+		setResetAsk("working");
+		setResetProblem("");
+		api.resetConversation(run.runId).then(() => setResetAsk("done")).catch((e) => {
+			const code = e instanceof ApiError ? e.code : "";
+			setResetProblem(code === "turn_in_flight" ? t("life.resetChat.busy") : e.message);
+			setResetAsk("asking");
+		});
+	};
 	const panelRef = useRef(null);
 	const kebabRef = useRef(null);
 	const [menuAt, setMenuAt] = useState(null);
@@ -1933,6 +1965,15 @@ function LifeRow({ run, onOpen, onDeleted, onArchive, onRename }) {
 		key: "archive",
 		label: run.archived ? t("life.unarchive") : t("life.archive"),
 		onClick: () => onArchive(run.runId, !run.archived)
+	});
+	if (onArchive && !run.unreadable) actions.push({
+		key: "resetChat",
+		label: t("life.resetChat.short"),
+		aria: t("life.resetChat.aria", { name }),
+		onClick: () => {
+			setResetProblem("");
+			setResetAsk("asking");
+		}
 	});
 	if (onDeleted) actions.push({
 		key: "delete",
@@ -2104,6 +2145,44 @@ function LifeRow({ run, onOpen, onDeleted, onArchive, onRename }) {
 							onClick: endThisLife,
 							children: doom === "working" ? t("delete.working") : t("life.delete.go")
 						})]
+					})
+				]
+			}) : null,
+			resetAsk ? /* @__PURE__ */ jsxs("div", {
+				className: "ew-rowdoom",
+				role: "group",
+				"aria-label": t("life.resetChat.short"),
+				children: [
+					/* @__PURE__ */ jsx("div", {
+						className: "ew-rowdoom-say",
+						children: resetAsk === "done" ? t("life.resetChat.done") : t("life.resetChat.confirm")
+					}),
+					resetProblem ? /* @__PURE__ */ jsx("div", {
+						className: "ew-modal-problem",
+						children: resetProblem
+					}) : null,
+					/* @__PURE__ */ jsx("div", {
+						className: "ew-rowdoom-bar",
+						children: resetAsk === "done" ? /* @__PURE__ */ jsx("button", {
+							className: "ew-btn ew-btn-sm",
+							type: "button",
+							onClick: () => setResetAsk(null),
+							children: t("life.resetChat.ok")
+						}) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("button", {
+							className: "ew-btn ew-btn-sm",
+							type: "button",
+							onClick: () => {
+								setResetAsk(null);
+								setResetProblem("");
+							},
+							children: t("life.resetChat.cancel")
+						}), /* @__PURE__ */ jsx("button", {
+							className: "ew-btn ew-btn-sm",
+							type: "button",
+							disabled: resetAsk === "working",
+							onClick: resetStoryteller,
+							children: resetAsk === "working" ? t("life.resetChat.working") : t("life.resetChat.short")
+						})] })
 					})
 				]
 			}) : null
@@ -7463,7 +7542,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.6.5" })
+								children: t("app.version", { version: "0.7.0" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",

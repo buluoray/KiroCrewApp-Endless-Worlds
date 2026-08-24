@@ -709,6 +709,15 @@ export const api = {
       body,
     ),
 
+  /** A fresh storyteller for the same story: discards the narrator's accumulated
+   *  conversation while keeping every fact of the life. `confirm` echoes the run
+   *  id, same retried-fetch guard as deleteLife. */
+  resetConversation: (runId: string) =>
+    post<{ runId: string; reset: boolean }>(
+      `/runs/${encodeURIComponent(runId)}/reset-conversation`,
+      { confirm: runId },
+    ),
+
   restoreWorld: (id: string) =>
     post<{ worldId: string; restored: boolean }>(`/worlds/${encodeURIComponent(id)}/restore`, {}),
 

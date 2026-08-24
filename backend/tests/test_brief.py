@@ -203,7 +203,7 @@ def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monke
     before_chronicle = store.read_chronicle(run)
 
     monkeypatch.setattr(narrator, "purge_narrator_session", record_purge)
-    monkeypatch.setattr(narrator, "APP_INSTALL_GENERATION", "updated-install")
+    monkeypatch.setattr(narrator, "app_install_generation", lambda: "updated-install")
     _advance(state_obj, store, run, _prompts(sent))
 
     new_slot = state_obj.slots[narrator.narrator_slot_key(run)]
