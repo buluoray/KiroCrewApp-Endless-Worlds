@@ -121,6 +121,89 @@ def stop(state_file: Path) -> str:
     return note
 
 
+def _child_env(home: Path) -> dict[str, str]:
+    """Environment for every child process of a throwaway instance.
+
+    ``KIROCREW_HOME`` alone is NOT isolation, and this file's own promise ("its own
+    data home, its own port, nothing near yours") was false without the second
+    variable. Enabling an app registers its agents into kiro-cli's OWN directory
+    (``~/.kiro/agents``), which no data-home override moves — so a throwaway
+    instance rewrote the OPERATOR's live agent specs to point at its scratch
+    install. The app's MCP server resolves its data dir from its own file location
+    (``_APP_ROOT = _HERE.parent``), so after one ``up`` the operator's real session
+    read THIS instance's fixture data and reported their own save as missing.
+
+    ``KIROCREW_POD=1`` declares this instance ephemeral, and ``KIRO_HOME`` gives it
+    its OWN kiro user directory — the pair ``pod/runtime.build_pod_env`` uses, and
+    both are needed. The host's write guard
+    (``agent._decline_shared_agent_home``) exempts a write only when the target is
+    EXACTLY the dedicated ``<data home>/kiro/agents`` this instance's teardown owns;
+    the marker alone does not qualify, which was measured — an instance carrying
+    only ``KIROCREW_POD`` still rewrote the operator's specs. Redirecting the write
+    is what protects them, and the marker keeps the instance honest about why.
+
+    Not a supported route for anything that RUNS an agent: ``KIRO_HOME`` also moves
+    kiro-cli's session storage. This harness never runs one — fixtures go through
+    the app's own writers — so it needs neither those transcripts nor specs of its
+    own.
+    """
+    return {
+        **os.environ,
+        "KIROCREW_HOME": str(home),
+        "KIROCREW_POD": "1",
+        "KIRO_HOME": str(home / "kiro"),
+    }
+
+
+def _shared_agent_specs() -> dict[str, float]:
+    """The operator's REAL agent specs as ``{name: mtime}``, for :func:`_assert_untouched`.
+
+    Resolved here rather than by importing the host: this runs under whatever
+    interpreter launched the CLI, which need not have ``kiro_crew`` importable, and
+    an import guarded by ``except: return {}`` made the check FAIL OPEN — it
+    reported "nothing to compare" on both sides and waved the very rewrite it
+    exists to catch straight through. Mirrors the host's override-blind resolver:
+    the ambient ``KIRO_HOME`` if the operator exported one, else ``~/.kiro``.
+    """
+    shared = Path(os.environ.get("KIRO_HOME") or Path.home() / ".kiro") / "agents"
+    if not shared.is_dir():
+        return {}
+    out: dict[str, float] = {}
+    for spec in shared.glob("*.json"):
+        try:
+            out[spec.name] = spec.stat().st_mtime
+        except OSError:
+            continue
+    return out
+
+
+def _assert_untouched(before: dict[str, float]) -> None:
+    """Fail loudly if starting this instance modified the operator's agent specs.
+
+    The isolation promise at the top of this file is worth exactly what enforces
+    it. Its absence cost a real debugging session: the specs were repointed at a
+    throwaway install silently, the symptom surfaced later in the operator's own
+    session as "this save no longer exists" (the app's MCP server resolves its data
+    dir from its own file location), and nothing connected the two. This turns that
+    into an error at the moment of the write, naming the files.
+
+    No "both sides empty, nothing to check" escape: an empty reading is either a
+    machine with no shared specs — where an appearing one is exactly the write to
+    refuse — or a broken resolver, and treating either as a pass is how the first
+    version of this guard stayed silent through the bug.
+    """
+    after = _shared_agent_specs()
+    changed = sorted(n for n in set(before) | set(after) if before.get(n) != after.get(n))
+    if changed:
+        raise InstanceError(
+            "this throwaway instance modified the operator's shared agent specs: "
+            + ", ".join(changed)
+            + " — isolation is broken; restore them with `kirocrew setup --agent-only` "
+            "(plus `kirocrew app disable/enable` per app) and do not run shots until "
+            "this is fixed"
+        )
+
+
 def _install_into(home: Path, interpreter: Path) -> None:
     """Install + enable this app in ``home``, in a child process.
 
@@ -146,7 +229,7 @@ def _install_into(home: Path, interpreter: Path) -> None:
     )
     got = subprocess.run(
         [str(interpreter), "-c", script, str(APP_ROOT)],
-        env={**os.environ, "KIROCREW_HOME": str(home)},
+        env=_child_env(home),
         capture_output=True,
         text=True,
         timeout=300,
@@ -191,6 +274,9 @@ def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instan
     fresh instance's dashboard without a browser session.
     """
     interpreter = gateway_interpreter()
+    # Snapshot BEFORE the install: enabling the app is the step that registers
+    # agents, so this is the only window in which the write could happen.
+    shared_before = _shared_agent_specs()
     if home.exists():
         shutil.rmtree(home)
     home.mkdir(parents=True)
@@ -201,10 +287,11 @@ def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instan
         json.dumps({"agent": {"apps_trusted": [APP_NAME]}}, indent=2), encoding="utf-8"
     )
     _install_into(home, interpreter)
+    _assert_untouched(shared_before)
 
     proc = subprocess.Popen(
         [str(interpreter), "-m", "kiro_crew", "gateway", "--test-mode", "--no-crons"],
-        env={**os.environ, "KIROCREW_HOME": str(home)},
+        env=_child_env(home),
         stdout=subprocess.PIPE,
         stderr=log_file.open("w"),
         text=True,
