@@ -5,9 +5,10 @@
  * page's own maximum so a slow month is visibly slow *relative to this life*,
  * which is the comparison an audit actually makes.
  *
- * Tokens are labelled as tokens. The backend exposes no billing signal, and a
- * number dressed up as money that can never be reconciled with a bill would
- * poison the audit this page exists for.
+ * Tokens are labelled as tokens. When the gateway exposes real per-turn
+ * billing the table grows a credits column and the note names the currency;
+ * a number dressed up as money that can never be reconciled with a bill would
+ * poison the audit this page exists for, so tokens alone are never dressed up.
  */
 
 import { useEffect, useState } from 'react'
@@ -49,6 +50,7 @@ export function PerfPage({
   onBack: () => void
 }) {
   const [turns, setTurns] = useState<PerfTurn[] | null>(null)
+  const [creditNote, setCreditNote] = useState('')
   const [problem, setProblem] = useState('')
 
   useEffect(() => {
@@ -56,7 +58,10 @@ export function PerfPage({
     api
       .perf(runId)
       .then((out) => {
-        if (alive) setTurns(out.turns)
+        if (alive) {
+          setTurns(out.turns)
+          setCreditNote(out.creditNote)
+        }
       })
       .catch((e: Error) => {
         if (alive) setProblem(e.message)
@@ -69,6 +74,7 @@ export function PerfPage({
   const rows = [...(turns ?? [])].reverse()
   const maxStory = Math.max(0, ...rows.map((r) => r.storyMs ?? 0))
   const maxArt = Math.max(0, ...rows.map((r) => r.artMs ?? 0))
+  const hasCredits = creditNote === 'credits'
 
   return (
     <div className="ew-perf">
@@ -78,7 +84,7 @@ export function PerfPage({
         </button>
         <h2 className="ew-perf-title">{t('perf.title', { name })}</h2>
       </div>
-      <div className="ew-meta">{t('perf.tokensNote')}</div>
+      <div className="ew-meta">{hasCredits ? t('perf.creditsNote') : t('perf.tokensNote')}</div>
       {problem ? <div className="ew-modal-problem">{problem}</div> : null}
       {turns !== null && rows.length === 0 ? (
         <div className="ew-meta">{t('perf.empty')}</div>
@@ -91,6 +97,7 @@ export function PerfPage({
               <th>{t('perf.story')}</th>
               <th>{t('perf.art')}</th>
               <th>{t('perf.declared')}</th>
+              {hasCredits ? <th>{t('perf.credits')}</th> : null}
               <th>{t('perf.tokens')}</th>
               <th>{t('perf.context')}</th>
               <th>{t('perf.events')}</th>
@@ -120,6 +127,9 @@ export function PerfPage({
                   {r.form ? t(r.form === 'patch' ? 'perf.formPatch' : 'perf.formFull') : '—'}
                   {r.declaredBytes !== undefined ? ` ${(r.declaredBytes / 1024).toFixed(1)}KB` : ''}
                 </td>
+                {hasCredits ? (
+                  <td>{r.credits !== undefined ? r.credits.toFixed(2) : '—'}</td>
+                ) : null}
                 <td>{r.usedTokens !== undefined ? r.usedTokens.toLocaleString() : '—'}</td>
                 <td>{r.pct !== undefined ? `${r.pct}%` : '—'}</td>
                 <td>{r.rotation ? rotationLabel(r.rotation) : ''}</td>

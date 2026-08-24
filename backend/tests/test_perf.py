@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ _BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND))
 
 import mcp_server as srv  # noqa: E402
-from perf import TurnPerf, aggregate, art_spans  # noqa: E402
+from perf import TurnPerf, aggregate, art_spans, join_usage  # noqa: E402
 
 WORLD = """---
 {"id": "w", "title": "W", "version": "1.0", "language": "en",
@@ -192,3 +193,112 @@ def test_a_commit_without_a_pending_record_writes_no_row(app):
         state={"status": {"age": 1}},
     )
     assert TurnPerf(app, run).rows() == []
+
+
+# ── join_usage: real billing joined at read time from the host's ledger ──────
+
+
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, UTC).isoformat()
+
+
+def test_join_usage_credits_the_committing_turn():
+    turns = [{"turn": 1, "at": 100.0}, {"turn": 2, "at": 500.0}]
+    usage = [
+        {"ts": _iso(130.0), "credits": 3.5, "cost": 0.07},
+        {"ts": _iso(540.0), "credits": 2.0},
+    ]
+    out = join_usage(turns, usage)
+    assert out[0]["credits"] == 3.5 and out[0]["cost"] == 0.07
+    assert out[1]["credits"] == 2.0 and "cost" not in out[1]
+
+
+def test_join_usage_skips_uncommitted_conversation_turns():
+    # A recovery injection ends a conversation turn between two commits but
+    # commits nothing; its row must not be attributed to the next commit.
+    turns = [{"turn": 1, "at": 100.0}, {"turn": 2, "at": 500.0}]
+    usage = [
+        {"ts": _iso(130.0), "credits": 3.0},
+        {"ts": _iso(300.0), "credits": 9.9},  # injected turn, no commit
+        {"ts": _iso(540.0), "credits": 2.0},
+    ]
+    out = join_usage(turns, usage)
+    assert out[0]["credits"] == 3.0
+    assert out[1]["credits"] == 2.0
+
+
+def test_join_usage_never_steals_the_next_turns_row():
+    # Turn 1's row is gone (window expired); the only later row belongs to
+    # turn 2 and must stay with turn 2.
+    turns = [{"turn": 1, "at": 100.0}, {"turn": 2, "at": 500.0}]
+    usage = [{"ts": _iso(540.0), "credits": 2.0}]
+    out = join_usage(turns, usage)
+    assert "credits" not in out[0]
+    assert out[1]["credits"] == 2.0
+
+
+def test_join_usage_caps_the_attribution_gap():
+    turns = [{"turn": 1, "at": 100.0}]
+    usage = [{"ts": _iso(100.0 + 3600.0), "credits": 4.0}]
+    assert "credits" not in join_usage(turns, usage)[0]
+
+
+def test_join_usage_ignores_undatable_rows_and_non_numeric_values():
+    turns = [{"turn": 1, "at": 100.0}, {"turn": 7, "rotation": "budget"}]
+    usage = [
+        {"ts": "not-a-date", "credits": 8.0},
+        {"ts": _iso(120.0), "credits": True, "cost": float("nan")},
+    ]
+    out = join_usage(turns, usage)
+    # bool is not a count; NaN comes pre-filtered by the host but must not slip
+    # through here either. The rotation-only row has no commit to credit.
+    assert "credits" not in out[0]
+    assert "cost" not in out[0]
+    assert "rotation" in out[1] and "credits" not in out[1]
+
+
+# ── the route's guarded reader: absent, present, and failing hosts ───────────
+
+
+def test_usage_rows_helper_returns_empty_without_the_host_reader(monkeypatch):
+    import types
+
+    import routes
+
+    fake = types.ModuleType("kiro_crew.dashboard.handlers.usage")  # no reader attr
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
+    assert routes._usage_rows_for("some-life") == []
+
+
+def test_usage_rows_helper_reads_the_narrator_slot(monkeypatch):
+    import types
+
+    import routes
+    from narrator import narrator_slot_key
+
+    seen: list[str] = []
+
+    def fake_reader(slot, days=30, **kwargs):
+        seen.append(slot)
+        return [{"ts": _iso(1.0), "credits": 1.5}]
+
+    fake = types.ModuleType("kiro_crew.dashboard.handlers.usage")
+    fake.slot_turn_usage = fake_reader
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
+    rows = routes._usage_rows_for("some-life")
+    assert rows and rows[0]["credits"] == 1.5
+    assert seen == [narrator_slot_key("some-life")]
+
+
+def test_usage_rows_helper_swallows_a_failing_reader(monkeypatch):
+    import types
+
+    import routes
+
+    def boom(slot, **kwargs):
+        raise RuntimeError("shard unreadable")
+
+    fake = types.ModuleType("kiro_crew.dashboard.handlers.usage")
+    fake.slot_turn_usage = boom
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
+    assert routes._usage_rows_for("some-life") == []

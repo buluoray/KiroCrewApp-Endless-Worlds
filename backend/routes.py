@@ -153,6 +153,7 @@ from memory_routes import memory_routes  # noqa: E402
 from narrator import (  # noqa: E402
     ensure_narrator_slot_ex,
     ensure_worldsmith_slot,
+    narrator_slot_key,
     purge_narrator_session,
     release_narrator_slot,
     release_worldsmith_slot,
@@ -160,7 +161,7 @@ from narrator import (  # noqa: E402
     worldsmith_slot_key,
 )
 from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
-from perf import TurnPerf  # noqa: E402
+from perf import TurnPerf, join_usage  # noqa: E402
 from perf import aggregate as perf_aggregate  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
 from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
@@ -1025,6 +1026,28 @@ async def life_deletion(request: web.Request, ctx: AppContext) -> web.Response:
     return web.json_response(_life_deletion_facts(ctx, run_id, _gateway_state(request)))
 
 
+def _usage_rows_for(run_id: str) -> list[dict[str, Any]]:
+    """The narrator conversation's per-turn billing rows, or ``[]``.
+
+    Guarded import: the host only grew a per-turn usage reader recently, so a
+    gateway without it serves the perf page with tokens as the proxy instead of
+    failing the route. Called without the reader's app-ownership filter: this
+    route is already dashboard-user-gated, the slot key is this app's own
+    deterministic namespace, and rows written before the host stamped ownership
+    carry no app field — filtering would blank exactly the history an audit
+    reads.
+    """
+    try:
+        from kiro_crew.dashboard.handlers.usage import slot_turn_usage
+    except ImportError:
+        return []
+    try:
+        return slot_turn_usage(narrator_slot_key(run_id))
+    except Exception as exc:  # noqa: BLE001 — billing is annotation, never a route failure
+        logger.debug("per-turn usage read failed for %s: %s", run_id, exc)
+        return []
+
+
 async def life_perf(request: web.Request, ctx: AppContext) -> web.Response:
     """``GET /runs/{run_id}/perf`` — the audit page's data: what each turn cost.
 
@@ -1032,9 +1055,10 @@ async def life_perf(request: web.Request, ctx: AppContext) -> web.Response:
     are left out rather than shown half-empty): story latency (ask → commit),
     the narrator's read time, tool-call count, declaration form and size, art
     latency joined from the backdrop timeline, the context meter after the
-    turn, and any conversation rotation with its reason. ``creditNote`` says
-    out loud that tokens are a proxy: the harness exposes no billing signal to
-    an app, and a fabricated dollar figure would be unauditable.
+    turn, and any conversation rotation with its reason. Real per-turn credits
+    join from the host's usage ledger when the gateway exposes one;
+    ``creditNote`` tells the page which currency it is looking at, so tokens
+    are only ever presented as the proxy they are.
     """
     if request.get("user") is None:
         return _unauthorized()
@@ -1045,11 +1069,13 @@ async def life_perf(request: web.Request, ctx: AppContext) -> web.Response:
     rows = TurnPerf(ctx.data_dir, run_id).rows()
     timeline = BackdropTimeline(ctx.data_dir, run_id)
     events = timeline.events()
+    turns = join_usage(perf_aggregate(rows, events), _usage_rows_for(run_id))
+    has_credits = any("credits" in t for t in turns)
     return web.json_response(
         {
             "runId": run_id,
-            "turns": perf_aggregate(rows, events),
-            "creditNote": "tokens-not-credits",
+            "turns": turns,
+            "creditNote": "credits" if has_credits else "tokens-not-credits",
         }
     )
 
