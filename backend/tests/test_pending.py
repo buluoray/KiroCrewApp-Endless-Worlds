@@ -38,6 +38,7 @@ sys.path.insert(0, str(_BACKEND))
 from narrator import APP_NAME, MEMORY_MODE  # noqa: E402
 from store import RunStore  # noqa: E402
 from turn import (  # noqa: E402
+    BACKDROP_STALE_SECS,
     PENDING_STALE_SECS,
     TURN_DEADLINE_SECS,
     advance_turn,
@@ -505,3 +506,62 @@ def test_a_committed_page_stays_generating_while_its_requested_art_is_pending(st
     assert live["stage"] == "painting"
     assert live["steps"] == 5, "painting must stay at the existing 92% progress cap"
     assert live["lastTool"] == "endless_paint_backdrop"
+
+
+def test_art_that_will_never_arrive_stops_holding_the_page_hostage(store, run):
+    """The freeze this ceiling exists for.
+
+    The request record is cleared ONLY by an exact-turn commit, so a recovery task
+    that died with its gateway leaves one nobody will ever clear. Unbounded, the
+    waiting state never ended: the play view disables every choice while
+    generating, so the reader sat on a page it had already been shown with every
+    control dead, no retry, and delete refusing with ``turn_in_flight``.
+    """
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "the gate closed"})
+    store.request_backdrop(run, turn=1, brief="a closed red gate")
+    store.update_backdrop_request(run, askedAt=time.time() - (BACKDROP_STALE_SECS + 1))
+
+    assert generating(store, run) is None, (
+        "a backdrop request past the ceiling still reports the page as generating, "
+        "which disables every choice on a page the player can already read"
+    )
+
+
+def test_a_backdrop_request_inside_the_ceiling_still_reports_painting(store, run):
+    """The other side of the boundary — the ceiling must not cancel ordinary waits."""
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "the gate closed"})
+    store.request_backdrop(run, turn=1, brief="a closed red gate")
+    store.update_backdrop_request(run, askedAt=time.time() - (BACKDROP_STALE_SECS - 30))
+
+    live = generating(store, run)
+    assert live is not None and live["stage"] == "painting"
+
+
+def test_a_backdrop_request_with_no_timestamp_is_not_believed(store, run):
+    """A record with no readable ``askedAt`` cannot be aged, so it cannot be trusted
+    to hold the page: an unagexable record is the unbounded wait by another name."""
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "the gate closed"})
+    store.request_backdrop(run, turn=1, brief="a closed red gate")
+    store.update_backdrop_request(run, askedAt="not a number")
+
+    assert generating(store, run) is None
+
+
+def test_the_page_release_and_the_waiting_state_read_one_ceiling():
+    """Two ceilings for one transaction is the defect, not an implementation detail.
+
+    ``routes._backdrop_is_pending`` released the committed page at 900s while
+    ``turn.generating`` had no bound at all, so the page came back with its controls
+    still dead. A test on the values alone would pass again the moment someone
+    edits one number, so this pins the IDENTITY: routes must read the shared
+    constant, not restate it.
+    """
+    import routes
+
+    assert routes._BACKDROP_STALE_SECS is BACKDROP_STALE_SECS, (
+        "routes restates the backdrop ceiling instead of importing it; the two can "
+        "drift apart again and re-freeze a life"
+    )

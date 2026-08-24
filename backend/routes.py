@@ -163,6 +163,7 @@ from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  #
 from settings import REASONING_EFFORTS, read_settings, write_settings  # noqa: E402
 from store import CorruptRunState, RunStore, StoreError  # noqa: E402
 from turn import (  # noqa: E402
+    BACKDROP_STALE_SECS,
     OPENING_DEADLINE_SECS,
     advance_turn,
     already_committed,
@@ -200,9 +201,12 @@ _BACKDROP_FALLBACK_SECS = 120.0
 #: an uncooperative narrator) withheld the committed month FOREVER, while every
 #: other enrichment drops with a warning. A replacement brief refreshes
 #: ``askedAt`` and buys a fresh window; the recovery-cycle cap below bounds how
-#: many silent narrator re-notifications can extend the wait. Mirrors
-#: ``turn.PENDING_STALE_SECS`` (900), the same judgement for the prose itself.
-_BACKDROP_STALE_SECS = 900.0
+#: many silent narrator re-notifications can extend the wait.
+#:
+#: Imported rather than restated: ``turn.generating`` reads the same ceiling to
+#: decide when to stop reporting "painting", and the two drifting apart is what
+#: froze a life — the page was released here while the waiting state never ended.
+_BACKDROP_STALE_SECS = BACKDROP_STALE_SECS
 #: How many silent narrator recovery cycles one brief may spend. Each cycle
 #: dispatches a real model turn every ``_BACKDROP_ATTEMPT_SECS``; without a cap
 #: an uncooperative narrator burned tokens indefinitely (the illustrator side
