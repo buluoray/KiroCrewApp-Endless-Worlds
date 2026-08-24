@@ -199,13 +199,49 @@ def test_same_origin_is_never_granted(ui: str) -> None:
 
 
 def test_the_scene_is_loaded_as_a_sandboxed_src_document(slot: str) -> None:
-    """Loaded via `src` (a real same-origin document), not `srcdoc`: WebKit / iOS
-    WKWebView blank-render a sandboxed srcdoc frame. Security is unchanged — the
+    """The scene ROUTE is the primary form: a real same-origin document, never a
+    ``blob:`` URL (which fails the load in a WebKit-based in-app browser and takes
+    the page down with it).
+
+    ``srcdoc`` is present but only as the watchdog's fallback, and this pins that it
+    stays subordinate: it is gated on the ``inline`` state, so a fresh document is
+    always attempted over the route first. Security is unchanged in either form — the
     frame keeps its sandbox with no allow-same-origin (asserted separately), so the
-    document is null-origin and cannot reach the dashboard even though it is
-    same-origin-framable."""
-    assert re.search(r"\bsrc=\{", slot), "scene must load via src"
-    assert "srcDoc={" not in slot, "srcdoc blank-renders on WebKit; use src"
+    document is null-origin and cannot reach the dashboard.
+    """
+    assert re.search(r"\bsrc=\{src\}", slot), "scene must load via src"
+    assert "createObjectURL" not in slot, "blob: crashes a WebKit in-app browser"
+    # The fallback is conditional, never the unconditional source of the document.
+    assert re.search(r"srcDoc=\{inline && on \? html : undefined\}", slot), (
+        "srcdoc must be gated on the fallback state, not the primary form"
+    )
+    assert re.search(r"const src = inline \? undefined : routeSrc", slot), (
+        "the route form must be what a fresh document is tried with first"
+    )
+
+
+def test_a_frame_that_never_ran_falls_back_before_it_reports_failure(slot: str) -> None:
+    """The watchdog escalates; it does not dead-end.
+
+    A frame that misses the deadline has not run — an SSO proxy's own sign-in page in
+    place of our document, an auth refusal, a JSON body, an embedder that refused the
+    URL. The app already holds the bytes (it fetched them itself, and that fetch is
+    authenticated by the app rather than by the browser), so the first miss switches
+    the frame to those bytes. Only a second miss is a real failure the player is told
+    about. Reporting the first one was the bug this replaces: behind an SSO tunnel the
+    route form NEVER runs, so the note was permanent while the document sat in hand.
+    """
+    assert "inline ? setFailed(true) : setInline(true)" in slot, (
+        "the first missed deadline must fall back, not fail"
+    )
+
+
+def test_the_fallback_is_per_document_and_not_a_session_latch(slot: str) -> None:
+    """Reset on new bytes, so one refused navigation cannot pin every later scene to
+    ``srcdoc`` — including on the surfaces where only the route form renders."""
+    assert re.search(r"setInline\(false\)\s*\n\s*\}, \[routeSrc\]\)", slot), (
+        "the fallback must reset when the document changes"
+    )
 
 
 # -- what the slot accepts back -----------------------------------------

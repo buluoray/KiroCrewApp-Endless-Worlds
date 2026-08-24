@@ -6789,12 +6789,22 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice, resetSignal
 	]);
 	const on = !!(html && sceneId);
 	const loading = !!sceneId && !html && !failed;
-	const src = on && runId ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}?v=${sceneVersion(html)}` : void 0;
+	const [inline, setInline] = useState(false);
+	const routeSrc = on && runId ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}?v=${sceneVersion(html)}` : void 0;
+	const src = inline ? void 0 : routeSrc;
 	useEffect(() => {
-		if (!src || fitH) return void 0;
-		const timer = setTimeout(() => setFailed(true), SCENE_RENDER_DEADLINE_MS);
+		setInline(false);
+	}, [routeSrc]);
+	useEffect(() => {
+		if (!on || fitH) return void 0;
+		const timer = setTimeout(() => inline ? setFailed(true) : setInline(true), SCENE_RENDER_DEADLINE_MS);
 		return () => clearTimeout(timer);
-	}, [src, fitH]);
+	}, [
+		on,
+		routeSrc,
+		inline,
+		fitH
+	]);
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-slot-wrap",
 		ref: wrapRef,
@@ -6822,6 +6832,7 @@ function SceneSlot({ runId, sceneId, asks, visible = true, onChoice, resetSignal
 				style: failed ? { display: "none" } : on && fitH ? { height: `${fitH}px` } : void 0,
 				sandbox: "allow-scripts allow-forms",
 				src,
+				srcDoc: inline && on ? html : void 0,
 				allow: "",
 				referrerPolicy: "no-referrer"
 			}) : null
@@ -7743,7 +7754,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.10.0" })
+								children: t("app.version", { version: "0.10.1" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",

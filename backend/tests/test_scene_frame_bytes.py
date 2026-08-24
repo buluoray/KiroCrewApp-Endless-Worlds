@@ -81,8 +81,16 @@ def test_a_frame_that_never_renders_reports_itself() -> None:
     )
     # The timer must actually be able to mark the scene failed, and must be cleared
     # once a height arrives — a latched failure would stick after a slow first paint.
-    watchdog = re.search(r"setTimeout\(\(\) => setFailed\(true\), SCENE_RENDER_DEADLINE_MS\)", src)
-    assert watchdog, "the deadline does not lead to setFailed(true)"
+    # It reaches that verdict in two steps now: the first missed deadline swaps the
+    # frame onto the bytes the app already holds, and only the second is reported. The
+    # note must stay reachable, which is what this pins — an escalation that could
+    # never arrive at it would restore the silent blank slot by another route.
+    watchdog = re.search(
+        r"setTimeout\(\s*\(\) => \(inline \? setFailed\(true\) : setInline\(true\)\),"
+        r"\s*SCENE_RENDER_DEADLINE_MS,?\s*\)",
+        src,
+    )
+    assert watchdog, "the deadline does not lead to a fallback and then setFailed(true)"
     assert "clearTimeout" in src, "the watchdog is never cleared, so it cannot be cancelled"
 
 
