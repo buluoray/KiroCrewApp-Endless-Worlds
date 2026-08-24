@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/hero.webp" alt="无限世界 —— 一段人生可能穿过的诸多世界" width="820">
+</p>
+
 # 无限世界 / Endless Worlds
 
 [English](README.md) | **简体中文**

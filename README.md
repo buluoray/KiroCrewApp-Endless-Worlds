@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/hero.webp" alt="Endless Worlds — a montage of the worlds a single life can pass through" width="820">
+</p>
+
 # Endless Worlds
 
 **English** | [简体中文](README.zh-CN.md)
