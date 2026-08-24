@@ -7,10 +7,14 @@ the first post-update turn persisted that stale value as the run's marker, and
 the reset the update should have triggered could then never fire again.
 
 Close: the player closing the story's tab asks for a fresh storyteller. Core
-deliberately preserves a closed slot's resume pointer, so the app detects the
-close itself — a process-local registry, because the narrator's temporary-mode
-slot is never in ``open_slots.json`` (its persist filter keeps only
-``persistent`` slots) and a restart must keep reading as "continue", not "closed".
+preserves a closed slot's resume pointer (a reopened tab continues), so the app
+has to act — but it must not act on the slot's mere ABSENCE. The bulk
+idle-archive sweep removes app slots too and stamps the same ``closed_at``, so
+absence cannot tell "the player closed this" from "this was quiet for three
+days", and only the first should cost a conversation. Core already draws that
+line by which call site fires: ``notify_slot_closed`` runs for a deliberate
+dismissal and deliberately not for the sweep. So the app registers a hook and is
+TOLD, rather than inferring.
 
 Manual: one seam, ``reset_narrator_conversation``, discards the conversation
 through the LIVE manager and clears the briefed marker in the same call — a
@@ -31,12 +35,14 @@ sys.path.insert(0, str(_BACKEND))
 
 import narrator  # noqa: E402
 from narrator import (  # noqa: E402
+    _SLOT_PREFIX,
     APP_NAME,
     MEMORY_MODE,
-    consume_closed_slot,
     ensure_narrator_slot_ex,
+    install_close_hook,
     narrator_slot_key,
     reset_narrator_conversation,
+    run_id_from_slot_key,
 )
 from store import RunStore  # noqa: E402
 
@@ -93,9 +99,24 @@ def run(store):
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
-    narrator._LIVE_SLOT_KEYS.clear()
+    """Leave no hook behind in core's registry.
+
+    It is process memory keyed by app name, so a test that reaches the real
+    registry (rather than the stand-in these tests inject) would hand the next
+    test a live hook closed over a dead store.
+    """
+
+    def _drop():
+        try:
+            from kiro_crew.apps.teardown import unregister_slot_close_hook
+
+            unregister_slot_close_hook(APP_NAME)
+        except Exception:  # noqa: BLE001 — no core in this environment
+            pass
+
+    _drop()
     yield
-    narrator._LIVE_SLOT_KEYS.clear()
+    _drop()
 
 
 # ── the generation is read from the CURRENT files, not from import time ─────
@@ -148,38 +169,109 @@ def test_generation_is_memoized_on_unchanged_metadata(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
-# ── close detection: process-local, one answer per close ────────────────────
+# ── being TOLD about a close, rather than inferring one ─────────────────────
 
 
-def test_a_closed_slot_is_detected_once(store, run):
+def _register_hook(state, store, monkeypatch):
+    """Install the hook against a stand-in core registry; return what it holds."""
+    import types
+
+    registry: dict = {}
+    fake = types.ModuleType("kiro_crew.apps.teardown")
+    fake.register_slot_close_hook = lambda app, hook: registry.__setitem__(app, hook)
+    monkeypatch.setitem(sys.modules, "kiro_crew.apps.teardown", fake)
+    install_close_hook(state, store)
+    return registry
+
+
+def test_the_run_is_recovered_from_the_slot_key():
+    run = "a" * 32
+    assert run_id_from_slot_key(narrator_slot_key(run)) == run
+    # Core hands the hook a slot NAME, and one that does not decode to a real run
+    # id must be ignored rather than reached into the store with. Note the trap the
+    # bad-id test below also names: lowercase-and-hyphens MATCHES the run-id
+    # grammar, so a suffixed key decodes to a DIFFERENT valid run, not to nothing.
+    assert run_id_from_slot_key("chat-1-1787551170") == ""
+    assert run_id_from_slot_key(f"{_SLOT_PREFIX}Upper") == ""
+    assert run_id_from_slot_key(f"{_SLOT_PREFIX}../escape") == ""
+    assert run_id_from_slot_key(_SLOT_PREFIX + "a" * 49) == ""
+    assert run_id_from_slot_key(_SLOT_PREFIX) == ""
+    assert run_id_from_slot_key("") == ""
+
+
+def test_the_hook_is_registered_under_this_app(store, run, monkeypatch):
+    state = FakeState()
+    registry = _register_hook(state, store, monkeypatch)
+    assert list(registry) == [APP_NAME], (
+        "core keys the registry by app name; registering under anything else means "
+        "the close is never delivered and the reset silently stops happening"
+    )
+
+
+def test_a_dismissal_delivered_by_core_resets_the_conversation(store, run, monkeypatch):
+    import types
+
+    chat_utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
+    chat_utils._history_key_for = lambda key: key
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", chat_utils)
+
     state = FakeState()
     ensure_narrator_slot_ex(state, run)
     key = narrator_slot_key(run)
-    assert not consume_closed_slot(state, run), "an open slot is not a close"
-    state.slots.pop(key)
-    assert consume_closed_slot(state, run), "created-then-gone is a close"
-    assert not consume_closed_slot(state, run), "a close is consumed, not repeated"
-    # Re-created and closed again: detected again.
-    ensure_narrator_slot_ex(state, run)
-    state.slots.pop(key)
-    assert consume_closed_slot(state, run)
+    store.mark_briefed(run, slot=key)
+    store.commit_state(run, {**store.read_state(run), "turn": 7})
+
+    hook = _register_hook(state, store, monkeypatch)[APP_NAME]
+    asyncio.run(hook(key))
+
+    assert state.sessions.discarded == [key]
+    assert store.briefed_slot(run) == "", "the fresh conversation must re-brief"
+    assert store.rotation_turn(run) == 7, (
+        "the rotation marker must record this turn, or the next turn's planned "
+        "rotation discards the conversation this just created"
+    )
 
 
-def test_a_restart_is_not_a_close(store, run):
-    # A fresh registry (what a gateway restart produces) never reports a close,
-    # even though the slot is absent — restart resumes, close resets.
+def test_a_foreign_slot_name_is_ignored(store, run, monkeypatch):
+    """Core hands the hook every slot name this app owns, and an app can own more
+    than one kind. A name that is not a run's slot must not be decoded into one.
+
+    The reset seam is deliberately reachable here (its import is satisfied), so the
+    name guard is the only thing standing between this call and a discard.
+    """
+    import types
+
+    chat_utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
+    chat_utils._history_key_for = lambda key: key
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", chat_utils)
+
     state = FakeState()
-    assert not consume_closed_slot(state, run)
+    hook = _register_hook(state, store, monkeypatch)[APP_NAME]
+
+    asyncio.run(hook("chat-1-1787551170"))
+
+    assert state.sessions.discarded == []
 
 
-def test_a_reused_slot_registers_for_close_detection(store, run):
-    # The slot predates this module's registry (module reload): the reuse path
-    # must register it, or a later close would be invisible.
+def test_a_failing_reset_does_not_block_the_dismissal(store, run, monkeypatch):
+    """Core refuses a close whose hook raises. That is right for an app whose hook
+    pauses a worker and wrong for ours: the player wants the tab gone, and a stale
+    pointer is the behaviour that shipped before this existed."""
     state = FakeState()
-    state.slots[narrator_slot_key(run)] = FakeSlot(narrator_slot_key(run))
-    ensure_narrator_slot_ex(state, run)
-    state.slots.pop(narrator_slot_key(run))
-    assert consume_closed_slot(state, run)
+
+    async def boom(*_a, **_kw):
+        raise RuntimeError("session store is wedged")
+
+    monkeypatch.setattr(narrator, "reset_narrator_conversation", boom)
+    hook = _register_hook(state, store, monkeypatch)[APP_NAME]
+
+    asyncio.run(hook(narrator_slot_key(run)))  # must not raise
+
+
+def test_no_dashboard_runtime_is_a_no_op(store, monkeypatch):
+    """Unit-test environments have no core to register with."""
+    monkeypatch.setitem(sys.modules, "kiro_crew.apps.teardown", None)
+    install_close_hook(FakeState(), store)  # must not raise
 
 
 # ── the reset seam: live manager, and the briefed marker dies with it ───────
@@ -232,10 +324,10 @@ def test_clear_briefed_round_trip(store, run):
     assert store.briefed_slot(run) == ""
 
 
-# ── the wiring: a close observed by the TURN LOOP resets the conversation ───
+# ── the wiring: a dismissal reaches the turn loop through the hook ──────────
 
 
-def test_a_closed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, monkeypatch):
+def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, monkeypatch):
     from turn import advance_turn
 
     RULEBOOK = "the world does not revolve around the player"
@@ -261,26 +353,86 @@ def test_a_closed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, mon
 
     import types
 
-    fake = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    fake._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", fake)
+    chat_utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
+    chat_utils._history_key_for = lambda key: key
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", chat_utils)
+
+    registry: dict = {}
+    teardown = types.ModuleType("kiro_crew.apps.teardown")
+    teardown.register_slot_close_hook = lambda app, hook: registry.__setitem__(app, hook)
+    monkeypatch.setitem(sys.modules, "kiro_crew.apps.teardown", teardown)
 
     advance()
     assert RULEBOOK in sent[0]
+    assert APP_NAME in registry, "the turn path must arm the hook, since core forgets it"
     store.commit_state(run, {**store.read_state(run), "turn": 1})
     store.append_turn(run, {"turn": 1, "prose": "the snow stopped"})
 
-    # The player closes the tab between turns.
+    # The player dismisses the tab between turns. Core tells us, then pops the slot.
     key = narrator_slot_key(run)
+    asyncio.run(registry[APP_NAME](key))
     state.slots.pop(key)
+    assert state.sessions.discarded == [key], "a dismissal must discard the conversation"
 
     advance()
-    assert state.sessions.discarded == [key], "a closed tab must discard the conversation"
     assert RULEBOOK in sent[1], "the fresh conversation must be re-briefed"
 
-    # And a third turn on the SAME (reopened) tab does not reset again.
+    # A third turn on the SAME (reopened) tab must not rotate again: the dismissal
+    # recorded its turn, so the planned rotation sees the boundary already spent.
     store.commit_state(run, {**store.read_state(run), "turn": 2})
     store.append_turn(run, {"turn": 2, "prose": "spring"})
     advance()
-    assert len(state.sessions.discarded) == 1, "one close, one reset"
+    assert len(state.sessions.discarded) == 1, "one dismissal, one reset"
     assert RULEBOOK not in sent[2]
+
+
+def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
+    """The regression that inference produced.
+
+    The bulk cleanup sweep pops app slots and stamps the same ``closed_at`` as a
+    real close, so a slot's absence cannot mean "the player asked for this". A
+    life left alone past the sweep's threshold and then tidied away must come back
+    with its conversation, not a blank storyteller.
+    """
+    from turn import advance_turn
+
+    state = FakeState()
+
+    def dispatch(_state, _slot, prompt):
+        return True
+
+    def advance():
+        return asyncio.run(
+            advance_turn(
+                state_obj=state,
+                store=store,
+                run_id=run,
+                rulebook="rules",
+                dispatch=dispatch,
+                deadline_secs=0.3,
+                shape="declare state in this shape: status",
+            )
+        )
+
+    import types
+
+    chat_utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
+    chat_utils._history_key_for = lambda key: key
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", chat_utils)
+    teardown = types.ModuleType("kiro_crew.apps.teardown")
+    teardown.register_slot_close_hook = lambda app, hook: None
+    monkeypatch.setitem(sys.modules, "kiro_crew.apps.teardown", teardown)
+
+    advance()
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "quiet"})
+
+    # The sweep removes the slot WITHOUT calling the close hook. That is core's
+    # deliberate distinction, and it is the whole reason we no longer infer.
+    state.slots.pop(narrator_slot_key(run))
+
+    advance()
+    assert state.sessions.discarded == [], (
+        "a tidied-away tab is not a dismissal; discarding here would lose a "
+        "conversation the player never asked to end"
+    )

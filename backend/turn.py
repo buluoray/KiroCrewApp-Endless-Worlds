@@ -346,20 +346,20 @@ async def advance_turn(
     # the module, so an import-time constant would keep naming the old install.
     install_generation = narrator.app_install_generation()
     install_changed = store.narrator_generation(run_id) != install_generation
+    # Re-armed every turn, because core's hook registry is process memory: a
+    # gateway restart or a module reload empties it. This is how a player's tab
+    # dismissal reaches us at all — core calls the hook only for a DELIBERATE
+    # close, and deliberately not for the bulk idle-archive sweep, which stamps
+    # the same ``closed_at`` and would otherwise read identically.
+    narrator.install_close_hook(state_obj, store)
     if install_changed:
+        # Marker first: it is what stops the planned rotation below from firing on
+        # the very next turn against a conversation this just replaced, and a
+        # failed write after the replace would leave exactly that.
+        store.mark_rotation(run_id, turn=baseline)
         narrator.release_stale_narrator_slot(state_obj, run_id)
         await narrator.purge_narrator_session(state_obj, run_id)
-        store.mark_rotation(run_id, turn=baseline)
         TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason="install")
-    elif narrator.consume_closed_slot(state_obj, run_id):
-        # The player closed this run's tab since the last turn. Core deliberately
-        # preserves a closed slot's resume pointer (a reopened tab continues), but
-        # for a narrator that contract inverts: closing the story's tab is the
-        # player saying "start me a fresh storyteller". Conversation only — the
-        # life's state and chronicle continue exactly where they were.
-        await narrator.reset_narrator_conversation(state_obj, store, run_id)
-        store.mark_rotation(run_id, turn=baseline)
-        TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason="closed")
     elif rotate_reason := _should_rotate(store, run_id, baseline, chapter_crossed):
         # Planned rotation: the conversation restarts at a narratively clean point
         # (a chapter just opened, or the turn budget below ran out) instead of
@@ -367,10 +367,13 @@ async def advance_turn(
         # the narrator loses its baseline uncontrolled. The fresh conversation
         # re-briefs and re-anchors itself with a full read — the same self-healing
         # path a compaction already triggers, only at a moment of our choosing.
-        # The marker is written BEFORE dispatch so a second request for the same
-        # turn (double-tap, refresh) never discards the writer's session.
-        await narrator.reset_narrator_conversation(state_obj, store, run_id)
+        #
+        # The marker is written BEFORE the reset, not just before dispatch: it is
+        # what makes one boundary produce one rotation, so a request that resets
+        # and then fails to record it would rotate the same boundary again on the
+        # next attempt and discard a conversation that had just started.
         store.mark_rotation(run_id, turn=baseline)
+        await narrator.reset_narrator_conversation(state_obj, store, run_id)
         TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason=rotate_reason)
 
     slot, fresh_slot = ensure_narrator_slot_ex(
