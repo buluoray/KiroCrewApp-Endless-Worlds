@@ -160,6 +160,15 @@ async function run() {
     try {
       if (step.home) await goHome()
       else if (step.click) await clickText(step.click, step.exact !== false)
+      // By accessible name. The shelf renders the same row action twice — inline for a
+      // desktop, inside a kebab menu for a phone — and hides one by width, so `:visible`
+      // is what picks the one a finger could actually reach at this width.
+      else if (step.label)
+        await page.getByLabel(step.label, { exact: true }).locator('visible=true').first().click({ timeout: step.optional ? 2500 : 15000 })
+      // By selector, for a control whose accessible name is a turn number: addressing
+      // the LAST row by position survives a scenario growing another turn.
+      else if (step.clickSel)
+        await page.locator(`${step.clickSel}:visible`).first().click({ timeout: step.optional ? 2500 : 15000 })
       else if (step.clickNth) await page.getByText(step.clickNth.text).nth(step.clickNth.n).click({ timeout: 15000 })
       else if (step.wait) await page.waitForSelector(step.wait, { timeout: 20000 })
       else if (step.scrollTo) await page.locator(step.scrollTo).first().scrollIntoViewIfNeeded({ timeout: 15000 })
@@ -167,6 +176,15 @@ async function run() {
       else if (step.seconds) await page.waitForTimeout(step.seconds * 1000)
       report.steps.push(`ok ${label}`)
     } catch (err) {
+      // `optional` is for a control whose presence depends on REMEMBERED ui state
+      // (a rail the previous shot left closed), not for papering over a flake: the
+      // step is skipped and reported as skipped, and the expectations still decide
+      // the verdict. Its wait is short on purpose — an optional step that is going
+      // to be absent should not spend a full timeout proving it.
+      if (step.optional) {
+        report.steps.push(`skipped ${label}`)
+        continue
+      }
       report.steps.push(`FAILED ${label}: ${String(err).split('\n')[0].slice(0, 200)}`)
       throw err
     }
@@ -217,6 +235,11 @@ report.measured = await page.evaluate((selectors) => {
           top: Math.round(top),
           left: Math.round(left),
           right: Math.round(right),
+          // What the element WOULD need against what it shows. Equal means nothing is
+          // cut off sideways; a bigger scroll width is content past the fold, whether
+          // or not anything visibly hints at it.
+          sw: Math.round(el.scrollWidth),
+          cw: Math.round(el.clientWidth),
           shown: painted(el),
         }))(el.getBoundingClientRect())
       : null
@@ -248,6 +271,8 @@ for (const exp of job.expects || []) {
   }
   if (exp.min_w && box.w < exp.min_w) fail(`is ${box.w}px wide, under the ${exp.min_w}px floor`)
   if (exp.min_h && box.h < exp.min_h) fail(`is ${box.h}px tall, under the ${exp.min_h}px floor`)
+  if (exp.fits_x && box.sw > box.cw + TOL)
+    fail(`needs ${box.sw}px but shows ${box.cw}px, so ${box.sw - box.cw}px is off the side`)
   if (exp.covers_x) {
     const other = report.measured[exp.covers_x]
     if (!other) fail(`cannot be compared with ${exp.covers_x}, which was not measured`)

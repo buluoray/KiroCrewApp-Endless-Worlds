@@ -75,6 +75,18 @@ innocent edit and teaches everyone to ignore the gate.
 `presence="absent"` means *not visible*, not *not in the DOM* — a `display:none` element
 is still queryable, and "it stepped aside" has to mean it stopped rendering.
 
+`fits_x=True` is the one assertion a screenshot cannot substitute for: it compares an
+element's `scrollWidth` against the width it actually shows, so content that runs off
+the side is a violation rather than a frame that merely looks fine. That defect is
+invisible in a picture — a block does not look broken when it silently stops, and the
+columns past the fold are simply gone. Measured on the performance page before it was
+adapted: 553px of table in a 358px viewport, 195px of it unreachable.
+
+Put it on the block that OWNS its width, and never on a table wrapped in a deliberate
+scroll region — WCAG Reflow (1.4.10) exempts a data table's own two-axis scroll and
+exempts nothing around it, so the assertion belongs on the page while the table's
+overflow stays contained in its `role="region"` scroller.
+
 ## Reviewing a run without reading forty files
 
 `review` writes one contact sheet per (width, theme) plus `report.json`:
@@ -210,10 +222,27 @@ Shot(
 )
 ```
 
-Steps are `click` / `clickNth` / `wait` / `scrollTo` / `press` / `seconds`. Address a
+Steps are `click` / `label` / `clickSel` / `clickNth` / `wait` / `scrollTo` / `press` /
+`seconds`. Address a
 life by its **label**, not its title: every life in one world shares the world's title
 (and the world's own card carries that text too), so a title click lands on whichever
 the shelf renders first. The labels are in `fixtures.py`.
+
+`label` clicks by accessible name, which is how to reach a control the app renders
+TWICE and hides one of by width — the shelf's row actions are inline buttons on a
+desktop and fold into a kebab on a phone, and the name carries the life's label so it
+is unique on a shelf of five. `clickSel` clicks a CSS selector, for a control whose
+only name is a number (`.ew-perf-row:last-of-type .ew-perf-open`) — addressing the last
+row by position survives a scenario growing another turn. Both match `:visible` only,
+because the hidden twin is the common case at 390px.
+
+Adding `"optional": True` to a click makes a missing target a *skipped* step instead of
+a failed shot, and it is for exactly one situation: a control whose presence depends on
+REMEMBERED ui state, so whether it is there depends on what ran before. The rail's
+open/closed state is the real case — past 1100px an open rail hides the shelf's own life
+rows, so the desktop route to the performance page runs through closing it, and the
+previous shot may have left it closed already. It is not for papering over a flake: the
+skip is reported and the expectations still decide the verdict.
 
 ## Things worth knowing before you debug this
 
@@ -223,6 +252,19 @@ the shelf renders first. The labels are in `fixtures.py`.
 - **Third-party app code does not execute unless the operator trusts it.** The
   throwaway home is created with `agent.apps_trusted: ["endless-worlds"]` — trusting
   this app by name, never the allow-every-third-party-app switch.
+- **The instance is isolated by TWO variables, and the guard checks OWNERSHIP.**
+  `KIROCREW_HOME` alone is not isolation: enabling an app registers its agents into
+  kiro-cli's own `~/.kiro/agents`, which no data-home override moves, so an instance
+  once repointed the operator's live specs at its scratch install — and because the
+  app's MCP server resolves its data dir from its own file location, the operator's next
+  session read fixture data and reported their own save as missing. `KIRO_HOME` plus
+  `KIROCREW_POD=1` redirects that write, and `_assert_untouched` refuses to start if any
+  shared spec now *points into this instance*. It asks that question rather than "did
+  these files change", because this harness shares a machine with the gateway driving
+  it: the host rewrites every spec at once when it re-registers agents, and a
+  change-keyed guard called that broken isolation and refused to start on a working
+  machine. An ambient change that leads nowhere near the instance is reported, not
+  fatal. `backend/tests/test_devtools_isolation_guard.py` pins both halves.
 - **The instance's ready line is how it is reached.** `--test-mode` prints port and a
   dashboard credential on stdout; there is no other supported way into a fresh
   instance's dashboard without a browser session.

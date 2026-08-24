@@ -82,15 +82,29 @@ class TurnPerf:
         return out[-_MAX_ROWS:]
 
 
+#: The rows that END a turn's art span, and whether reaching one counts as a
+#: fallback. All three publish a real backdrop; they differ only in who drew it —
+#: the illustrator, the narrator by hand, or the server from the traced underlay
+#: after the model's budget ran out. The server's row is a terminal like the other
+#: two: leaving it out does not merely mislabel such a turn, it leaves the span
+#: open forever, so the page reports the art as still being painted and never
+#: reports how long it took — on exactly the slow turns an audit is opened for.
+_ART_TERMINALS: dict[str, str] = {
+    "tool:endless_commit_backdrop": "committed",
+    "tool:endless_commit_fallback_backdrop": "fallback",
+    "server-fallback-commit": "fallback",
+}
+
+
 def art_spans(timeline_events: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     """Per-turn art timing derived from the backdrop timeline's existing rows.
 
     Derived at read time rather than recorded twice: the timeline is already the
     authority on what the art lane did, and a second recording of the same span
     is a second place for the two to disagree. A turn's span runs from its
-    ``requested`` row to its last terminal row — a commit (illustrator or
-    fallback) — and reports which terminal it was; a turn with a request and no
-    terminal yet is in flight and reported without a duration.
+    ``requested`` row to its last terminal row — a commit by whoever drew it —
+    and reports which terminal it was; a turn with a request and no terminal yet
+    is in flight and reported without a duration.
     """
     by_turn: dict[int, dict[str, Any]] = {}
     for event in timeline_events:
@@ -104,9 +118,9 @@ def art_spans(timeline_events: list[dict[str, Any]]) -> dict[int, dict[str, Any]
         if step == "requested":
             # First request wins: a re-request mid-turn extends the same page.
             slot.setdefault("requestedAt", at)
-        elif step in ("tool:endless_commit_backdrop", "tool:endless_commit_fallback_backdrop"):
+        elif step in _ART_TERMINALS:
             slot["committedAt"] = at
-            slot["outcome"] = "fallback" if "fallback" in step else "committed"
+            slot["outcome"] = _ART_TERMINALS[step]
     spans: dict[int, dict[str, Any]] = {}
     for turn, slot in by_turn.items():
         asked = slot.get("requestedAt")

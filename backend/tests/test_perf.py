@@ -76,6 +76,27 @@ def test_art_spans_first_request_wins():
     assert art_spans(events)[3]["artMs"] == 30000
 
 
+def test_art_spans_close_on_the_servers_own_fallback_commit():
+    """The server drawing the backdrop itself ENDS the span, like either commit tool.
+
+    Its row is the one the illustrator never writes — the model's budget ran out
+    and the server published the traced underlay instead — and it is written by a
+    third code path, which is how it came to be missing from the terminal set.
+    Treating it as non-terminal does not merely mislabel the turn: the span stays
+    open, so the page reports the art as still painting and never reports how
+    long it took, on exactly the slowest turns an audit is opened to look at.
+    """
+    events = [
+        {"turn": 7, "step": "requested", "at": 400.0},
+        {"turn": 7, "step": "recover:illustrator-dispatched", "at": 402.0, "attempt": 1},
+        {"turn": 7, "step": "recover:illustrator-timeout", "at": 461.0, "attempt": 1},
+        {"turn": 7, "step": "server-fallback-commit", "at": 523.5, "underlay": "trace"},
+    ]
+    span = art_spans(events)[7]
+    assert span["outcome"] == "fallback", "the server drew it, so the turn fell back"
+    assert span["artMs"] == 123500, "and the span it took is reported, not left open"
+
+
 # ── unit: the two-writer aggregation ─────────────────────────────────────────
 
 

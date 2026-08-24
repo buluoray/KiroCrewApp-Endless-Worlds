@@ -13,6 +13,7 @@ Nothing here touches the operator's own data home: the instance gets its own
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -155,8 +156,8 @@ def _child_env(home: Path) -> dict[str, str]:
     }
 
 
-def _shared_agent_specs() -> dict[str, float]:
-    """The operator's REAL agent specs as ``{name: mtime}``, for :func:`_assert_untouched`.
+def _shared_agent_dir() -> Path:
+    """Where the operator's REAL agent specs live.
 
     Resolved here rather than by importing the host: this runs under whatever
     interpreter launched the CLI, which need not have ``kiro_crew`` importable, and
@@ -165,42 +166,100 @@ def _shared_agent_specs() -> dict[str, float]:
     exists to catch straight through. Mirrors the host's override-blind resolver:
     the ambient ``KIRO_HOME`` if the operator exported one, else ``~/.kiro``.
     """
-    shared = Path(os.environ.get("KIRO_HOME") or Path.home() / ".kiro") / "agents"
+    return Path(os.environ.get("KIRO_HOME") or Path.home() / ".kiro") / "agents"
+
+
+def _shared_agent_specs() -> dict[str, str]:
+    """The operator's real agent specs as ``{name: sha256-of-bytes}``.
+
+    Content, not mtime. Both detect a rewrite, but only content answers the
+    question this guard is actually asking — mtime also moves when a spec is
+    rewritten byte-identically, which is what the host does to every spec at once
+    when it re-registers agents, and a guard that cannot tell that from a real
+    write is a guard that cries wolf on a busy machine.
+    """
+    shared = _shared_agent_dir()
     if not shared.is_dir():
         return {}
-    out: dict[str, float] = {}
+    out: dict[str, str] = {}
     for spec in shared.glob("*.json"):
         try:
-            out[spec.name] = spec.stat().st_mtime
+            out[spec.name] = hashlib.sha256(spec.read_bytes()).hexdigest()
         except OSError:
             continue
     return out
 
 
-def _assert_untouched(before: dict[str, float]) -> None:
-    """Fail loudly if starting this instance modified the operator's agent specs.
+def _specs_pointing_at(home: Path) -> list[str]:
+    """Shared specs that now reference ``home`` — i.e. this throwaway install.
+
+    The OWNERSHIP signal the guard was missing. Every version of the bug this
+    guard exists for looks the same in the file: a spec whose command, args or
+    MCP server path leads into the ephemeral install, so the operator's own
+    session then reads this instance's fixture data. That is a property of the
+    spec's CONTENT, and it does not depend on knowing which process wrote it.
+    """
+    shared = _shared_agent_dir()
+    if not shared.is_dir():
+        return []
+    needle = str(home)
+    out: list[str] = []
+    for spec in sorted(shared.glob("*.json")):
+        try:
+            if needle in spec.read_text(encoding="utf-8", errors="replace"):
+                out.append(spec.name)
+        except OSError:
+            continue
+    return out
+
+
+def _assert_untouched(before: dict[str, str], home: Path) -> None:
+    """Fail loudly if starting this instance captured the operator's agent specs.
 
     The isolation promise at the top of this file is worth exactly what enforces
     it. Its absence cost a real debugging session: the specs were repointed at a
     throwaway install silently, the symptom surfaced later in the operator's own
     session as "this save no longer exists" (the app's MCP server resolves its data
-    dir from its own file location), and nothing connected the two. This turns that
-    into an error at the moment of the write, naming the files.
+    dir from its own file location), and nothing connected the two.
+
+    Two readings, and they are NOT the same question:
+
+    * **Does any shared spec now point into this instance?** That is the bug, it
+      is attributable, and it raises. It is also strictly stronger than comparing
+      snapshots — it still fires if the write happened before this call, or left
+      the bytes' timestamp alone.
+    * **Did any spec's content change during the install window?** On a machine
+      with a live gateway that is routinely someone ELSE's write: the host
+      re-registers every agent on its own events, and this harness shares the
+      machine with the session driving it. Reported, never fatal, and only
+      meaningful alongside the first reading — a change that does not lead here
+      is not this instance's to refuse, and treating it as fatal is what made the
+      harness unusable while the operator's own gateway was working.
 
     No "both sides empty, nothing to check" escape: an empty reading is either a
     machine with no shared specs — where an appearing one is exactly the write to
     refuse — or a broken resolver, and treating either as a pass is how the first
     version of this guard stayed silent through the bug.
     """
+    captured = _specs_pointing_at(home)
+    if captured:
+        raise InstanceError(
+            "this throwaway instance captured the operator's shared agent specs — "
+            + ", ".join(captured)
+            + f" now point into {home} — so the operator's own session would read "
+            "this instance's fixture data; isolation is broken. Restore them with "
+            "`kirocrew setup --agent-only` (plus `kirocrew app disable/enable` per "
+            "app) and do not run shots until this is fixed"
+        )
     after = _shared_agent_specs()
     changed = sorted(n for n in set(before) | set(after) if before.get(n) != after.get(n))
     if changed:
-        raise InstanceError(
-            "this throwaway instance modified the operator's shared agent specs: "
-            + ", ".join(changed)
-            + " — isolation is broken; restore them with `kirocrew setup --agent-only` "
-            "(plus `kirocrew app disable/enable` per app) and do not run shots until "
-            "this is fixed"
+        print(
+            "  note: shared agent specs changed during the install "
+            f"({len(changed)}: {', '.join(changed[:4])}"
+            f"{'…' if len(changed) > 4 else ''}) but none point at this instance — "
+            "another process on this machine re-registered them",
+            flush=True,
         )
 
 
@@ -287,7 +346,7 @@ def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instan
         json.dumps({"agent": {"apps_trusted": [APP_NAME]}}, indent=2), encoding="utf-8"
     )
     _install_into(home, interpreter)
-    _assert_untouched(shared_before)
+    _assert_untouched(shared_before, home)
 
     proc = subprocess.Popen(
         [str(interpreter), "-m", "kiro_crew", "gateway", "--test-mode", "--no-crons"],
