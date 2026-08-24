@@ -327,6 +327,8 @@ var TABLES$1 = {
 		"perf.back": "返回",
 		"perf.title": "性能 — {name}",
 		"perf.tokensNote": "费用以 token 显示：平台不提供计费信号，token 是 credit 最诚实的代理。",
+		"perf.credits": "Credits",
+		"perf.creditsNote": "Credits 按回合从主机用量台账关联；tokens 列为该回合后的上下文占用。",
 		"perf.empty": "暂无数据——新回合玩过之后这里会出现记录。",
 		"perf.turn": "回合",
 		"perf.story": "故事",
@@ -665,6 +667,8 @@ var TABLES$1 = {
 		"perf.back": "Back",
 		"perf.title": "Performance — {name}",
 		"perf.tokensNote": "Costs are shown as tokens: the platform exposes no billing signal, so tokens are the honest proxy for credits.",
+		"perf.credits": "Credits",
+		"perf.creditsNote": "Credits are joined per turn from the host's usage ledger; the tokens column is the context meter after the turn.",
 		"perf.empty": "No data yet — rows appear as new turns are played.",
 		"perf.turn": "Turn",
 		"perf.story": "Story",
@@ -2526,9 +2530,10 @@ function WorldDetailView({ worldId, onBack, onPlay, onDelete, onLanguage, initia
 * page's own maximum so a slow month is visibly slow *relative to this life*,
 * which is the comparison an audit actually makes.
 *
-* Tokens are labelled as tokens. The backend exposes no billing signal, and a
-* number dressed up as money that can never be reconciled with a bill would
-* poison the audit this page exists for.
+* Tokens are labelled as tokens. When the gateway exposes real per-turn
+* billing the table grows a credits column and the note names the currency;
+* a number dressed up as money that can never be reconciled with a bill would
+* poison the audit this page exists for, so tokens alone are never dressed up.
 */
 function Bar({ value, max }) {
 	const pct = max > 0 ? Math.max(2, Math.round(value / max * 100)) : 0;
@@ -2555,11 +2560,15 @@ function rotationLabel(reason) {
 }
 function PerfPage({ runId, name, onBack }) {
 	const [turns, setTurns] = useState(null);
+	const [creditNote, setCreditNote] = useState("");
 	const [problem, setProblem] = useState("");
 	useEffect(() => {
 		let alive = true;
 		api.perf(runId).then((out) => {
-			if (alive) setTurns(out.turns);
+			if (alive) {
+				setTurns(out.turns);
+				setCreditNote(out.creditNote);
+			}
 		}).catch((e) => {
 			if (alive) setProblem(e.message);
 		});
@@ -2570,6 +2579,7 @@ function PerfPage({ runId, name, onBack }) {
 	const rows = [...turns ?? []].reverse();
 	const maxStory = Math.max(0, ...rows.map((r) => r.storyMs ?? 0));
 	const maxArt = Math.max(0, ...rows.map((r) => r.artMs ?? 0));
+	const hasCredits = creditNote === "credits";
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-perf",
 		children: [
@@ -2587,7 +2597,7 @@ function PerfPage({ runId, name, onBack }) {
 			}),
 			/* @__PURE__ */ jsx("div", {
 				className: "ew-meta",
-				children: t("perf.tokensNote")
+				children: hasCredits ? t("perf.creditsNote") : t("perf.tokensNote")
 			}),
 			problem ? /* @__PURE__ */ jsx("div", {
 				className: "ew-modal-problem",
@@ -2604,6 +2614,7 @@ function PerfPage({ runId, name, onBack }) {
 					/* @__PURE__ */ jsx("th", { children: t("perf.story") }),
 					/* @__PURE__ */ jsx("th", { children: t("perf.art") }),
 					/* @__PURE__ */ jsx("th", { children: t("perf.declared") }),
+					hasCredits ? /* @__PURE__ */ jsx("th", { children: t("perf.credits") }) : null,
 					/* @__PURE__ */ jsx("th", { children: t("perf.tokens") }),
 					/* @__PURE__ */ jsx("th", { children: t("perf.context") }),
 					/* @__PURE__ */ jsx("th", { children: t("perf.events") })
@@ -2627,6 +2638,7 @@ function PerfPage({ runId, name, onBack }) {
 						r.outcome === "fallback" ? ` ${t("perf.fallback")}` : ""
 					] }) : r.outcome === "pending" ? t("perf.artPending") : "—" }),
 					/* @__PURE__ */ jsxs("td", { children: [r.form ? t(r.form === "patch" ? "perf.formPatch" : "perf.formFull") : "—", r.declaredBytes !== void 0 ? ` ${(r.declaredBytes / 1024).toFixed(1)}KB` : ""] }),
+					hasCredits ? /* @__PURE__ */ jsx("td", { children: r.credits !== void 0 ? r.credits.toFixed(2) : "—" }) : null,
 					/* @__PURE__ */ jsx("td", { children: r.usedTokens !== void 0 ? r.usedTokens.toLocaleString() : "—" }),
 					/* @__PURE__ */ jsx("td", { children: r.pct !== void 0 ? `${r.pct}%` : "—" }),
 					/* @__PURE__ */ jsx("td", { children: r.rotation ? rotationLabel(r.rotation) : "" })
@@ -7731,7 +7743,7 @@ function EndlessWorlds() {
 							}),
 							view === "library" && !hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-version",
-								children: t("app.version", { version: "0.9.0" })
+								children: t("app.version", { version: "0.10.0" })
 							}) : null,
 							hideBody ? /* @__PURE__ */ jsx("div", {
 								className: "ew-region-pane",

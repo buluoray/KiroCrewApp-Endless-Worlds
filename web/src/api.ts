@@ -655,6 +655,10 @@ export type PerfTurn = {
   windowTokens?: number
   model?: string
   rotation?: string
+  /** Real per-turn billing, joined from the host's usage ledger when the
+   * gateway exposes one — absent on older gateways and expired-window turns. */
+  credits?: number
+  cost?: number
 }
 
 export type PerfReport = {

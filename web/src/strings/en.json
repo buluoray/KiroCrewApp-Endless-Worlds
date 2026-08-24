@@ -138,6 +138,8 @@
   "perf.back": "Back",
   "perf.title": "Performance — {name}",
   "perf.tokensNote": "Costs are shown as tokens: the platform exposes no billing signal, so tokens are the honest proxy for credits.",
+  "perf.credits": "Credits",
+  "perf.creditsNote": "Credits are joined per turn from the host's usage ledger; the tokens column is the context meter after the turn.",
   "perf.empty": "No data yet — rows appear as new turns are played.",
   "perf.turn": "Turn",
   "perf.story": "Story",

@@ -138,6 +138,8 @@
   "perf.back": "返回",
   "perf.title": "性能 — {name}",
   "perf.tokensNote": "费用以 token 显示：平台不提供计费信号，token 是 credit 最诚实的代理。",
+  "perf.credits": "Credits",
+  "perf.creditsNote": "Credits 按回合从主机用量台账关联；tokens 列为该回合后的上下文占用。",
   "perf.empty": "暂无数据——新回合玩过之后这里会出现记录。",
   "perf.turn": "回合",
   "perf.story": "故事",
