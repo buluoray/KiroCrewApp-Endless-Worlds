@@ -20,12 +20,46 @@ interface SceneMessage {
  *  last row clipped off by a frame that was one fixed height for every spec. */
 const MIN_SCENE_H = 96
 const MAX_SCENE_H = 1400
-/** How long a frame may take to report its height before the slot calls it failed.
- *  Generous on purpose: the document is a local request and reports on load, so
- *  seconds of headroom cover a cold instance without ever making a working scene
- *  flash an error. Too short shows a false failure; too long restores the silent
- *  blank frame this exists to prevent. */
-const SCENE_RENDER_DEADLINE_MS = 6000
+/** The bounds on how long a frame may take to report its height before the slot
+ *  gives up on the route form. The deadline itself is not a constant — it is
+ *  derived per scene from how long the app's OWN fetch of that same document took
+ *  (see `renderDeadlineMs`), because that fetch is the best available measurement
+ *  of what the frame's navigation for the same bytes over the same path will cost.
+ *
+ *  A fixed constant cannot be right for both surfaces: short enough to keep the
+ *  wait bearable on a path where the route form NEVER works, it pre-empts a slow
+ *  but working navigation on a path where the fallback blank-renders. Measuring
+ *  removes the guess. The floor keeps a suspiciously fast fetch (a warm cache)
+ *  from setting a deadline the frame cannot meet; the ceiling is what the deadline
+ *  used to be, so no scene can now wait longer than it did before. */
+const SCENE_RENDER_DEADLINE_MIN_MS = 700
+const SCENE_RENDER_DEADLINE_MAX_MS = 6000
+/** How much slower than the app's own fetch the frame's navigation is allowed to
+ *  be before the slot calls it refused, plus a fixed allowance for the document's
+ *  own parse and first script run. Generous on purpose: over-waiting costs the
+ *  player a moment behind a placeholder, while under-waiting hands a WebKit device
+ *  the form that blank-renders there. */
+const SCENE_RENDER_DEADLINE_FACTOR = 5
+const SCENE_RENDER_PARSE_ALLOWANCE_MS = 300
+
+function renderDeadlineMs(fetchMs: number): number {
+  const derived = fetchMs * SCENE_RENDER_DEADLINE_FACTOR + SCENE_RENDER_PARSE_ALLOWANCE_MS
+  return Math.min(SCENE_RENDER_DEADLINE_MAX_MS, Math.max(SCENE_RENDER_DEADLINE_MIN_MS, derived))
+}
+
+/** Whether the route form has ALREADY been observed to fail in this page's life.
+ *
+ *  Module scope on purpose, and deliberately NOT persisted: an access path that
+ *  refuses the frame's own navigation refuses it for every scene on the page, so
+ *  making each scene rediscover that costs the player the full deadline again per
+ *  scene — which is what a page with a map AND a ledger actually felt like. The
+ *  first scene pays the probe; the rest start where it ended up.
+ *
+ *  It can only ever be set by an OBSERVED failure, so on a surface where the route
+ *  form works nothing sets it and every scene keeps using it. And because it dies
+ *  with the page rather than living in storage, a proxy that starts behaving is
+ *  re-probed on the next load instead of being written off for good. */
+let routeFormRefused = false
 
 /** A short, stable token that changes only when the scene's compiled HTML does, so
  *  the iframe `src` reloads on a real content change but NOT on a tab switch or
@@ -90,6 +124,11 @@ export function SceneSlot({
    *  previous height until its own report lands, so a page turn resizes once
    *  instead of collapsing to the fallback and growing back. */
   const [fitH, setFitH] = useState(0)
+  /** How long the app's own fetch of this scene's document took, in ms. The
+   *  render deadline is derived from it, so the wait for the frame scales with the
+   *  path the bytes actually travelled instead of a constant picked for one
+   *  surface. 0 until the fetch lands, which is also before any frame exists. */
+  const [fetchMs, setFetchMs] = useState(0)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -103,10 +142,12 @@ export function SceneSlot({
       return
     }
     let alive = true
+    const startedAt = performance.now()
     api
       .scene(runId, sceneId)
       .then((text) => {
         if (alive) {
+          setFetchMs(performance.now() - startedAt)
           setHtml(text)
           setFailed(false)
         }
@@ -179,6 +220,11 @@ export function SceneSlot({
   // A scene that has been asked for but whose picture has not arrived yet: say so,
   // rather than leaving a blank slot that reads as broken.
   const loading = !!sceneId && !html && !failed
+  // The document has arrived but the frame has not yet proven it rendered it: no
+  // height report, no failure. Everything the player sees in this window is the
+  // placeholder — the frame itself is held transparent, because what it paints while
+  // loading is not ours to choose.
+  const waiting = on && !fitH && !failed
   // How the frame gets its document. Two mechanisms, tried in order, because each
   // one is broken on a surface the other survives and NEITHER is broken on both:
   //
@@ -204,14 +250,15 @@ export function SceneSlot({
   // So the route is tried first and `srcdoc` is the fallback, switched to by the
   // watchdog below rather than chosen up front: the app cannot detect which surface
   // it is on, but it CAN detect that the frame did not run, and that is the same
-  // signal for either cause.
+  // signal for either cause. Once it HAS detected it, `routeFormRefused` remembers
+  // it for the rest of the page so no later scene repeats the probe.
   //
   // The boundary is identical in both forms: the sandbox attribute omits
   // allow-same-origin, so the document keeps an opaque origin and its postMessage
   // origin is the string "null" the handler above checks, and the document's own CSP
   // travels in its `<meta>` — inside the bytes, ahead of every generated byte, so it
   // governs the `srcdoc` form exactly as it governs the served one.
-  const [inline, setInline] = useState(false)
+  const [inline, setInline] = useState(routeFormRefused)
   const routeSrc =
     on && runId
       ? `${API}/runs/${encodeURIComponent(runId)}/scenes/${encodeURIComponent(sceneId)}` +
@@ -219,12 +266,12 @@ export function SceneSlot({
       : undefined
   const src = inline ? undefined : routeSrc
 
-  // A new scene, or new bytes for this one, is a fresh chance for the cheaper form:
-  // the fallback is per-document, not a latch on the component. Without this a
-  // single refused navigation would keep every later scene on `srcdoc` for the rest
-  // of the session, including on surfaces where only the route form renders.
+  // A new scene, or new bytes for this one, starts on whichever form this page has
+  // learned works — not unconditionally back on the route form. Resetting to `false`
+  // here is what made every scene on a refusing path pay the deadline again, which
+  // on a page carrying a map AND a ledger is the whole wait the player feels.
   useEffect(() => {
-    setInline(false)
+    setInline(routeFormRefused)
   }, [routeSrc])
 
   // The watchdog. The frame's document reports its own height as soon as it runs, so
@@ -232,8 +279,7 @@ export function SceneSlot({
   // page, an auth refusal, a JSON body, an embedder that refused the URL. It does not
   // matter which: the answer is the same, hand the frame the bytes we already have.
   // Only when THAT does not run either is the scene genuinely undrawable, and only
-  // then does the note replace it. Reporting the first failure to the player was the
-  // bug this replaces — the app had the document in hand the whole time.
+  // then does the note replace it.
   //
   // Keyed on the form as well as the deadline's other inputs, so the fallback gets
   // its own full deadline instead of inheriting the elapsed one. Cleared rather than
@@ -241,12 +287,18 @@ export function SceneSlot({
   // failure forever.
   useEffect(() => {
     if (!on || fitH) return undefined
-    const timer = setTimeout(
-      () => (inline ? setFailed(true) : setInline(true)),
-      SCENE_RENDER_DEADLINE_MS,
-    )
+    const timer = setTimeout(() => {
+      if (inline) {
+        setFailed(true)
+        return
+      }
+      // Remembered before the swap, so the scene mounted beside this one starts on
+      // the working form instead of waiting out its own copy of this deadline.
+      routeFormRefused = true
+      setInline(true)
+    }, renderDeadlineMs(fetchMs))
     return () => clearTimeout(timer)
-  }, [on, routeSrc, inline, fitH])
+  }, [on, routeSrc, inline, fitH, fetchMs])
 
   return (
     <div
@@ -266,6 +318,18 @@ export function SceneSlot({
         </div>
       ) : null}
 
+      {/* The placeholder the player looks at until the frame has PROVEN it ran.
+          Sized like the frame it stands in for and carrying the same frosted
+          treatment, so what fills the gap is the world's own art under this app's
+          scrim rather than whatever the frame happens to be painting.
+
+          It exists because a loading frame paints something and the app does not
+          choose what: behind an SSO proxy the refused navigation renders the
+          proxy's own white sign-in page, and a white sheet mid-story is exactly
+          what the player reported. The frame is held transparent until its height
+          report arrives (below), and this sits in the space meanwhile. */}
+      {waiting ? <div className="ew-slot-wait" aria-hidden="true" /> : null}
+
       {/* Once it exists it is never removed, never re-keyed and never moved — hidden
           with display instead. Before the first scene there is nothing to protect,
           so it is not created at all.
@@ -277,6 +341,13 @@ export function SceneSlot({
           attribute rather than the element is what keeps the frame from being
           re-created, so the fallback costs a reload and nothing else.
 
+          Transparent until its own height report arrives, and stacked under the
+          placeholder while it is: `opacity` rather than `display:none` because the
+          document must still LOAD and LAY OUT to be able to report a height at all
+          — hiding it with `display` would zero the very measurement being waited
+          for. `pointer-events` go with the opacity so a page the player cannot see
+          is not one they can click into.
+
           The sandbox is unchanged in both forms — allow-scripts allow-forms, and
           NEVER allow-same-origin, so the document stays null-origin (its postMessage
           origin is the string "null" the handler checks) and cannot reach the
@@ -285,7 +356,15 @@ export function SceneSlot({
         <iframe
           title={t('play.sceneTitle')}
           className={`ew-slot${on && !failed ? ' ew-slot-on' : ''}`}
-          style={failed ? { display: 'none' } : on && fitH ? { height: `${fitH}px` } : undefined}
+          style={
+            failed
+              ? { display: 'none' }
+              : waiting
+                ? { opacity: 0, pointerEvents: 'none' }
+                : on && fitH
+                  ? { height: `${fitH}px` }
+                  : undefined
+          }
           sandbox="allow-scripts allow-forms"
           src={src}
           srcDoc={inline && on ? html : undefined}

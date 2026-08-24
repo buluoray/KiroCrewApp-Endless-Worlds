@@ -65,33 +65,66 @@ def test_a_frame_that_never_renders_reports_itself() -> None:
     """Without this the slot sits blank at the fallback height and says nothing.
 
     The watchdog is what makes the route's unobservable response observable: it turns
-    "no height reported" into the failure note the player already has a string for.
+    "no height reported" into a fallback and, failing that, the note the player
+    already has a string for.
     """
     src = module("scene.tsx")
-    assert "SCENE_RENDER_DEADLINE_MS" in src, (
-        "no render deadline: a frame whose document never ran leaves a silent blank "
-        "slot, which is the failure mode that cost two rounds of guessing"
+    # The deadline is DERIVED, not declared: a constant cannot be right for both a
+    # path where the route form never works (short is kind) and one where the
+    # fallback blank-renders (short pre-empts a working navigation). It scales off
+    # the app's own fetch of the same document, which is the one measurement of that
+    # path the app already has.
+    assert "renderDeadlineMs(fetchMs)" in src, (
+        "the deadline must be derived from the measured fetch, not a fixed constant"
     )
-    deadline = re.search(r"SCENE_RENDER_DEADLINE_MS\s*=\s*(\d+)", src)
-    assert deadline, "the render deadline is not a declared constant"
-    ms = int(deadline.group(1))
-    assert 2000 <= ms <= 15000, (
-        f"the render deadline is {ms}ms; too short flashes a false failure on a cold "
-        "instance, too long restores the silent blank frame it exists to prevent"
+    assert re.search(r"setFetchMs\(performance\.now\(\) - startedAt\)", src), (
+        "nothing measures the fetch the deadline is derived from"
+    )
+    bounds = {
+        name: int(m.group(1))
+        for name in ("SCENE_RENDER_DEADLINE_MIN_MS", "SCENE_RENDER_DEADLINE_MAX_MS")
+        if (m := re.search(rf"{name}\s*=\s*(\d+)", src))
+    }
+    assert len(bounds) == 2, "the derived deadline is not bounded at both ends"
+    lo, hi = bounds["SCENE_RENDER_DEADLINE_MIN_MS"], bounds["SCENE_RENDER_DEADLINE_MAX_MS"]
+    assert 300 <= lo < hi <= 6000, (
+        f"the deadline band is {lo}..{hi}ms; too low a floor pre-empts a working "
+        "navigation on the surface where the fallback blank-renders, and too high a "
+        "ceiling restores the silent blank frame the watchdog exists to prevent"
     )
     # The timer must actually be able to mark the scene failed, and must be cleared
     # once a height arrives — a latched failure would stick after a slow first paint.
-    # It reaches that verdict in two steps now: the first missed deadline swaps the
-    # frame onto the bytes the app already holds, and only the second is reported. The
-    # note must stay reachable, which is what this pins — an escalation that could
-    # never arrive at it would restore the silent blank slot by another route.
-    watchdog = re.search(
-        r"setTimeout\(\s*\(\) => \(inline \? setFailed\(true\) : setInline\(true\)\),"
-        r"\s*SCENE_RENDER_DEADLINE_MS,?\s*\)",
-        src,
-    )
-    assert watchdog, "the deadline does not lead to a fallback and then setFailed(true)"
+    assert "setFailed(true)" in src, "the deadline does not lead to setFailed(true)"
     assert "clearTimeout" in src, "the watchdog is never cleared, so it cannot be cancelled"
+
+
+def test_the_frame_never_paints_a_document_it_has_not_vouched_for() -> None:
+    """What a loading frame paints is not the app's choice, so it paints nothing.
+
+    Behind an SSO proxy the refused navigation renders the proxy's own white sign-in
+    page, mid-story, for as long as the probe runs — the report was "白" before the
+    scene appeared. The frame is therefore transparent until its height report proves
+    it ran OUR document, with a placeholder standing in its space.
+
+    ``opacity``, never ``display``: the document has to load and lay out to report a
+    height at all, and ``display:none`` would zero the very measurement being waited
+    for — turning the wait into a permanent one.
+    """
+    src = module("scene.tsx")
+    assert re.search(r"const waiting = on && !fitH && !failed", src), (
+        "nothing defines the window in which the frame has not yet vouched for itself"
+    )
+    assert re.search(r"waiting\s*\n?\s*\?\s*\{ opacity: 0, pointerEvents: 'none' \}", src), (
+        "the frame must be transparent, and inert, until it reports a height"
+    )
+    assert re.search(r"\{waiting \? <div className=\"ew-slot-wait\"", src), (
+        "nothing stands in the frame's place while it is invisible"
+    )
+    # The guard above is only sound while the hidden frame still lays out.
+    assert not re.search(r"waiting[^\n]*display: 'none'", src), (
+        "hiding the waiting frame with display would zero the height report it is "
+        "waiting for, and the wait would never end"
+    )
 
 
 def test_the_sandbox_and_the_origin_check_are_unchanged() -> None:
