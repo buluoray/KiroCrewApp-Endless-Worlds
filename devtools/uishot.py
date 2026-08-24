@@ -485,6 +485,15 @@ def cmd_compare(args: argparse.Namespace) -> int:
     before = (args.out or OUT) / "before"
     wanted = args.names or [s.key for s in shotdefs.SHOTS]
 
+    # Sync first, exactly as `shot` and `review` do. Without it the "after" side
+    # renders whatever bundle happens to be installed — and the previous run of THIS
+    # command installed the baseline's bundle and then restored a copy of that, so
+    # before and after came out byte-identical and the change read as inert. That is
+    # the failure this harness is least able to afford here: `compare` is the command
+    # someone runs specifically to decide whether an edit did anything.
+    for note in _sync_app_code(got):
+        print(note)
+
     print(f"after  — working tree ({len(wanted)} shot(s))")
     for name in wanted:
         _print_report(_run_one(got, shotdefs.BY_KEY[name], *shotdefs.DESKTOP, "dark", after))

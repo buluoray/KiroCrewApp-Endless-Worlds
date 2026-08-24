@@ -195,8 +195,21 @@ report.measured = await page.evaluate((selectors) => {
     // The first match is not necessarily the one on screen: this app renders a desktop
     // and a phone instance of the same slot and hides one by width, so measuring
     // `querySelector` alone silently reports a hidden duplicate's zero box.
+    //
+    // "On screen" means it renders INK. A layout box is not enough: an element hidden
+    // with `visibility` keeps its box (that is the whole point of choosing it over
+    // `display` — see the sheet rule in styles.css), so a rects-only test reports it as
+    // shown and an `absent` expectation about it can never fail. Both mechanisms have
+    // to read the same way here or the gate silently exempts one of them.
+    const painted = (e) => {
+      if (e.getClientRects().length === 0) return false
+      for (let n = e; n instanceof Element; n = n.parentElement) {
+        if (getComputedStyle(n).visibility === 'hidden') return false
+      }
+      return true
+    }
     const all = [...document.querySelectorAll(sel)]
-    const el = all.find((e) => e.getClientRects().length > 0) || all[0] || null
+    const el = all.find(painted) || all[0] || null
     out[sel] = el
       ? (({ width, height, top, left, right }) => ({
           w: Math.round(width),
@@ -204,9 +217,7 @@ report.measured = await page.evaluate((selectors) => {
           top: Math.round(top),
           left: Math.round(left),
           right: Math.round(right),
-          // Presence means VISIBLE, not merely in the DOM: a display:none slot is
-          // still queryable, and "it stepped aside" has to mean it stopped rendering.
-          shown: el.getClientRects().length > 0,
+          shown: painted(el),
         }))(el.getBoundingClientRect())
       : null
   }
