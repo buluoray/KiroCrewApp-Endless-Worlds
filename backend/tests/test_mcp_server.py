@@ -241,10 +241,13 @@ def test_a_malformed_turn_applies_nothing(app):
     store = srv._store()
     run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
 
+    # `state` is no longer schema-required (statePatch is the other legal form),
+    # so a turn with neither reaches the handler and is refused THERE, with a
+    # reason the narrator can act on. The invariant this test exists for is
+    # unchanged: a refused call applies nothing.
     out = call("endless_advance_turn", runId=run, turn=2, prose="…")  # state missing
-    assert out["ok"] is False
-    assert out["field"] == "arguments.state"
-    assert out["applied"] is False
+    assert out["committed"] is False
+    assert out["reason"] == "state-required"
     assert store.read_state(run)["turn"] == 1, "state moved on a refused call"
 
 

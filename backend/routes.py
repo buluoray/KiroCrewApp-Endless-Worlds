@@ -1300,6 +1300,12 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 
     _cfg = read_settings(ctx.data_dir)
+    # Did the LAST committed turn open a chapter? That is the narratively clean
+    # point for a planned conversation rotation (turn.py decides; this is only the
+    # observation). Compared against the rollback copy, same as the play view's
+    # "unlocked" toast; empty prev (a life's first months) never reads as crossed.
+    _prev = store.read_prev(run_id)
+    chapter_crossed = bool(_prev) and bool(opened_since(pack.template, _prev, run_state))
     outcome = await advance_turn(
         state_obj=state_obj,
         store=store,
@@ -1313,6 +1319,7 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         project=str(ctx.data_dir / "runs" / run_id),
         model=_cfg["model"],
         reasoning_effort=_cfg["reasoningEffort"],
+        chapter_crossed=chapter_crossed,
     )
 
     # The prose may be committed, but requested art is the other half of this page.
