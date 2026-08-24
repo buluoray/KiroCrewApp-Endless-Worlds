@@ -32,6 +32,7 @@ from typing import Any
 import narrator
 from content import Content
 from narrator import ensure_narrator_slot_ex, release_narrator_slot
+from perf import TurnPerf
 from store import RunStore
 
 #: R4.2 — how long a waited turn runs before the request returns un-advanced and
@@ -53,19 +54,23 @@ TURN_DEADLINE_SECS = 300.0
 ROTATION_MAX_TURNS = 24
 
 
-def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed: bool) -> bool:
-    """One planned conversation rotation per boundary, never for a new life.
+def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed: bool) -> str:
+    """The rotation reason ("" = none): one planned rotation per boundary.
 
     ``rotation_turn`` records where the conversation last started fresh, so a
     boundary triggers exactly one reset however many times the same turn is
     requested — the second request sees the marker already at ``baseline``.
+    Returns the reason as a string (truthiness unchanged for callers) so the
+    perf ledger can say WHY a conversation restarted.
     """
     if baseline <= 0:
-        return False
+        return ""
     done = store.rotation_turn(run_id)
     if done >= baseline:
-        return False
-    return chapter_crossed or (baseline - done) >= ROTATION_MAX_TURNS
+        return ""
+    if chapter_crossed:
+        return "chapter"
+    return "budget" if (baseline - done) >= ROTATION_MAX_TURNS else ""
 
 
 #: One fresh conversation per stuck turn. A SECOND zero-contact expiry on a
@@ -272,6 +277,33 @@ def make_dispatcher(run_chat: Callable[..., Any], background: bool = True) -> Ca
 # ── the loop ────────────────────────────────────────────────────────────
 
 
+def _note_turn_context(
+    state_obj: Any, store: RunStore, run_id: str, turn: int, slot_key: str
+) -> None:
+    """Record the narrator slot's context meter beside the committed turn.
+
+    Read from core's per-slot snapshot (the same one the dashboard's context bar
+    restores from), guarded end to end: a runtime without the method (unit-test
+    fakes) or a slot with no reading yet simply records nothing. Advisory rows —
+    the perf page joins them onto the commit row by turn.
+    """
+    try:
+        reader = getattr(state_obj, "context_snapshot_for", None)
+        snap = reader(slot_key) if callable(reader) else None
+        if not isinstance(snap, dict):
+            return
+        TurnPerf(store.data_dir, run_id).mark(
+            turn,
+            "context",
+            pct=snap.get("pct"),
+            usedTokens=snap.get("used_tokens"),
+            windowTokens=snap.get("window_tokens"),
+            model=snap.get("model"),
+        )
+    except Exception:  # noqa: BLE001 — a meter must never fail the turn it measures
+        pass
+
+
 async def advance_turn(
     *,
     state_obj: Any,
@@ -318,6 +350,7 @@ async def advance_turn(
         narrator.release_stale_narrator_slot(state_obj, run_id)
         await narrator.purge_narrator_session(state_obj, run_id)
         store.mark_rotation(run_id, turn=baseline)
+        TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason="install")
     elif narrator.consume_closed_slot(state_obj, run_id):
         # The player closed this run's tab since the last turn. Core deliberately
         # preserves a closed slot's resume pointer (a reopened tab continues), but
@@ -326,7 +359,8 @@ async def advance_turn(
         # life's state and chronicle continue exactly where they were.
         await narrator.reset_narrator_conversation(state_obj, store, run_id)
         store.mark_rotation(run_id, turn=baseline)
-    elif _should_rotate(store, run_id, baseline, chapter_crossed):
+        TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason="closed")
+    elif rotate_reason := _should_rotate(store, run_id, baseline, chapter_crossed):
         # Planned rotation: the conversation restarts at a narratively clean point
         # (a chapter just opened, or the turn budget below ran out) instead of
         # growing until the harness compacts it at an arbitrary mid-scene point and
@@ -337,6 +371,7 @@ async def advance_turn(
         # turn (double-tap, refresh) never discards the writer's session.
         await narrator.reset_narrator_conversation(state_obj, store, run_id)
         store.mark_rotation(run_id, turn=baseline)
+        TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason=rotate_reason)
 
     slot, fresh_slot = ensure_narrator_slot_ex(
         state_obj, run_id, project=project, model=model, reasoning_effort=reasoning_effort
@@ -431,6 +466,7 @@ async def advance_turn(
                 reason="generating",
             )
         store.clear_pending(run_id)
+        _note_turn_context(state_obj, store, run_id, wanted, slot_key)
         return TurnOutcome(advanced=True, turn=wanted, prose=prose)
 
     prompt = prompt_override or compose_prompt(
@@ -466,6 +502,7 @@ async def advance_turn(
     prose = await _await_commit(store, run_id, wanted, deadline_secs)
     if prose is not None:
         store.clear_pending(run_id)
+        _note_turn_context(state_obj, store, run_id, wanted, slot_key)
         return TurnOutcome(advanced=True, turn=wanted, prose=prose)
 
     # Nothing is rolled back, and the in-flight record is deliberately LEFT. The

@@ -1706,3 +1706,14 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   .ew-opt, .ew-rail-x, .ew-jump { min-height: 44px; }
   .ew-pager-arw { width: 44px; height: 44px; }
 }
+
+/* ── performance page ── */
+.ew-perf { padding: 4px 0 24px; }
+.ew-perf-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.ew-perf-title { margin: 0; font-size: 1.1rem; }
+.ew-perf-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85rem; }
+.ew-perf-table th { text-align: left; font-weight: 600; opacity: 0.7; padding: 4px 8px; }
+.ew-perf-table td { padding: 4px 8px; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); white-space: nowrap; }
+.ew-perfbar { display: inline-block; width: 56px; height: 6px; margin-left: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, transparent); vertical-align: middle; overflow: hidden; }
+.ew-perfbar-fill { display: block; height: 100%; border-radius: 3px; background: color-mix(in srgb, currentColor 45%, transparent); }
+@media (max-width: 700px) { .ew-perf-table { font-size: 0.78rem; } .ew-perfbar { width: 36px; } }
