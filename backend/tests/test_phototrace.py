@@ -942,6 +942,209 @@ def test_a_transient_fetch_failure_is_retried_before_settling_for_base(data, mon
     assert calls["img"] >= 2, "the fetch pass must have been retried after the blip"
 
 
+def _commons_only_fetch(photo: bytes, img_url: str, counter: dict[str, int]):
+    """A fake fetcher where Openverse holds nothing and Commons holds one CC0 photo."""
+
+    def fetch(url: str) -> bytes:
+        if "api.php" in url:
+            return json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            str(i): {
+                                "title": f"File:Forge{i}.jpg",
+                                "imageinfo": [
+                                    {
+                                        "mime": "image/jpeg",
+                                        "thumburl": f"{img_url}?{i}",
+                                        "descriptionurl": (
+                                            f"https://commons.wikimedia.org/wiki/File:Forge{i}.jpg"
+                                        ),
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            }
+                            for i in (1, 2, 3)
+                        }
+                    }
+                }
+            ).encode("utf-8")
+        if url.startswith(img_url):
+            counter["img"] += 1
+            return photo
+        return json.dumps({"results": []}).encode("utf-8")
+
+    return fetch
+
+
+def test_a_missing_tracer_is_recorded_as_its_own_reason_not_a_fetch_failure(data, monkeypatch):
+    """`fetch-failed` means a blip cost the page its photo, and the illustrator answers
+    that by committing the tonal base as a finished backdrop. A host that cannot trace
+    at all fails every candidate identically and forever, so wearing that reason ships
+    flat pages while every receipt blames the network — the failure this separates."""
+    counter = {"img": 0}
+    monkeypatch.setattr(
+        phototrace,
+        "_FETCH",
+        _commons_only_fetch(
+            _photo_bytes(bright=True), "https://upload.wikimedia.org/f.jpg", counter
+        ),
+    )
+
+    def no_tracer(*a, **k):
+        raise phototrace.TracerUnavailable("the reference tracer is not installed (probe)")
+
+    monkeypatch.setattr(srv, "build_underlay_fragment_bounded", no_tracer)
+    run_id = "c" * 32
+    _request_backdrop(data, run_id, 1)
+
+    out = _call("endless_trace_reference", runId=run_id, turn=1, query="forge")
+    assert out["underlay"] == "base", "with nothing traceable the lane must settle for a base"
+
+    scene = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">'
+        '<rect width="800" height="600" fill="#111111"/>'
+        '<g id="etr-underlay"/></svg>'
+    )
+    draft = _call("endless_submit_backdrop_draft", runId=run_id, turn=1, markup=scene, mobile=scene)
+    _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=scene,
+        mobile=scene,
+    )
+
+    fallback = BackdropStore(data, run_id).current()["trace"]["fallback"]
+    assert fallback["reason"] == "tracer-unavailable", (
+        "a host that cannot trace must not be recorded as a transient fetch failure"
+    )
+    assert "not installed" in fallback.get("detail", ""), (
+        "the receipt must carry WHY the host could not trace, or the next audit has to "
+        "re-run the whole lane by hand to find out"
+    )
+
+
+def test_a_missing_tracer_skips_the_fetch_retry_and_the_other_candidates(data, monkeypatch):
+    """Retrying is for a failure that might not happen again. An absent tracer fails
+    every candidate and every pass the same way, so each extra attempt is pure latency
+    on a page the player is already waiting for."""
+    counter = {"img": 0}
+    monkeypatch.setattr(
+        phototrace,
+        "_FETCH",
+        _commons_only_fetch(
+            _photo_bytes(bright=True), "https://upload.wikimedia.org/f.jpg", counter
+        ),
+    )
+    slept: list[float] = []
+    monkeypatch.setattr(srv.time, "sleep", lambda s, *a, **k: slept.append(s))
+    traces = {"n": 0}
+
+    def no_tracer(*a, **k):
+        traces["n"] += 1
+        raise phototrace.TracerUnavailable("the reference tracer is not installed (probe)")
+
+    monkeypatch.setattr(srv, "build_underlay_fragment_bounded", no_tracer)
+    run_id = "d" * 32
+    _request_backdrop(data, run_id, 1)
+
+    out = _call("endless_trace_reference", runId=run_id, turn=1, query="forge")
+    assert out["underlay"] == "base"
+    assert traces["n"] == 1, (
+        "the first TracerUnavailable must end the pass — not one more candidate, not "
+        f"one more attempt (traced {traces['n']} times)"
+    )
+    assert srv._FETCH_RETRY_BACKOFF_SECS not in slept, (
+        "an absent tracer must not spend the fetch backoff"
+    )
+
+
+def test_a_missing_tracer_asks_for_a_hand_drawn_scene_not_a_finished_base():
+    """The instruction is what actually reaches the page. A terminal miss — no photo
+    exists, or none can be traced here — leaves the same page to draw, so both must ask
+    for a real scene over the tonal ground rather than for the bare ground."""
+    guidance = srv._base_underlay_next({"reason": "tracer-unavailable"})
+    assert "hand-drawn scene" in guidance and "full review pass" in guidance, (
+        "a host that cannot trace must still be asked for a real drawn scene"
+    )
+    assert "the base alone is a finished backdrop" not in guidance, (
+        "this is the sentence that shipped flat tonal bars as a finished page"
+    )
+    assert guidance != srv._base_underlay_next({"reason": "no-candidates"}), (
+        "the two terminal reasons share the degradation but not the diagnosis: a "
+        "reader must be able to tell 'no photo exists' from 'this host cannot trace'"
+    )
+
+
+def test_the_worker_runs_under_the_resolved_interpreter_and_names_a_missing_tracer(monkeypatch):
+    """The MCP server imports neither vtracer nor Pillow, so the interpreter the host
+    spawns it with routinely cannot trace even when the wheels are installed somewhere
+    on the machine. The worker therefore runs under a probed interpreter, and a worker
+    that dies on the import is a host fault — not this photograph's fault."""
+    monkeypatch.setattr(phototrace, "_TRACE_INTERPRETER", "/custom/python")
+    seen: list[list[str]] = []
+
+    class Result:
+        returncode = 1
+        stderr = b"ModuleNotFoundError: No module named 'vtracer'"
+
+    def fake_run(argv, **kwargs):
+        seen.append(list(argv))
+        return Result()
+
+    monkeypatch.setattr(phototrace.subprocess, "run", fake_run)
+    with pytest.raises(phototrace.TracerUnavailable):
+        build_underlay_fragment_bounded(_photo_bytes(bright=True), view=(800, 600))
+
+    assert seen and seen[0][0] == "/custom/python", (
+        f"the worker must be spawned with the resolved interpreter, not {seen[0][0]!r}"
+    )
+    assert phototrace._TRACE_INTERPRETER is None, (
+        "a worker that cannot import the tracer proves the memo is stale, so the next "
+        "page must re-probe instead of being pinned to a dead interpreter"
+    )
+
+
+def test_an_ordinary_worker_failure_stays_an_ordinary_failure(monkeypatch):
+    """Only a missing dependency is terminal. A photo that traces to nothing must still
+    fall through to the NEXT candidate, so one bad reference cannot mask the lane."""
+    monkeypatch.setattr(phototrace, "_TRACE_INTERPRETER", sys.executable)
+
+    class Result:
+        returncode = 1
+        stderr = b"BackdropError: the reference traced to nothing usable"
+
+    monkeypatch.setattr(phototrace.subprocess, "run", lambda argv, **k: Result())
+    with pytest.raises(BackdropError) as caught:
+        build_underlay_fragment_bounded(_photo_bytes(bright=True), view=(800, 600))
+    assert not isinstance(caught.value, phototrace.TracerUnavailable), (
+        "a per-photo trace failure must not be reported as a host without a tracer"
+    )
+
+
+def test_no_traceable_interpreter_reports_it_instead_of_guessing(monkeypatch):
+    """When nothing on the host can trace, the lane must say so rather than spawn a
+    worker it already knows will die with an unreadable import error."""
+    monkeypatch.setattr(phototrace, "_TRACE_INTERPRETER", None)
+    monkeypatch.setattr(phototrace, "_candidate_trace_interpreters", lambda: ["/a/py", "/b/py"])
+    monkeypatch.setattr(phototrace, "_interpreter_can_trace", lambda python: False)
+
+    def refuse(*a, **k):
+        raise AssertionError("no worker may be spawned when no interpreter can trace")
+
+    monkeypatch.setattr(phototrace.subprocess, "run", refuse)
+    assert phototrace.resolve_trace_interpreter() is None
+    with pytest.raises(phototrace.TracerUnavailable):
+        build_underlay_fragment_bounded(_photo_bytes(bright=True), view=(800, 600))
+
+    monkeypatch.setattr(phototrace, "_interpreter_can_trace", lambda python: python == "/b/py")
+    assert phototrace.resolve_trace_interpreter() == "/b/py", (
+        "the first interpreter that can trace wins, even when it is not this process's"
+    )
+
+
 @pytest.mark.parametrize(
     ("source", "expected_underlay"),
     [

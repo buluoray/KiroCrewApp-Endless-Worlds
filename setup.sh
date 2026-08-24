@@ -29,20 +29,56 @@ run_priv() {
 log "installing optional art dependencies (best-effort; failures are ignored)"
 
 # 1. Python packages — the cross-platform path. CairoSVG rasterizes draft
-#    previews; vtracer + pillow trace SCENE reference photos. Install into the
-#    active environment (the app's own python), falling back to a --user install
-#    if that environment is not writable.
-PY="$(command -v python3 || command -v python || true)"
-if [ -n "$PY" ]; then
+#    previews; vtracer + pillow trace SCENE reference photos.
+#
+#    Every candidate interpreter is attempted, not just the first one found, and
+#    each is VERIFIED by importing the tracer afterwards. One `command -v python3`
+#    is not enough: the interpreter that runs the MCP server is the one the HOST
+#    spawns it with (a gateway virtualenv, say), while PATH here resolves to
+#    whatever the installer happened to have — routinely a different interpreter.
+#    Installing into only that one leaves a host that searches and fetches
+#    references perfectly and cannot trace a single pixel of them, which reads as a
+#    network fault and is not one. The runtime probes the same candidate set, so any
+#    one of them landing is enough.
+#
+#    The check is the backend's OWN probe entry point rather than a second copy of
+#    the import list here, so install-time and run-time can never disagree about
+#    what "can trace" means.
+SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"
+verify_tracer() {
+  [ -f "$SELF_DIR/backend/phototrace.py" ] || return 1
+  "$1" "$SELF_DIR/backend/phototrace.py" --probe-tracer >/dev/null 2>&1
+}
+
+ART_PKGS="cairosvg vtracer pillow"
+TRACER_OK=0
+for PY in "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}" "$(command -v python3)" "$(command -v python)"; do
+  [ -n "$PY" ] || continue
+  [ -x "$PY" ] || continue
+  case " $SEEN_PY " in *" $PY "*) continue ;; esac
+  SEEN_PY="$SEEN_PY $PY"
   log "python: $PY"
-  if "$PY" -m pip install --disable-pip-version-check --quiet cairosvg vtracer pillow >/dev/null 2>&1 \
-     || "$PY" -m pip install --user --disable-pip-version-check --quiet cairosvg vtracer pillow >/dev/null 2>&1; then
-    log "pip: cairosvg + vtracer + pillow ready (installed or already present)"
-  else
-    log "pip step skipped/failed — the app still runs, art just degrades gracefully"
+  if verify_tracer "$PY"; then
+    log "  tracer already present"
+    TRACER_OK=1
+    continue
   fi
-else
+  # A --user install is refused inside a virtualenv, so it is only a fallback for
+  # a non-writable system interpreter.
+  "$PY" -m pip install --disable-pip-version-check --quiet $ART_PKGS >/dev/null 2>&1 \
+    || "$PY" -m pip install --user --disable-pip-version-check --quiet $ART_PKGS >/dev/null 2>&1
+  if verify_tracer "$PY"; then
+    log "  cairosvg + vtracer + pillow ready"
+    TRACER_OK=1
+  else
+    log "  pip step skipped/failed for this interpreter"
+  fi
+done
+if [ -z "$SEEN_PY" ]; then
   log "no python found; skipping pip dependencies"
+elif [ "$TRACER_OK" = "0" ]; then
+  log "no interpreter can import the tracer — SCENE pages will be hand-drawn instead"
+  log "  to enable photo tracing later: <that python> -m pip install vtracer pillow"
 fi
 
 # 2. System librsvg — the backend can reach it directly through ctypes with no
