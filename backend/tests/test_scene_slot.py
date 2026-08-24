@@ -231,17 +231,50 @@ def test_a_frame_that_never_ran_falls_back_before_it_reports_failure(slot: str) 
     about. Reporting the first one was the bug this replaces: behind an SSO tunnel the
     route form NEVER runs, so the note was permanent while the document sat in hand.
     """
-    assert "inline ? setFailed(true) : setInline(true)" in slot, (
+    assert re.search(r"if \(inline\) \{\s*\n\s*setFailed\(true\)\s*\n\s*return\s*\n\s*\}", slot), (
+        "a second missed deadline must report failure"
+    )
+    assert re.search(r"routeFormRefused = true\s*\n\s*setInline\(true\)", slot), (
         "the first missed deadline must fall back, not fail"
     )
 
 
-def test_the_fallback_is_per_document_and_not_a_session_latch(slot: str) -> None:
-    """Reset on new bytes, so one refused navigation cannot pin every later scene to
-    ``srcdoc`` — including on the surfaces where only the route form renders."""
-    assert re.search(r"setInline\(false\)\s*\n\s*\}, \[routeSrc\]\)", slot), (
-        "the fallback must reset when the document changes"
+def test_one_refusal_spares_every_later_scene_the_same_wait(slot: str) -> None:
+    """A refusing access path refuses EVERY scene, so only the first should pay.
+
+    The route form's viability is a property of the path, not of the document: behind
+    an SSO proxy the frame's own navigation is refused for every scene on the page.
+    Rediscovering that per scene made a page carrying a map AND a ledger wait out the
+    deadline twice, which is the wait the player actually felt. So the first observed
+    refusal is remembered and later frames start where it ended up.
+
+    This replaces the earlier rule that reset unconditionally to the route form. That
+    reset existed to stop one refusal pinning later scenes on a surface where only the
+    route form renders — a real hazard, and the reason the flag may only ever be set
+    by an OBSERVED failure. Where the route form works nothing observes a failure, so
+    nothing latches and every scene keeps using it.
+    """
+    assert re.search(r"^let routeFormRefused = false$", slot, re.M), (
+        "the memo must start unset, so the route form is what the page tries first"
     )
+    assert re.search(r"useState\(routeFormRefused\)", slot), (
+        "a newly mounted frame must start on the form this page already learned works"
+    )
+    assert re.search(r"setInline\(routeFormRefused\)\s*\n\s*\}, \[routeSrc\]\)", slot), (
+        "a new document must reset to the learned form, not unconditionally to route"
+    )
+
+
+def test_the_refusal_memo_dies_with_the_page(slot: str) -> None:
+    """Module scope, never storage.
+
+    A proxy that starts behaving again has to be re-probed, and the cheapest correct
+    expiry is the page's own lifetime. Persisting the flag (localStorage and friends)
+    would write the route form off across reloads on a path that has since been
+    fixed, and there is no event that would ever clear it.
+    """
+    for store in ("localStorage", "sessionStorage", "document.cookie", "indexedDB"):
+        assert store not in slot, f"the refusal memo must not outlive the page via {store}"
 
 
 # -- what the slot accepts back -----------------------------------------
