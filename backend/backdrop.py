@@ -111,8 +111,12 @@ def _clean_trace_audit(raw: Any) -> dict[str, Any] | None:
             # no-candidates: every source answered and holds nothing usable for this
             # subject. search-failed: a source did not answer — ask again, and this
             # says nothing about the subject. fetch-failed: candidates existed and
-            # none became an underlay. cached-miss attempts name a negative that was
-            # already known, so a reader can tell a skipped request from a spent one.
+            # none became an underlay. tracer-unavailable: candidates existed and the
+            # HOST cannot trace — a machine fault no query can fix, so it carries a
+            # `detail` naming what is missing; without it an audit has to re-run the
+            # whole lane by hand to learn why a page shipped flat. cached-miss attempts
+            # name a negative that was already known, so a reader can tell a skipped
+            # request from a spent one.
             "reason": str(fallback.get("reason") or "")[:40],
             "attempts": [
                 {
@@ -124,6 +128,9 @@ def _clean_trace_audit(raw: Any) -> dict[str, Any] | None:
                 if isinstance(a, dict)
             ],
         }
+        detail = str(fallback.get("detail") or "")[:200]
+        if detail:
+            clean["fallback"]["detail"] = detail
     matched = raw.get("matched")
     if underlay == "reference" and isinstance(matched, str) and matched.strip():
         clean["matched"] = matched[:200]

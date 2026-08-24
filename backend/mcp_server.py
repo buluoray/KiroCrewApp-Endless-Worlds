@@ -60,6 +60,14 @@ def _die(message: str) -> None:
     sys.exit(1)
 
 
+def _warn(message: str) -> None:
+    """Report a degradation the operator has to fix, without failing the tool.
+
+    stderr, not stdout: stdout is the protocol channel kiro-cli is parsing.
+    """
+    print(f"[{SERVER_NAME}] {message}", file=sys.stderr)
+
+
 try:  # the gateway's own stdio loop — see the module docstring in mcp_shared
     from kiro_crew.mcp_shared import run_mcp_stdio_loop
 except Exception as exc:  # noqa: BLE001
@@ -97,6 +105,7 @@ from phototrace import (  # noqa: E402
     TRACE_CANDIDATE_COUNT,
     CandidateStore,
     MissCache,
+    TracerUnavailable,
     TraceStore,
     build_underlay_fragment_bounded,
     compose_with_underlay,
@@ -1957,13 +1966,27 @@ def _apply_underlay(run_id: str, turn: int, svg: str, variant: str) -> str:
     return compose_with_underlay(svg, None)
 
 
+#: The degradation shared by every TERMINAL scene miss — no photograph exists, or none
+#: can be traced here. Both leave the same page to draw, so they must not drift apart:
+#: the base is a tonal ground and the Illustrator still owes a real scene above it.
+_HAND_DRAWN_GROUND = (
+    "The procedural tonal base is NOT the finished image; it is a tonal GROUND. Put "
+    'one <g id="etr-underlay"/> in each SVG for that ground, then author a real '
+    "hand-drawn scene above it — architecture, light, and evidence composed with the "
+    "same care as any scene, never a few bars over bare tone. Paint it in a painterly "
+    "style (watercolor suits most scenes; read that style's skill file if your task "
+    "names one) and take it through the full review pass before committing. Do not "
+    "settle for the bare base."
+)
+
+
 def _base_underlay_next(search: dict[str, Any]) -> str:
     """What to tell the Illustrator when the lane produced a procedural base.
 
     A base underlay used to be reported as a finished outcome — "here is a tonal
     base, compose over it" — which left no way back even when the search had failed
-    for a reason the Illustrator could fix in one call. The three reasons need three
-    different answers, so this branches on the audit rather than saying one thing:
+    for a reason the Illustrator could fix in one call. The reasons need different
+    answers, so this branches on the audit rather than saying one thing:
 
     - ``no-candidates``: the search is SPENT — the forced single-keyword retry (see
       _trace_reference) already ran and still found nothing, so no free-license
@@ -1971,6 +1994,11 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
       image: the Illustrator authors a real hand-drawn scene over it, with the full
       review pass. This is the intended degradation; committing the bare base is only
       the timeout safety net (commit_underlay_only), never the instruction here.
+    - ``tracer-unavailable``: references WERE found and this host cannot trace any of
+      them. Terminal for the same reason and answered the same way — a hand-drawn
+      scene — because no query and no later turn can install a missing dependency. It
+      gets its own lead sentence so nobody reading the page hunts for a photograph
+      that was there all along.
     - ``search-failed``: the archive did not answer. Retrying the SAME query is the
       right move here, and rewording would be superstition.
     - ``fetch-failed`` / no query: nothing to retry — compose over the base.
@@ -1985,14 +2013,13 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
         return (
             "no free-license photograph exists for this page — the search is spent "
             "(only the narrow CC0/public-domain slice is searched, so many subjects "
-            "have no usable photo even when the open web does). The procedural tonal "
-            "base is NOT the finished image; it is a tonal GROUND. Put one "
-            '<g id="etr-underlay"/> in each SVG for that ground, then author a real '
-            "hand-drawn scene above it — architecture, light, and evidence composed "
-            "with the same care as any scene, never a few bars over bare tone. Paint "
-            "it in a painterly style (watercolor suits most scenes; read that style's "
-            "skill file if your task names one) and take it through the full review "
-            "pass before committing. Do not settle for the bare base."
+            "have no usable photo even when the open web does). " + _HAND_DRAWN_GROUND
+        )
+    if reason == "tracer-unavailable":
+        return (
+            "references were found for this page but this host cannot trace a "
+            "photograph at all — the tracer is not installed, so no query and no "
+            "retry can produce an underlay here. " + _HAND_DRAWN_GROUND
         )
     if reason == "search-failed":
         return (
@@ -2066,6 +2093,7 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
         # number of times with a short backoff — the search is not repeated — before
         # settling for the base. The happy path breaks on the first success and the
         # backoff sleep never runs.
+        tracer_missing = ""
         for fetch_attempt in range(_FETCH_RETRY_ATTEMPTS):
             for candidate in candidates:
                 try:
@@ -2084,6 +2112,13 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
                         opacity=opacity,
                         focal=mobile_focal,
                     )
+                except TracerUnavailable as exc:
+                    # Nothing about this photograph: the tracer is absent, so every
+                    # remaining candidate fails identically. Trying the next one — or
+                    # the whole pass again — buys nothing but a slower page. Caught
+                    # before BackdropError because it is a subclass of it.
+                    tracer_missing = str(exc)
+                    break
                 except BackdropError:
                     continue
                 traced.append(
@@ -2095,14 +2130,27 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
                 )
                 if len(traced) >= TRACE_CANDIDATE_COUNT:
                     break
-            if traced or fetch_attempt + 1 >= _FETCH_RETRY_ATTEMPTS:
+            if traced or tracer_missing or fetch_attempt + 1 >= _FETCH_RETRY_ATTEMPTS:
                 break
             time.sleep(_FETCH_RETRY_BACKOFF_SECS)
         # Candidates existed and not one of them became an underlay even after the
         # bounded re-fetch — a different failure from "nothing matched", recorded so
-        # it is not mistaken for a query miss.
+        # it is not mistaken for a query miss. Which failure matters: a missing tracer
+        # is a HOST fault that no query and no later turn can fix, and calling it
+        # fetch-failed is what told the Illustrator to ship the bare tonal base.
         if not traced and candidates:
-            search_audit = {**search_audit, "reason": "fetch-failed"}
+            if tracer_missing:
+                _warn(
+                    f"scene lane degraded: {len(candidates)} reference(s) matched "
+                    f"{query!r} but none could be traced — {tracer_missing}"
+                )
+                search_audit = {
+                    **search_audit,
+                    "reason": "tracer-unavailable",
+                    "detail": tracer_missing,
+                }
+            else:
+                search_audit = {**search_audit, "reason": "fetch-failed"}
 
     if traced:
         # Offer the choice: stash candidates and clear any stale active underlay so a
@@ -2289,10 +2337,16 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
         search = trace.get("search")
         if isinstance(search, dict):
             if kind == "base":
-                trace_audit["fallback"] = {
+                fallback: dict[str, Any] = {
                     "reason": str(search.get("reason") or "no-candidates"),
                     "attempts": search.get("attempts") or [],
                 }
+                # A HOST fault (no tracer) is the one reason a reader cannot deduce
+                # from the reason word alone — and the one that makes every later page
+                # flat too — so it carries what was missing.
+                if search.get("detail"):
+                    fallback["detail"] = str(search.get("detail"))
+                trace_audit["fallback"] = fallback
             elif search.get("matched"):
                 # Which ladder rung won, so a brief that only ever matches after
                 # widening is visible as a brief to rewrite, not a silent success.

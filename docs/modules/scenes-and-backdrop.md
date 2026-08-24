@@ -485,6 +485,41 @@ sees is produced locally from a closed, code-owned vocabulary.
   never the intended output of a no-candidates page. The instructions live in
   `agents/illustrator.json` and `_base_underlay_next`.
 
+- **A host that cannot trace is `tracer-unavailable`, not `fetch-failed`.** The trace
+  worker imports `vtracer` + Pillow (`phototrace.TRACE_WORKER_DEPS`) and the MCP server
+  imports NEITHER — the motif lane needs no tracer — so an interpreter can serve every
+  other tool and be unable to trace a single reference. That is not hypothetical: the
+  interpreter a host spawns the server with (a gateway virtualenv) is routinely not the
+  one `setup.sh` installed the wheels into, because an install-time `python3` resolves
+  against whatever PATH the installer had.
+
+  Three things follow. `build_underlay_fragment_bounded` runs the worker under
+  `resolve_trace_interpreter()` — `sys.executable` first (checked in-process via
+  `find_spec`, no child), then the PATH `python3`/`python` probed with the module's own
+  `--probe-tracer` entry point; only the POSITIVE answer is memoised, so installing the
+  wheel starts tracing again without a gateway restart. A worker that dies on the import
+  (or no interpreter at all) raises `TracerUnavailable`, which `_trace_reference` catches
+  BEFORE `BackdropError` — it ends the pass instead of trying the remaining candidates
+  and the whole retry, because every one of them fails identically. And the audit records
+  `tracer-unavailable` plus a `detail` naming what is missing, carried through to the
+  committed receipt.
+
+  Wearing `fetch-failed` was not a cosmetic error: that reason means "a blip cost this
+  page its photo", and `_base_underlay_next` answers it by telling the illustrator the
+  tonal base is a FINISHED backdrop. A machine missing one wheel therefore shipped flat
+  tonal bars on every scene page while each receipt blamed the network. Audited on a real
+  life whose two pages both recorded `fetch-failed` with `outcome: ok` searches — the
+  photos had been found and fetched, and the trace child was dying on
+  `ModuleNotFoundError: No module named 'vtracer'`. `tracer-unavailable` is terminal like
+  `no-candidates` and gets the same hand-drawn degradation (shared `_HAND_DRAWN_GROUND`)
+  with its own lead sentence. Pinned by
+  `test_a_missing_tracer_is_recorded_as_its_own_reason_not_a_fetch_failure`,
+  `test_a_missing_tracer_skips_the_fetch_retry_and_the_other_candidates`,
+  `test_a_missing_tracer_asks_for_a_hand_drawn_scene_not_a_finished_base`,
+  `test_the_worker_runs_under_the_resolved_interpreter_and_names_a_missing_tracer`,
+  `test_an_ordinary_worker_failure_stays_an_ordinary_failure`, and
+  `test_no_traceable_interpreter_reports_it_instead_of_guessing`.
+
 - **The backdrop pipeline is timed for audit.** `backdrop_timing.py`'s
   `BackdropTimeline` appends one event per pipeline step to
   `runs/<id>/backdrop-timeline.jsonl` — `requested`, each backdrop tool call (with its

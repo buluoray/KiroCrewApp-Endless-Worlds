@@ -27,12 +27,14 @@ Illustrator to paint over.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import logging
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,6 +67,22 @@ MAX_TRACE_FRAGMENT_BYTES = 400_000
 #: Pillow/vtracer execute in a killable child. One variant must finish within this
 #: wall-clock bound so malformed or pathological photos cannot wedge the MCP loop.
 TRACE_TIMEOUT_SECS = 30
+
+#: What the trace worker imports. The MCP server itself imports NEITHER — the motif
+#: lane needs no tracer — so an interpreter can run the whole app, answer every other
+#: tool, and still be unable to trace a single reference.
+TRACE_WORKER_DEPS = ("vtracer", "PIL")
+
+#: A probe child only resolves two module specs, so it is fast; it is still a child
+#: process, so it is bounded like every other one.
+_INTERPRETER_PROBE_TIMEOUT_SECS = 20
+
+#: Set once an interpreter is known to import TRACE_WORKER_DEPS. Only the POSITIVE
+#: answer is memoised: a host missing the tracer is re-probed on the next page, so
+#: installing the wheel starts tracing again without a gateway restart. The negative
+#: path costs a couple of tiny child processes per page, and only where the lane is
+#: already degraded.
+_TRACE_INTERPRETER: str | None = None
 
 #: How many traceable references the Illustrator is offered to choose among. Each
 #: costs two bounded traces (desktop + mobile), so this is a small number: enough
@@ -128,6 +146,20 @@ class SearchUnavailable(BackdropError):
     about the subject at all. Every source used to collapse both into ``[]``, which
     is why a rate-limited minute was indistinguishable from a world that genuinely
     has no attribution-free photograph — and why neither could be cached safely.
+    """
+
+
+class TracerUnavailable(BackdropError):
+    """No reachable interpreter can import the tracer, so NO photo can be traced.
+
+    Kept apart from an ordinary trace failure for the same reason SearchUnavailable is
+    kept apart from an empty result: this one says nothing about the photograph. A
+    per-photo failure is worth trying the next candidate for; this one fails every
+    candidate on this host identically, so retrying is pure latency, and reporting it
+    as ``fetch-failed`` tells the Illustrator that a transient blip cost it a
+    reference — which then instructs it to commit the bare tonal base as a finished
+    backdrop. That is how a machine missing one wheel ships flat pages while every
+    receipt claims a network fault.
     """
 
 
@@ -742,6 +774,92 @@ def _trace_fragment_child(job_path: Path, output_path: Path) -> int:
         return 1
 
 
+_MISSING_DEP_RE = re.compile(r"No module named '(?:" + "|".join(TRACE_WORKER_DEPS) + r")(?:['.])")
+
+
+def _reports_missing_tracer(detail: str) -> bool:
+    """Did the worker die because the tracer is absent, rather than on this photo?"""
+    return bool(_MISSING_DEP_RE.search(detail))
+
+
+def forget_trace_interpreter() -> None:
+    """Drop the memoised interpreter so the next trace re-probes the host."""
+    global _TRACE_INTERPRETER
+    _TRACE_INTERPRETER = None
+
+
+def _candidate_trace_interpreters() -> list[str]:
+    """Interpreters that might be able to trace, the running one first.
+
+    `sys.executable` is first because it is the only one that needs no child process
+    to check and the only one guaranteed to import this package's own modules. The
+    PATH pair follows because the interpreter that RUNS the MCP server and the one
+    `setup.sh` installed the wheels into are routinely not the same: the gateway
+    spawns the server through its own virtualenv, while an install-time `python3`
+    resolves against whatever PATH the installer had.
+    """
+    seen: set[str] = set()
+    found: list[str] = []
+    for python in (sys.executable, shutil.which("python3"), shutil.which("python")):
+        if not python:
+            continue
+        try:
+            key = os.path.realpath(python)
+        except OSError:
+            key = python
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(python)
+    return found
+
+
+def _interpreter_can_trace(python: str) -> bool:
+    """Can this interpreter import the trace worker's dependencies?"""
+    if python == sys.executable:
+        for module in TRACE_WORKER_DEPS:
+            try:
+                if importlib.util.find_spec(module) is None:
+                    return False
+            except (ImportError, ValueError):
+                return False
+        return True
+    try:
+        probe = subprocess.run(
+            [python, str(Path(__file__).resolve()), "--probe-tracer"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_INTERPRETER_PROBE_TIMEOUT_SECS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+def resolve_trace_interpreter() -> str | None:
+    """The interpreter to run the trace worker with, or None when no host can trace."""
+    global _TRACE_INTERPRETER
+    if _TRACE_INTERPRETER is not None:
+        return _TRACE_INTERPRETER
+    for python in _candidate_trace_interpreters():
+        if not _interpreter_can_trace(python):
+            continue
+        _TRACE_INTERPRETER = python
+        if python != sys.executable:
+            logger.warning(
+                "reference tracing runs under %s: this process cannot import %s",
+                python,
+                " + ".join(TRACE_WORKER_DEPS),
+            )
+        return python
+    logger.warning(
+        "no reachable interpreter can import %s — the SCENE lane cannot trace a "
+        "reference on this host and every scene degrades to a hand-drawn page",
+        " + ".join(TRACE_WORKER_DEPS),
+    )
+    return None
+
+
 def build_underlay_fragment_bounded(
     photo: bytes,
     *,
@@ -753,6 +871,12 @@ def build_underlay_fragment_bounded(
     """Trace one variant in a killable child and validate its bounded output."""
     if len(photo) > _MAX_PHOTO_BYTES:
         raise BackdropError("the reference photo is too large to trace")
+    python = resolve_trace_interpreter()
+    if python is None:
+        raise TracerUnavailable(
+            f"no reachable interpreter can import the reference tracer "
+            f"({' + '.join(TRACE_WORKER_DEPS)})"
+        )
     with tempfile.TemporaryDirectory(prefix="etr-parent-") as tmp_dir:
         root = Path(tmp_dir)
         photo_path = root / "photo.bin"
@@ -776,7 +900,7 @@ def build_underlay_fragment_bounded(
         try:
             proc = subprocess.run(
                 [
-                    sys.executable,
+                    python,
                     str(Path(__file__).resolve()),
                     "--trace-fragment",
                     str(job_path),
@@ -796,6 +920,12 @@ def build_underlay_fragment_bounded(
             ) from None
         detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
         if proc.returncode != 0 or not output_path.is_file():
+            # The probe said this interpreter could trace and the worker disagreed, so
+            # the memo is stale (a rebuilt venv, a changed PATH) — drop it and let the
+            # next page re-probe rather than pinning a host to a dead interpreter.
+            if _reports_missing_tracer(detail):
+                forget_trace_interpreter()
+                raise TracerUnavailable(f"the reference tracer is not installed ({detail})")
             raise BackdropError(
                 f"reference trace worker failed ({detail or 'no fragment produced'})"
             )
@@ -995,4 +1125,12 @@ class CandidateStore:
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "--trace-fragment":
         raise SystemExit(_trace_fragment_child(Path(sys.argv[2]), Path(sys.argv[3])))
-    raise SystemExit("phototrace.py is a module; only --trace-fragment is runnable")
+    if len(sys.argv) == 2 and sys.argv[1] == "--probe-tracer":
+        # Resolve the specs without importing them: a probe answers "could this
+        # interpreter trace" and must not pay vtracer's load cost to say yes.
+        raise SystemExit(
+            0 if all(importlib.util.find_spec(m) is not None for m in TRACE_WORKER_DEPS) else 1
+        )
+    raise SystemExit(
+        "phototrace.py is a module; only --trace-fragment and --probe-tracer are runnable"
+    )
