@@ -34,9 +34,12 @@ hoped for:
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: Files that define the installed app. Content catches updates even when mtimes are
 #: preserved; inode/ctime metadata catches a same-content reinstall at the same path.
@@ -153,7 +156,6 @@ OWN_SERVER_REF = f"@{APP_NAME}:{OWN_SERVER_KEY}"
 MEMORY_MODE = "temporary"
 
 _SLOT_PREFIX = "endless-run-"
-
 #: Run ids reach here from stored app state, which the narrator itself can be
 #: talked into rewriting. From here the value becomes a slot key and then a
 #: history filename, so it is validated before it can flow into either.
@@ -301,6 +303,13 @@ async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bo
     new conversation that was never told the rules of its world. One seam, one
     invariant: a discarded conversation always re-briefs.
 
+    Cleared BEFORE the discard, which is what makes that invariant hold rather
+    than merely stating it. Reversed, a failed clear leaves a brand-new
+    conversation that will never be told the rules — the exact state this is
+    supposed to make impossible. In this order the same failure only leaves the
+    OLD conversation about to be re-briefed once more, which costs a re-send and
+    nothing else.
+
     Best-effort like its siblings: a missing runtime or a bad id is a no-op.
     """
     try:
@@ -315,44 +324,85 @@ async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bo
     except Exception:  # noqa: BLE001
         return False
     try:
-        await sessions.discard_conversation(_history_key_for(slot_key))
-    except Exception:  # noqa: BLE001
-        return False
-    try:
         store.clear_briefed(run_id)
     except Exception:  # noqa: BLE001
         pass
+    try:
+        await sessions.discard_conversation(_history_key_for(slot_key))
+    except Exception:  # noqa: BLE001
+        return False
     return True
 
 
-#: Narrator slot keys THIS process created (or validated as its own). Exists for
-#: close-detection only: a key registered here whose slot is gone from ``_slots``
-#: was closed by the player, because nothing else removes an app slot mid-process.
-#: Deliberately process-local — a gateway restart clears it, so a restart (where
-#: the temporary-mode slot is simply absent, not closed) never reads as a close
-#: and resumes the conversation exactly as it does today.
-_LIVE_SLOT_KEYS: set[str] = set()
+def run_id_from_slot_key(slot_key: str) -> str:
+    """The run a narrator slot belongs to, or ``""`` if the key is not one.
+
+    The inverse of :func:`narrator_slot_key`, and validated the same way: core
+    hands the hook a slot name, and a name that does not decode to a real run id
+    must be ignored rather than fed to the store.
+    """
+    if not is_narrator_slot(slot_key):
+        return ""
+    run_id = slot_key[len(_SLOT_PREFIX) :]
+    return run_id if _RUN_ID_RE.match(run_id) else ""
 
 
-def consume_closed_slot(state: Any, run_id: str) -> bool:
-    """True once per close: this process made the run's slot, and it is gone.
+def install_close_hook(state: Any, store: Any) -> None:
+    """Ask core to TELL us when the player dismisses one of this app's tabs.
 
-    ``consume`` because the answer resets on read — the caller acts on it (one
-    conversation reset), and the key re-registers when the slot is re-created, so
-    a second close later is detected again. Guarded like every sibling: a bad id
-    or an unreadable runtime answers False, failing toward "continue".
+    Core draws the distinction we need and draws it by which call site fires:
+    ``notify_slot_closed`` runs only for a deliberate dismissal, and the bulk
+    idle-archive path deliberately does not come through it. That matters because
+    both paths stamp the same ``closed_at`` on the transcript, so a slot's mere
+    ABSENCE from ``state._slots`` cannot tell "the player closed this" from "this
+    was quiet for three days" — and the second must not discard a conversation
+    nobody asked to end.
+
+    So the hook replaces inference. Resetting inside it is also why there is no
+    durable "reset pending" flag to keep in step with anything: the close IS the
+    event, and it is handled once, where it happens.
+
+    A failure here must NOT block the close. Core refuses the dismissal when the
+    hook raises — right for an app whose hook is the write that pauses a worker,
+    wrong for ours: the player wants the tab gone, and the cost of a failed reset
+    is a stale pointer, which is exactly the behaviour that shipped before this.
+    So the hook swallows its own failure.
+
+    Re-registered from the turn path rather than once at import, because core's
+    registry is process memory: a gateway restart or a module reload empties it,
+    and a hook installed only at import would go quiet with no signal. Core keys
+    the registry by app name and re-registering replaces, so calling this every
+    turn costs one dict write and cannot accumulate hooks.
     """
     try:
-        slot_key = narrator_slot_key(run_id)
-    except BadRunId:
-        return False
-    if slot_key not in _LIVE_SLOT_KEYS:
-        return False
-    slots = getattr(state, "_slots", None)
-    if not isinstance(slots, dict) or slot_key in slots:
-        return False
-    _LIVE_SLOT_KEYS.discard(slot_key)
-    return True
+        from kiro_crew.apps.teardown import register_slot_close_hook  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — no dashboard runtime (unit tests)
+        return
+
+    async def _on_slot_closed(slot_key: str) -> None:
+        run_id = run_id_from_slot_key(slot_key)
+        if not run_id:
+            return
+        # Marked BEFORE the discard: the marker is what stops the next turn's
+        # planned rotation from resetting a conversation this just made fresh, and
+        # if the order were reversed a failed write would leave the fresh
+        # conversation about to be discarded again.
+        try:
+            store.mark_rotation(run_id, turn=int(store.read_state(run_id).get("turn") or 0))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await reset_narrator_conversation(state, store, run_id)
+        except Exception:  # noqa: BLE001 — see the docstring: a raise here would
+            # make core REFUSE the player's close, which is the one outcome worse
+            # than a stale pointer. The seam is best-effort by contract, but the
+            # contract is not the guard.
+            logger.warning("conversation reset on dismissal failed for %s", run_id, exc_info=True)
+
+    try:
+        register_slot_close_hook(APP_NAME, _on_slot_closed)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _validate_existing_narrator_slot(slot: Any, slot_key: str) -> None:
@@ -419,9 +469,6 @@ def ensure_narrator_slot_ex(
     existing = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
     if existing is not None:
         _validate_existing_narrator_slot(existing, slot_key)
-        # Registered on the reuse path too: a slot that predates this module's
-        # import (module reload) must still be close-detectable afterwards.
-        _LIVE_SLOT_KEYS.add(slot_key)
         # Re-applied on an EXISTING slot too, so a player who changes model or
         # effort sees it take on the very next turn.
         _apply_choice(existing, model, reasoning_effort)
@@ -446,7 +493,6 @@ def ensure_narrator_slot_ex(
 
     # Deliberately absent: slot._trust / slot._trusted_patterns. See the module
     # docstring. A test asserts this file never assigns them.
-    _LIVE_SLOT_KEYS.add(slot_key)
     return slot, True
 
 
