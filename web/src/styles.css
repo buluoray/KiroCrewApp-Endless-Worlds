@@ -1750,10 +1750,76 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 /* ── performance page ── */
 .ew-perf { padding: 4px 0 24px; }
 .ew-perf-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-.ew-perf-title { margin: 0; font-size: 1.1rem; }
+.ew-perf-title { margin: 0; font-size: 1.1rem; min-width: 0; overflow-wrap: anywhere; }
+/* The table's scroll container, and the only place overflow is allowed to live.
+   Reflow (WCAG 1.4.10) exempts a data table, NOT the page around it — so the
+   overflow is contained here and everything outside wraps. `tabindex` is what
+   makes it scrollable by keyboard: the table holds nothing focusable of its own. */
+.ew-perf-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+.ew-perf-scroll:focus-visible { outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px; }
+/* Named for assistive tech, which needs the region to have one; sighted readers
+   already have the page's own heading directly above it. */
+.ew-perf-caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ew-perf-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85rem; }
 .ew-perf-table th { text-align: left; font-weight: 600; opacity: 0.7; padding: 4px 8px; }
 .ew-perf-table td { padding: 4px 8px; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); white-space: nowrap; }
 .ew-perfbar { display: inline-block; width: 56px; height: 6px; margin-left: 6px; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, transparent); vertical-align: middle; overflow: hidden; }
 .ew-perfbar-fill { display: block; height: 100%; border-radius: 3px; background: color-mix(in srgb, currentColor 45%, transparent); }
-@media (max-width: 700px) { .ew-perf-table { font-size: 0.78rem; } .ew-perfbar { width: 36px; } }
+
+/* The row's disclosure. 44px tall because it is the one control on this page a
+   finger has to hit, and it carries the turn number so the row still reads as a
+   row rather than growing a separate affordance column. */
+.ew-perf-open { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px; background: none; border: 0; color: inherit; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; text-align: left; }
+.ew-perf-caret { opacity: 0.6; font-size: 0.8em; }
+/* The chevron is the affordance every reader gets; the words are a second one for
+   a mouse, revealed on the row it is pointing at. Shown on every row at once they
+   repeat down the column as noise, and shown never they leave a bare caret to
+   guess at. Hidden by default so a phone — which has no hover — never reserves
+   space for text it will not show. */
+.ew-perf-openhint { opacity: 0; font-size: 0.8em; transition: opacity 120ms ease; }
+@media (prefers-reduced-motion: reduce) { .ew-perf-openhint { transition: none; } }
+@media (hover: hover) {
+  .ew-perf-row:hover .ew-perf-openhint { opacity: 0.55; }
+}
+.ew-perf-open:focus-visible .ew-perf-openhint { opacity: 0.55; }
+.ew-perf-open:active { opacity: 0.7; }
+.ew-perf-open { -webkit-tap-highlight-color: transparent; }
+.ew-perf-stagerow > td { white-space: normal; padding: 0 8px 12px; }
+
+/* The expansion. Prose-shaped, so it wraps — it has no table exemption to hide
+   behind, and it is the detail path for every column a phone drops above. Capped
+   because it is read top-to-bottom: spread across a 1440px row, a step's label
+   and its duration end up a screen apart and stop reading as one line. */
+.ew-perf-stages { display: grid; gap: 12px; padding: 10px 0 4px; max-width: 720px; }
+.ew-perf-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px 16px; margin: 0; }
+.ew-perf-fact { min-width: 0; }
+.ew-perf-fact dt { opacity: 0.65; font-size: 0.78rem; }
+.ew-perf-fact dd { margin: 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+.ew-perf-lanehead { font-weight: 600; font-size: 0.8rem; opacity: 0.7; margin-bottom: 4px; }
+.ew-perf-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ew-perf-steps li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: 0.82rem; padding: 3px 0; border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
+.ew-perf-step { min-width: 0; overflow-wrap: anywhere; }
+.ew-perf-took { opacity: 0.75; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* A fact that is ALSO a column. It exists for the width where that column is
+   hidden, so above the breakpoint it is the same number twice on one screen —
+   the exact redundancy that makes an expansion feel like it padded itself. The
+   pairing with `.ew-perf-rest` is the invariant: a cell hidden below 768px has a
+   fact shown below 768px, which is what keeps a dropped column readable
+   somewhere (WCAG F102) without repeating it where it is already visible. */
+@media (min-width: 768px) {
+  .ew-perf-fact-dup { display: none; }
+}
+
+/* A phone keeps the columns that identify a turn and tell you which one was
+   slow, and moves the rest into the expansion every row already has. Cells are
+   dropped from their own cells rather than the table being reflowed with
+   `display`: reflowing it costs the table semantics, and card-stacking would
+   trade this page's whole job — comparing turns — for a lookup layout. */
+@media (max-width: 767px) {
+  .ew-perf-table { font-size: 0.8rem; }
+  .ew-perf-table .ew-perf-rest { display: none; }
+  .ew-perfbar { width: 40px; }
+  .ew-perf-openhint { display: none; }
+  .ew-perf-table th, .ew-perf-table td { padding: 4px 6px; }
+}

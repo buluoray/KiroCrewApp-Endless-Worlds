@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -188,6 +189,103 @@ def _advance(
         raise RuntimeError(f"turn {turn} refused: {out}")
 
 
+def _seed_perf(data: Path, run: str) -> None:
+    """Per-turn cost rows and the stage trace behind them.
+
+    Written through the two ledgers' own ``mark`` writers, like every other
+    fixture — but called from here rather than reached by playing, because
+    neither writing process is in the loop when a life is seeded: the ``commit``
+    row belongs to the MCP server (only it sees a commit happen) and the
+    ``context``/``rotation`` rows belong to the gateway (only it can read the
+    narrator slot's meter). ``at`` is passed explicitly for the same reason the
+    numbers below differ from each other: a real audit reads spans, and rows
+    stamped microseconds apart would render every bar at the same length and
+    every stage gap at zero, hiding exactly the width and spacing defects a shot
+    of this page is taken to inspect.
+
+    The three turns are deliberately UNLIKE: a first turn that declared its
+    whole state, a cheap patch turn whose art came back fast, and an expensive
+    turn that rotated the conversation and fell back to server-drawn art.
+    """
+    from backdrop_timing import BackdropTimeline  # noqa: PLC0415
+    from perf import TurnPerf  # noqa: PLC0415
+
+    perf = TurnPerf(data, run)
+    art = BackdropTimeline(data, run)
+    # An hour ago, so the rows read as one recent sitting rather than as "now".
+    base = time.time() - 3600
+
+    # (turn, storyMs, readMs, toolCalls, form, declaredBytes, pct, usedTokens)
+    turns = [
+        (1, 41_300, 6_200, 5, "full", 7_940, 12, 24_100),
+        (2, 28_700, 4_100, 4, "patch", 1_260, 31, 62_400),
+        (3, 96_400, 5_800, 9, "patch", 2_180, 74, 149_800),
+    ]
+    for turn, story_ms, read_ms, calls, form, declared, pct, used in turns:
+        at = base + turn * 240
+        perf.mark(
+            turn,
+            "commit",
+            at=round(at, 3),
+            storyMs=story_ms,
+            readMs=read_ms,
+            toolCalls=calls,
+            form=form,
+            declaredBytes=declared,
+        )
+        perf.mark(
+            turn,
+            "context",
+            at=round(at + 0.4, 3),
+            pct=pct,
+            usedTokens=used,
+            windowTokens=200_000,
+            model="claude-sonnet-5",
+        )
+    # The last turn's context outgrew its window, so the conversation rotated.
+    perf.mark(3, "rotation", at=round(base + 3 * 240 + 0.6, 3), reason="budget")
+
+    # The art lane, as the timeline actually records it: a request, the narrator's
+    # and illustrator's tool calls with the server time inside each, and the gaps
+    # between them — which are the model thinking, and are usually the bulk.
+    lanes: list[tuple[int, list[tuple[float, str, int | None]]]] = [
+        (
+            1,
+            [
+                (0.0, "requested", None),
+                (18.4, "tool:endless_trace_reference", 2_240),
+                (37.9, "tool:endless_submit_backdrop_draft", 610),
+                (52.6, "tool:endless_commit_backdrop", 180),
+            ],
+        ),
+        (
+            2,
+            [
+                (0.0, "requested", None),
+                (12.1, "tool:endless_submit_backdrop_draft", 540),
+                (23.8, "tool:endless_commit_backdrop", 160),
+            ],
+        ),
+        # Two illustrator attempts, both out of time, then the server drew it.
+        (
+            3,
+            [
+                (0.0, "requested", None),
+                (2.2, "recover:illustrator-dispatched", None),
+                (61.5, "recover:illustrator-timeout", None),
+                (63.0, "recover:illustrator-dispatched", None),
+                (121.7, "recover:illustrator-timeout", None),
+                (123.4, "server-fallback-commit", 320),
+            ],
+        ),
+    ]
+    for turn, events in lanes:
+        # The art is asked for as the turn commits, so the lane shares its clock.
+        anchor = base + turn * 240
+        for offset, step, server_ms in events:
+            art.mark(turn, step, at=round(anchor + offset, 3), serverMs=server_ms)
+
+
 def _new_run(srv: Any, title: str, *, language: str = "zh", world: str = WORLD_ID) -> str:
     store = srv._store()
     return store.create_run(
@@ -321,6 +419,7 @@ def _build_rich(srv: Any, data: Path, built: dict[str, str]) -> str:
         excerpt="她抬眼看了你一下，又低下去。",
         turn=2,
     )
+    _seed_perf(data, run)
     return run
 
 

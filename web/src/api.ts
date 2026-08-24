@@ -667,6 +667,32 @@ export type PerfReport = {
   creditNote: string
 }
 
+/** One recorded moment inside a turn: a tool the narrator or the illustrator
+ *  called, a request, a recovery step. `serverMs` is time spent INSIDE that step
+ *  and `gapMs` is the wait before it — which is the model thinking, and is
+ *  normally where a slow turn's minutes actually went. */
+export type TurnStage = {
+  step: string
+  at: number
+  gapMs?: number | null
+  serverMs?: number
+  attempt?: number
+  lane?: string
+  underlay?: string
+}
+
+export type TurnStages = {
+  turn: number
+  events: TurnStage[]
+  summary: {
+    totalMs: number
+    slowestGapMs: number
+    slowestGapBefore: string
+    slowestServerStep: string
+    slowestServerMs: number
+  }
+}
+
 export const api = {
   worlds: (language?: string) =>
     json<{ worlds: WorldRow[]; seeds: SeedReport }>(
@@ -749,6 +775,15 @@ export const api = {
    *  declaration form and size, context meter, rotations. Tokens, not credits —
    *  the server names the proxy explicitly in `creditNote`. */
   perf: (runId: string) => json<PerfReport>(`/runs/${encodeURIComponent(runId)}/perf`),
+
+  /** The ordered stages inside ONE turn, for the performance page's row
+   *  expansion. Read per turn rather than shipped with the table: a long life's
+   *  full trace is many times the size of the summary a player usually wants,
+   *  and it is only ever looked at one turn at a time. */
+  turnStages: (runId: string, turn: number) =>
+    json<TurnStages>(
+      `/runs/${encodeURIComponent(runId)}/backdrop-timeline?turn=${encodeURIComponent(turn)}`,
+    ),
 
   restoreWorld: (id: string) =>
     post<{ worldId: string; restored: boolean }>(`/worlds/${encodeURIComponent(id)}/restore`, {}),

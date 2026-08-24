@@ -200,6 +200,7 @@ def _run_one(
                 "min_w": e.min_w,
                 "min_h": e.min_h,
                 "covers_x": e.covers_x,
+                "fits_x": e.fits_x,
                 "why": e.why,
             }
             for e in shot.expects
