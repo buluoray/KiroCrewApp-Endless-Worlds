@@ -43,6 +43,31 @@ logger = logging.getLogger(__name__)
 
 TURN_DEADLINE_SECS = 300.0
 
+#: Turn budget for one narrator conversation before a planned rotation, the
+#: backstop for worlds that never open a chapter. Sized from a measured life:
+#: the transcript grew ~40 KB/turn before the delta-read work and ~25 KB/turn is
+#: the expected floor after it, so 24 turns ≈ 600 KB — comfortably under the
+#: point where the harness starts compacting the conversation on its own, which
+#: is the uncontrolled event rotation exists to preempt. A heuristic, not a
+#: contract; the chapter trigger below is preferred whenever the world has one.
+ROTATION_MAX_TURNS = 24
+
+
+def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed: bool) -> bool:
+    """One planned conversation rotation per boundary, never for a new life.
+
+    ``rotation_turn`` records where the conversation last started fresh, so a
+    boundary triggers exactly one reset however many times the same turn is
+    requested — the second request sees the marker already at ``baseline``.
+    """
+    if baseline <= 0:
+        return False
+    done = store.rotation_turn(run_id)
+    if done >= baseline:
+        return False
+    return chapter_crossed or (baseline - done) >= ROTATION_MAX_TURNS
+
+
 #: One fresh conversation per stuck turn. A SECOND zero-contact expiry on a
 #: freshly built slot means the problem is not the conversation.
 _MAX_SLOT_HEALS_PER_TURN = 1
@@ -263,6 +288,7 @@ async def advance_turn(
     shape: str = "",
     model: str = "",
     reasoning_effort: str = "",
+    chapter_crossed: bool = False,
 ) -> TurnOutcome:
     """Ask for one turn and wait for the narrator to commit it.
 
@@ -291,6 +317,7 @@ async def advance_turn(
     if install_changed:
         narrator.release_stale_narrator_slot(state_obj, run_id)
         await narrator.purge_narrator_session(state_obj, run_id)
+        store.mark_rotation(run_id, turn=baseline)
     elif narrator.consume_closed_slot(state_obj, run_id):
         # The player closed this run's tab since the last turn. Core deliberately
         # preserves a closed slot's resume pointer (a reopened tab continues), but
@@ -298,6 +325,18 @@ async def advance_turn(
         # player saying "start me a fresh storyteller". Conversation only — the
         # life's state and chronicle continue exactly where they were.
         await narrator.reset_narrator_conversation(state_obj, store, run_id)
+        store.mark_rotation(run_id, turn=baseline)
+    elif _should_rotate(store, run_id, baseline, chapter_crossed):
+        # Planned rotation: the conversation restarts at a narratively clean point
+        # (a chapter just opened, or the turn budget below ran out) instead of
+        # growing until the harness compacts it at an arbitrary mid-scene point and
+        # the narrator loses its baseline uncontrolled. The fresh conversation
+        # re-briefs and re-anchors itself with a full read — the same self-healing
+        # path a compaction already triggers, only at a moment of our choosing.
+        # The marker is written BEFORE dispatch so a second request for the same
+        # turn (double-tap, refresh) never discards the writer's session.
+        await narrator.reset_narrator_conversation(state_obj, store, run_id)
+        store.mark_rotation(run_id, turn=baseline)
 
     slot, fresh_slot = ensure_narrator_slot_ex(
         state_obj, run_id, project=project, model=model, reasoning_effort=reasoning_effort

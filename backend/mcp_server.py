@@ -188,7 +188,7 @@ _TOOLS: list[dict[str, Any]] = [
         ),
         "inputSchema": {
             "type": "object",
-            "required": ["runId", "turn", "prose", "state"],
+            "required": ["runId", "turn", "prose"],
             "additionalProperties": False,
             "properties": {
                 "runId": _RUN_ID,
@@ -202,7 +202,32 @@ _TOOLS: list[dict[str, Any]] = [
                         "here. Declare it IN FULL: a field you leave out reads to the "
                         "player as a fact that vanished. `digest` and `relations` are "
                         "the exceptions and merge forward, so there you declare only "
-                        "what changed (a null value retires one entry)."
+                        "what changed (a null value retires one entry). PREFER "
+                        "`statePatch` when you still hold the fingerprint you read — "
+                        "it says the same thing in a fraction of the tokens."
+                    ),
+                },
+                "statePatch": {
+                    "type": "object",
+                    "description": (
+                        "Only what changed this turn, merged onto the state named by "
+                        "`basedOn`: a nested object where a leaf you send replaces "
+                        "that leaf, a null retires it, and everything you do not "
+                        "mention stays exactly as you read it. Requires `basedOn` "
+                        "(the fingerprint from your endless_read_runtime call this "
+                        "turn); if the fingerprint no longer matches, the commit is "
+                        "refused and you re-read, then resend. Use `state` instead "
+                        "when you have lost the fingerprint."
+                    ),
+                },
+                "basedOn": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": (
+                        "The `fingerprint` your statePatch is built on. Same "
+                        "self-certification as read_runtime's `since`: if you can "
+                        "still produce it, the state you are patching is the state "
+                        "on file."
                     ),
                 },
                 # Terminal marker. A living turn MUST include `choices`; only a
@@ -1173,6 +1198,28 @@ def _merge_forward(prior: Any, incoming: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _merge_patch(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """``statePatch`` semantics: ``_merge_forward`` applied recursively.
+
+    A dict patched onto a dict merges key by key; ``None`` retires a key at any
+    depth; any other value (scalar, list, or a dict landing on a non-dict)
+    replaces the leaf whole. Unmentioned keys survive untouched — which is the
+    whole point: the narrator sends what moved and vouches for the rest with
+    ``basedOn``. The empty-string retirement sentinel is deliberately NOT
+    honoured here: it exists in ``_merge_forward`` for the prose-valued digest
+    entries, but a general state leaf can legitimately hold ``""``.
+    """
+    merged = dict(base)
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_patch(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 def _apply_milestones(run_id: str, state: dict[str, Any], prev: dict[str, Any]) -> None:
     """Record any milestones newly reached this turn into a reserved state key.
 
@@ -1344,30 +1391,81 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     gains, gain_drops = _clean_gains(args.get("gains") or [])
     events = [str(e)[:200] for e in (args.get("events") or [])][:12]
 
-    state = dict(args["state"])
-    # Snapshot of what the NARRATOR declared, taken before any backend amendment.
-    # Compared with the final committed state, it yields the leaf paths the
-    # backend wrote — which is exactly what a delta read is allowed to send back
-    # (the narrator remembers its own declarations; it cannot know these).
+    patch = args.get("statePatch")
+    if isinstance(args.get("state"), dict):
+        state = dict(args["state"])
+        # The declaration is the story's whole state, so it REPLACES the previous one
+        # — a field the narrator stops declaring is a fact that stopped being true.
+        # The app's own keys are the exception: they were never the narrator's to
+        # declare, and dropping them silently breaks the page rather than the story.
+        for key in RESERVED_STATE_KEYS:
+            if key in current and key not in state:
+                state[key] = current[key]
+        # The cumulative panels (digest, relations) merge forward instead of replacing,
+        # so the narrator declares only what moved this span rather than re-sending the
+        # whole block every turn. Omitted entirely → carry the prior forward; declared
+        # partially → merge onto the prior; a null/"" sub-value retires that entry.
+        for key in MERGE_STATE_KEYS:
+            prior = current.get(key)
+            if key not in state:
+                if isinstance(prior, dict) and prior:
+                    state[key] = prior
+            elif isinstance(state[key], dict) and isinstance(prior, dict):
+                state[key] = _merge_forward(prior, state[key])
+    elif isinstance(patch, dict):
+        # The write-side twin of read_runtime's `since`, and the same
+        # self-certification: a narrator that can still produce the fingerprint it
+        # read is patching the state it believes it is patching. Measured before
+        # this existed, re-declaring the whole state was 22 KB per commit on a
+        # real life — the single largest line in the narrator's transcript — and
+        # every retry re-paid it in full.
+        based_on = str(args.get("basedOn") or "")
+        if not based_on:
+            return {
+                "committed": False,
+                "turn": committed,
+                "reason": "based-on-required",
+                "detail": (
+                    "A statePatch needs `basedOn`: the exact `fingerprint` your "
+                    "endless_read_runtime call handed you this turn. If you no "
+                    "longer hold one, send the full `state` instead."
+                ),
+            }
+        if based_on != store.fingerprint(current):
+            return {
+                "committed": False,
+                "turn": committed,
+                "reason": "baseline-mismatch",
+                "detail": (
+                    "Your statePatch is built on a state this run is no longer in. "
+                    "Call endless_read_runtime again, then resend the WHOLE call — "
+                    "either a statePatch with the fresh fingerprint, or the full "
+                    "state. Do not guess at what changed."
+                ),
+            }
+        # NOT the full-declaration blocks above: starting from the current state,
+        # the reserved keys are already present, and the recursive merge gives the
+        # digest/relations semantics directly (declare what moved, null retires).
+        # Running _merge_forward here as well would resurrect entries the patch
+        # just retired, out of the very `prior` they were retired from.
+        state = _merge_patch(current, patch)
+    else:
+        return {
+            "committed": False,
+            "turn": committed,
+            "reason": "state-required",
+            "detail": (
+                "A turn declares where the life now stands: send `state` in full, "
+                "or `statePatch` + `basedOn` when you still hold the fingerprint "
+                "you read this turn."
+            ),
+        }
+    # Snapshot of the state the NARRATOR intends, taken after its own declaration
+    # is assembled but before any backend amendment. Compared with the final
+    # committed state, it yields the leaf paths the backend wrote — which is
+    # exactly what a delta read is allowed to send back (the narrator remembers
+    # its own declarations; it cannot know these).
     declared = json.loads(json.dumps(state, default=str))
-    # The declaration is the story's whole state, so it REPLACES the previous one
-    # — a field the narrator stops declaring is a fact that stopped being true.
-    # The app's own keys are the exception: they were never the narrator's to
-    # declare, and dropping them silently breaks the page rather than the story.
-    for key in RESERVED_STATE_KEYS:
-        if key in current and key not in state:
-            state[key] = current[key]
-    # The cumulative panels (digest, relations) merge forward instead of replacing,
-    # so the narrator declares only what moved this span rather than re-sending the
-    # whole block every turn. Omitted entirely → carry the prior forward; declared
-    # partially → merge onto the prior; a null/"" sub-value retires that entry.
-    for key in MERGE_STATE_KEYS:
-        prior = current.get(key)
-        if key not in state:
-            if isinstance(prior, dict) and prior:
-                state[key] = prior
-        elif isinstance(state[key], dict) and isinstance(prior, dict):
-            state[key] = _merge_forward(prior, state[key])
     state["turn"] = turn
     # Record milestones reached this turn (permanent, app-owned) before committing.
     try:
@@ -2759,6 +2857,10 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
         # narrator the clear "got str" message. `memory` is enrichment, so an
         # unrecoverable block is DROPPED and the turn still commits.
         if name == "endless_advance_turn":
+            if isinstance(args.get("statePatch"), str):
+                recovered = _lenient_json_object(args["statePatch"])
+                if recovered is not None:
+                    args["statePatch"] = recovered
             if isinstance(args.get("state"), str):
                 recovered = _lenient_json_object(args["state"])
                 if recovered is not None:

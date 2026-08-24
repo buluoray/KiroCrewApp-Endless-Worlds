@@ -391,6 +391,33 @@ class RunStore:
         _check_run_id(run_id)
         self._kv.delete(self._brief_key(run_id))
 
+    # -- conversation rotation bookkeeping -----------------------------------
+    #
+    # One narrator conversation per life grows without bound (measured: 2.9 MB by
+    # turn 57 on a real life), until the harness compacts it at an arbitrary point
+    # and the narrator loses its baseline mid-scene. Rotation replaces that with a
+    # PLANNED reset at a narratively clean point; this marker records the turn the
+    # conversation last started fresh at, so one boundary triggers one reset even
+    # when the same turn is requested twice (double-tap, retry, refresh).
+
+    @staticmethod
+    def _rotation_key(run_id: str) -> str:
+        return f"rotation-{run_id}"
+
+    def rotation_turn(self, run_id: str) -> int:
+        """The committed turn the conversation last started fresh at (0 = never)."""
+        _check_run_id(run_id)
+        raw = self._kv.get(self._rotation_key(run_id))
+        try:
+            return int(raw.get("turn") or 0) if isinstance(raw, dict) else 0
+        except (TypeError, ValueError):
+            return 0
+
+    def mark_rotation(self, run_id: str, *, turn: int) -> None:
+        """Record that the conversation was fresh as of committed ``turn``."""
+        _check_run_id(run_id)
+        self._kv.set(self._rotation_key(run_id), {"turn": int(turn), "at": time.time()})
+
     # -- the turn in flight -----------------------------------------------
     #
     # A record that a turn was ASKED FOR, written before the narrator is spoken
@@ -666,6 +693,7 @@ class RunStore:
         self._kv.delete(self._narrator_generation_key(run_id))
         self._kv.delete(self._brief_key(run_id))
         self._kv.delete(self._provenance_key(run_id))
+        self._kv.delete(self._rotation_key(run_id))
         self._kv.delete(self._pending_key(run_id))
         self._kv.delete(self._backdrop_request_key(run_id))
         rows = [r for r in self.read_index() if r.get("runId") != run_id]
