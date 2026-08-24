@@ -121,7 +121,7 @@ async def _advance(store, run_id, dispatch, **kw):
         run_id=run_id,
         rulebook="r",
         dispatch=dispatch,
-        deadline_secs=kw.pop("deadline_secs", 0.4),
+        inline_wait_secs=kw.pop("inline_wait_secs", 0.4),
         **kw,
     )
 
@@ -175,9 +175,32 @@ def test_a_dropped_request_leaves_the_record_standing(store, run):
     out = asyncio.run(_advance(store, run, _silent(calls)))
 
     assert out.advanced is False
-    assert out.reason == "timeout"
+    assert out.reason == "writing"
     assert store.read_pending(run) is not None, (
         "clearing the record on timeout throws away the only evidence the month is being written"
+    )
+
+
+def test_an_ask_this_request_dispatched_reports_itself_as_taken(store, run):
+    """The two un-advanced reasons are not interchangeable.
+
+    ``writing`` says: this request recorded the ask, dispatched it, and stopped
+    waiting — the month is coming and must NOT be asked for again. That is what lets
+    a caller spend the player's words and hand the rest to a poll. Reporting the
+    ordinary handover as ``generating`` instead would keep offering to resend an ask
+    already in flight, which is the double-narration the pending record exists to
+    prevent.
+    """
+    calls: list[str] = []
+    out = asyncio.run(_advance(store, run, _silent(calls)))
+
+    assert len(calls) == 1, "the ask was dispatched by THIS request"
+    assert out.reason == "writing"
+    assert out.advanced is False, "nothing committed inside the request"
+    assert out.turn == 0, "the life is still on the month it was on"
+    pending = store.read_pending(run)
+    assert pending is not None and int(pending["turn"]) == 1, (
+        "the ask must be on disk, because the poll that finishes this turn reads it"
     )
 
 
@@ -208,6 +231,58 @@ def test_a_landed_turn_leaves_nothing_in_flight(store, run):
     assert generating(store, run) is None
 
 
+def test_a_request_that_never_answered_does_not_freeze_the_page():
+    """The reason a committed month could still read as one that never came.
+
+    The server finishes a turn whether or not anyone is still holding the socket, so
+    a request that does not answer proves nothing — and the page must not conclude
+    anything from it. Two properties make that true: the page's notion of a stalled
+    ask is DERIVED (from the server's record every poll) rather than latched by a
+    request, and the reload runs on every path out of the ask, including the one
+    where the request threw. Without the second, the page sat with a permanent "this
+    page did not come through" over a month that had in fact been written, and only
+    remounting the view — leaving the life and re-entering — found it.
+    """
+    import uisrc
+
+    src = uisrc.module("play.tsx")
+    assert "setStalled" not in src, (
+        "a latched failure flag cannot be corrected by the server; the page must "
+        "derive the verdict from what the run reports"
+    )
+    assert re.search(r"const stalled = ", src), "the stall verdict is not derived at all"
+
+    take = re.search(r"const take = async \(.*?\n  \}\n", src, re.S)
+    assert take, "the per-turn ask is not where this test thinks it is"
+    body = take.group(0)
+    assert body.count("await load()") == 1, (
+        "one reload, reached from every path — a second copy means one of them is a "
+        "branch that can be skipped"
+    )
+    # At the ask's OWN indentation, which is what makes it unconditional. Nested one
+    # level deeper it sits inside the try or the catch, and the path that does not
+    # run it is exactly the path where the page has the least idea what happened.
+    assert re.search(r"\n    await load\(\)\n", body), (
+        "the reload must sit at the top level of the ask, not inside a branch a "
+        "thrown or refused request can skip"
+    )
+
+
+def test_a_birth_is_fired_and_handed_off_never_waited_on():
+    """A life's first turn is the heaviest a life ever asks for, and nothing about
+    holding its request open helps: the ask is recorded before the narrator is
+    spoken to, and the arranging screen polls that record. Awaiting it instead means
+    a birth that outran the request's inline wait reads as one that never started."""
+    import uisrc
+
+    for name in ("play.tsx", "opening.tsx", "main.tsx"):
+        src = uisrc.module(name)
+        assert "await api.openRun" not in src, (
+            f"{name} holds a request open for a whole birth; fire it and let the "
+            "arranging screen's poll finish it"
+        )
+
+
 # ── the correctness half: no second narrator ────────────────────────────────
 
 
@@ -224,7 +299,12 @@ def test_asking_twice_while_in_flight_does_not_dispatch_twice(store, run):
     assert len(calls) == 1, f"the narrator was asked {len(calls)} times for one turn"
     assert second.advanced is False
     assert second.reason == "generating", (
-        "a caller must be able to tell 'someone is writing this' from 'it timed out'"
+        "an ask that was NOT taken must not report itself as one that is being "
+        "written: the record in flight may name a different action entirely, and a "
+        "caller that reads this as accepted throws away words the player still owns"
+    )
+    assert second.reason != "writing", (
+        "'writing' is reserved for an ask this request itself recorded"
     )
 
 
@@ -250,7 +330,7 @@ def test_a_returning_request_attaches_to_the_first_narrators_turn(store, run):
             store.append_turn(run, {"turn": 1, "prose": "the snow stopped"})
 
         out, _ = await asyncio.gather(
-            _advance(store, run, _silent(calls), deadline_secs=3.0, state=gateway),
+            _advance(store, run, _silent(calls), inline_wait_secs=3.0, state=gateway),
             the_first_narrator_finishes(),
         )
         return out
@@ -284,7 +364,7 @@ def test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous(stor
         return True
 
     async def scenario():
-        task = asyncio.ensure_future(_advance(store, run, half_committed, deadline_secs=2.5))
+        task = asyncio.ensure_future(_advance(store, run, half_committed, inline_wait_secs=2.5))
         # Long enough that polls land in the gap first (poll tick is 0.25s),
         # generous enough not to flake on a slow runner.
         await asyncio.sleep(0.6)
