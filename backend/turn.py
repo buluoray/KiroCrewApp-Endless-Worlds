@@ -186,6 +186,8 @@ def compose_prompt(
     action: str = "",
     style: str = "",
     language: Any = "en",
+    prose_length: str = "",
+    backdrops_enabled: bool = True,
 ) -> str:
     """Everything the narrator needs to write the next turn, and nothing else.
 
@@ -233,6 +235,15 @@ def compose_prompt(
 
     if style:
         parts += ["", text("turn.style", style=style)]
+
+    # The player's pacing preference, as one line the narrator reads every turn.
+    # The visual switches are ENFORCED at the MCP gates; these two lines are the
+    # courtesy that saves the narrator from spending a tool call (or three
+    # paragraphs) it will not be thanked for.
+    if prose_length in ("short", "long"):
+        parts += ["", text(f"turn.length.{prose_length}")]
+    if not backdrops_enabled:
+        parts += ["", text("turn.noart")]
 
     if shape:
         parts += ["", shape]
@@ -372,6 +383,8 @@ async def advance_turn(
     model: str = "",
     reasoning_effort: str = "",
     chapter_crossed: bool = False,
+    prose_length: str = "",
+    backdrops_enabled: bool = True,
 ) -> TurnOutcome:
     """Ask for one turn and wait, briefly, for the narrator to commit it.
 
@@ -549,6 +562,8 @@ async def advance_turn(
         action=action,
         style=style,
         language=language,
+        prose_length=prose_length,
+        backdrops_enabled=backdrops_enabled,
     )
 
     # BEFORE dispatch, never after. The window this closes is the one between

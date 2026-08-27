@@ -41,5 +41,8 @@
   "turn.state.empty": "（这是开局，还没有状态。）",
   "turn.state.group": "[{key}] {value}",
   "turn.state.rest": "[其余] {values}",
-  "turn.style": "玩家选择的模拟风格：{style}"
+  "turn.style": "玩家选择的模拟风格：{style}",
+  "turn.length.short": "玩家偏好短篇幅：正文控制在两三段以内，紧凑有力，不铺陈次要细节。",
+  "turn.length.long": "玩家偏好长篇幅：正文可以从容展开到五段以上，铺陈细节与氛围。",
+  "turn.noart": "玩家已在设置中关闭页面配图：本回合不要调用 endless_paint_backdrop 或 endless_clear_backdrop，把全部笔墨留给正文。"
 }

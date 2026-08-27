@@ -1305,3 +1305,100 @@ def test_a_whitespace_or_case_mangled_bare_run_id_is_repaired():
         args = {"runId": keep}
         srv._normalize_run_id_arg(args)
         assert args["runId"] == keep
+
+
+# -- the player's playability settings are enforced at the gates -----------
+
+
+def test_paint_backdrop_is_a_no_op_when_the_player_turned_art_off(app):
+    from settings import write_settings
+
+    write_settings(app, model="", reasoning_effort="", backdrops=False)
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    out = call("endless_paint_backdrop", runId=run, brief="a grey dawn over the wall")
+    assert out["ok"] is True and out["backdrop"] == "off"
+    # Nothing queued: no illustrator will run and the page never waits on art.
+    assert store.read_backdrop_request(run) is None
+
+
+def test_sparse_cadence_declines_a_brief_too_soon_after_the_last_art(app):
+    from backdrop import BackdropStore
+    from settings import SPARSE_GAP_TURNS, write_settings
+
+    write_settings(app, model="", reasoning_effort="", backdrop_cadence="sparse")
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    BackdropStore(app, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=4)
+
+    out = call("endless_paint_backdrop", runId=run, brief="LANE: motif\nTHESIS: too soon")
+    assert out["backdrop"] == "kept"
+    assert store.read_backdrop_request(run) is None
+
+    # Far enough from the last art, the same brief is accepted again.
+    store.commit_state(run, {"turn": 4 + SPARSE_GAP_TURNS, "worldId": "w"})
+    out = call("endless_paint_backdrop", runId=run, brief="LANE: motif\nTHESIS: earned now")
+    assert out["backdrop"] == "queued"
+
+
+def test_sparse_cadence_still_accepts_a_replacement_brief_for_a_pending_page(app):
+    # A re-brief for a page whose art is already pending is recovery, not a new
+    # spend — refusing it would wedge the recovery loop.
+    from backdrop import BackdropStore
+    from settings import write_settings
+
+    write_settings(app, model="", reasoning_effort="", backdrop_cadence="sparse")
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    BackdropStore(app, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=3)
+    store.request_backdrop(run, turn=4, brief="LANE: motif\nTHESIS: first direction")
+
+    out = call("endless_paint_backdrop", runId=run, brief="LANE: motif\nTHESIS: simpler")
+    assert out["backdrop"] == "queued"
+    req = store.read_backdrop_request(run)
+    assert req and "simpler" in req["brief"]
+
+
+def test_a_disabled_style_is_rewritten_before_the_brief_is_stored(app):
+    from settings import write_settings
+
+    write_settings(app, model="", reasoning_effort="", styles=["watercolor", "oil", "minimal"])
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    call(
+        "endless_paint_backdrop",
+        runId=run,
+        brief='LANE: scene\nSTYLE: photo\nREFERENCE: subject="stone bridge"',
+    )
+    req = store.read_backdrop_request(run)
+    assert req and req["style"] == "watercolor"
+    assert "STYLE: photo" not in req["brief"]
+
+
+def test_choice_decoration_switches_strip_art_and_effects(app):
+    from settings import write_settings
+
+    write_settings(app, model="", reasoning_effort="", choice_art=False, choice_effects=False)
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"turn": 2},
+        choices=[
+            {
+                "label": "I open the door",
+                "fateful": True,
+                "art": '<svg xmlns="http://www.w3.org/2000/svg"/>',
+                "effect": "shimmer",
+                "tint": "#aabbcc",
+            }
+        ],
+    )
+    assert out["ok"] is True
+    stored = store.read_chronicle(run)[-1]["choices"][0]
+    assert "art" not in stored and "effect" not in stored and "tint" not in stored
+    # The choice itself always survives its decoration.
+    assert stored["label"] == "I open the door" and stored["fateful"] is True

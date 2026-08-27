@@ -41,5 +41,8 @@
   "turn.state.empty": "(This is the beginning. There is no state yet.)",
   "turn.state.group": "[{key}] {value}",
   "turn.state.rest": "[other] {values}",
-  "turn.style": "Simulation style the player chose: {style}"
+  "turn.style": "Simulation style the player chose: {style}",
+  "turn.length.short": "The player prefers short pages: keep the prose to two or three tight paragraphs and skip secondary detail.",
+  "turn.length.long": "The player prefers long pages: let the prose breathe — five paragraphs or more, rich in detail and atmosphere.",
+  "turn.noart": "The player turned page art off in the settings: do not call endless_paint_backdrop or endless_clear_backdrop this turn — spend everything on the prose."
 }

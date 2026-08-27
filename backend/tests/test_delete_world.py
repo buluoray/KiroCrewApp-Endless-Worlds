@@ -518,3 +518,68 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(world,
     assert "do NOT narrate" in prompts[0]
     assert "endless_commit_fallback_backdrop" in prompts[0]
     assert store.read_backdrop_request(run_id) is None
+
+
+def test_fast_art_quality_dispatches_one_illustrator_and_skips_the_revision_pass(
+    world, monkeypatch
+):
+    """The player's fast tier is enforced at the recovery loop, not suggested:
+    one illustrator attempt (standard gets two), and that attempt's task tells it
+    to ship its first competent draft instead of spending a revision pass."""
+    from backdrop import BackdropStore
+
+    store = world["store"]
+    run_id = store.create_run(
+        {"turn": 1, "worldId": "test-world", "style": "standard"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    store.request_backdrop(run_id, turn=1, brief="a red gate closes")
+
+    class FinishedWithoutArt:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, task, *, agent, silent, model):
+            self.calls.append((task, agent, silent, model))
+            return f"spawn-{len(self.calls)}"
+
+        def is_done(self, _spawn_id):
+            return True
+
+    spawn = FinishedWithoutArt()
+    world["ctx"].spawn = spawn
+    slot = object()
+
+    monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (slot, False))
+
+    def fake_dispatcher(_runner):
+        def dispatch(_state, _slot, _prompt):
+            # The narrator repair commits art, ending the recovery loop.
+            BackdropStore(world["data"], run_id).set(
+                '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+                turn=1,
+            )
+            store.clear_backdrop_request(run_id)
+            return True
+
+        return dispatch
+
+    monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
+    monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
+    asyncio.run(
+        routes_mod._recover_backdrop(
+            world["ctx"],
+            store,
+            object(),
+            run_id,
+            painter_model="paint-model",
+            narrator_model="story-model",
+            reasoning_effort="high",
+            art_quality="fast",
+        )
+    )
+
+    assert len(spawn.calls) == 1, "fast tier must cap the illustrators at one attempt"
+    task = spawn.calls[0][0]
+    assert "fast art mode: no revision pass" in task
+    assert "revise at most once" not in task

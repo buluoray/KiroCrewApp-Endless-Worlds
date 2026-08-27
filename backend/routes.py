@@ -306,6 +306,7 @@ async def _recover_backdrop(
     painter_model: str,
     narrator_model: str,
     reasoning_effort: str,
+    art_quality: str = "standard",
 ) -> None:
     """Land requested art without exposing orchestration failures to the player.
 
@@ -313,6 +314,11 @@ async def _recover_backdrop(
     same narrator conversation receives an internal repair prompt: it may issue a
     simpler brief (starting a fresh illustrator cycle) or draw through the
     server-gated direct fallback. The ordinary generation state stays on screen.
+
+    ``art_quality`` is the player's speed/polish trade: ``fast`` caps the
+    illustrators at ONE attempt and instructs that attempt to publish its first
+    competent draft (the draft tool's answer carries the same instruction), so a
+    failed fast attempt falls through to the narrator/server fallbacks sooner.
     """
     try:
         # The model's whole-recovery budget. When it elapses, the server publishes
@@ -331,11 +337,28 @@ async def _recover_backdrop(
             attempts = int(request.get("attempts") or 0)
             spawn = getattr(ctx, "spawn", None)
             within_budget = loop.time() < recovery_deadline
-            if attempts < _BACKDROP_ILLUSTRATOR_ATTEMPTS and spawn is not None and within_budget:
+            attempt_cap = 1 if art_quality == "fast" else _BACKDROP_ILLUSTRATOR_ATTEMPTS
+            if attempts < attempt_cap and spawn is not None and within_budget:
                 attempt = attempts + 1
                 store.update_backdrop_request(run_id, attempts=attempt)
                 BackdropTimeline(ctx.data_dir, run_id).mark(
                     turn, "recover:illustrator-dispatched", attempt=attempt
+                )
+                review_clause = (
+                    (
+                        "with EXACTLY this runId and turn, glance at the returned "
+                        "preview PNGs only to confirm nothing is structurally broken "
+                        "(blank frame, unreadable composition), and publish that "
+                        "first draft with endless_commit_backdrop using the returned "
+                        "draftId — fast art mode: no revision pass. "
+                    )
+                    if art_quality == "fast"
+                    else (
+                        "with EXACTLY this runId and turn, read every returned preview "
+                        "PNG together as images, revise at most once, and publish the "
+                        "final pair with endless_commit_backdrop using the returned "
+                        "draftId. "
+                    )
                 )
                 task = (
                     "Paint the desktop/mobile backdrop pair for one page of a life. "
@@ -345,10 +368,8 @@ async def _recover_backdrop(
                     "without tracing. A declared painterly STYLE (watercolor/oil/"
                     "minimal) replaces the trace requirement — hand-draw the scene "
                     "in that style instead. Then call endless_submit_backdrop_draft "
-                    "with EXACTLY this runId and turn, read every returned preview "
-                    "PNG together as images, revise at most once, and publish the "
-                    "final pair with endless_commit_backdrop using the returned "
-                    f"draftId. This is invisible recovery attempt {attempt}; use "
+                    f"{review_clause}"
+                    f"This is invisible recovery attempt {attempt}; use "
                     "only the brief and the lane's provided tools, with no external "
                     "research.\n"
                     f"{_style_directive(str(request.get('style') or ''))}"
@@ -492,6 +513,7 @@ def _ensure_backdrop_recovery(
             painter_model=settings.get("painterModel") or "",
             narrator_model=settings.get("model") or "",
             reasoning_effort=settings.get("reasoningEffort") or "",
+            art_quality=str(settings.get("artQuality") or "standard"),
         )
     )
     _BACKDROP_RECOVERY_TASKS[run_id] = task
@@ -631,8 +653,47 @@ async def put_settings(request: web.Request, ctx: AppContext) -> web.Response:
             {"field": "reasoningEffort", "expected": "a known effort level or empty"},
             status=400,
         )
+    raw_styles = body.get("styles")
+    styles = [s for s in raw_styles if isinstance(s, str)] if isinstance(raw_styles, list) else None
+    raw_cadence = body.get("backdropCadence")
+    raw_length = body.get("proseLength")
+    # A PUT that omits a knob keeps its saved value rather than resetting it to the
+    # default — the settings panel sends everything, but a scripted caller (or an
+    # older panel) should not wipe knobs it never heard of.
+    prior = read_settings(ctx.data_dir)
     saved = write_settings(
-        ctx.data_dir, model=model, reasoning_effort=effort, painter_model=painter
+        ctx.data_dir,
+        model=model,
+        reasoning_effort=effort,
+        painter_model=painter,
+        backdrops=(
+            bool(body["backdrops"])
+            if isinstance(body.get("backdrops"), bool)
+            else prior["backdrops"]
+        ),
+        styles=styles if styles is not None else prior["styles"],
+        backdrop_cadence=(
+            raw_cadence if isinstance(raw_cadence, str) else prior["backdropCadence"]
+        ),
+        choice_art=(
+            bool(body["choiceArt"])
+            if isinstance(body.get("choiceArt"), bool)
+            else prior["choiceArt"]
+        ),
+        choice_effects=(
+            bool(body["choiceEffects"])
+            if isinstance(body.get("choiceEffects"), bool)
+            else prior["choiceEffects"]
+        ),
+        prose_length=raw_length if isinstance(raw_length, str) else prior["proseLength"],
+        reduced_motion=(
+            bool(body["reducedMotion"])
+            if isinstance(body.get("reducedMotion"), bool)
+            else prior["reducedMotion"]
+        ),
+        art_quality=(
+            body["artQuality"] if isinstance(body.get("artQuality"), str) else prior["artQuality"]
+        ),
     )
     return web.json_response(saved)
 
@@ -1377,6 +1438,8 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         model=_cfg["model"],
         reasoning_effort=_cfg["reasoningEffort"],
         chapter_crossed=chapter_crossed,
+        prose_length=_cfg["proseLength"],
+        backdrops_enabled=bool(_cfg["backdrops"]),
     )
 
     # The prose may be committed, but requested art is the other half of this page.
