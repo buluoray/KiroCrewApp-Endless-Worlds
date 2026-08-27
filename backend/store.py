@@ -86,6 +86,32 @@ def brief_style(brief: str) -> str:
     return match.group(1).lower() if match else ""
 
 
+def rewrite_brief_style(brief: str, enabled: list[str], substitute: str) -> str:
+    """The brief with any DISABLED style replaced by the player's ``substitute``.
+
+    This is where the settings' style allowlist is enforced: the rewrite happens
+    once, at request time, so the stored brief — the only thing the illustrator
+    ever reads — already carries an enabled style. Three cases:
+
+    - The declared style is enabled (or the substitute itself): unchanged.
+    - The declared style is disabled: the STYLE line's value is replaced in place,
+      keeping the rest of the brief (the narrator's art direction) verbatim.
+    - No style is declared but the brief is a SCENE and ``photo`` is disabled: a
+      STYLE line is appended, because a style-less scene brief MEANS the photo
+      pipeline (the historical default) and would otherwise route to a search the
+      player switched off.
+
+    A motif brief with no style is left alone — motifs are hand-drawn and never
+    touch the photo pipeline.
+    """
+    declared = brief_style(brief)
+    if declared and declared not in enabled:
+        return _STYLE_RE.sub(lambda m: m.group(0)[: -len(m.group(1))] + substitute, brief, count=1)
+    if not declared and brief_lane(brief) == "scene" and "photo" not in enabled:
+        return f"{brief.rstrip()}\nSTYLE: {substitute}"
+    return brief
+
+
 def _check_run_id(run_id: str) -> None:
     if not _RUN_ID_RE.match(run_id):
         raise StoreError(f"malformed run id: {run_id!r}")

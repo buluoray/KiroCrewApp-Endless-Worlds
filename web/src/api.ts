@@ -718,17 +718,30 @@ export type TurnStages = {
   }
 }
 
+/** The app-wide player settings, exactly as the backend stores them. Every knob
+ *  is enforced server-side; the panel only chooses. */
+export type AppSettings = {
+  model: string
+  reasoningEffort: string
+  painterModel: string
+  backdrops: boolean
+  styles: string[]
+  backdropCadence: string
+  choiceArt: boolean
+  choiceEffects: boolean
+  proseLength: string
+  reducedMotion: boolean
+  artQuality: string
+}
+
 export const api = {
   worlds: (language?: string) =>
     json<{ worlds: WorldRow[]; seeds: SeedReport }>(
       `/worlds${language ? `?language=${encodeURIComponent(language)}` : ''}`,
     ),
-  settings: () =>
-    json<{ model: string; reasoningEffort: string; painterModel: string; efforts: string[] }>(
-      '/settings',
-    ),
-  saveSettings: (body: { model: string; reasoningEffort: string; painterModel: string }) =>
-    json<{ model: string; reasoningEffort: string; painterModel: string }>('/settings', {
+  settings: () => json<AppSettings & { efforts: string[] }>('/settings'),
+  saveSettings: (body: AppSettings) =>
+    json<AppSettings>('/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

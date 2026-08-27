@@ -89,6 +89,7 @@ from backdrop import (  # noqa: E402
     BackdropError,
     BackdropStore,
     compile_backdrop,
+    strip_motion,
 )
 from backdrop_timing import BackdropTimeline  # noqa: E402
 from chapters import (  # noqa: E402
@@ -119,7 +120,8 @@ from scenes import (  # noqa: E402
     SceneLedgerError,
     slugify_scene_id,
 )
-from store import RunStore, StoreError, brief_lane  # noqa: E402
+from settings import SPARSE_GAP_TURNS, preferred_style, read_settings  # noqa: E402
+from store import RunStore, StoreError, brief_lane, rewrite_brief_style  # noqa: E402
 from systems import apply_systems  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from view import always_panels_empty, shape_panels  # noqa: E402
@@ -1063,6 +1065,9 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
     choices-required gate runs on THIS result, so dropping every entry on a living
     turn still (correctly) forces a resend.
     """
+    cfg = read_settings(_DATA)
+    choice_art = bool(cfg["choiceArt"])
+    choice_effects = bool(cfg["choiceEffects"])
     out: list[Any] = []
     for i, c in enumerate(choices):
         # A bare string IS a caption: a narrator that sends ["逃跑", "反击"] has
@@ -1081,10 +1086,25 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
         clean["label"] = label[:200]
         cid = clean.get("id")
         clean["id"] = cid[:64] if isinstance(cid, str) and cid.strip() else f"c{i}"
+        # The player's decoration switches, enforced at the one gate every choice
+        # passes: with choice art or effects off the narrator may still send them,
+        # and they are stripped here rather than argued about — the choice itself
+        # always survives its decoration.
+        if not choice_art:
+            clean.pop("art", None)
+        if not choice_effects:
+            clean.pop("effect", None)
+            clean.pop("tint", None)
         art = clean.get("art")
         if isinstance(art, str) and art.strip() and len(art) <= 6000:
             try:
                 clean["art"] = compile_backdrop(art)
+                # Choice art is stored per turn and has no single read boundary
+                # like the backdrop store's _view, so reduced motion is applied
+                # here at commit: new pages are still from now on. (Backdrops —
+                # the dominant moving surface — de-animate retroactively.)
+                if cfg["reducedMotion"]:
+                    clean["art"] = strip_motion(clean["art"])
             except BackdropError:
                 clean.pop("art", None)
         else:
@@ -2139,11 +2159,52 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
 
     Bound to the turn the narrator is writing (the in-flight page), so the art the
     illustrator commits lands on the right page even though it arrives a beat later.
+
+    This is also where the player's art settings are ENFORCED, because every brief
+    passes through exactly here:
+
+    - ``backdrops`` off: the brief is acknowledged and dropped — nothing is queued,
+      no illustrator runs, and the page never enters a "painting" wait. The answer
+      tells the narrator plainly so it stops spending the call.
+    - ``sparse`` cadence: a new brief within ``SPARSE_GAP_TURNS`` turns of the last
+      committed art is declined and the current backdrop stays. A replacement brief
+      for a page whose art is ALREADY pending passes — that is recovery, not a new
+      spend.
+    - style allowlist: a disabled style is rewritten to the player's preferred
+      enabled one before the brief is stored, so the illustrator only ever reads
+      briefs it is allowed to paint.
     """
     run_id = args["runId"]
     turn = _backdrop_turn(run_id)
-    _store().request_backdrop(run_id, turn=turn, brief=args["brief"])
-    BackdropTimeline(_DATA, run_id).mark(turn, "requested", lane=brief_lane(args["brief"]))
+    cfg = read_settings(_DATA)
+    if not cfg["backdrops"]:
+        BackdropTimeline(_DATA, run_id).mark(turn, "declined:art-off")
+        return {
+            "backdrop": "off",
+            "turn": turn,
+            "note": (
+                "the player has turned page art off in the app settings; no image "
+                "will be drawn. Skip endless_paint_backdrop for the rest of this life."
+            ),
+        }
+    brief = rewrite_brief_style(str(args["brief"]), cfg["styles"], preferred_style(cfg["styles"]))
+    if cfg["backdropCadence"] == "sparse":
+        pending = _store().read_backdrop_request(run_id)
+        replacing = bool(pending and int(pending.get("turn") or 0) == turn)
+        last = _backdrop_store(run_id).latest_turn()
+        if not replacing and last is not None and turn - last < SPARSE_GAP_TURNS:
+            BackdropTimeline(_DATA, run_id).mark(turn, "declined:cadence")
+            return {
+                "backdrop": "kept",
+                "turn": turn,
+                "note": (
+                    "the player chose sparse page art: the current backdrop stays "
+                    f"for now (a new one is accepted after turn {last + SPARSE_GAP_TURNS}). "
+                    "Continue the turn without art."
+                ),
+            }
+    _store().request_backdrop(run_id, turn=turn, brief=brief)
+    BackdropTimeline(_DATA, run_id).mark(turn, "requested", lane=brief_lane(brief))
     return {"backdrop": "queued", "turn": turn}
 
 
@@ -2277,6 +2338,15 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
             "photograph at all — the tracer is not installed, so no query and no "
             "retry can produce an underlay here. " + _HAND_DRAWN_GROUND
         )
+    if reason == "photo-off":
+        return (
+            "the player disabled the photo-trace pipeline in the app settings, so no "
+            "archive was searched. The procedural tonal base is a GROUND, not the "
+            'finished image: put one <g id="etr-underlay"/> in each SVG for it, then '
+            "author a real hand-drawn scene above it in a painterly style (watercolor "
+            "suits most scenes; read that style's skill file if your task names one) "
+            "and take it through the full review pass before committing."
+        )
     if reason == "search-failed":
         return (
             "the image archive did not answer (a network error or a rate limit), so "
@@ -2342,6 +2412,14 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
 
     traced: list[dict[str, Any]] = []
     search_audit: dict[str, Any] = {"reason": "no-query", "matched": "", "attempts": []}
+    # The player can disable the traced-reference pipeline entirely (settings
+    # ``styles`` without "photo"). Briefs are rewritten to a painterly style before
+    # the illustrator reads them, so this path is a defensive belt for an
+    # illustrator that reached the tool anyway: no archive is contacted, no photo is
+    # fetched, and the answer routes it to the hand-drawn path the settings chose.
+    if query and "photo" not in read_settings(_DATA)["styles"]:
+        query = ""
+        search_audit = {"reason": "photo-off", "matched": "", "attempts": []}
     if query:
         candidates, search_audit = search_candidates(query, lane, misses=MissCache(_DATA))
         # Candidates existed but the fetch/trace can transiently fail every one (a
@@ -2552,12 +2630,25 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     draft = _backdrop_draft_store(run_id).submit(
         markup, mobile, turn=turn, buttons=args.get("buttons")
     )
+    # The player's art-quality tier decides what the review pass owes: standard
+    # keeps the lane's full review contract; fast turns it into a structural
+    # sanity glance so the first competent draft ships.
+    fast = read_settings(_DATA)["artQuality"] == "fast"
     return {
         "backdrop": "drafted",
         "draftId": draft["draftId"],
         "turn": turn,
         "previews": draft["previews"],
-        "next": "read every preview together, then follow the lane's review-pass contract",
+        "next": (
+            (
+                "fast art mode: glance at the previews only to confirm nothing is "
+                "structurally broken (blank frame, unreadable composition), then "
+                "commit THIS draft with endless_commit_backdrop — do not spend a "
+                "revision pass."
+            )
+            if fast
+            else "read every preview together, then follow the lane's review-pass contract"
+        ),
     }
 
 

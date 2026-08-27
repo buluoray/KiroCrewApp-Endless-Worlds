@@ -496,3 +496,56 @@ def test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate(data)
     committed = BackdropStore(data, run_id).exact(1)
     assert "#222" in committed["markup"] and "#abc" in committed["mobile"]
     assert runs.read_backdrop_request(run_id) is None
+
+
+# -- reduced motion (the settings' read-boundary strip) ---------------------
+
+
+def test_strip_motion_removes_smil_and_css_animation_but_keeps_the_scene():
+    from backdrop import strip_motion
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        "<style>@keyframes drift{from{opacity:.2}to{opacity:1}}"
+        ".cloud{animation:drift 4s infinite;fill:#8aa}</style>"
+        '<rect width="10" height="10" fill="#123"/>'
+        '<circle class="cloud" r="2" style="transition: opacity 1s; opacity:.5">'
+        '<animate attributeName="r" values="2;3;2" dur="5s" repeatCount="indefinite"/>'
+        "</circle>"
+        '<g><animateTransform attributeName="transform" type="rotate" dur="9s"/></g>'
+        "</svg>"
+    )
+    out = strip_motion(svg)
+    assert "<animate" not in out and "animateTransform" not in out
+    assert "@keyframes" not in out and "animation" not in out and "transition" not in out
+    # The scene itself survives: shapes, static styling, structure.
+    assert "<rect" in out and "<circle" in out and 'fill="#123"' in out
+    assert "opacity:.5" in out  # a static declaration next to a stripped one stays
+
+
+def test_strip_motion_leaves_a_still_svg_byte_identical():
+    from backdrop import strip_motion
+
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4" fill="#345"/></svg>'
+    assert strip_motion(svg) == svg
+
+
+def test_the_store_serves_stored_art_still_once_reduced_motion_is_on(tmp_path):
+    from settings import write_settings
+
+    animated = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect width="4" height="4"><animate attributeName="opacity" dur="3s"/></rect></svg>'
+    )
+    # Stored BEFORE the setting flips: the strip is a read-boundary rule, so art
+    # from any era obeys the CURRENT preference, and flipping back restores motion
+    # (the stored bytes are untouched).
+    BackdropStore(tmp_path, "run-abc").set(animated, turn=1)
+
+    write_settings(tmp_path, model="", reasoning_effort="", reduced_motion=True)
+    still = BackdropStore(tmp_path, "run-abc").current()
+    assert still and "<animate" not in still["markup"] and "<rect" in still["markup"]
+
+    write_settings(tmp_path, model="", reasoning_effort="", reduced_motion=False)
+    moving = BackdropStore(tmp_path, "run-abc").current()
+    assert moving and "<animate" in moving["markup"]

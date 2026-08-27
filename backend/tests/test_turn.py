@@ -162,6 +162,12 @@ def test_the_prompt_has_no_channel_for_the_players_own_memory():
     do by accident. (An earlier version of this test scanned the source for the
     word "memory" and failed on the docstring — it was testing prose, not
     behaviour.)
+
+    ``prose_length`` and ``backdrops_enabled`` are app settings, not a memory
+    channel: the first is validated against a closed three-value enum before it
+    reaches here and the second is a bool, so neither can carry the player's own
+    text. A NEW parameter added to this set must clear the same bar — no free
+    text about the player.
     """
     params = set(inspect.signature(compose_prompt).parameters)
     assert params == {
@@ -173,6 +179,8 @@ def test_the_prompt_has_no_channel_for_the_players_own_memory():
         "action",
         "style",
         "language",
+        "prose_length",
+        "backdrops_enabled",
     }
 
 

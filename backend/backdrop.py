@@ -71,6 +71,49 @@ _HANDLER_RE = re.compile(r"\bon[a-z]+\s*=", re.IGNORECASE)
 _EXTERNAL_REF_RE = re.compile(r'(?:xlink:href|href)\s*=\s*["\']?\s*(?:https?:|//)', re.IGNORECASE)
 _CSS_URL_RE = re.compile(r"url\(([^)]*)\)", re.IGNORECASE)
 
+#: The two ways a validated backdrop can move: SMIL animation elements, and CSS
+#: animation/transition declarations (inline ``<style>`` or ``style=`` — both are
+#: allowed by ``compile_backdrop`` and both animate inside an ``<img>`` SVG, where
+#: only scripts are inert). ``strip_motion`` removes both when the player asked
+#: for reduced motion. Paired forms are matched before self-closing ones so a
+#: ``<animate>…</animate>`` never leaves an orphan close tag behind.
+_SMIL_PAIRED_RE = re.compile(
+    r"<(animate|animateTransform|animateMotion|set)\b[^>]*>.*?</\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_SMIL_VOID_RE = re.compile(
+    r"<(?:animate|animateTransform|animateMotion|set)\b[^>]*/?>", re.IGNORECASE
+)
+_KEYFRAMES_RE = re.compile(
+    r"@(?:-webkit-)?keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}", re.IGNORECASE
+)
+#: A CSS animation/transition declaration, in a ``<style>`` rule or a ``style=``
+#: attribute. The leading delimiter (``{`` opening a rule, ``"``/``'`` opening an
+#: attribute, ``;`` or whitespace between declarations) is CAPTURED and put back
+#: by ``strip_motion``, so removing the declaration never eats the brace or quote
+#: that the surrounding syntax needs.
+_CSS_MOTION_DECL_RE = re.compile(
+    r"([;{\"'\s]|^)(?:animation|transition)(?:-[a-z]+)*\s*:[^;\"'}<]*", re.IGNORECASE
+)
+
+
+def strip_motion(svg: str) -> str:
+    """The same SVG with every animation removed, for the reduced-motion setting.
+
+    Applied at the READ boundary (``BackdropStore._view``) rather than at commit,
+    so flipping the setting takes effect on every already-stored backdrop
+    immediately and flipping it back restores their motion — the stored bytes are
+    never touched. Text-based like the validator itself: the markup this runs on
+    already passed ``compile_backdrop``, and a static frame with a stray empty
+    style declaration beats a parser dependency for a preference.
+    """
+    if not svg:
+        return svg
+    out = _SMIL_PAIRED_RE.sub("", svg)
+    out = _SMIL_VOID_RE.sub("", out)
+    out = _KEYFRAMES_RE.sub("", out)
+    return _CSS_MOTION_DECL_RE.sub(r"\1", out)
+
 
 class BackdropError(ValueError):
     """A background that cannot be used. Names what was wrong so the narrator can
@@ -572,6 +615,15 @@ class BackdropStore:
         if not isinstance(run_id, str) or not _ID_RE.match(run_id):
             raise BackdropError(f"not a run id: {run_id!r}")
         self._path = data_dir / "runs" / run_id / "backdrop.json"
+        # The reduced-motion preference is applied at THIS store's read boundary
+        # (see strip_motion) — every published backdrop leaves through `_view`, so
+        # one flag here covers current(), at(), and exact() alike, for art stored
+        # before the setting existed as much as after. Imported lazily: settings
+        # imports nothing from here, but keeping the top level clean spares the
+        # thumbnail child process (which imports this module) a file read.
+        from settings import read_settings
+
+        self._reduced = bool(read_settings(data_dir)["reducedMotion"])
 
     def _load(self) -> list[dict[str, Any]]:
         """The backdrop history, oldest-first. Each entry is
@@ -606,8 +658,7 @@ class BackdropStore:
         tmp.write_text(payload, encoding="utf-8")
         os.replace(tmp, self._path)
 
-    @staticmethod
-    def _view(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _view(self, entry: dict[str, Any] | None) -> dict[str, Any] | None:
         """Shape a public backdrop entry, or ``None`` for a tombstone/missing row."""
         if not entry:
             return None
@@ -626,11 +677,17 @@ class BackdropStore:
             if candidate["pageUrl"] and candidate["license"]:
                 source = candidate
         trace = _clean_trace_audit(entry.get("trace"))
+        mobile = mobile if isinstance(mobile, str) and mobile.strip() else None
+        buttons = buttons if isinstance(buttons, str) and buttons.strip() else None
+        if self._reduced:
+            markup = strip_motion(markup)
+            mobile = strip_motion(mobile) if mobile else None
+            buttons = strip_motion(buttons) if buttons else None
         return {
             "markup": markup,
-            "mobile": mobile if isinstance(mobile, str) and mobile.strip() else None,
+            "mobile": mobile,
             "version": version,
-            "buttons": buttons if isinstance(buttons, str) and buttons.strip() else None,
+            "buttons": buttons,
             "source": source,
             "trace": trace,
         }
@@ -675,6 +732,17 @@ class BackdropStore:
         scene and caches it correctly."""
         view = self.at(turn)
         return int(view["version"]) if view else 0
+
+    def latest_turn(self) -> int | None:
+        """The turn of the most recent REAL backdrop (tombstone clears skipped),
+        or ``None`` when this life has never had one. The sparse-cadence gate
+        measures its gap from this: a clear costs no model run, so it neither
+        resets nor extends the budget."""
+        for entry in reversed(self._load()):
+            markup = entry.get("markup")
+            if isinstance(markup, str) and markup.strip():
+                return int(entry.get("turn") or 0)
+        return None
 
     def set(
         self,

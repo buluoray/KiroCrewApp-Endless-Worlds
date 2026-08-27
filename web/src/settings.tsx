@@ -4,20 +4,37 @@ import { api } from './api'
 import { t } from './strings'
 
 /**
- * Narrator + painter settings, opened from the home page: which model writes the
- * story, at what reasoning effort, and which model paints the backdrops. All apply
- * to every life at its next turn.
+ * The app settings panel, opened from the home page. Three groups:
  *
- * The model list comes from the gateway's advertised set (never a hardcoded id);
- * an empty pick means "keep the app's default", so the app still runs on auto
- * when the list is unavailable or the player has chosen nothing.
+ * - Narration: which model writes the story, at what effort, at what length.
+ * - Page art: whether backdrops are drawn at all, by which model, in which
+ *   styles, and how often. Everything under the master switch dims when it is
+ *   off — the choices are moot, not forbidden.
+ * - Choice decoration: the small emblems and motion effects on choice buttons.
+ *
+ * Every knob is ENFORCED server-side (the MCP gates and the choice cleaner);
+ * this panel only records the player's pick. The model list comes from the
+ * gateway's advertised set (never a hardcoded id); an empty pick means "keep
+ * the app's default", so the app still runs on auto when the list is
+ * unavailable or the player has chosen nothing.
  */
+
+const PAINT_STYLES = ['photo', 'watercolor', 'oil', 'minimal'] as const
+
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [painterModel, setPainterModel] = useState('')
   const [efforts, setEfforts] = useState<string[]>([''])
   const [models, setModels] = useState<Array<{ id: string; name?: string }>>([])
+  const [backdrops, setBackdrops] = useState(true)
+  const [styles, setStyles] = useState<string[]>([...PAINT_STYLES])
+  const [cadence, setCadence] = useState('normal')
+  const [choiceArt, setChoiceArt] = useState(true)
+  const [choiceEffects, setChoiceEffects] = useState(true)
+  const [proseLength, setProseLength] = useState('')
+  const [reducedMotion, setReducedMotion] = useState(false)
+  const [artQuality, setArtQuality] = useState('standard')
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -35,6 +52,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setEffort(s.reasoningEffort || '')
         setPainterModel(s.painterModel && s.painterModel !== 'auto' ? s.painterModel : '')
         if (Array.isArray(s.efforts) && s.efforts.length) setEfforts(s.efforts)
+        setBackdrops(s.backdrops !== false)
+        if (Array.isArray(s.styles) && s.styles.length) setStyles(s.styles)
+        setCadence(s.backdropCadence || 'normal')
+        setChoiceArt(s.choiceArt !== false)
+        setChoiceEffects(s.choiceEffects !== false)
+        setProseLength(s.proseLength || '')
+        setReducedMotion(s.reducedMotion === true)
+        setArtQuality(s.artQuality || 'standard')
       })
       .catch(() => {})
     // `api.models()` proxies through the app's own backend route, which the app's
@@ -53,14 +78,48 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const save = async () => {
     setBusy(true)
     try {
-      const out = await api.saveSettings({ model, reasoningEffort: effort, painterModel })
+      const out = await api.saveSettings({
+        model,
+        reasoningEffort: effort,
+        painterModel,
+        backdrops,
+        styles,
+        backdropCadence: cadence,
+        choiceArt,
+        choiceEffects,
+        proseLength,
+        reducedMotion,
+        artQuality,
+      })
       setModel(out.model || '')
       setEffort(out.reasoningEffort || '')
       setPainterModel(out.painterModel || '')
+      setBackdrops(out.backdrops !== false)
+      if (Array.isArray(out.styles) && out.styles.length) setStyles(out.styles)
+      setCadence(out.backdropCadence || 'normal')
+      setChoiceArt(out.choiceArt !== false)
+      setChoiceEffects(out.choiceEffects !== false)
+      setProseLength(out.proseLength || '')
+      setReducedMotion(out.reducedMotion === true)
+      setArtQuality(out.artQuality || 'standard')
       setSaved(true)
     } finally {
       setBusy(false)
     }
+  }
+
+  const toggleStyle = (style: string) => {
+    setSaved(false)
+    setStyles((prev) => {
+      if (prev.includes(style)) {
+        // At least one style must stay enabled: an empty allowlist is not a
+        // state the backend accepts (it would coerce to "all on", silently
+        // undoing the click), so refuse the uncheck here where it is visible.
+        if (prev.length <= 1) return prev
+        return prev.filter((s) => s !== style)
+      }
+      return PAINT_STYLES.filter((s) => prev.includes(s) || s === style)
+    })
   }
 
   // The saved model may not be in the advertised list (offline, or a pick from a
@@ -81,6 +140,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
+      <div className="ew-settings-group">{t('settings.group.narration')}</div>
+
       <label className="ew-settings-row">
         <span className="ew-settings-label">{t('settings.model')}</span>
         <select
@@ -93,25 +154,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         >
           <option value="">{t('settings.modelDefault')}</option>
           {optionsFor(model).map((id) => (
-            <option key={id} value={id}>
-              {label(id)}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="ew-settings-row">
-        <span className="ew-settings-label">{t('settings.painterModel')}</span>
-        <select
-          className="ew-uilang ew-settings-select"
-          value={painterModel}
-          onChange={(e) => {
-            setPainterModel(e.target.value)
-            setSaved(false)
-          }}
-        >
-          <option value="">{t('settings.modelDefault')}</option>
-          {optionsFor(painterModel).map((id) => (
             <option key={id} value={id}>
               {label(id)}
             </option>
@@ -135,6 +177,151 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             </option>
           ))}
         </select>
+      </label>
+
+      <label className="ew-settings-row">
+        <span className="ew-settings-label">{t('settings.proseLength')}</span>
+        <select
+          className="ew-uilang ew-settings-select"
+          value={proseLength}
+          onChange={(e) => {
+            setProseLength(e.target.value)
+            setSaved(false)
+          }}
+        >
+          <option value="">{t('settings.proseLength.default')}</option>
+          <option value="short">{t('settings.proseLength.short')}</option>
+          <option value="long">{t('settings.proseLength.long')}</option>
+        </select>
+      </label>
+
+      <div className="ew-settings-group">{t('settings.group.art')}</div>
+
+      <label className="ew-settings-row">
+        <span className="ew-settings-label">{t('settings.backdrops')}</span>
+        <input
+          type="checkbox"
+          checked={backdrops}
+          onChange={(e) => {
+            setBackdrops(e.target.checked)
+            setSaved(false)
+          }}
+        />
+        <span className="ew-settings-note">
+          {backdrops ? t('settings.backdrops.on') : t('settings.backdrops.off')}
+        </span>
+      </label>
+
+      <div className={backdrops ? '' : 'ew-settings-dimmed'}>
+        <label className="ew-settings-row">
+          <span className="ew-settings-label">{t('settings.painterModel')}</span>
+          <select
+            className="ew-uilang ew-settings-select"
+            value={painterModel}
+            disabled={!backdrops}
+            onChange={(e) => {
+              setPainterModel(e.target.value)
+              setSaved(false)
+            }}
+          >
+            <option value="">{t('settings.modelDefault')}</option>
+            {optionsFor(painterModel).map((id) => (
+              <option key={id} value={id}>
+                {label(id)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="ew-settings-row">
+          <span className="ew-settings-label">{t('settings.styles')}</span>
+          <div className="ew-settings-checks">
+            {PAINT_STYLES.map((style) => (
+              <label key={style} className="ew-settings-check">
+                <input
+                  type="checkbox"
+                  checked={styles.includes(style)}
+                  disabled={!backdrops}
+                  onChange={() => toggleStyle(style)}
+                />
+                <span>{t(`settings.style.${style}`)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <label className="ew-settings-row">
+          <span className="ew-settings-label">{t('settings.cadence')}</span>
+          <select
+            className="ew-uilang ew-settings-select"
+            value={cadence}
+            disabled={!backdrops}
+            onChange={(e) => {
+              setCadence(e.target.value)
+              setSaved(false)
+            }}
+          >
+            <option value="normal">{t('settings.cadence.normal')}</option>
+            <option value="sparse">{t('settings.cadence.sparse')}</option>
+          </select>
+        </label>
+
+        <label className="ew-settings-row">
+          <span className="ew-settings-label">{t('settings.artQuality')}</span>
+          <select
+            className="ew-uilang ew-settings-select"
+            value={artQuality}
+            disabled={!backdrops}
+            onChange={(e) => {
+              setArtQuality(e.target.value)
+              setSaved(false)
+            }}
+          >
+            <option value="standard">{t('settings.artQuality.standard')}</option>
+            <option value="fast">{t('settings.artQuality.fast')}</option>
+          </select>
+        </label>
+      </div>
+
+      <label className="ew-settings-row">
+        <span className="ew-settings-label">{t('settings.reducedMotion')}</span>
+        <input
+          type="checkbox"
+          checked={reducedMotion}
+          onChange={(e) => {
+            setReducedMotion(e.target.checked)
+            setSaved(false)
+          }}
+        />
+        <span className="ew-settings-note">{t('settings.reducedMotion.hint')}</span>
+      </label>
+
+      <div className="ew-settings-group">{t('settings.group.choices')}</div>
+
+      <label className="ew-settings-row">
+        <span className="ew-settings-label">{t('settings.choiceArt')}</span>
+        <input
+          type="checkbox"
+          checked={choiceArt}
+          onChange={(e) => {
+            setChoiceArt(e.target.checked)
+            setSaved(false)
+          }}
+        />
+        <span className="ew-settings-note">{t('settings.choiceArt.hint')}</span>
+      </label>
+
+      <label className="ew-settings-row">
+        <span className="ew-settings-label">{t('settings.choiceEffects')}</span>
+        <input
+          type="checkbox"
+          checked={choiceEffects}
+          onChange={(e) => {
+            setChoiceEffects(e.target.checked)
+            setSaved(false)
+          }}
+        />
+        <span className="ew-settings-note">{t('settings.choiceEffects.hint')}</span>
       </label>
 
       <div className="ew-settings-foot">
