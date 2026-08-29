@@ -34,6 +34,7 @@ hoped for:
 from __future__ import annotations
 
 import hashlib
+import inspect
 import logging
 import re
 from pathlib import Path
@@ -285,6 +286,21 @@ async def purge_narrator_session(state: Any, run_id: str) -> bool:
     return True
 
 
+def _accepts_replay(fn: Any) -> bool:
+    """Whether core's ``discard_conversation`` takes the ``replay`` keyword.
+
+    A ``**kwargs`` signature counts: it forwards. Anything unintrospectable
+    answers False, which degrades to the pre-knob call rather than raising.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if "replay" in params:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bool:
     """Give this run a FRESH narrator conversation while keeping everything else.
 
@@ -311,6 +327,22 @@ async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bo
     nothing else.
 
     Best-effort like its siblings: a missing runtime or a bad id is a no-op.
+
+    ``replay=False`` is what makes the fresh conversation actually fresh. Clearing
+    the resume pointer is precisely the condition under which core's next cold
+    start REBUILDS the transcript from its conversation log as a
+    ``[CONVERSATION HISTORY]`` block, so the two mechanisms work against each
+    other: without this the narrator is handed a reconstruction of the very
+    conversation it just discarded, and the player watches it quote pages it was
+    supposed to have forgotten. The transcript itself is untouched either way —
+    this suppresses the re-injection, it does not delete the record.
+
+    The keyword is only passed when core's own signature accepts it, because it
+    exists only on builds carrying the conversation-reset knob; on an older one the
+    reset must still happen (with replay) instead of failing shut. Asked of the
+    signature rather than caught as a ``TypeError``, so a ``TypeError`` raised from
+    INSIDE the teardown is not mistaken for a signature mismatch and answered with
+    a second teardown.
     """
     try:
         slot_key = narrator_slot_key(run_id)
@@ -328,7 +360,11 @@ async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bo
     except Exception:  # noqa: BLE001
         pass
     try:
-        await sessions.discard_conversation(_history_key_for(slot_key))
+        history_key = _history_key_for(slot_key)
+        if _accepts_replay(sessions.discard_conversation):
+            await sessions.discard_conversation(history_key, replay=False)
+        else:
+            await sessions.discard_conversation(history_key)
     except Exception:  # noqa: BLE001
         return False
     return True

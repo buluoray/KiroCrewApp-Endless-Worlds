@@ -58,6 +58,18 @@ class FakeSlot:
 class FakeSessions:
     def __init__(self):
         self.discarded: list[str] = []
+        self.replays: list[bool] = []
+
+    async def discard_conversation(self, key: str, *, replay: bool = True) -> None:
+        self.discarded.append(key)
+        self.replays.append(replay)
+
+
+class LegacyFakeSessions:
+    """A core build predating the ``replay`` knob (#5736)."""
+
+    def __init__(self):
+        self.discarded: list[str] = []
 
     async def discard_conversation(self, key: str) -> None:
         self.discarded.append(key)
@@ -297,6 +309,50 @@ def test_reset_discards_through_the_live_manager(store, run, monkeypatch):
     assert state.sessions.discarded == [key]
     assert store.briefed_slot(run) == "", "a discarded conversation must re-brief"
     assert key in state.slots, "the tab (slot) survives a conversation reset"
+    assert state.sessions.replays == [False], (
+        "replay must be suppressed: clearing the resume pointer is exactly what "
+        "makes core's next cold start rebuild the discarded transcript as a "
+        "[CONVERSATION HISTORY] block, so a reset that leaves replay on hands the "
+        "fresh narrator a reconstruction of the pages it just forgot"
+    )
+
+
+def test_reset_still_runs_on_a_core_without_the_replay_knob(store, run, monkeypatch):
+    """``replay`` only exists on core builds carrying the conversation-reset knob.
+
+    On an older one the reset must still happen — with replay, which is the old
+    behaviour — rather than raising a TypeError the caller reads as a failed reset.
+    """
+    import types
+
+    fake = types.ModuleType("kiro_crew.dashboard.chat_utils")
+    fake._history_key_for = lambda key: key
+    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", fake)
+
+    state = FakeState()
+    state.sessions = LegacyFakeSessions()
+    ensure_narrator_slot_ex(state, run)
+    key = narrator_slot_key(run)
+    done = asyncio.run(reset_narrator_conversation(state, store, run))
+    assert done, "a core without the knob must still get its conversation reset"
+    assert state.sessions.discarded == [key]
+
+
+def test_a_kwargs_forwarding_manager_is_offered_the_knob():
+    """A ``**kwargs`` signature forwards, so it must be treated as accepting it —
+    otherwise a wrapper around core silently downgrades every reset to replay-on."""
+    from narrator import _accepts_replay
+
+    async def forwards(key, **kw):  # pragma: no cover - signature only
+        ...
+
+    async def positional_only(key):  # pragma: no cover - signature only
+        ...
+
+    assert _accepts_replay(forwards)
+    assert not _accepts_replay(positional_only)
+    # Unintrospectable degrades to the pre-knob call rather than raising.
+    assert not _accepts_replay(object())
 
 
 def test_reset_survives_a_missing_runtime(store, run):
