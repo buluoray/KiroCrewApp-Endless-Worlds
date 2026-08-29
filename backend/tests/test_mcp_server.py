@@ -1250,6 +1250,38 @@ def test_a_double_encoded_choices_array_is_recovered_not_refused(app):
     assert [c["label"] for c in committed] == ["逃跑", "反击"]
 
 
+def test_a_double_encoded_single_choice_is_recovered_not_shown_as_json(app):
+    """Observed live (run 38efc26…, turn 16): the array arrived as an array but ONE
+    element was a JSON string of the choice object, so the bare-caption salvage put
+    the raw `{"id": ..., "label": ...}` text on the button and the player read a bug.
+    The element is parsed back, so its own label and id survive."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="p",
+        state={"worldId": "w"},
+        choices=[
+            {"id": "flee", "label": "逃跑"},
+            '{"id": "ask-ready", "label": "我问祖父,到底什么算准备好了"}',
+            "大声呼救",
+        ],
+    )
+    assert out["ok"] is True and out["committed"] is True
+    committed = store.read_chronicle(run)[-1]["choices"]
+    assert [c["label"] for c in committed] == [
+        "逃跑",
+        "我问祖父,到底什么算准备好了",
+        "大声呼救",
+    ]
+    # The recovered element keeps its OWN id rather than the synthesized `c1`.
+    assert [c["id"] for c in committed] == ["flee", "ask-ready", "c2"]
+    # No button caption may still be raw JSON.
+    assert not any(c["label"].lstrip().startswith("{") for c in committed)
+
+
 def test_choice_captions_are_salvaged_from_common_alias_keys(app):
     """Observed live: a narrator sent `text` captions and every entry was silently
     dropped, turning into a choices-required refusal for a field it DID send.

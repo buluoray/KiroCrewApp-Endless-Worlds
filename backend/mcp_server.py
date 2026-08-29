@@ -1070,10 +1070,17 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
     choice_effects = bool(cfg["choiceEffects"])
     out: list[Any] = []
     for i, c in enumerate(choices):
-        # A bare string IS a caption: a narrator that sends ["逃跑", "反击"] has
-        # answered the question the schema asks, just not in the dict shape.
         if isinstance(c, str) and c.strip():
-            c = {"label": c}
+            # A single choice is sometimes double-encoded — the array arrives as an
+            # array, but one ELEMENT is a JSON string of the object. Parse that back
+            # first, because the bare-caption salvage below would otherwise put the
+            # raw `{"id": ..., "label": ...}` text on the button, which the player
+            # reads as a bug and cannot act on. Same recovery `state`/`memory` and
+            # the whole `choices` array already get, at the element level.
+            decoded = _lenient_json_object(c)
+            # A bare string IS a caption: a narrator that sends ["逃跑", "反击"] has
+            # answered the question the schema asks, just not in the dict shape.
+            c = decoded if decoded is not None else {"label": c}
         if not isinstance(c, dict):
             continue
         label = next(
