@@ -41,6 +41,15 @@ but never import each other; `drafts.py` is stdlib-only.
   — dotted paths, comparisons, and `and`/`or`/`not`, no calls — and the gate enforces
   that separately (`test_a_when_expression_with_a_function_call_is_refused`).
 
+- **A lore entry is asked for its reader-facing fields, because the lore list is also
+  the player's encyclopedia.** `view.world_detail` falls back to an entry's `id` for
+  its heading and buckets a category-less entry under "other", and an `id` is a latin
+  slug by contract — so a brief that documented only `id`/`keys`/`text` produced a
+  Chinese world whose setting page read `holy-reveal`, `official-orgs`. The brief now
+  asks for `name` and `category` (and optionally `summary`) in the world's own
+  language and states that consequence, and
+  `test_the_brief_asks_for_the_reader_facing_lore_fields` pins their presence.
+
 - **The cleaning contract treats a thin idea as a commission and always reports what
   it dropped.** `CLEANING_CONTRACT` orders the agent to strip or rewrite unplayable
   content (ASCII maps, dice math, real-time or multiplayer rules, external links),
@@ -76,6 +85,14 @@ but never import each other; `drafts.py` is stdlib-only.
   as a diagnostic, while leaving ordinary siblings alone.
   `test_a_near_miss_path_is_warned_about_not_rejected` and
   `test_ordinary_sibling_paths_do_not_warn` pin both directions.
+
+- **An unnamed lore entry is warned about rather than repaired.** `_flag_unnamed_lore`
+  runs on every accepted header and lists the ids of lore entries with no `name`,
+  because that is what a reader will see in place of a title. It deliberately invents
+  nothing: a slug cannot be turned back into the world's language, so the only honest
+  move is to surface the gap in the review where the brief's instruction can be
+  repeated. `test_a_lore_entry_with_no_display_name_is_warned_about` and
+  `test_a_named_lore_entry_stays_quiet` pin both directions.
 
 - **Ids are auto-normalized, and their `when` references follow.** `_normalize_ids`
   slugifies only *declared* ids (camelCase → hyphen via `_slugify`), then
