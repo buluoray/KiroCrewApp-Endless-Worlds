@@ -152,7 +152,7 @@ def aggregate(
         step = str(row.get("step") or "")
         if step == "commit":
             entry = turns.setdefault(turn, {"turn": turn})
-            for key in ("storyMs", "readMs", "form", "declaredBytes", "toolCalls", "at"):
+            for key in ("storyMs", "readMs", "form", "declaredBytes", "toolCalls", "tools", "at"):
                 if key in row:
                     entry[key] = row[key]
         elif step == "context":

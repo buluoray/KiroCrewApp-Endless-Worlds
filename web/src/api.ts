@@ -671,6 +671,10 @@ export type PerfTurn = {
   storyMs?: number
   readMs?: number
   toolCalls?: number
+  /** The names behind `toolCalls`, in call order. Shorter than the count when a
+   * runaway turn hit the recorder's per-turn cap, and absent on turns committed
+   * before the trail was recorded at all. */
+  tools?: string[]
   form?: 'patch' | 'full'
   declaredBytes?: number
   artMs?: number

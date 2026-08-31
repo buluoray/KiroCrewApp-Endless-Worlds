@@ -1611,6 +1611,13 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
             storyMs=int((now - asked_at) * 1000) if asked_at else None,
             readMs=int((read_at - asked_at) * 1000) if asked_at and read_at >= asked_at else None,
             toolCalls=int(asked.get("steps") or 0) or None,
+            # The sequence behind that count, and the only copy that lasts: the
+            # turn loop clears the in-flight record once it observes this landing
+            # (``turn.py``), and the next month's ``mark_pending`` would overwrite
+            # it regardless — so a turn's tool trail exists permanently in this
+            # row or nowhere. The names are re-read defensively because the
+            # record is JSON on disk.
+            tools=[t for t in (asked.get("tools") or []) if isinstance(t, str)] or None,
             form="patch" if isinstance(patch, dict) else "full",
             declaredBytes=len(
                 json.dumps(patch if isinstance(patch, dict) else args.get("state"), default=str)

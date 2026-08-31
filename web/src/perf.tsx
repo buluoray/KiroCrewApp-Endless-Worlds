@@ -137,6 +137,24 @@ function Stages({ runId, row }: { runId: string; row: PerfTurn }) {
       ? row.storyMs - row.readMs
       : undefined
 
+  /* What the narrator actually called, in order — the answer to the question
+     `toolCalls` raises but cannot settle: not how many calls, but whether it
+     wrote without reading first, painted twice, or never reached the commit.
+
+     Named through the SAME lookup the art lane uses, so one event is not
+     "published" two lines above and `commit_backdrop` here; the lookup's
+     fallback keeps a tool this page has no word for yet literal instead of
+     inventing a label that would make two steps read alike.
+
+     Rendered as a sequence rather than in the art lane's step/duration shape,
+     because no per-call timing is recorded — borrowing that shape would promise
+     a number the ledger does not have. `clipped` is derived from the count
+     rather than from a stored flag: the recorder caps the trail and leaves the
+     count whole precisely so the difference is the truncation signal. */
+  const trail = row.tools ?? []
+  const clipped =
+    row.toolCalls !== undefined && row.toolCalls > trail.length ? row.toolCalls - trail.length : 0
+
   /* Each fact names the catalog key it came from, and whether that key is one of
      the columns a phone drops (`NARROW_HIDDEN`). Derived from the one list rather
      than hand-marked, and hidden above the breakpoint by the stylesheet rather
@@ -185,6 +203,15 @@ function Stages({ runId, row }: { runId: string; row: PerfTurn }) {
             <span className="ew-perf-took">{ms(wrote)}</span>
           </li>
         </ul>
+        {trail.length ? (
+          <div className="ew-perf-trail">
+            <span className="ew-perf-traillabel">{t('perf.trail')}</span>
+            <span className="ew-perf-trailseq">
+              {trail.map((name) => stageLabel(`tool:${name}`)).join(' → ')}
+              {clipped ? ` → ${t('perf.trailMore', { count: clipped })}` : ''}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="ew-perf-lane">

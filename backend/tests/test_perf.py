@@ -111,6 +111,7 @@ def test_aggregate_joins_both_writers_and_the_art_lane():
             "form": "patch",
             "declaredBytes": 300,
             "toolCalls": 4,
+            "tools": ["endless_read_runtime", "endless_advance_turn"],
         },
         {"turn": 2, "step": "context", "at": 51.0, "pct": 37, "usedTokens": 74000},
         {"turn": 3, "step": "rotation", "at": 60.0, "reason": "chapter"},
@@ -125,6 +126,10 @@ def test_aggregate_joins_both_writers_and_the_art_lane():
     two = out[0]
     assert two["storyMs"] == 42000 and two["pct"] == 37 and two["usedTokens"] == 74000
     assert two["artMs"] == 25000 and two["outcome"] == "committed"
+    assert two["tools"] == ["endless_read_runtime", "endless_advance_turn"], (
+        "the trail has to reach the reader — left out of the projection it is "
+        "written to disk every turn and visible to nobody"
+    )
     assert out[1]["rotation"] == "chapter"
 
 
@@ -323,3 +328,47 @@ def test_usage_rows_helper_swallows_a_failing_reader(monkeypatch):
     fake.slot_turn_usage = boom
     monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
     assert routes._usage_rows_for("some-life") == []
+
+
+# ── the page: the trail has to be readable, in both languages ───────────────
+
+
+def test_every_string_the_perf_page_asks_for_exists_in_both_tables():
+    """A key present in one table renders as the key itself for the other
+    language — visible, but only to whoever plays in it."""
+    import re
+
+    from uisrc import WEB_SRC, module
+
+    keys = set(re.findall(r"t\('([\w.]+)'", module("perf.tsx")))
+    assert keys, "the perf page hardcodes its text instead of looking it up"
+    root = WEB_SRC / "strings"
+    en = json.loads((root / "en.json").read_text(encoding="utf-8"))
+    zh = json.loads((root / "zh.json").read_text(encoding="utf-8"))
+    assert not (keys - set(en)), f"missing from en.json: {sorted(keys - set(en))}"
+    assert not (keys - set(zh)), f"missing from zh.json: {sorted(keys - set(zh))}"
+
+
+def test_the_trail_is_named_with_the_same_lookup_as_the_art_lane():
+    """One event must not be "published" in one lane and ``commit_backdrop`` in
+    the other, so the trail goes through ``stageLabel`` rather than printing the
+    raw names — and it prefixes ``tool:`` because that is the shape that lookup
+    keys on."""
+    from uisrc import module
+
+    src = module("perf.tsx")
+    assert "stageLabel(`tool:${name}`)" in src, (
+        "the trail is rendering raw tool names, which renames events the art "
+        "lane already has words for"
+    )
+
+
+def test_the_clip_marker_is_derived_from_the_count_not_a_stored_flag():
+    """The recorder caps the trail and leaves the count whole precisely so the
+    difference IS the truncation signal. Reading a flag instead would add a
+    second field that can disagree with the first."""
+    from uisrc import module
+
+    src = module("perf.tsx")
+    assert "row.toolCalls > trail.length" in src
+    assert "truncated" not in src, "a stored clip flag has no business here"

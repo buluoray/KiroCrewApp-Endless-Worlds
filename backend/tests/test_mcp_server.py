@@ -1434,3 +1434,39 @@ def test_choice_decoration_switches_strip_art_and_effects(app):
     assert "art" not in stored and "effect" not in stored and "tint" not in stored
     # The choice itself always survives its decoration.
     assert stored["label"] == "I open the door" and stored["fateful"] is True
+
+
+# -- the tool trail outlives the record it was collected on ----------------
+
+
+def test_a_committed_turn_keeps_its_tool_trail_after_the_record_is_cleared(app):
+    """End to end, because the in-flight record proves nothing about durability.
+
+    The record does not survive the month: the turn loop clears it once it
+    observes the landing, and the next month's ``mark_pending`` would overwrite
+    it regardless. So the perf row is the trail's only durable home, and reading
+    the ledger AFTER the record is gone is the only way to see the fold happened.
+    """
+    from perf import TurnPerf
+
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.mark_pending(run, turn=2, slot="s")
+
+    call("endless_read_runtime", runId=run)
+    call(
+        "endless_advance_turn",
+        runId=run,
+        turn=2,
+        prose="a",
+        state={"v": 1},
+        choices=[{"id": "go", "label": "go on"}],
+    )
+
+    store.clear_pending(run)  # what the turn loop does once it sees the landing
+    assert store.read_pending(run) is None
+
+    commits = [r for r in TurnPerf(app, run).rows() if r.get("step") == "commit"]
+    assert commits, "no commit row means the trail was never written anywhere"
+    assert commits[-1]["tools"] == ["endless_read_runtime", "endless_advance_turn"]
+    assert commits[-1]["toolCalls"] == 2, "the count and the trail must agree"

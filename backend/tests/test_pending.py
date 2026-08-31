@@ -645,3 +645,63 @@ def test_the_page_release_and_the_waiting_state_read_one_ceiling():
         "routes restates the backdrop ceiling instead of importing it; the two can "
         "drift apart again and re-freeze a life"
     )
+
+
+# ── the tool trail: which calls, in what order ──────────────────────────────
+#
+# ``toolCalls`` already answered "how many". It cannot answer the question a
+# turn that went wrong actually raises: whether the narrator wrote without
+# reading first, painted twice, or never reached advance_turn at all. The trail
+# lives on the in-flight record and is folded into the turn's perf row at
+# commit, because ``clear_pending`` is moments away and this is the only copy.
+
+
+def test_the_tools_are_recorded_in_the_order_they_were_called(store, run):
+    store.mark_pending(run, turn=1, slot="s")
+    for tool in ("endless_read_runtime", "endless_paint_backdrop", "endless_advance_turn"):
+        store.note_tool_call(run, tool)
+
+    pending = store.read_pending(run)
+    assert pending["tools"] == [
+        "endless_read_runtime",
+        "endless_paint_backdrop",
+        "endless_advance_turn",
+    ], "order is the whole point — a set or a count would answer a different question"
+    assert pending["steps"] == 3
+    assert pending["lastTool"] == "endless_advance_turn", "the play page's field is untouched"
+
+
+def test_a_looping_narrator_is_capped_and_the_count_still_tells_the_truth(store, run):
+    """The cap needs no companion flag: a trail shorter than the count IS the
+    truncation signal, so the two fields must not be capped together."""
+    from store import _MAX_TURN_TOOLS
+
+    store.mark_pending(run, turn=1, slot="s")
+    for _ in range(_MAX_TURN_TOOLS + 5):
+        store.note_tool_call(run, "endless_read_runtime")
+
+    pending = store.read_pending(run)
+    assert len(pending["tools"]) == _MAX_TURN_TOOLS
+    assert pending["steps"] == _MAX_TURN_TOOLS + 5, (
+        "capping the count too would erase the only evidence that the trail is "
+        "partial, and would understate a runaway turn"
+    )
+
+
+def test_a_junk_trail_on_disk_is_replaced_rather_than_trusted(store, run):
+    """The record is JSON on disk. A hand-edited or half-written one must not be
+    able to raise inside the tool this is counting."""
+    store.mark_pending(run, turn=1, slot="s")
+    store.note_tool_call(run, "endless_read_runtime")
+    poisoned = store.read_pending(run)
+    poisoned["tools"] = "not a list"
+    store._kv.set(store._pending_key(run), poisoned)
+
+    store.note_tool_call(run, "endless_advance_turn")
+    assert store.read_pending(run)["tools"] == ["endless_advance_turn"]
+
+
+def test_a_call_outside_a_turn_leaves_no_trail(store, run):
+    """Unchanged from the count's own rule: no pending turn, nothing to advance."""
+    store.note_tool_call(run, "endless_read_runtime")
+    assert store.read_pending(run) is None

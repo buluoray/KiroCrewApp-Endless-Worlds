@@ -187,6 +187,8 @@
   "perf.caption": "「{name}」每个回合的耗时与用量",
   "perf.openStages": "看阶段明细",
   "perf.toolCalls": "工具调用",
+  "perf.trail": "调用顺序",
+  "perf.trailMore": "另有 {count} 次",
   "perf.model": "模型",
   "perf.laneStory": "故事阶段",
   "perf.laneArt": "画图阶段",
