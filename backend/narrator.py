@@ -240,6 +240,42 @@ def release_narrator_slot(state: Any, run_id: str) -> bool:
     return True
 
 
+def _accepts_replay(fn: Any) -> bool:
+    """Whether core's ``discard_conversation`` takes the ``replay`` keyword.
+
+    A ``**kwargs`` signature counts: it forwards. Anything unintrospectable
+    answers False, which degrades to the pre-knob call rather than raising.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    if "replay" in params:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
+async def _suppress_next_replay(sessions: Any, key: str) -> None:
+    """Tell core that *key*'s next cold start must begin EMPTY.
+
+    Core arms that one-shot flag from exactly one place — ``discard_conversation``
+    with ``replay=False`` — so a teardown that took any other route has to come
+    back through this one to set it. Here the teardown has already happened, which
+    makes every other effect of the call inert: the live session was popped by
+    ``remove``, the map row by ``forget_conversation``, and the subagent-runtime
+    reap is a pop of something already gone. The flag is the whole point.
+
+    Best-effort by contract: this only ever spares the fresh narrator a
+    reconstruction it should not see, so a failure must not turn a purge that
+    otherwise succeeded into a reported failure.
+    """
+    try:
+        if _accepts_replay(sessions.discard_conversation):
+            await sessions.discard_conversation(key, replay=False)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def purge_narrator_session(state: Any, run_id: str) -> bool:
     """Delete the narrator's persisted conversation when a life is deleted.
 
@@ -248,6 +284,27 @@ async def purge_narrator_session(state: Any, run_id: str) -> bool:
     sequence mirrors the dashboard's own permanent-delete: shut the session down
     (``sessions.remove`` preserves the files for resume), forget its map entry to
     get the session id, then unlink that id's transcript files.
+
+    Then suppress the next cold start's replay, for the reason spelled out on
+    ``reset_narrator_conversation``: a cleared resume pointer is precisely what
+    makes core rebuild the transcript from its OWN conversation log as a
+    ``[CONVERSATION HISTORY]`` block, and that log is a separate artifact this
+    function never touches — ``_unlink_layer_b_files`` removes kiro-cli's copy,
+    not core's. Without the suppression a build swap tore the conversation down
+    and was handed a reconstruction of it on the very next turn, which is what
+    made an updated app look like it had never reset at all.
+
+    Two orderings here are load-bearing, and both fail silently if reversed.
+    The suppression must follow ``remove``, which DISCARDS that same flag (it is
+    clearing a stale one, correctly, for a session it expects to resume) — armed
+    first, it would be wiped by the next line. And it must follow
+    ``forget_conversation``, which is the only read of the session id: the
+    suppressing call ends in ``clear_sid``, so arming earlier would blank the id
+    whose files this is here to unlink.
+
+    Armed before the no-id early return, because a missing id does not mean a
+    missing replay. Core's log is keyed by the session key, not by that id, so a
+    run whose pointer was already gone still has a transcript to be handed back.
 
     Best-effort and fully guarded: a runtime without a session store, a missing
     dashboard import (as in unit tests), a bad id, or any per-step failure is a
@@ -277,6 +334,7 @@ async def purge_narrator_session(state: Any, run_id: str) -> bool:
         sid = sessions.forget_conversation(key) or ""
     except Exception:  # noqa: BLE001
         pass
+    await _suppress_next_replay(sessions, key)
     if not sid:
         return False
     try:
@@ -284,21 +342,6 @@ async def purge_narrator_session(state: Any, run_id: str) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return True
-
-
-def _accepts_replay(fn: Any) -> bool:
-    """Whether core's ``discard_conversation`` takes the ``replay`` keyword.
-
-    A ``**kwargs`` signature counts: it forwards. Anything unintrospectable
-    answers False, which degrades to the pre-knob call rather than raising.
-    """
-    try:
-        params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return False
-    if "replay" in params:
-        return True
-    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bool:
