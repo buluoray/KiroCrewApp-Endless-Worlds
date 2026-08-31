@@ -54,6 +54,7 @@ GOOD = {
         {
             "id": "status",
             "always": True,
+            "region": "status",
             "fields": [
                 {"id": "age", "label": "年龄", "primitive": "field"},
                 {"id": "renown", "label": "声望", "primitive": "stat", "min": 0, "max": 100},
@@ -62,6 +63,7 @@ GOOD = {
         {
             "id": "magic",
             "when": "state.magic.awakened == true",
+            "region": "world",
             "fields": [
                 {"id": "mana", "label": "魔力", "primitive": "stat"},
             ],
@@ -257,10 +259,27 @@ def test_the_brief_states_the_load_bearing_prohibitions() -> None:
 
 
 def test_the_brief_asks_for_the_reader_facing_lore_fields() -> None:
-    """`view.summarize` falls back to a lore entry's slug id for its heading, so a
+    """`view.world_detail` falls back to a lore entry's slug id for its heading, so a
     brief that documents only id/keys/text produces an encyclopedia of raw slugs."""
     for field in ("name", "category", "summary"):
         assert f'"{field}"' in COMPILER_BRIEF, f"brief omits the lore field {field}"
+
+
+def test_the_brief_asks_for_every_field_the_parser_reads_and_a_player_sees() -> None:
+    """The brief is a prompt: a field it does not name is a field the worldsmith has no
+    reason to emit, and nothing else fails. A generated world came back with every
+    documented field filled and only the undocumented ones empty — `region`, so not one
+    panel had a phone tab, and `relations`, so no setting entry had an edge. `spoiler`
+    stays deliberately absent: a reached milestone is shown whether or not it is
+    marked, so asking for it would buy nothing.
+    """
+    for field in ("region", "relations"):
+        assert field in COMPILER_BRIEF, f"brief omits the player-visible field {field}"
+    for region in ("status", "world", "pack", "tasks"):
+        assert f'"{region}"' in COMPILER_BRIEF, (
+            f"brief omits the canonical region {region}, one of the only four that get a "
+            "localized bar label"
+        )
 
 
 # -- preview --------------------------------------------------------------
@@ -468,6 +487,88 @@ def test_a_named_lore_entry_stays_quiet() -> None:
     res = accept_compiled_header(PROSE, h)
     assert res.ok is True, res.problem
     assert not any("no display name" in w for w in res.warnings)
+
+
+def test_a_lore_entry_with_no_category_is_warned_about() -> None:
+    """Named but uncategorized still collapses the encyclopedia into one bucket."""
+    h = json.loads(json.dumps(GOOD))
+    h["lore"] = [
+        {"id": "riverport", "name": "Riverport", "keys": ["Riverport"], "text": "A trade city."}
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert any("no category" in w and "riverport" in w for w in res.warnings)
+
+
+def test_a_role_with_no_display_name_is_warned_about() -> None:
+    """A role's name labels a button in character creation, and `world_detail`
+    falls back to the slug there exactly as it does for lore."""
+    h = json.loads(json.dumps(GOOD))
+    h["roles"] = [{"id": "hedge-knight", "summary": "Sworn to no house."}]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert any("roles with no display name" in w and "hedge-knight" in w for w in res.warnings)
+
+
+def test_a_panel_with_no_region_is_warned_about() -> None:
+    """`tabbar.buildTabs` skips an untagged panel outright, so it grows no phone
+    tab — a silent loss of the narrow layout, not a neutral default."""
+    h = json.loads(json.dumps(GOOD))
+    del h["panels"][1]["region"]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert any("no region" in w and "magic" in w for w in res.warnings)
+
+
+def test_tiers_without_a_tier_into_are_warned_about() -> None:
+    """`systems.apply_systems` only derives a rank when BOTH tiers and tierInto are
+    present, so a tier table alone is wholly inert."""
+    h = json.loads(json.dumps(GOOD))
+    h["systems"] = [
+        {
+            "id": "xp",
+            "kind": "accrual",
+            "into": "state.hero.xp",
+            "tiers": [{"at": 0, "name": "Novice"}],
+        }
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert any("tierInto" in w and "xp" in w for w in res.warnings)
+
+
+def test_an_unnamed_tier_is_warned_about() -> None:
+    """`_tier_name` returns '' for a nameless tier and `apply_systems` then writes
+    nothing, so the rank field silently never moves."""
+    h = json.loads(json.dumps(GOOD))
+    h["systems"] = [
+        {
+            "id": "xp",
+            "kind": "accrual",
+            "into": "state.hero.xp",
+            "tierInto": "state.hero.rank",
+            "tiers": [{"at": 0, "name": "Novice"}, {"at": 10}],
+        }
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert any("tier with no name" in w and "xp" in w for w in res.warnings)
+
+
+def test_a_fully_declared_system_stays_quiet() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["systems"] = [
+        {
+            "id": "xp",
+            "kind": "accrual",
+            "into": "state.hero.xp",
+            "tierInto": "state.hero.rank",
+            "tiers": [{"at": 0, "name": "Novice"}, {"at": 10, "name": "Adept"}],
+        }
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert not any("tier" in w.lower() for w in res.warnings)
 
 
 def test_a_bad_system_entry_is_dropped_and_the_good_one_survives() -> None:

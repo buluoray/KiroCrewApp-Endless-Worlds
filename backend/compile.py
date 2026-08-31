@@ -98,6 +98,16 @@ REQUIRED FIELDS
               that is the status bar shown at all times. Every other panel needs a
               "when" expression instead. Each field is
               {{ "id", "label", "primitive" }}.
+              ALSO give each panel a "region" — the phone tab it lives behind.
+              Prefer one of the four canonical ids, which get a localized short bar
+              label in every language: "status" (the life itself), "world" (the world
+              around it), "pack" (what the life carries), "tasks" (what is open). A
+              world's own word is allowed and takes the panel's own label on the bar,
+              but the bar holds six tabs before the tail folds away, so reach for a
+              custom region only when none of the four fits. A panel with NO region
+              gets no phone tab at all — it is reachable only inside the reading
+              drawer — so leaving it off is a real loss of the phone layout, not a
+              neutral default.
   endings     conditions that finish a life. Each {{ "id", "when" }}.
   milestones  OPTIONAL named achievements — a long-play hook. Each
               {{ "id", "label", "when" }} (the same `when` language as endings and
@@ -137,7 +147,11 @@ REQUIRED FIELDS
               world's own groupings (力量体系 / 势力 / 地点 / 人物, or Factions /
               Places / People) and reuse the same spelling across entries so they
               group. `summary` is one optional line shown before the body is
-              expanded.
+              expanded. An entry may also carry
+              `"relations": [{{ "to": "<other lore id>", "label"?: ... }}]`, drawn
+              under it as a small edge list — use it for the ties that make a setting
+              a web rather than a glossary (an order that serves a house, a city that
+              fell to a force), with `label` in the world's language.
   systems     OPTIONAL mechanics the APP runs for you, so the narrator never does
               arithmetic. Each {{ "id", "kind", "into" }} where kind is one of
               {{accrual, resource, decay, unlock}} and `into` is the `state.…` path the
@@ -858,30 +872,60 @@ def _salvage_optional_lists(body: dict[str, Any], prose: str, warnings: list[str
         if key == "systems":
             good = _dedup_system_targets(good, warnings)
         body[key] = good
-    _flag_unnamed_lore(body.get("lore"), warnings)
+    _flag_display_gaps(body, warnings)
 
 
-def _flag_unnamed_lore(lore: Any, warnings: list[str]) -> None:
-    """Report lore entries with no reader-facing ``name``.
-
-    A lore list is the player's encyclopedia as well as the narrator's lorebook, and
-    ``view.summarize`` falls back to the entry's ``id`` for its heading. An id is a
-    latin slug by contract, so a missing name silently renders as ``holy-reveal`` to a
-    reader of a Chinese world. Nothing can be inferred here — a slug cannot be turned
-    back into the world's language — so this only surfaces the gap in the review.
-    """
-    if not isinstance(lore, list):
-        return
-    missing = [
+def _ids_missing(entries: Any, field: str) -> list[str]:
+    """The ids of entries whose ``field`` is absent or blank."""
+    if not isinstance(entries, list):
+        return []
+    return [
         str(e.get("id") or "?")
-        for e in lore
-        if isinstance(e, dict) and not str(e.get("name") or "").strip()
+        for e in entries
+        if isinstance(e, dict) and not str(e.get(field) or "").strip()
     ]
-    if missing:
+
+
+def _flag_display_gaps(body: dict[str, Any], warnings: list[str]) -> None:
+    """Report declarations the PLAYER sees that were left without their reader-facing
+    half, and declarations that can never fire.
+
+    None of these are repairable and none are errors — the world parses and plays.
+    They are reported because they are invisible everywhere else: a heading falls back
+    to a slug (``view.world_detail`` renders ``name or id``, and an id is a latin slug
+    by contract, so a Chinese world reads ``holy-reveal``), an untagged panel simply
+    grows no phone tab, and a tier that cannot name a rank silently never writes one.
+    Inventing the missing half would be worse than naming the gap: a slug cannot be
+    turned back into the world's language, and only the world knows which tab a panel
+    belongs behind.
+    """
+    for key, noun in (("lore", "lore entries"), ("roles", "roles")):
+        missing = _ids_missing(body.get(key), "name")
+        if missing:
+            warnings.append(
+                f"{noun} with no display name, shown to the player as their raw id: "
+                + ", ".join(missing)
+            )
+
+    uncategorized = _ids_missing(body.get("lore"), "category")
+    if uncategorized:
         warnings.append(
-            "lore entries with no display name, shown to the player as their raw id: "
-            + ", ".join(missing)
+            'lore entries with no category, filed under "other" together: '
+            + ", ".join(uncategorized)
         )
+
+    untagged = _ids_missing(body.get("panels"), "region")
+    if untagged:
+        warnings.append("panels with no region, which get no phone tab: " + ", ".join(untagged))
+
+    for s in body.get("systems") or []:
+        if not isinstance(s, dict) or not isinstance(s.get("tiers"), list) or not s["tiers"]:
+            continue
+        sid = str(s.get("id") or "?")
+        if not str(s.get("tierInto") or "").strip():
+            warnings.append(f"system {sid!r} declares tiers but no tierInto, so no rank is written")
+        elif any(not str(t.get("name") or "").strip() for t in s["tiers"] if isinstance(t, dict)):
+            warnings.append(f"system {sid!r} has a tier with no name, which writes no rank")
 
 
 def _salvage_header(mapping: dict[str, Any], prose: str) -> tuple[dict[str, Any], list[str]]:
