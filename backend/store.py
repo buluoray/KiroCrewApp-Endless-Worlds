@@ -35,6 +35,14 @@ _RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 _INDEX_KEY = "index"
 
+#: How many tool names one in-flight turn keeps IN ORDER for its audit trail.
+#:
+#: A month is two or three calls, so this cap binds only on a narrator that
+#: looped. It needs no companion "truncated" flag: the count is tracked
+#: separately and is authoritative, so a row whose recorded sequence is shorter
+#: than its count is telling you it was clipped.
+_MAX_TURN_TOOLS = 40
+
 
 class StoreError(RuntimeError):
     """Raised for a caller mistake — bad run id, missing run, corrupt record."""
@@ -348,12 +356,30 @@ class RunStore:
         show one undifferentiated spinner. Only counts while a pending record
         exists — a call outside a turn has no turn to advance — and never raises:
         progress bookkeeping must not fail the tool it is counting.
+
+        The names are also kept IN ORDER, because a count cannot answer the
+        question a turn that went wrong actually raises: not how many calls there
+        were, but which ones and in what order — a narrator that wrote without
+        reading first, or painted twice, or never reached ``advance_turn`` at all.
+        The commit folds this list into the turn's permanent perf row, which is
+        what makes it outlive ``clear_pending``; ``lastTool`` stays as it was,
+        because the play page only ever renders the current one.
+
+        A stored value that is not a list is replaced rather than trusted: the
+        record is JSON on disk, and a hand-edited or half-written one must not be
+        able to make an append raise inside the tool it is counting.
         """
         _check_run_id(run_id)
         pending = self.read_pending(run_id)
         if isinstance(pending, dict):
             pending["steps"] = int(pending.get("steps") or 0) + 1
             pending["lastTool"] = str(tool)
+            seq = pending.get("tools")
+            if not isinstance(seq, list):
+                seq = []
+            if len(seq) < _MAX_TURN_TOOLS:
+                seq.append(str(tool))
+            pending["tools"] = seq
             self._kv.set(self._pending_key(run_id), pending)
 
     # -- narrator installation generation ---------------------------------

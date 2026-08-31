@@ -111,6 +111,7 @@ def test_aggregate_joins_both_writers_and_the_art_lane():
             "form": "patch",
             "declaredBytes": 300,
             "toolCalls": 4,
+            "tools": ["endless_read_runtime", "endless_advance_turn"],
         },
         {"turn": 2, "step": "context", "at": 51.0, "pct": 37, "usedTokens": 74000},
         {"turn": 3, "step": "rotation", "at": 60.0, "reason": "chapter"},
@@ -125,6 +126,10 @@ def test_aggregate_joins_both_writers_and_the_art_lane():
     two = out[0]
     assert two["storyMs"] == 42000 and two["pct"] == 37 and two["usedTokens"] == 74000
     assert two["artMs"] == 25000 and two["outcome"] == "committed"
+    assert two["tools"] == ["endless_read_runtime", "endless_advance_turn"], (
+        "the trail has to reach the reader — left out of the projection it is "
+        "written to disk every turn and visible to nobody"
+    )
     assert out[1]["rotation"] == "chapter"
 
 
