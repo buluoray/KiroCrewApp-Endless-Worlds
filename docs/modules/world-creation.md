@@ -14,7 +14,7 @@ but never import each other; `drafts.py` is stdlib-only.
 
 | Path | What it is |
 |---|---|
-| `backend/compile.py` | the compile gate — `COMPILER_BRIEF` and `CLEANING_CONTRACT` (instructions to the worldsmith), `accept_compiled_header` (the validation gate), `_normalize_ids`/`_rewrite_when` (id repair), `_suspicious_paths` (near-miss warnings), and `preview` (the player-facing review) |
+| `backend/compile.py` | the compile gate — `COMPILER_BRIEF` and `CLEANING_CONTRACT` (instructions to the worldsmith), `accept_compiled_header` (the validation gate), `_normalize_ids`/`_rewrite_when` (id repair), `_suspicious_paths` (near-miss warnings), `_flag_display_gaps` (half-written player-facing declarations), and `preview` (the player-facing review) |
 | `backend/drafts.py` | `DraftStore` — the `new → generating → ready\|failed → installed` lifecycle, id/size validation, atomic record writes, stale self-heal, and the tiny `worldsmith_prompt` |
 | `backend/world.py` | `read_world` (the hand-written validation path the gate reuses) and install/provenance stamping |
 | `backend/mcp_server.py` | the worldsmith tools (`endless_read_draft`, `endless_submit_world_draft`) that pull a draft and submit a compiled header |
@@ -49,6 +49,21 @@ but never import each other; `drafts.py` is stdlib-only.
   asks for `name` and `category` (and optionally `summary`) in the world's own
   language and states that consequence, and
   `test_the_brief_asks_for_the_reader_facing_lore_fields` pins their presence.
+
+- **A field the brief does not name is a field no generated world has.** The brief is a
+  prompt, so an omission produces no error anywhere — it produces a world that is
+  quietly missing a surface. Auditing every header key the parser reads against the
+  brief text found exactly three undocumented, and the evidence was unambiguous: in a
+  generated world every documented player-facing field came back filled (all four role
+  names, all seven tier names, all three milestone labels) and only the undocumented
+  ones were empty. `region` is now documented — `tabbar.buildTabs` *skips* an untagged
+  panel, so a world without it grows no phone tab at all — along with the four
+  canonical region ids, which are the only ones that get a localized bar label. So is
+  lore `relations`, which the setting view draws as an edge list and which no generated
+  world had ever emitted. `spoiler` stays out on purpose: a reached milestone is shown
+  whether or not it is marked, so asking for it would buy nothing and cost worldsmith
+  attention. `test_the_brief_asks_for_every_field_the_parser_reads_and_a_player_sees`
+  pins the two additions and the canonical region ids.
 
 - **The cleaning contract treats a thin idea as a commission and always reports what
   it dropped.** `CLEANING_CONTRACT` orders the agent to strip or rewrite unplayable
@@ -86,13 +101,25 @@ but never import each other; `drafts.py` is stdlib-only.
   `test_a_near_miss_path_is_warned_about_not_rejected` and
   `test_ordinary_sibling_paths_do_not_warn` pin both directions.
 
-- **An unnamed lore entry is warned about rather than repaired.** `_flag_unnamed_lore`
-  runs on every accepted header and lists the ids of lore entries with no `name`,
-  because that is what a reader will see in place of a title. It deliberately invents
-  nothing: a slug cannot be turned back into the world's language, so the only honest
-  move is to surface the gap in the review where the brief's instruction can be
-  repeated. `test_a_lore_entry_with_no_display_name_is_warned_about` and
-  `test_a_named_lore_entry_stays_quiet` pin both directions.
+- **A declaration the player sees, left half-written, is warned about rather than
+  repaired.** `_flag_display_gaps` runs on every accepted header and reports the gaps
+  nothing else can catch, because each one leaves a world that parses and plays: a
+  `lore` entry or a `role` with no `name` (`view.world_detail` renders `name or id`, and
+  a role's name also labels a button in character creation), a `lore` entry with no
+  `category` (filed under "other" with everything else), a `panel` with no `region` (no
+  phone tab), a `system` with `tiers` but no `tierInto` (wholly inert — `apply_systems`
+  needs both), and a `tier` with no `name` (`_tier_name` returns `''` and no rank is
+  written). It invents nothing, deliberately: a slug cannot be turned back into the
+  world's language, and only the world knows which tab a panel belongs behind — so the
+  honest move is to surface the gap in the review where the brief's instruction can be
+  repeated. Refusing instead would be wrong too; every one of these worlds is playable.
+  Pinned in both directions by `test_a_lore_entry_with_no_display_name_is_warned_about`,
+  `test_a_named_lore_entry_stays_quiet`,
+  `test_a_lore_entry_with_no_category_is_warned_about`,
+  `test_a_role_with_no_display_name_is_warned_about`,
+  `test_a_panel_with_no_region_is_warned_about`,
+  `test_tiers_without_a_tier_into_are_warned_about`,
+  `test_an_unnamed_tier_is_warned_about`, and `test_a_fully_declared_system_stays_quiet`.
 
 - **Ids are auto-normalized, and their `when` references follow.** `_normalize_ids`
   slugifies only *declared* ids (camelCase → hyphen via `_slugify`), then
