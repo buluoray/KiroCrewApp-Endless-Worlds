@@ -187,6 +187,8 @@
   "perf.caption": "Time and usage for each turn of: {name}",
   "perf.openStages": "see stages",
   "perf.toolCalls": "Tool calls",
+  "perf.trail": "In order",
+  "perf.trailMore": "+{count} more",
   "perf.model": "Model",
   "perf.laneStory": "Story stages",
   "perf.laneArt": "Art stages",

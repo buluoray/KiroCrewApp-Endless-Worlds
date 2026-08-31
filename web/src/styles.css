@@ -1813,6 +1813,14 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-perf-step { min-width: 0; overflow-wrap: anywhere; }
 .ew-perf-took { opacity: 0.75; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* The call trail. A chain, not a list: the reading is left-to-right order, so it
+   wraps as one run of text rather than becoming rows that invite a per-row
+   duration column the ledger cannot fill. `anywhere` because a tool this page
+   has no word for yet falls back to its raw name, which does not break. */
+.ew-perf-trail { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 6px; padding-top: 5px; border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent); font-size: 0.82rem; }
+.ew-perf-traillabel { font-weight: 600; opacity: 0.7; }
+.ew-perf-trailseq { min-width: 0; opacity: 0.85; overflow-wrap: anywhere; }
+
 /* A fact that is ALSO a column. It exists for the width where that column is
    hidden, so above the breakpoint it is the same number twice on one screen —
    the exact redundancy that makes an expansion feel like it padded itself. The
