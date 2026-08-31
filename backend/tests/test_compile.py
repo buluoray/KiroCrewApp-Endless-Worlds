@@ -256,6 +256,13 @@ def test_the_brief_states_the_load_bearing_prohibitions() -> None:
         assert rule in COMPILER_BRIEF, f"brief no longer states: {rule}"
 
 
+def test_the_brief_asks_for_the_reader_facing_lore_fields() -> None:
+    """`view.summarize` falls back to a lore entry's slug id for its heading, so a
+    brief that documents only id/keys/text produces an encyclopedia of raw slugs."""
+    for field in ("name", "category", "summary"):
+        assert f'"{field}"' in COMPILER_BRIEF, f"brief omits the lore field {field}"
+
+
 # -- preview --------------------------------------------------------------
 
 
@@ -434,6 +441,33 @@ def test_a_bad_lore_entry_is_dropped_and_the_good_one_survives() -> None:
     assert res.ok is True, res.problem
     assert [entry.id for entry in res.pack.template.lore] == ["riverport"]
     assert any("dropped lore" in w for w in res.warnings)
+
+
+def test_a_lore_entry_with_no_display_name_is_warned_about() -> None:
+    """A lore list is the player's encyclopedia, and the heading falls back to the
+    id — a latin slug by contract — so an unnamed entry reads as `riverport` to a
+    reader of a Chinese world. Nothing can be inferred, so it must be surfaced."""
+    h = json.loads(json.dumps(GOOD))
+    h["lore"] = [{"id": "riverport", "keys": ["Riverport"], "text": "A trade city."}]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert any("no display name" in w and "riverport" in w for w in res.warnings)
+
+
+def test_a_named_lore_entry_stays_quiet() -> None:
+    h = json.loads(json.dumps(GOOD))
+    h["lore"] = [
+        {
+            "id": "riverport",
+            "name": "Riverport",
+            "category": "Places",
+            "keys": ["Riverport"],
+            "text": "A trade city.",
+        }
+    ]
+    res = accept_compiled_header(PROSE, h)
+    assert res.ok is True, res.problem
+    assert not any("no display name" in w for w in res.warnings)
 
 
 def test_a_bad_system_entry_is_dropped_and_the_good_one_survives() -> None:

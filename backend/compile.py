@@ -116,7 +116,9 @@ REQUIRED FIELDS
               short world and wasteful for a long one.
   lore        OPTIONAL keyword-triggered setting entries — the lighter companion to
               chapters (a chapter gates on STATE; a lore entry gates on KEYWORDS).
-              A list of {{ "id", "keys": [...], "text": ..., "always"?: bool }}. Each
+              A list of
+              {{ "id", "name", "category", "summary"?, "keys": [...], "text": ...,
+                 "always"?: bool }}. Each
               surfaces to the narrator only when one of its `keys` (a name, place,
               faction, force) appears in the recent months or in the player's action
               — so put a recurring NAMED thing here (a character met once and seen
@@ -125,6 +127,17 @@ REQUIRED FIELDS
               world's language — it need NOT be in the rulebook prose. `always: true`
               surfaces an entry every turn; use it for a couple of ever-relevant
               facts only. An entry needs at least one key unless it is `always`.
+              ALWAYS write `name` and `category`, both in the WORLD'S OWN LANGUAGE:
+              this list is also the player's encyclopedia on the world page, where
+              `name` is the entry's heading and `category` is the section it files
+              under. `id` is a latin slug and is NEVER shown to a player, so an entry
+              without a `name` renders to the reader as its raw slug — "holy-reveal"
+              instead of "显圣机制" — and an entry without a `category` lands in an
+              "other" bucket with everything else. `category` is free-form: name the
+              world's own groupings (力量体系 / 势力 / 地点 / 人物, or Factions /
+              Places / People) and reuse the same spelling across entries so they
+              group. `summary` is one optional line shown before the body is
+              expanded.
   systems     OPTIONAL mechanics the APP runs for you, so the narrator never does
               arithmetic. Each {{ "id", "kind", "into" }} where kind is one of
               {{accrual, resource, decay, unlock}} and `into` is the `state.…` path the
@@ -312,7 +325,9 @@ framework's plumbing.
 
 THE CLEANED PROSE IS THE NARRATOR'S RULEBOOK ALONE — it is NEVER shown to the player.
 The player's view of the world is the structured `lore` (a browsable encyclopedia the
-app renders on the world page). So descriptive world exposition — history, factions,
+app renders on the world page) — which is why every entry needs a reader-facing `name`
+and `category` in the world's language, not just an id, keys and a body. So descriptive
+world exposition — history, factions,
 how magic or infection works, what a place or era is like — belongs in `lore` entries,
 NOT left in the prose as a player-readable "setting" section. Do NOT produce a
 player-facing raw-prose settings dump: if a paragraph reads like something a reader
@@ -843,6 +858,30 @@ def _salvage_optional_lists(body: dict[str, Any], prose: str, warnings: list[str
         if key == "systems":
             good = _dedup_system_targets(good, warnings)
         body[key] = good
+    _flag_unnamed_lore(body.get("lore"), warnings)
+
+
+def _flag_unnamed_lore(lore: Any, warnings: list[str]) -> None:
+    """Report lore entries with no reader-facing ``name``.
+
+    A lore list is the player's encyclopedia as well as the narrator's lorebook, and
+    ``view.summarize`` falls back to the entry's ``id`` for its heading. An id is a
+    latin slug by contract, so a missing name silently renders as ``holy-reveal`` to a
+    reader of a Chinese world. Nothing can be inferred here — a slug cannot be turned
+    back into the world's language — so this only surfaces the gap in the review.
+    """
+    if not isinstance(lore, list):
+        return
+    missing = [
+        str(e.get("id") or "?")
+        for e in lore
+        if isinstance(e, dict) and not str(e.get("name") or "").strip()
+    ]
+    if missing:
+        warnings.append(
+            "lore entries with no display name, shown to the player as their raw id: "
+            + ", ".join(missing)
+        )
 
 
 def _salvage_header(mapping: dict[str, Any], prose: str) -> tuple[dict[str, Any], list[str]]:
