@@ -5,8 +5,10 @@ Network is always faked through phototrace._FETCH; CI never touches Commons.
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +36,25 @@ from phototrace import (  # noqa: E402
 )
 
 
+def _tracer_importable() -> bool:
+    try:
+        return importlib.util.find_spec("vtracer") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+#: Tests that run vtracer IN THIS interpreter. vtracer is an optional runtime wheel
+#: (setup.sh installs it best-effort; without it every scene degrades to hand-drawn),
+#: so a dev venv may lack it and these skip there with the fix named. CI installs it
+#: (.github/workflows/ci.yml) and must never skip them: under CI a missing wheel is
+#: an install regression, so the marker is inert and the test fails loudly instead.
+requires_tracer = pytest.mark.skipif(
+    not _tracer_importable() and not os.environ.get("CI"),
+    reason="vtracer is not importable in this interpreter; "
+    "`python -m pip install vtracer pillow` to run the in-process trace tests",
+)
+
+
 def _photo_bytes(bright: bool) -> bytes:
     from PIL import Image, ImageDraw
 
@@ -54,6 +75,7 @@ def _wrap(fragment: str, w: int = 800, h: int = 600) -> str:
     )
 
 
+@requires_tracer
 def test_underlay_fragment_is_a_compilable_group_without_the_canvas_blob():
     fragment = build_underlay_fragment(_photo_bytes(bright=True), view=(800, 600))
     assert fragment.startswith('<g opacity="0.65">') and "<svg" not in fragment
@@ -61,6 +83,7 @@ def test_underlay_fragment_is_a_compilable_group_without_the_canvas_blob():
     compile_backdrop(_wrap(fragment))  # composes into a valid, safe backdrop
 
 
+@requires_tracer
 def test_dark_photos_get_the_adaptive_exposure_lift():
     """A night photo must not band into all-darkest and trace to nothing."""
     fragment = build_underlay_fragment(_photo_bytes(bright=False), view=(450, 900))
@@ -717,6 +740,7 @@ def test_invalid_focal_points_are_refused(focal):
         build_underlay_fragment(_photo_bytes(bright=True), view=(200, 200), focal=focal)
 
 
+@requires_tracer
 def test_each_variant_uses_its_own_focal_point(monkeypatch):
     from PIL import ImageOps
 

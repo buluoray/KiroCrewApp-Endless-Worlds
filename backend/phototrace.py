@@ -692,8 +692,11 @@ def build_underlay_fragment(
     needs no scale transform and its coordinates line up 1:1 with the
     Illustrator's overlay. The full-canvas background blob vtracer emits is
     dropped — the page's own sky sits beneath.
+
+    The focal, format and dimension refusals run before vtracer is imported: they
+    need only Pillow, so a bad input is refused for what it is on any host rather
+    than masked by a missing tracer.
     """
-    import vtracer  # local: motif lane needs no vtracer
     from PIL import Image, ImageFilter, ImageOps  # local: motif lane needs no PIL
 
     stops = _parse_ramp(ramp)
@@ -726,6 +729,8 @@ def build_underlay_fragment(
         flat += list(c)
     flat += list(stops[0]) * (256 - len(stops))
     banded.putpalette(flat)
+
+    import vtracer  # local: motif lane needs no vtracer; validation above needs none
 
     with tempfile.TemporaryDirectory(prefix="etr-") as tmp:
         pre = Path(tmp) / "pre.png"
