@@ -703,6 +703,13 @@ export default function EndlessWorlds() {
   } else if (view === 'live' && live) {
     body = (
       <PlayPage
+        // One page per life. Entering another life from the rail, the shelf or a
+        // legacy heir only changes `live`, and without a key the page kept every
+        // piece of the previous life's local state — the words typed into its box,
+        // an armed choice, an outstanding ask — and a read of the old life still in
+        // flight landed on top of the new one and stayed there. The scene frames
+        // live at the root, so remounting this page reloads none of them.
+        key={live}
         runId={live}
         onBack={home}
         onScenes={setScenes}

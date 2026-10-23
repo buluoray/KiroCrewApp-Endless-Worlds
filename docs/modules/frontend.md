@@ -195,6 +195,23 @@ guarantee.
   `test_a_birth_is_fired_and_handed_off_never_waited_on`; the two un-advanced reasons
   it branches on are specified in [turn-loop](turn-loop.md).
 
+- **The play page is one page per life.** `main.tsx` keys `PlayPage` by the
+  open run id, so entering another life (rail, shelf, legacy heir) remounts it.
+  Without the key the page kept the previous life's typed words, armed choice and
+  outstanding ask, and a read of the old life still in flight landed on the new
+  one and stayed. The scene frames render at the root, so the remount reloads
+  none of them. Pinned by `test_ui_state.py::test_the_play_page_is_one_page_per_life`.
+
+- **Local verdicts wait for the server.** The draft review calls a draft gone
+  only on a 404 (or a first read that never answered); a dropped poll of a
+  compile keeps the progress screen and lets the next poll answer. The settings
+  panel enables Save only after the player's settings were read, because Save
+  writes every field and the pre-read fields are defaults; a failed read or save
+  is shown, with a retry for the read. Pinned by
+  `test_ui_state.py::test_one_dropped_poll_does_not_declare_a_draft_gone`,
+  `test_save_waits_for_the_players_settings_to_be_read`, and
+  `test_a_failed_read_or_save_is_said_out_loud`.
+
 - **Turn progress is a tool-call count; retry preserves the input; paging is by
   turn number.** The progress bar advances by the narrator's tool-call count
   (capped short of completion until the commit lands) rather than a timer; a

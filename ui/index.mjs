@@ -252,6 +252,9 @@ var TABLES$1 = {
 		"settings.effortDefault": "默认",
 		"settings.save": "保存",
 		"settings.saved": "已保存",
+		"settings.saveFailed": "没能保存，设置没有改动。",
+		"settings.readFailed": "没能读到你的设置，暂时不能保存。",
+		"settings.readRetry": "重试",
 		"settings.note": "从每条人生的下一回合起生效，包括正在进行的那一条。",
 		"settings.group.narration": "叙事",
 		"settings.group.art": "页面配图",
@@ -645,6 +648,9 @@ var TABLES$1 = {
 		"settings.effortDefault": "Default",
 		"settings.save": "Save",
 		"settings.saved": "Saved",
+		"settings.saveFailed": "Couldn't save. Your settings are unchanged.",
+		"settings.readFailed": "Couldn't read your settings, so saving is paused.",
+		"settings.readRetry": "Try again",
 		"settings.note": "Applies to the narrator on the next turn of every life, including one already in progress.",
 		"settings.group.narration": "Narration",
 		"settings.group.art": "Page art",
@@ -1612,30 +1618,33 @@ function WorldDraftReview({ draftId, onInstalled, onDiscarded, onBack }) {
 		await kickCompile();
 		load();
 	};
+	const seen = useRef(false);
 	const load = async () => {
 		try {
 			const d = await api.worldDraft(draftId);
+			seen.current = true;
 			setDraft(d);
 			if (d.status === "new" && !kicked.current) {
 				kicked.current = true;
 				kickCompile();
 			}
 			if (!titleTouched.current) setTitle(d.preview?.title || d.title || "");
-		} catch {
-			setError(t("review.gone"));
+		} catch (e) {
+			if (e instanceof ApiError && e.status === 404 || !seen.current) setError(t("review.gone"));
 		}
 	};
 	useEffect(() => {
 		load();
 	}, [draftId]);
 	const generating = draft?.status === "generating" || draft?.status === "new";
+	const polling = generating && !error;
 	useEffect(() => {
-		if (!generating) return void 0;
+		if (!polling) return void 0;
 		const timer = window.setInterval(() => {
 			load();
 		}, DRAFT_POLL_MS);
 		return () => window.clearInterval(timer);
-	}, [generating, draftId]);
+	}, [polling, draftId]);
 	const install = async () => {
 		if (busy) return;
 		setBusy("installing");
@@ -7328,10 +7337,20 @@ function SettingsPanel({ onClose }) {
 	const [artQuality, setArtQuality] = useState("standard");
 	const [saved, setSaved] = useState(false);
 	const [busy, setBusy] = useState(false);
+	const [saveFailed, setSaveFailed] = useState(false);
+	/** Whether the player's saved settings have been read. Until they have, the
+	*  controls show this panel's defaults, and Save writes EVERY field — so saving
+	*  then would quietly replace the player's real model, styles and switches with
+	*  defaults they never chose. Save waits for the read; a failed read says so and
+	*  can be tried again. */
+	const [read, setRead] = useState("loading");
+	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
 		let alive = true;
+		setRead("loading");
 		api.settings().then((s) => {
 			if (!alive) return;
+			setRead("ok");
 			setModel(s.model && s.model !== "auto" ? s.model : "");
 			setEffort(s.reasoningEffort || "");
 			setPainterModel(s.painterModel && s.painterModel !== "auto" ? s.painterModel : "");
@@ -7344,16 +7363,20 @@ function SettingsPanel({ onClose }) {
 			setProseLength(s.proseLength || "");
 			setReducedMotion(s.reducedMotion === true);
 			setArtQuality(s.artQuality || "standard");
-		}).catch(() => {});
+		}).catch(() => {
+			if (alive) setRead("failed");
+		});
 		api.models().then((m) => {
 			if (alive) setModels(m);
 		}).catch(() => {});
 		return () => {
 			alive = false;
 		};
-	}, []);
+	}, [attempt]);
 	const save = async () => {
+		if (read !== "ok") return;
 		setBusy(true);
+		setSaveFailed(false);
 		try {
 			const out = await api.saveSettings({
 				model,
@@ -7380,6 +7403,9 @@ function SettingsPanel({ onClose }) {
 			setReducedMotion(out.reducedMotion === true);
 			setArtQuality(out.artQuality || "standard");
 			setSaved(true);
+		} catch {
+			setSaved(false);
+			setSaveFailed(true);
 		} finally {
 			setBusy(false);
 		}
@@ -7666,16 +7692,34 @@ function SettingsPanel({ onClose }) {
 			}),
 			/* @__PURE__ */ jsxs("div", {
 				className: "ew-settings-foot",
-				children: [/* @__PURE__ */ jsx("button", {
-					className: "ew-btn ew-btn-go",
-					type: "button",
-					disabled: busy,
-					onClick: () => void save(),
-					children: t("settings.save")
-				}), saved ? /* @__PURE__ */ jsx("span", {
-					className: "ew-settings-saved",
-					children: t("settings.saved")
-				}) : null]
+				children: [
+					/* @__PURE__ */ jsx("button", {
+						className: "ew-btn ew-btn-go",
+						type: "button",
+						disabled: busy || read !== "ok",
+						onClick: () => void save(),
+						children: t("settings.save")
+					}),
+					saved ? /* @__PURE__ */ jsx("span", {
+						className: "ew-settings-saved",
+						children: t("settings.saved")
+					}) : null,
+					saveFailed ? /* @__PURE__ */ jsx("span", {
+						className: "ew-meta",
+						role: "alert",
+						children: t("settings.saveFailed")
+					}) : null,
+					read === "failed" ? /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx("span", {
+						className: "ew-meta",
+						role: "alert",
+						children: t("settings.readFailed")
+					}), /* @__PURE__ */ jsx("button", {
+						className: "ew-btn ew-btn-quiet",
+						type: "button",
+						onClick: () => setAttempt((n) => n + 1),
+						children: t("settings.readRetry")
+					})] }) : null
+				]
 			}),
 			/* @__PURE__ */ jsx("div", {
 				className: "ew-hint",
@@ -8180,7 +8224,7 @@ function EndlessWorlds() {
 		readerBar: narrowLive && !hideBody,
 		onPanels: setPanels,
 		turnPending
-	});
+	}, live);
 	else if (view === "opening" && world) body = /* @__PURE__ */ jsx(OpeningScreen, {
 		world,
 		onBack: home,

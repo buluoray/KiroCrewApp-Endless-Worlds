@@ -37,13 +37,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [artQuality, setArtQuality] = useState('standard')
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
+  /** Whether the player's saved settings have been read. Until they have, the
+   *  controls show this panel's defaults, and Save writes EVERY field — so saving
+   *  then would quietly replace the player's real model, styles and switches with
+   *  defaults they never chose. Save waits for the read; a failed read says so and
+   *  can be tried again. */
+  const [read, setRead] = useState<'loading' | 'ok' | 'failed'>('loading')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let alive = true
+    setRead('loading')
     void api
       .settings()
       .then((s) => {
         if (!alive) return
+        setRead('ok')
         // The advertised list already carries an `auto` entry, and the default
         // option ("") also resolves to auto — so a persisted "auto" is the same
         // choice as default. Normalize it to "" so the select shows one auto row,
@@ -61,7 +71,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         setReducedMotion(s.reducedMotion === true)
         setArtQuality(s.artQuality || 'standard')
       })
-      .catch(() => {})
+      .catch(() => {
+        if (alive) setRead('failed')
+      })
     // `api.models()` proxies through the app's own backend route, which the app's
     // path-scoped cookie authorizes (the core /api/models route does not).
     void api
@@ -73,10 +85,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     return () => {
       alive = false
     }
-  }, [])
+  }, [attempt])
 
   const save = async () => {
+    if (read !== 'ok') return
     setBusy(true)
+    setSaveFailed(false)
     try {
       const out = await api.saveSettings({
         model,
@@ -103,6 +117,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       setReducedMotion(out.reducedMotion === true)
       setArtQuality(out.artQuality || 'standard')
       setSaved(true)
+    } catch {
+      // A refused or dropped save used to re-enable the button and say nothing,
+      // which reads the same as a save that worked.
+      setSaved(false)
+      setSaveFailed(true)
     } finally {
       setBusy(false)
     }
@@ -328,12 +347,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         <button
           className="ew-btn ew-btn-go"
           type="button"
-          disabled={busy}
+          disabled={busy || read !== 'ok'}
           onClick={() => void save()}
         >
           {t('settings.save')}
         </button>
         {saved ? <span className="ew-settings-saved">{t('settings.saved')}</span> : null}
+        {saveFailed ? (
+          <span className="ew-meta" role="alert">
+            {t('settings.saveFailed')}
+          </span>
+        ) : null}
+        {read === 'failed' ? (
+          <>
+            <span className="ew-meta" role="alert">
+              {t('settings.readFailed')}
+            </span>
+            <button
+              className="ew-btn ew-btn-quiet"
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+            >
+              {t('settings.readRetry')}
+            </button>
+          </>
+        ) : null}
       </div>
       <div className="ew-hint">{t('settings.note')}</div>
     </div>
