@@ -86,7 +86,13 @@ class Instance:
 
     @property
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self.port}"
+        # `localhost`, not `127.0.0.1`: the gateway 302s every credential-less page
+        # navigation on a loopback alias onto its canonical host, `localhost`. The
+        # driver signs in with `?token=` (never redirected) and then opens the app
+        # page without it, so on `127.0.0.1` that second load moved to `localhost`,
+        # where the session cookie set on `127.0.0.1` is not sent: every API call
+        # came back 403 and every shot timed out on the rail click.
+        return f"http://localhost:{self.port}"
 
     @property
     def data_dir(self) -> Path:
