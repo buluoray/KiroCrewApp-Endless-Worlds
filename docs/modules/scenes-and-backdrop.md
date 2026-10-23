@@ -448,6 +448,53 @@ sees is produced locally from a closed, code-owned vocabulary.
   stay schema-capped at 24KB. Pinned by `backend/tests/test_phototrace.py` and
   `backend/tests/test_backdrop.py`.
 
+- **A page built on an underlay is opaque.** The fragment's `opacity` (0.65) is a
+  brightness dial that assumes a dark sky beneath it, but nothing put one there.
+  `commit_underlay_only` publishes the underlay alone, and a base page is told to
+  commit the placeholder "with no other marks", so those pages shipped 35%
+  see-through onto the host page. And vtracer's first path — the full-canvas
+  background blob — was dropped outright, leaving the photo's dominant band (a sky,
+  a wall) EMPTY: audited over the 7 committed traced-reference backdrops on disk, 4
+  had 8–31% of the frame at alpha 0, which the play page showed as near-black
+  blotches through `.ew-backdrop`. Two changes close it. `build_underlay_fragment`
+  keeps the blob's TONE as one flat rect under the other bands (its geometry is
+  still discarded). Every fragment names the ramp's darkest stop in
+  `data-etr-ground`, and `compose_with_underlay` lays that as an opaque rect at the
+  very bottom of the document — beneath any sky the Illustrator drew, so a drawn
+  sky still paints exactly as authored and the ground only fills what was
+  transparent. The ground is read only from the server's own fragment with a
+  strict hex pattern, never from Illustrator markup, and the result still passes
+  `compile_backdrop`; a fragment without one, or a root tag it cannot place it
+  after, composes exactly as before. Pinned by
+  `test_an_underlay_only_page_is_opaque_not_see_through`,
+  `test_the_ground_goes_beneath_the_illustrators_own_sky`,
+  `test_a_fragment_without_a_ground_composes_exactly_as_before`, and
+  `test_a_traced_underlay_has_no_hole_where_its_dominant_band_was`.
+
+- **Every traced candidate can be declined.** Selection used to be forced: the
+  only way out of three photographs of the wrong place was to pick one. In the
+  same audit, 4 of 6 photo-backed pages did not show the place their prose
+  described (a forest rope bridge for a rooftop plank bridge, a 1920s daytime
+  campus for a dormitory window at night). The ladder's four-word floor already
+  judged "confidently wrong" worse than an honest base; the curation step now can
+  too. `endless_select_reference` accepts `index: -1`, which settles the page's own
+  procedural base (built with the same ramp and opacity when the candidates were
+  traced, and kept beside them in `CandidateStore`) with reason `no-fit`;
+  `_base_underlay_next` routes that to the hand-drawn scene path exactly like a
+  spent search, and the receipt records `fallback.reason: no-fit`. The illustrator
+  prompt asks it to judge candidates against PAGE PROSE, not only the search words.
+  Pinned by `test_every_candidate_can_be_declined_for_a_hand_drawn_scene` and
+  `test_the_decline_is_part_of_the_tool_contract_and_the_prompt`.
+
+- **Painterly art bleeds past the frame.** A displacement filter pulls pixels in
+  from outside the shapes, so a scene whose washes stop at the canvas edge ships a
+  pale, torn-paper strip of base along the frame. All 5 audited watercolor pages
+  had one; growing the filtered group's content by the displacement scale removed
+  it in Chromium (librsvg previews still show a faint bottom strip, so the preview
+  slightly overstates it). `skills/svg-style-core` teaches the margin and its
+  formula, and the watercolor and oil skills point to it. Pinned by
+  `test_styles.py::test_every_displacing_style_teaches_bleeding_past_the_frame`.
+
 - **Backdrop-agent failure stays behind the curtain, and a timed-out scene never
   falls through to the narrator hand-drawing one.** The brief is cleared on successful commit, not on dispatch, so
   a dropped request or gateway restart can resume recovery. The backend gives the

@@ -127,6 +127,24 @@ def test_every_style_skill_teaches_ranges_and_matte_oil() -> None:
     assert "negative space" in minimal.lower()
 
 
+def test_every_displacing_style_teaches_bleeding_past_the_frame() -> None:
+    """A displacement filter pulls pixels in from outside the shapes, so a scene
+    that stops at the canvas edge ships a pale torn-paper border. All five audited
+    painterly backdrops had one; bleeding the content by the displacement scale
+    removed it in Chromium. Every style that displaces must say so, and the
+    recipe's numbers must be the margin formula, not a guess."""
+    core = (REPO / "skills" / "svg-style-core" / "SKILL.md").read_text()
+    assert "## Bleed past the frame" in core
+    assert "translate(-22 -22) scale(1.055 1.0733)" in core
+    assert round((800 + 44) / 800, 4) == 1.055 and round((600 + 44) / 600, 4) == 1.0733
+    assert "scale(1.0978 1.0489)" in core
+    assert round((450 + 44) / 450, 4) == 1.0978 and round((900 + 44) / 900, 4) == 1.0489
+    for style in ("watercolor", "oil"):
+        text = (REPO / "skills" / f"svg-style-{style}" / "SKILL.md").read_text()
+        assert "feDisplacementMap" in text
+        assert "Bleed past the frame" in text, f"{style} displaces but never says to bleed"
+
+
 def test_preview_renderers_run_librsvg_before_cairosvg(monkeypatch, tmp_path) -> None:
     """The preview chain is ordered by FILTER FIDELITY: librsvg implements the
     painterly filter primitives (feTurbulence/feDisplacementMap); CairoSVG silently

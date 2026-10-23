@@ -640,7 +640,10 @@ _TOOLS: list[dict[str, Any]] = [
             "SCENE lane only: after reading the candidate previews from "
             "endless_trace_reference, choose the one whose real structure and light "
             "best fit the brief by passing its `index`. The chosen reference becomes "
-            "the page's active underlay; the others are discarded. Only call this "
+            "the page's active underlay; the others are discarded. When NONE of them "
+            "shows this page's place (a different setting, era, time of day, or kind "
+            "of space), pass `index: -1`: every candidate is declined, a tonal base "
+            "becomes the ground, and you hand-draw the scene. Only call this "
             "when endless_trace_reference returned `candidates` — a procedural "
             "`base` result is already active and needs no selection. After "
             'selecting, place exactly one `<g id="etr-underlay"/>` in each SVG.'
@@ -652,7 +655,7 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
-                "index": {"type": "integer", "minimum": 0},
+                "index": {"type": "integer", "minimum": -1},
             },
         },
     },
@@ -2453,6 +2456,11 @@ def _base_underlay_next(search: dict[str, Any]) -> str:
             "(only the narrow CC0/public-domain slice is searched, so many subjects "
             "have no usable photo even when the open web does). " + _HAND_DRAWN_GROUND
         )
+    if reason == "no-fit":
+        return (
+            "you declined every traced photograph because none shows this page's "
+            "place, so no photo is in play and none will be searched again. " + _HAND_DRAWN_GROUND
+        )
     if reason == "tracer-unavailable":
         return (
             "references were found for this page but this host cannot trace a "
@@ -2615,6 +2623,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             query=query,
             candidates=traced,
             search=search_audit,
+            base={
+                "desktop": procedural_base_fragment(view=(800, 600), ramp=ramp, opacity=opacity),
+                "mobile": procedural_base_fragment(view=(450, 900), ramp=ramp, opacity=opacity),
+            },
         )
         _trace_store(run_id).clear()
         options = [
@@ -2635,7 +2647,10 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             "next": (
                 "read every candidate's desktop AND mobile previews together, then "
                 "call endless_select_reference with the `index` whose real structure "
-                "and light best fit the brief. Draw only after selecting."
+                "and light best fit the brief. If NONE of them shows this page's "
+                "place — a different setting, era, time of day, or kind of space — "
+                "pass index -1 instead: a wrong photograph traced as the place is "
+                "worse than a hand-drawn one. Draw only after selecting."
             ),
         }
 
@@ -2700,6 +2715,46 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: The ``index`` that declines every traced candidate. Selection used to be forced:
+#: the only way out of three wrong photographs was to pick one, so a rooftop plank
+#: bridge was published as a rope bridge in a forest and a night dormitory window
+#: as a 1920s daytime campus. Of 6 committed traced-reference pages audited, 4 did
+#: not show the place the prose described. Declining settles the page's own tonal
+#: base with reason ``no-fit``, which routes to the hand-drawn scene path exactly
+#: like a search that found nothing — the honest outcome the ladder's four-word
+#: floor already chose over "confidently wrong".
+_DECLINE_ALL = -1
+
+
+def _decline_references(run_id: str, turn: int, candidates: dict[str, Any]) -> dict[str, Any]:
+    raw_base = candidates.get("base")
+    base: dict[str, Any] = raw_base if isinstance(raw_base, dict) else {}
+    desktop = base.get("desktop") or procedural_base_fragment(view=(800, 600))
+    mobile = base.get("mobile") or procedural_base_fragment(view=(450, 900))
+    raw_search = candidates.get("search")
+    search: dict[str, Any] = raw_search if isinstance(raw_search, dict) else {}
+    search_audit = {**search, "reason": "no-fit"}
+    fragment_id = _trace_store(run_id).save(
+        turn=turn,
+        desktop=desktop,
+        mobile=mobile,
+        source=None,
+        kind="base",
+        query=str(candidates.get("query") or ""),
+        search=search_audit,
+    )
+    _candidate_store(run_id).clear()
+    return {
+        "selected": None,
+        "underlay": "base",
+        "fragmentId": fragment_id,
+        "turn": turn,
+        "source": None,
+        "previews": _render_trace_previews(run_id, fragment_id, desktop, mobile),
+        "next": _base_underlay_next(search_audit),
+    }
+
+
 def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
     """Promote one traced candidate to the active underlay after the Illustrator's review."""
     run_id = args["runId"]
@@ -2711,8 +2766,13 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
             "no reference candidates are waiting for this page; call endless_trace_reference first"
         )
     options = candidates.get("candidates") or []
+    if index == _DECLINE_ALL:
+        return _decline_references(run_id, turn, candidates)
     if not 0 <= index < len(options):
-        raise BackdropError(f"pick an index between 0 and {len(options) - 1}")
+        raise BackdropError(
+            f"pick an index between 0 and {len(options) - 1}, "
+            f"or {_DECLINE_ALL} when none of them shows this page's place"
+        )
     chosen = options[index]
     fragment_id = _trace_store(run_id).save(
         turn=turn,

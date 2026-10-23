@@ -45,7 +45,9 @@ lighter, warmer MIX of its own color, the shadow side darker and cooler.
 </filter>
 ```
 
-Apply to the whole scene group. Crisp subjects (a face, lettering) go in an
+Apply to the whole scene group, with its content bled past the frame by the
+displacement scale (`svg-style-core`, "Bleed past the frame"), or the drag exposes
+the ground as a ragged strip along every edge. Crisp subjects (a face, lettering) go in an
 unfiltered sibling group or one with scale 6–10.
 
 ## Pattern-based motifs: mostly hands off
