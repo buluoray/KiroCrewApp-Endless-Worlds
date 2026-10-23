@@ -585,6 +585,18 @@ class RunStore:
         raw = self._kv.get(self._pending_key(run_id))
         return raw if isinstance(raw, dict) else None
 
+    def mark_pending_ended(self, run_id: str) -> None:
+        """Stamp the in-flight record as ended: its narrator run is over, no month.
+
+        Kept rather than deleted so the play view can say the ask did not come
+        through; the next ``mark_pending`` replaces it whole.
+        """
+        _check_run_id(run_id)
+        pending = self.read_pending(run_id)
+        if not pending:
+            return
+        self._kv.set(self._pending_key(run_id), {**pending, "endedAt": time.time()})
+
     def clear_pending(self, run_id: str) -> None:
         """Forget the in-flight record. Safe when there is none."""
         _check_run_id(run_id)

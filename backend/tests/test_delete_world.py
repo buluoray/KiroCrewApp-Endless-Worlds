@@ -478,7 +478,7 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(world,
     monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (slot, False))
 
     def fake_dispatcher(_runner):
-        def dispatch(_state, got_slot, prompt):
+        def dispatch(_state, got_slot, prompt, **_kw):
             assert got_slot is slot
             gated = store.read_backdrop_request(run_id)
             assert gated["fallbackAllowed"] is True
@@ -553,7 +553,7 @@ def test_fast_art_quality_dispatches_one_illustrator_and_skips_the_revision_pass
     monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (slot, False))
 
     def fake_dispatcher(_runner):
-        def dispatch(_state, _slot, _prompt):
+        def dispatch(_state, _slot, _prompt, **_kw):
             # The narrator repair commits art, ending the recovery loop.
             BackdropStore(world["data"], run_id).set(
                 '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
@@ -637,7 +637,7 @@ def _recover_with(world, monkeypatch, spawn, *, drafted, grace):
     prompts = []
 
     def fake_dispatcher(_runner):
-        def dispatch(_state, _slot, prompt):
+        def dispatch(_state, _slot, prompt, **_kw):
             prompts.append(prompt)
             BackdropStore(world["data"], run_id).set(_ART, turn=1)
             store.clear_backdrop_request(run_id)

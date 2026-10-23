@@ -145,6 +145,24 @@ turn 200 as at turn 1.
   (+ `test_generating_without_a_state_object_keeps_the_age_only_judgement` for
   callers with no gateway state).
 
+- **A narrator run that ends without a month, and without one tool call, ends
+  the wait.** The slot survives an agent that was refused at spawn (a sandbox or
+  credential failure), so neither slot absence nor the age bound notices it, and
+  the birth screen used to cycle its flavour lines for the whole opening budget.
+  `make_dispatcher`'s `dispatch(..., on_settled=)` calls back when the run is over,
+  however it ended, and `advance_turn` hands it `settle_unanswered`, which stamps
+  the pending record `endedAt` only when the month did not land, the record is
+  still this ask (same `askedAt`), and `steps` is still zero. A run that reached
+  this app's tools is left alone: a runtime that dies mid-prompt can leave its
+  tool process writing, and a playtest saw exactly that commit 75s after the run
+  ended. `_in_flight` then treats the record as nobody writing, and
+  `turn.unanswered()` feeds the play view's `unanswered` field. Enforced by
+  `turn.settle_unanswered` and `turn._in_flight`; pinned by
+  `test_a_narrator_refused_at_spawn_ends_the_wait`,
+  `test_a_run_that_reached_the_tools_is_not_called_unanswered`,
+  `test_a_late_settle_never_closes_a_newer_ask` and
+  `test_a_new_ask_clears_the_unanswered_mark` (the first two mutation-verified).
+
 - **The pending record is written before the narrator is dispatched.** The
   ordering closes the window between speaking to the narrator and the commit: a
   request that dies in that gap would otherwise be indistinguishable from one
@@ -299,6 +317,10 @@ turn 200 as at turn 1.
   `turn.generating`; pinned by
   `test_requested_art_withholds_the_new_page_until_its_exact_commit` and
   `test_a_committed_page_stays_generating_while_its_requested_art_is_pending`.
+  The `painting` record carries the committed turn's chronicle `action`, so the
+  page keeps quoting what the player asked for through the art wait, the longest
+  part of a rich month; pinned (mutation-verified) by
+  `test_painting_keeps_quoting_what_the_player_asked_for`.
   Both readers release the page once its exact art exists, even if a request is
   still on disk, and `endless_paint_backdrop` refuses to queue a brief for a page
   that already has its exact art, so a replacement brief racing a late

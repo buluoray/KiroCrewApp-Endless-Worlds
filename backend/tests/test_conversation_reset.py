@@ -390,7 +390,7 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
     state = FakeState()
     sent: list[str] = []
 
-    def dispatch(_state, _slot, prompt):
+    def dispatch(_state, _slot, prompt, **_kw):
         sent.append(prompt)
         return True
 
@@ -454,7 +454,7 @@ def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
 
     state = FakeState()
 
-    def dispatch(_state, _slot, prompt):
+    def dispatch(_state, _slot, prompt, **_kw):
         return True
 
     def advance():

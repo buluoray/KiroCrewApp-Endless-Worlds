@@ -328,6 +328,9 @@ export interface PlayView {
    *  through a type assertion, which compiled while the field did not exist. */
   language: string
   awaitingOpening: boolean
+  /** The newest ask's narrator run ended without writing the month — nobody is
+   *  coming, so the page offers a retry now rather than after its poll cap. */
+  unanswered?: boolean
   choices: Choice[]
   digest: DigestRow[]
   panels: PanelView[]

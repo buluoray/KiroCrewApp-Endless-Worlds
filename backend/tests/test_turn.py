@@ -272,7 +272,7 @@ def test_a_double_tap_cannot_produce_two_versions_of_one_month(store):
     state = FakeState()
     run = store.create_run({"turn": 1}, {"runId": "r1"})
 
-    def commit_once(st, slot, prompt):
+    def commit_once(st, slot, prompt, **_kw):
         current = store.read_state(run)
         if int(current["turn"]) < 2:
             store.commit_state(run, {"turn": 2})
@@ -311,7 +311,7 @@ def test_a_committed_turn_is_returned_with_its_prose(store):
     state = FakeState()
     run = store.create_run({"turn": 1}, {"runId": "r1"})
 
-    def commit(st, slot, prompt):
+    def commit(st, slot, prompt, **_kw):
         store.commit_state(run, {"turn": 2})
         store.append_turn(run, {"turn": 2, "prose": PROSE})
         return True
@@ -346,7 +346,7 @@ def test_a_month_that_outruns_the_wait_is_handed_over_not_rolled_back(store):
             store=store,
             run_id=run,
             rulebook="r",
-            dispatch=lambda *a: True,
+            dispatch=lambda *a, **_kw: True,
             inline_wait_secs=0.6,
         )
     )
@@ -366,7 +366,7 @@ def test_a_queued_turn_is_still_waited_for(store):
     run = store.create_run({"turn": 1}, {"runId": "r1"})
     calls = []
 
-    def queued_then_commits(st, slot, prompt):
+    def queued_then_commits(st, slot, prompt, **_kw):
         calls.append(prompt)
         store.commit_state(run, {"turn": 2})
         store.append_turn(run, {"turn": 2, "prose": PROSE})
@@ -456,7 +456,7 @@ def test_the_turn_runs_in_a_sealed_app_owned_slot(store):
             store=store,
             run_id=run,
             rulebook="r",
-            dispatch=lambda *a: True,
+            dispatch=lambda *a, **_kw: True,
             inline_wait_secs=0.4,
             project="/tmp/whatever",
         )
@@ -639,7 +639,7 @@ def test_every_key_the_prompts_use_exists_in_both_tables():
 # under the current registration, re-brief — once per turn, never a loop.
 
 
-def _silent(st, slot, prompt):
+def _silent(st, slot, prompt, **_kw):
     """A dispatch whose narrator never calls a tool and never commits."""
     slot.prompts.append(prompt)
     return True
