@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { WorldDraftDetail, WorldDraftRow } from './api'
-import { api } from './api'
+import { api, ApiError } from './api'
 import { t } from './strings'
 import { Chip } from './ui'
 
@@ -239,9 +239,13 @@ export function WorldDraftReview({
     void load()
   }
 
+  // Whether a read of this draft has ever answered, so a later failed poll can be
+  // told apart from a draft that was never there.
+  const seen = useRef(false)
   const load = async () => {
     try {
       const d = await api.worldDraft(draftId)
+      seen.current = true
       setDraft(d)
       if (d.status === 'new' && !kicked.current) {
         kicked.current = true
@@ -252,8 +256,15 @@ export function WorldDraftReview({
       if (!titleTouched.current) {
         setTitle(d.preview?.title || d.title || '')
       }
-    } catch {
-      setError(t('review.gone'))
+    } catch (e) {
+      // Only the server saying so makes a draft gone. A compile runs for minutes
+      // and is polled every few seconds, so one dropped poll is ordinary; latching
+      // it as "gone" put the player on a dead end over a draft still being shaped,
+      // with no poll able to take it back. Keep the screen and let the next poll
+      // answer instead.
+      if ((e instanceof ApiError && e.status === 404) || !seen.current) {
+        setError(t('review.gone'))
+      }
     }
   }
 
@@ -263,14 +274,17 @@ export function WorldDraftReview({
   }, [draftId])
 
   const generating = draft?.status === 'generating' || draft?.status === 'new'
+  // A draft the server has called gone is not polled again: nothing on that
+  // screen reads the answer.
+  const polling = generating && !error
   useEffect(() => {
-    if (!generating) return undefined
+    if (!polling) return undefined
     const timer = window.setInterval(() => {
       void load()
     }, DRAFT_POLL_MS)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generating, draftId])
+  }, [polling, draftId])
 
   const install = async () => {
     if (busy) return
