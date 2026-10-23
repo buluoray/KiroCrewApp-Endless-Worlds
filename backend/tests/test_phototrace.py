@@ -78,7 +78,7 @@ def _wrap(fragment: str, w: int = 800, h: int = 600) -> str:
 @requires_tracer
 def test_underlay_fragment_is_a_compilable_group_without_the_canvas_blob():
     fragment = build_underlay_fragment(_photo_bytes(bright=True), view=(800, 600))
-    assert fragment.startswith('<g opacity="0.65">') and "<svg" not in fragment
+    assert fragment.startswith('<g opacity="0.65" data-etr-ground="#') and "<svg" not in fragment
     assert fragment.count("<path ") >= 1
     compile_backdrop(_wrap(fragment))  # composes into a valid, safe backdrop
 
@@ -763,7 +763,7 @@ def test_bounded_worker_returns_a_valid_fragment():
     fragment = build_underlay_fragment_bounded(
         _photo_bytes(bright=True), view=(200, 150), focal=(0.25, 0.75)
     )
-    assert fragment.startswith('<g opacity="0.65">')
+    assert fragment.startswith('<g opacity="0.65" data-etr-ground="#')
     compile_backdrop(_wrap(fragment, 200, 150))
 
 
@@ -1703,3 +1703,159 @@ def test_a_single_word_scene_miss_settles_for_base_immediately(data, monkeypatch
     out = _call("endless_trace_reference", runId=run_id, turn=1, query="forge")
     assert out["underlay"] == "base", "a single-word miss has no keyword to retry"
     assert TraceStore(data, run_id).load(1) is not None
+
+
+# ── page art: an underlay page is opaque, and a wrong photo can be declined ──
+
+
+def _min_alpha_and_holes(svg: str, w: int, h: int, tmp_path: Path) -> tuple[int, float]:
+    """Rasterize with the app's own preview renderer: (lowest alpha, share of alpha 0)."""
+    from PIL import Image
+
+    from backdrop import _render_svg_thumbnail
+
+    target = tmp_path / f"probe-{w}x{h}.png"
+    try:
+        _render_svg_thumbnail(compile_backdrop(svg), target, w, h)
+    except BackdropError as exc:  # no librsvg/cairo on this host
+        pytest.skip(f"no SVG rasterizer here: {exc}")
+    alpha = Image.open(target).convert("RGBA").getchannel("A")
+    values = list(alpha.getdata())
+    return min(values), values.count(0) / len(values)
+
+
+@pytest.mark.parametrize("view", [(800, 600), (450, 900)])
+def test_an_underlay_only_page_is_opaque_not_see_through(view, tmp_path):
+    """The server timeout fallback publishes the underlay ALONE, and the base path
+    tells the Illustrator to commit the placeholder "with no other marks". Both
+    used to publish a frame at the fragment's 0.65 opacity over nothing, so the host
+    page showed through the whole backdrop."""
+    w, h = view
+    shell = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" '
+        f'preserveAspectRatio="xMidYMid slice"><g id="etr-underlay"/></svg>'
+    )
+    composed = compose_with_underlay(shell, procedural_base_fragment(view=view))
+    lowest, _ = _min_alpha_and_holes(composed, w // 4, h // 4, tmp_path)
+    assert lowest == 255, f"an underlay-only page must be opaque, lowest alpha {lowest}"
+
+
+def test_the_ground_goes_beneath_the_illustrators_own_sky():
+    """The ground fills only what would be transparent: a sky drawn under the
+    placeholder must still paint above it, exactly as the Illustrator drew it."""
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 600' data-x='a>b'>"
+        "<rect id='sky' width='800' height='600' fill='#123456'/>"
+        "<g id='etr-underlay'/></svg>"
+    )
+    composed = compose_with_underlay(svg, procedural_base_fragment(view=(800, 600)))
+    ground = composed.index('<rect x="0" y="0" width="100%" height="100%" fill="#')
+    assert composed.index("<svg") < ground < composed.index("id='sky'")
+    assert composed.startswith(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 600' data-x='a>b'><rect"
+    )
+    compile_backdrop(composed)
+
+
+def test_a_fragment_without_a_ground_composes_exactly_as_before():
+    legacy = '<g opacity="0.65"><rect width="10" height="10" fill="#fff"/></g>'
+    svg = "<svg xmlns='http://www.w3.org/2000/svg'><g id='etr-underlay'/></svg>"
+    assert compose_with_underlay(svg, legacy) == svg.replace("<g id='etr-underlay'/>", legacy)
+
+
+@requires_tracer
+def test_a_traced_underlay_has_no_hole_where_its_dominant_band_was(tmp_path):
+    """vtracer's first path is the full-canvas background blob, usually the photo's
+    dominant band. Dropping it outright left that band EMPTY: 4 of 7 committed
+    traced backdrops had 8-31% of the frame at alpha 0, shown as black blotches."""
+    fragment = build_underlay_fragment(_photo_bytes(bright=True), view=(800, 600))
+    shell = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><g id="etr-underlay"/></svg>'
+    )
+    lowest, holes = _min_alpha_and_holes(compose_with_underlay(shell, fragment), 200, 150, tmp_path)
+    assert holes == 0.0 and lowest == 255
+    # Opaque is not enough: the band must keep the photo's OWN tone there, not
+    # fall through to the dark ground (a bright sky rendered as night). The
+    # synthetic photo's top-left corner is its light-grey background.
+    from PIL import Image
+
+    corner = Image.open(tmp_path / "probe-200x150.png").convert("RGB").getpixel((4, 4))
+    ground = phototrace._GROUND_RE.match(fragment).group(1)
+    ground_rgb = tuple(int(ground[i : i + 2], 16) for i in (1, 3, 5))
+    assert sum(corner) > sum(ground_rgb) + 60, (corner, ground_rgb)
+
+
+def test_every_candidate_can_be_declined_for_a_hand_drawn_scene(data, monkeypatch):
+    """Selection used to be forced, so a page whose three photographs all showed the
+    wrong place published one of them anyway (a forest rope bridge for a rooftop
+    plank bridge). Declining settles the page's own base and routes to hand-drawn."""
+    photo = _photo_bytes(bright=True)
+
+    def fake_fetch(url: str) -> bytes:
+        if "openverse.org/v1/images/?" in url:
+            return json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": "Rope bridge in a forest",
+                            "license": "cc0",
+                            "license_version": "1.0",
+                            "thumbnail": "https://api.openverse.org/v1/images/a/thumb/",
+                            "foreign_landing_url": "https://commons.wikimedia.org/wiki/File:A",
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+        return photo
+
+    monkeypatch.setattr(phototrace, "_FETCH", fake_fetch)
+    run_id = "e" * 32
+    _request_backdrop(data, run_id, 1)
+    ramp = ["#101018", "#20242e", "#6a5424"]
+    out = _call("endless_trace_reference", runId=run_id, turn=1, query="plank bridge", ramp=ramp)
+    assert out["ok"] is True and out["underlay"] == "reference"
+    assert "-1" in out["next"], "the decline must be offered where the choice is made"
+
+    declined = _call("endless_select_reference", runId=run_id, turn=1, index=-1)
+    assert declined["ok"] is True and declined["underlay"] == "base"
+    assert declined["source"] is None
+    assert "hand-drawn" in declined["next"] and "declined" in declined["next"]
+    assert CandidateStore(data, run_id).load(1) is None, "the declined photos are gone"
+    active = TraceStore(data, run_id).load(1)
+    assert active["kind"] == "base"
+    assert active["desktop"] == procedural_base_fragment(view=(800, 600), ramp=ramp)
+
+    # The page can still publish — the base satisfies the scene gate — and the
+    # receipt says WHY it shipped without a photograph.
+    shell = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">'
+        '<g id="etr-underlay"/><circle cx="40" cy="40" r="9" fill="#6a5424"/></svg>'
+    )
+    draft = _call(
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=1,
+        markup=shell.format(w=800, h=600),
+        mobile=shell.format(w=450, h=900),
+    )
+    final = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=shell.format(w=800, h=600),
+        mobile=shell.format(w=450, h=900),
+    )
+    assert final["ok"] is True, final
+    committed = BackdropStore(data, run_id).current()
+    assert committed["source"] is None
+    assert committed["trace"]["underlay"] == "base"
+    assert committed["trace"]["fallback"]["reason"] == "no-fit"
+
+
+def test_the_decline_is_part_of_the_tool_contract_and_the_prompt():
+    tool = next(t for t in srv._TOOLS if t["name"] == "endless_select_reference")
+    assert tool["inputSchema"]["properties"]["index"]["minimum"] == -1
+    assert "index: -1" in tool["description"]
+    prompt = json.loads((_BACKEND.parent / "agents" / "illustrator.json").read_text())["prompt"]
+    assert "`index: -1`" in prompt and "PAGE PROSE" in prompt

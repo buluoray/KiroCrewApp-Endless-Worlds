@@ -51,6 +51,32 @@ material color, stacked like paint:
   composition. A filter cannot rescue a line drawing; it can only make a solid
   painting breathe.
 
+## Bleed past the frame
+
+A displacement filter moves every pixel by up to its `scale`. At the canvas edge
+it pulls in pixels from OUTSIDE your shapes, so a scene whose washes stop at
+`0` and `800` gets a ragged strip of bare base paper along the frame — a pale torn
+border around the whole page. Every painterly page audited had it. The page is a
+background, never a sheet of paper on a table: no torn edge, no paper margin.
+
+Paint the filtered scene past the canvas by at least the largest displacement
+`scale` you use, on every side. The simplest way: wrap the filtered group's
+CONTENT (not the group itself) in one transform that grows it by that margin —
+
+```xml
+<g filter="url(#wc)">
+  <!-- desktop 800×600, scale 22: grow by 22 on each side -->
+  <g transform="translate(-22 -22) scale(1.055 1.0733)">
+    …the whole scene…
+  </g>
+</g>
+```
+
+(`scale` x = (W + 2·pad) / W, y = (H + 2·pad) / H; mobile 450×900 with pad 22 is
+`scale(1.0978 1.0489)`.) Drawing the edge shapes out to `-pad` and `W + pad`
+yourself works too. Check the four edges of every preview; any light strip there
+means a shape still stops at the frame.
+
 ## The look-and-adjust loop
 
 Filter numbers in the style skills are RANGES, not constants. The loop is:

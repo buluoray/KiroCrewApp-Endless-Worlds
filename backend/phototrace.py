@@ -41,6 +41,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -662,6 +663,22 @@ def fetch_photo(url: str) -> bytes:
     return raw
 
 
+#: The underlay fragment names the opaque ground it was tuned over. Its opacity is
+#: a brightness dial that assumes a dark sky beneath (see _trace_reference), but
+#: nothing guaranteed one: an underlay-only page (the server timeout fallback, or a
+#: base committed "with no other marks" as instructed) had NOTHING beneath, so the
+#: whole frame was 35% see-through onto whatever the host page painted.
+#: ``compose_with_underlay`` reads this and lays the ground at the very bottom of
+#: the document, beneath any sky the Illustrator drew. Only a strict hex is read,
+#: and only from the server's own fragment, never from the Illustrator's SVG.
+_GROUND_ATTR = "data-etr-ground"
+_GROUND_RE = re.compile(r'^<g opacity="[0-9.]+" data-etr-ground="(#[0-9a-f]{6})">')
+
+
+def _hex(rgb: tuple[int, int, int]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+
 def _parse_ramp(ramp: list[str] | None) -> tuple[tuple[int, int, int], ...]:
     if not ramp:
         return NOCTURNE_RAMP
@@ -690,8 +707,9 @@ def build_underlay_fragment(
     Cover-crops to the view's aspect first, using that variant's own focal point,
     so desktop and mobile can frame the same source independently. The fragment
     needs no scale transform and its coordinates line up 1:1 with the
-    Illustrator's overlay. The full-canvas background blob vtracer emits is
-    dropped — the page's own sky sits beneath.
+    Illustrator's overlay. The full-canvas background blob vtracer emits keeps
+    only its tone, as one flat rect; the group names an opaque ground that
+    ``compose_with_underlay`` lays beneath the whole document.
 
     The focal, format and dimension refusals run before vtracer is imported: they
     need only Pillow, so a bad input is refused for what it is on any host rather
@@ -753,10 +771,23 @@ def build_underlay_fragment(
         paths = re.findall(r"<path [^>]*/>", out.read_text(encoding="utf-8"))
     if len(paths) < 2:
         raise BackdropError("the reference traced to nothing usable; try another query")
-    body = "\n".join(paths[1:])
+    # vtracer's first path is the full-canvas background blob. Its geometry is
+    # dropped (tens of KB for one flat region), but its TONE is not: that region is
+    # usually the photo's dominant band (a sky, a wall), and leaving it empty
+    # punched a hole the size of that band through the page. Measured on 7 committed
+    # traced backdrops, 4 left 8-31% of the frame fully transparent, which the page
+    # showed as near-black blotches. One flat rect in the blob's colour keeps the
+    # band and costs a few bytes.
+    blob = re.search(r'fill="(#[0-9a-fA-F]{6})"', paths[0])
+    ground_band = (
+        f'<rect x="0" y="0" width="{view[0]}" height="{view[1]}" fill="{blob.group(1)}"/>\n'
+        if blob
+        else ""
+    )
+    body = ground_band + "\n".join(paths[1:])
     if len(body) > MAX_TRACE_FRAGMENT_BYTES:
         raise BackdropError("the traced reference is too heavy; try a simpler photo")
-    return f'<g opacity="{opacity:.2f}">\n{body}\n</g>'
+    return f'<g opacity="{opacity:.2f}" {_GROUND_ATTR}="{_hex(stops[0])}">\n{body}\n</g>'
 
 
 def _trace_fragment_child(job_path: Path, output_path: Path) -> int:
@@ -973,7 +1004,12 @@ def procedural_base_fragment(
         f'<ellipse cx="{int(w * 0.72)}" cy="{int(h * 0.62)}" rx="{int(w * 0.14)}" '
         f'ry="{int(h * 0.04)}" fill="rgb({warm[0]},{warm[1]},{warm[2]})" opacity="0.07"/>'
     )
-    return f'<g opacity="{opacity:.2f}">\n' + "\n".join(rects) + pools + "\n</g>"
+    return (
+        f'<g opacity="{opacity:.2f}" {_GROUND_ATTR}="{_hex(stops[0])}">\n'
+        + "\n".join(rects)
+        + pools
+        + "\n</g>"
+    )
 
 
 def compose_with_underlay(
@@ -1004,7 +1040,57 @@ def compose_with_underlay(
     composed = _PLACEHOLDER_RE.sub(lambda _: fragment, svg, count=1)
     if "etr-underlay" in composed:
         raise BackdropError("the etr-underlay placeholder was not fully composed")
-    return composed
+    return _lay_ground(composed, fragment)
+
+
+def _root_open_end(svg: str) -> int:
+    """Index just past the root ``<svg …>`` start tag, honouring quoted values."""
+    m = re.search(r"<svg\b", svg, re.IGNORECASE)
+    if not m:
+        return -1
+    quote = ""
+    for i in range(m.end(), len(svg)):
+        ch = svg[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ">":
+            return -1 if svg[i - 1] == "/" else i + 1
+    return -1
+
+
+def _lay_ground(composed: str, fragment: str) -> str:
+    """Put the fragment's opaque ground beneath everything in the document.
+
+    At the bottom rather than at the placeholder, so a sky the Illustrator painted
+    under the underlay still shows exactly as drawn; the ground only fills what
+    would otherwise be transparent. Fail-safe: a fragment without a ground (one
+    stored before this existed) or a root tag this cannot place it after leaves the
+    document exactly as composed, and the result must still parse — a ground is
+    never a reason to refuse a page.
+    """
+    m = _GROUND_RE.match(fragment)
+    end = _root_open_end(composed)
+    if not m or end < 0:
+        return composed
+    grounded = (
+        composed[:end]
+        + f'<rect x="0" y="0" width="100%" height="100%" fill="{m.group(1)}"/>'
+        + composed[end:]
+    )
+    if not _parses(grounded) and _parses(composed):
+        return composed
+    return grounded
+
+
+def _parses(svg: str) -> bool:
+    try:
+        ET.fromstring(svg)
+    except ET.ParseError:
+        return False
+    return True
 
 
 class TraceStore:
@@ -1095,7 +1181,11 @@ class CandidateStore:
         query: str,
         candidates: list[dict[str, Any]],
         search: dict[str, Any] | None = None,
+        base: dict[str, str] | None = None,
     ) -> None:
+        """``base`` is the page's procedural tonal ground, built with the same ramp
+        and opacity as the candidates, kept so declining every candidate settles on
+        the ground this page asked for rather than a default palette."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".json.tmp")
         tmp.write_text(
@@ -1105,6 +1195,7 @@ class CandidateStore:
                     "query": str(query)[:500],
                     "candidates": candidates,
                     "search": search or None,
+                    "base": base or None,
                 },
                 ensure_ascii=False,
             ),

@@ -44,7 +44,10 @@ Colors stay luminous because white paper glows through them.
 </filter>
 ```
 
-Apply to the whole scene group (`<g filter="url(#wc)">`). For a subject that must
+Apply to the whole scene group (`<g filter="url(#wc)">`), and bleed its content
+past the frame by the displacement scale (`svg-style-core`,
+"Bleed past the frame") — otherwise the bleed exposes the paper base as a torn
+border along every edge. The paper base is UNDER the washes, never a visible margin. For a subject that must
 stay crisp (a face, an emblem), draw it in a SEPARATE group outside the filtered
 one, or give it its own filter instance with a gentler scale (8–14).
 
