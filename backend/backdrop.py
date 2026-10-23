@@ -606,6 +606,17 @@ class BackdropDraftStore:
             raise BackdropError("this final backdrop does not match the current reviewed draft")
         return draft
 
+    def has_draft(self, turn: int) -> bool:
+        """Whether an unpublished draft for exactly ``turn`` is waiting.
+
+        Read by backdrop recovery to tell an illustrator that is one commit away
+        from done apart from one still drawing; it exposes no draft content.
+        """
+        draft = self._load()
+        if draft is None:
+            return False
+        return int(draft.get("turn") or 0) == int(turn)
+
     def discard(self, draft_id: str, turn: int) -> None:
         draft = self.require(draft_id, turn)
         self._remove_previews(draft)
