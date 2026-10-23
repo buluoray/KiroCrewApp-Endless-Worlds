@@ -12,6 +12,55 @@
   /* Scopes any future overlay to this panel instead of the whole dashboard. */
   position: relative;
 }
+/* ── the app's own canvas, and the ink that goes on it ─────────────────────
+   Two views paint a ground the APP chose rather than the dashboard: the shelf's night
+   sky (.ew-home) and the live view, where the narrator's backdrop art fills the room
+   (art briefed to stay low-luminance). Both are dark in every dashboard theme. Text
+   there used to follow the dashboard's own tokens, so a light dashboard put its dark
+   ink on this dark ground — the light-mode readability bug.
+
+   So on those grounds the ink is the app's: the same values in a light and a dark
+   dashboard, because the ground does not change with the dashboard either. Accent
+   TEXT gets its own token mixed toward white (the host's hue survives; a saturated
+   accent or a light theme's deep accent does not reach 4.5:1 on a dark ground), and
+   accent FILLS keep the host's --accent untouched.
+
+   The bottom-of-screen tab bar is listed too: it is portaled to document.body, so it
+   cannot inherit from .ew-root, and it paints the same fixed dark ground.
+
+   Every value is measured, not picked: backend/tests/test_theme_contrast.py computes
+   each against the reading veil over white and black art and fails below WCAG AA. */
+.ew-root.ew-home,
+.ew-root.ew-view-live,
+.ew-tabbar,
+.ew-tabmore {
+  --text: #e8ebf2;
+  --muted: #c3c8d3;
+  --ew-accent-ink: color-mix(in srgb, var(--accent, #7c3aed) 35%, #fff);
+}
+/* A light dashboard also hands this ground white cards, white fields and a deep red
+   meant for a white page. Re-declared to the dark set the canvas was designed with, so
+   a choice, a panel or a life card on the night sky is the same dark glass it is in a
+   dark dashboard. Light mode only: a dark dashboard's own surfaces already suit it. */
+html[data-mode="light"] .ew-root.ew-home,
+html[data-mode="light"] .ew-root.ew-view-live,
+html[data-mode="light"] .ew-tabbar,
+html[data-mode="light"] .ew-tabmore {
+  --bg: #1a1b26;
+  --bg-elevated: #21222e;
+  --card: #1f2030;
+  --border: #33354a;
+  --surface-2: rgba(255, 255, 255, .05);
+  --danger: #f87171;
+}
+/* A live page before its first backdrop arrives (or a life that has none) would show
+   the light dashboard's white page under that light ink. The dark ground it is read on
+   in a dark dashboard, laid the same way the shelf lays its night sky. */
+html[data-mode="light"] .ew-root.ew-view-live::before {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: #0b0c10;
+}
+
 @media (min-width: 768px) {
   /* Every app page owns the available canvas. A short workflow is not centred or
      narrowed merely because it has less content; it begins at the top-left like
@@ -51,7 +100,7 @@
   display: none;
   align-items: center; min-height: 44px; padding: 0 12px 0 0;
   background: transparent; border: none; cursor: pointer;
-  color: var(--accent, #7c3aed); font: inherit; font-size: 14px;
+  color: var(--ew-accent-ink, var(--accent, #7c3aed)); font: inherit; font-size: 14px;
 }
 
 @media (min-width: 1100px) {
@@ -137,7 +186,7 @@
   display: block; width: 100%; text-align: left;
   min-height: 36px; margin-bottom: 14px; padding: 0;
   background: transparent; border: none; cursor: pointer;
-  color: var(--accent, #7c3aed); font: inherit; font-size: 13px;
+  color: var(--ew-accent-ink, var(--accent, #7c3aed)); font: inherit; font-size: 13px;
 }
 /* In the drawer's top row it shares the line with the close control, so it gives up
    the full-width block box it needs when it is the only thing there. */
@@ -192,7 +241,7 @@
 .ew-past-head, .ew-past .ew-prose, .ew-past .ew-marks { position: relative; z-index: 1; }
 .ew-past-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .ew-past-turn { font-size: 12px; color: var(--muted, #6b7280); letter-spacing: .04em; }
-.ew-past-action { font-size: 12px; color: var(--accent, #7c3aed); overflow-wrap: anywhere; }
+.ew-past-action { font-size: 12px; color: var(--ew-accent-ink, var(--accent, #7c3aed)); overflow-wrap: anywhere; }
 
 .ew-rail-note {
   font-size: 11px; color: var(--muted, #6b7280); padding: 6px 8px; line-height: 1.6;
@@ -219,7 +268,7 @@
 .ew-settings-label { flex: 0 0 8em; color: var(--muted, #6b7280); font-size: 13px; }
 .ew-settings-select { flex: 1; min-width: 0; }
 .ew-settings-foot { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
-.ew-settings-saved { font-size: 12px; color: var(--accent, #7c3aed); }
+.ew-settings-saved { font-size: 12px; color: var(--ew-accent-ink, var(--accent, #7c3aed)); }
 .ew-settings-group {
   margin: 16px 0 4px;
   font-size: 12px;
@@ -273,7 +322,10 @@
   position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--card, #1f2030) 45%, transparent),
+    /* 58% at the top, where the title sits: SOLVED so the muted meta row keeps 4.5:1
+       over a white drawing seen at the image's own half opacity
+       (backend/tests/test_theme_contrast.py). It was 45%, 3.9:1 there. */
+    color-mix(in srgb, var(--card, #1f2030) 58%, transparent),
     color-mix(in srgb, var(--card, #1f2030) 72%, transparent)
   );
 }
@@ -317,7 +369,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-chip-accent {
   border-color: transparent;
   background: color-mix(in oklab, var(--accent, #7c3aed) 16%, transparent);
-  color: var(--accent, #7c3aed);
+  color: var(--ew-accent-ink, var(--accent, #7c3aed));
 }
 
 .ew-meta { font-size: 12px; color: var(--muted, #6b7280); line-height: 1.7; }
@@ -338,7 +390,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 .ew-world-possibilities-label {
   margin-bottom: 5px; font-size: 11px; font-weight: 600;
-  letter-spacing: .04em; color: var(--accent, #7c3aed);
+  letter-spacing: .04em; color: var(--ew-accent-ink, var(--accent, #7c3aed));
 }
 .ew-world-possibility {
   position: relative; padding-left: 12px;
@@ -353,7 +405,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 .ew-world-enter {
   flex: none; font-size: 12px; font-weight: 600;
-  color: var(--accent, #7c3aed);
+  color: var(--ew-accent-ink, var(--accent, #7c3aed));
 }
 
 /* ── the landing: a living bookshelf ─────────────────────────────────────
@@ -443,7 +495,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-create-plus {
   width: 38px; height: 38px; flex: none; border-radius: 9px;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 22px; line-height: 1; color: var(--accent, #d9b45a);
+  font-size: 22px; line-height: 1; color: var(--ew-accent-ink, var(--accent, #d9b45a));
   border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 55%, var(--border, #2d2f3d));
 }
 .ew-create-text { display: flex; flex-direction: column; gap: 2px; }
@@ -485,7 +537,9 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   width: 100%; box-sizing: border-box;
   background: color-mix(in srgb, var(--card, #1f2030) 85%, #000);
   border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 40%, var(--border, #2d2f3d));
-  border-radius: 8px; color: #f1ecdf; font-size: 17px; font-weight: 700; padding: 9px 11px;
+  /* The field's own ink, from the same theme as its ground. A fixed cream on a
+     theme-derived field was 1.2:1 in a light dashboard, where the field is pale grey. */
+  border-radius: 8px; color: var(--text, #e2e8f0); font-size: 17px; font-weight: 700; padding: 9px 11px;
 }
 .ew-review { margin-top: 14px; }
 .ew-kv {
@@ -507,7 +561,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   display: block; width: 100%; margin-top: 14px; padding: 11px;
   border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 40%, var(--border, #2d2f3d));
   border-radius: 9px; background: color-mix(in srgb, var(--accent, #d9b45a) 5%, transparent);
-  color: var(--accent, #d9b45a); font: inherit; font-size: 13.5px; font-weight: 600;
+  color: var(--ew-accent-ink, var(--accent, #d9b45a)); font: inherit; font-size: 13.5px; font-weight: 600;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 .ew-review-accept { flex: 1; }
@@ -519,7 +573,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   display: inline-flex; align-items: center;
   min-height: 44px; padding: 0 12px 0 0;
   background: transparent; border: none; cursor: pointer;
-  color: var(--accent, #7c3aed); font: inherit; font-size: 14px;
+  color: var(--ew-accent-ink, var(--accent, #7c3aed)); font: inherit; font-size: 14px;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -638,7 +692,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   min-height: 36px; -webkit-tap-highlight-color: transparent;
 }
 .ew-opt-on {
-  border-color: transparent; color: var(--accent, #7c3aed);
+  border-color: transparent; color: var(--ew-accent-ink, var(--accent, #7c3aed));
   background: color-mix(in oklab, var(--accent, #7c3aed) 18%, transparent);
 }
 
@@ -714,7 +768,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-echo-line {
   appearance: none; background: none; border: 0; padding: 2px 0; cursor: pointer;
   font: inherit; font-size: 13px; font-style: italic; text-align: start;
-  color: var(--accent, #7c3aed);
+  color: var(--ew-accent-ink, var(--accent, #7c3aed));
 }
 @media (hover: hover) { .ew-echo-line:hover { text-decoration: underline; } }
 .ew-echo-body {
@@ -728,7 +782,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-echo-actions { display: flex; gap: 8px; margin-top: 2px; }
 
 .ew-unlocked-row {
-  font-size: 13px; color: var(--accent, #7c3aed);
+  font-size: 13px; color: var(--ew-accent-ink, var(--accent, #7c3aed));
   padding-inline-start: 10px;
   border-inline-start: 2px solid var(--accent, #7c3aed);
 }
@@ -742,7 +796,10 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-milestone { margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; }
 .ew-milestone-row {
   font-size: 13px; font-weight: 600;
-  color: color-mix(in oklab, var(--accent, #d9b45a) 82%, var(--text, #e2e8f0));
+  /* The live view's accent ink when there is one: an accent-heavy mix with a light
+     ink stays as dark as the accent itself, which on the app's dark ground is
+     unreadable for a deep or a light theme's accent. */
+  color: var(--ew-accent-ink, color-mix(in oklab, var(--accent, #d9b45a) 82%, var(--text, #e2e8f0)));
   padding: 8px 12px; border-radius: 8px;
   background: color-mix(in srgb, var(--accent, #d9b45a) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, #d9b45a) 34%, var(--border, #2d2f3d));
@@ -766,7 +823,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 12px; margin-bottom: 7px;
 }
-.ew-story-moment-title { font-size: 13px; font-weight: 600; color: var(--accent, #7c3aed); }
+.ew-story-moment-title { font-size: 13px; font-weight: 600; color: var(--ew-accent-ink, var(--accent, #7c3aed)); }
 .ew-story-moment-close {
   flex: none; border: none; padding: 3px 0; background: transparent;
   color: var(--muted, #6b7280); font: inherit; font-size: 11px; cursor: pointer;
@@ -939,6 +996,24 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
     color-mix(in srgb, var(--ew-bg, #0b0c10) 40%, transparent)
   );
 }
+/* The reading veil: where the text actually sits, a dark glass between it and the art.
+   The page scrim above stays light so the art reads as the room; the veil is only under
+   the reading column (and the shelf drawer beside it), so on a wide screen the art is
+   untouched around it. Without it every label sat straight on the art, and a bright
+   patch in the drawing took the contrast with it.
+
+   Only when a backdrop is painted: on a plain page there is no art to defend against.
+   A spread box-shadow carries the veil a little past the column's edge instead of
+   padding, so no geometry moves. Background only, never backdrop-filter: a filter would
+   become the containing block of the fixed phone reading row and the star-map sheet
+   inside this column. The alpha is SOLVED by backend/tests/test_theme_contrast.py:
+   the app's muted ink must reach 4.5:1 through it over a white drawing. */
+.ew-root:has(> .ew-backdrop) .ew-main,
+.ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
+  background: rgba(9, 10, 14, .72);
+  box-shadow: 0 0 0 12px rgba(9, 10, 14, .72);
+  border-radius: 4px;
+}
 
 .ew-play { display: block; }.ew-aside { display: none; }
 @media (min-width: 900px) {
@@ -1047,7 +1122,9 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
    clause into it (measured on the flagship). Chips are nowrap by default so tag
    rows stay tidy — but a value chip must wrap instead of overflowing the panel. */
 .ew-pval .ew-chip { white-space: normal; overflow-wrap: anywhere; }
-.ew-gap { color: var(--border, #2d2f3d); }
+/* "No value yet" is still an answer the player reads, so it takes the muted ink, not
+   the border colour (1.5:1 on the app's dark ground). */
+.ew-gap { color: var(--muted, #6b7280); }
 
 /* A label that is really a sentence. Measured on the live flagship: the narrator
    wrote a whole clause into a label slot, and the fixed 5.5em column wrapped it to
@@ -1518,7 +1595,9 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-topbar-fixed {
   position: fixed; left: 0; right: 0; top: var(--ew-chrome-h); z-index: 2;
   padding: 8px var(--ew-gutter, 16px);
-  background: rgba(8, 9, 18, .52);
+  /* The same solved alpha as the reading veil: this row floats over the art as well as
+     over the column, and its pager and date are small type. */
+  background: rgba(8, 9, 18, .72);
   backdrop-filter: blur(16px) saturate(1.15);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   transition: transform .28s ease, opacity .28s ease;
@@ -1599,7 +1678,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
    light the row up before the finger lifts. */
 @media (hover: hover) {
   .ew-setting-head:hover { background: var(--surface-2, rgba(255, 255, 255, 0.05)); }
-  .ew-setting-head:hover .ew-setting-name { color: var(--accent, #7c3aed); }
+  .ew-setting-head:hover .ew-setting-name { color: var(--ew-accent-ink, var(--accent, #7c3aed)); }
 }
 .ew-setting-head:focus-visible { outline: 2px solid var(--accent, #7c3aed); outline-offset: 2px; }
 .ew-setting-name { font-weight: 600; flex: 0 0 auto; }

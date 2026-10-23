@@ -142,6 +142,18 @@ guarantee.
   `test_the_slot_surface_does_not_follow_the_dashboard_theme`, and
   `test_the_scene_frames_clear_the_phones_tab_bar`.
 
+- **The app's own canvas carries the app's own ink.** The shelf's night sky and the
+  live view's backdrop are grounds the app chose, dark in every dashboard theme, so
+  `.ew-root.ew-home` and `.ew-root.ew-view-live` (and the portaled tab bar) declare
+  their own `--text`, `--muted` and an `--ew-accent-ink` for accent text, and under
+  `html[data-mode="light"]` re-declare the dark surface set (`--card`, `--bg`,
+  `--border`, …) a light dashboard would otherwise hand them. Where a backdrop is
+  painted, the reading column and the shelf drawer sit on a reading veil whose alpha
+  is solved, not picked. Every pair is held to WCAG AA over white and black art by
+  `test_theme_contrast.py` (`test_text_on_the_reading_veil_holds_over_any_drawing`,
+  `test_a_life_card_over_its_own_backdrop_stays_legible`,
+  `test_the_canvas_ink_does_not_follow_the_dashboard`).
+
 - **A scene answer takes the same road as any turn.** A scene posts its answer
   back via `postMessage` carrying a nonce that names this app, this scene, and a
   choice; `main.tsx` routes it through `api.answerScene` (which validates the
