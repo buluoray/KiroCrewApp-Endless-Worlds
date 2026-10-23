@@ -386,6 +386,21 @@ def test_paint_backdrop_records_a_brief_and_draws_nothing(app):
     assert req and req["brief"] == "a grey dawn over the wall"
 
 
+def test_paint_backdrop_declines_a_page_that_already_has_its_art(app):
+    """A brief for a page whose exact art is committed must not queue a request:
+    recovery never services it (the page is not pending), so it would only hold the
+    page in "painting" until the ceiling."""
+    from backdrop import BackdropStore
+
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    BackdropStore(app, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=4)
+
+    out = call("endless_paint_backdrop", runId=run, brief="LANE: motif\nTHESIS: again")
+    assert out["ok"] is True and out["backdrop"] == "kept"
+    assert store.read_backdrop_request(run) is None
+
+
 def test_lenient_json_object_recovers_double_encode_and_repairs_bad_escape():
     assert srv._lenient_json_object('{"a": 1}') == {"a": 1}
     # A lone backslash (an invalid JSON escape, e.g. a Windows path) is repaired.
@@ -1361,7 +1376,9 @@ def test_sparse_cadence_declines_a_brief_too_soon_after_the_last_art(app):
     write_settings(app, model="", reasoning_effort="", backdrop_cadence="sparse")
     store = srv._store()
     run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
-    BackdropStore(app, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=4)
+    # The last art is on an EARLIER page: art on this page would be declined as
+    # already painted before the cadence rule is ever read.
+    BackdropStore(app, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=3)
 
     out = call("endless_paint_backdrop", runId=run, brief="LANE: motif\nTHESIS: too soon")
     assert out["backdrop"] == "kept"
@@ -1389,6 +1406,25 @@ def test_sparse_cadence_still_accepts_a_replacement_brief_for_a_pending_page(app
     assert out["backdrop"] == "queued"
     req = store.read_backdrop_request(run)
     assert req and "simpler" in req["brief"]
+
+
+def test_sparse_replacement_brief_is_declined_once_the_page_has_its_art(app):
+    # The replacement exemption is for a page still waiting. A request left on
+    # disk beside this page's exact art reads as "replacing" and would pass the
+    # cadence rule, so the re-brief must be declined before that rule is read.
+    from backdrop import BackdropStore
+    from settings import write_settings
+
+    write_settings(app, model="", reasoning_effort="", backdrop_cadence="sparse")
+    store = srv._store()
+    run = store.create_run({"turn": 4, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(run, turn=4, brief="LANE: motif\nTHESIS: first direction")
+    BackdropStore(app, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=4)
+
+    out = call("endless_paint_backdrop", runId=run, brief="LANE: motif\nTHESIS: simpler")
+    assert out["backdrop"] == "kept"
+    req = store.read_backdrop_request(run)
+    assert req is None or "simpler" not in req["brief"]
 
 
 def test_a_disabled_style_is_rewritten_before_the_brief_is_stored(app):
