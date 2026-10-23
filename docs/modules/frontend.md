@@ -238,3 +238,29 @@ guarantee.
   dashboard's `/api/models` and tolerates both a bare array and `{models:[]}`, and
   both `model_id`/`model_name` and `id`/`name` — a field drift once emptied the
   picker down to only `auto`.
+
+- **Reading a new page remains keyboard- and screen-reader accessible.**
+  `StoryPage` names the prose region by page number, announces a ready page once
+  through a persistent polite status, and focuses the prose after load/paging.
+  Loading past pages do not take focus until their content arrives. Unchanged
+  polls do not refocus; a hidden reading tab, sheet, or focus outside the play
+  root prevents focus theft. Ending prose uses the same component.
+  `PlayPage` visibly labels free actions and describes Ctrl/Cmd+Enter (direct
+  submission); composition events never submit unfinished IME text. Escape and
+  Think again restore focus to the armed choice or free-action box. Scroll-hidden
+  navigation becomes visible on keyboard focus. Phone actions stack, pager labels
+  can shrink, and pager/confirmation targets remain at least 44px.
+  The shelf explains how to start a first life, the first page explains the
+  choice/confirm loop, and an empty world shelf points to Create a world.
+  Pinned by `test_free_action_has_a_visible_label_and_keyboard_help`,
+  `test_cancel_returns_to_the_control_that_armed_the_action`,
+  `test_a_landed_page_is_named_announced_and_focused_without_stealing_focus`,
+  `test_phone_navigation_does_not_hide_the_keyboard_focus`,
+  `test_first_life_help_is_visible_on_both_widths`, and
+  `test_first_run_and_keyboard_copy_exists_in_both_languages` in
+  `test_play_accessibility.py`. `devtools/play-ux.test.mjs` walks keyboard choice,
+  Escape, free text, IME, turn arrival, history, and first-run screens in a seeded
+  disposable pod. Set `EW_POD_URL` and `EW_POD_SESSION` (Playwright storage state)
+  when running it with `node --test`; absent these, it skips rather than touching
+  a live home. Turn writes and empty-shelf reads are intercepted fixtures; other
+  reads reach the real app. Native screen-reader speech is not automated here.
