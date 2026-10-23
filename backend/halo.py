@@ -160,13 +160,7 @@ def event_density(chronicle: list[dict[str, Any]], window: int = DENSITY_WINDOW)
     if not recent:
         return {"turns": 0, "events": 0, "perTurn": 0.0, "busy": False, "quiet": False}
 
-    events = 0
-    for entry in recent:
-        marked = entry.get("events")
-        if isinstance(marked, list):
-            events += len(marked)
-        elif isinstance(marked, int):
-            events += max(0, marked)
+    events = sum(_event_count(entry) for entry in recent)
     per_turn = events / len(recent)
     return {
         "turns": len(recent),
@@ -178,6 +172,37 @@ def event_density(chronicle: list[dict[str, Any]], window: int = DENSITY_WINDOW)
         # between a calm stretch it chose and one it drifted into.
         "quiet": events == 0 and len(recent) >= 3,
     }
+
+
+def _event_count(entry: dict[str, Any]) -> int:
+    """A lower bound across the two event declarations, without double-counting.
+
+    A turn can describe the same event in both the legacy notable-event list and
+    structured memory. There is no shared identity between those lists, so their
+    maximum is the safe count, not their sum. Memory is already declared story;
+    this reads it without inferring events from prose or changing either list.
+    """
+    marked = entry.get("events")
+    if isinstance(marked, list):
+        declared = len(marked)
+    elif isinstance(marked, int) and not isinstance(marked, bool):
+        declared = max(0, marked)
+    else:
+        declared = 0
+    memory = entry.get("memory")
+    remembered = memory.get("events") if isinstance(memory, dict) else None
+    count = 0
+    if isinstance(remembered, list):
+        count = sum(
+            1
+            for event in remembered
+            if isinstance(event, dict)
+            and any(
+                isinstance(event.get(key), str) and event[key].strip()
+                for key in ("title", "summary")
+            )
+        )
+    return max(declared, count)
 
 
 def attribution(
