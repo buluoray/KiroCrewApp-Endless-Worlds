@@ -256,6 +256,18 @@ turn 200 as at turn 1.
   resending the call; the same rule is in the narrator's own prompt so the common
   case never reaches the gate. Pinned by the `"newborn"` detail assert in
   `test_a_living_turn_with_no_choices_is_refused`.
+
+- **A terminal turn stamps `state.ended` at commit.** When the narrator passes
+  `ending: true` or the committed state fires a declared world ending,
+  `_advance_turn` writes `ended` into the committed state: the narrator's own
+  ending id if it wrote one, else the id of the world ending that fired, else
+  `true`. Before this, `ending: true` alone committed a choiceless page that
+  `resolve_ending` still read as a living life — no ending page, no controls, and a
+  turn route willing to narrate past the death — while a world-law ending was over
+  for the play view but listed as being lived by every reader keyed on the flag.
+  Pinned by `test_life_end.test_an_ending_marker_closes_the_life_for_every_reader`,
+  `test_a_world_law_ending_names_itself_on_disk`, `test_a_narrator_ending_id_is_kept`
+  and `test_a_living_turn_is_not_stamped`.
  `_clean_choices` salvages before it judges: a caption under a
   plausible alias key (`text`, `title`, `caption`, `name`) is folded onto
   `label`, and a bare string entry IS a caption — the content decides, not the

@@ -290,7 +290,10 @@ async def preview_story_card(request: web.Request, ctx: AppContext) -> web.Respo
 
     chronicle = store.read_chronicle(run_id)
     index = memory_graph.build_index(chronicle)
-    ended = int(state.get("turn") or 0) if state.get("ended") else 0
+    # The same "is it over" the ending page asks: a world-law ending carries no
+    # narrator flag on older lives, and a card drafted from one must still know
+    # where the life stopped.
+    ended = int(state.get("turn") or 0) if _life_over(ctx, state) else 0
     try:
         card = build_draft(
             index,

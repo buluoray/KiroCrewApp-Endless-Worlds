@@ -102,6 +102,19 @@ source of truth and keep no drifting secondary index.
   heir play. `test_parallel_lives_share_nothing`, `test_a_bridged_life_reads_only_what_was_carried`,
   and `test_the_source_life_is_never_modified_by_the_bridge_or_the_heir` pin it.
 
+## A finished life on the shelf
+
+The shelf (`GET /runs`), the life-deletion facts and the world-deletion life list
+mark a life `ended` with the same answer the play view gives: the committed
+`state.ended` flag (stamped at commit, see turn-loop), or `resolve_ending` over the
+world pack for a life committed before that stamp existed — a world-law ending such
+as `state.alive == false` carries no flag on those older lives. Keyed on the flag
+alone, such a life sat among the lives being lived and was offered as the one to
+continue. `routes._life_ended` is the shelf-side reader, caching one world read per
+listing; `memory_routes._life_over` is the same answer for the bridge gate and the
+story-card spoiler line. Pinned by
+`test_life_end.test_an_older_world_law_ending_without_the_flag_lists_as_ended`.
+
 ## Thread inheritance
 
 `build_bridge_record` includes a thread effect on the turn-zero bridge event for
