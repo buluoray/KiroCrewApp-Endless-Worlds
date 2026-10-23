@@ -104,10 +104,10 @@ REQUIRED FIELDS
               around it), "pack" (what the life carries), "tasks" (what is open). A
               world's own word is allowed and takes the panel's own label on the bar,
               but the bar holds six tabs before the tail folds away, so reach for a
-              custom region only when none of the four fits. A panel with NO region
-              gets no phone tab at all — it is reachable only inside the reading
-              drawer — so leaving it off is a real loss of the phone layout, not a
-              neutral default.
+              custom region only when none of the four fits. If you omit a region,
+              the gate uses a shared generic system tab and warns about the loss of
+              the world's own grouping. Declare the region yourself rather than
+              relying on that fallback.
   endings     conditions that finish a life. Each {{ "id", "when" }}.
   milestones  OPTIONAL named achievements — a long-play hook. Each
               {{ "id", "label", "when" }} (the same `when` language as endings and
@@ -431,7 +431,9 @@ def _as_mapping(header: Any) -> tuple[dict[str, Any] | None, str | None]:
         except json.JSONDecodeError as exc:
             if first_err is None:
                 first_err = exc
-    if parsed is None:
+    else:
+        # Parsing `null` succeeded: it is a wrong-shaped answer, not a JSON
+        # decode failure. Only exhausting both attempts means decoding failed.
         assert first_err is not None
         return None, (
             f"the compiled header is not valid JSON ({first_err.msg} at line {first_err.lineno})"
@@ -482,6 +484,11 @@ def _slugify(value: str) -> str:
     return s.strip("-")[:64]
 
 
+def _list_entries(value: Any) -> list[Any]:
+    """Inspect lists without repairing their shape. The gate still validates them."""
+    return value if isinstance(value, list) else []
+
+
 def _declared_ids(header: dict[str, Any]) -> set[str]:
     """Every id the header declares — the world id and each nested one. These are
     the ONLY strings a rename may touch, so a free runtime key a `when` invents is
@@ -494,13 +501,13 @@ def _declared_ids(header: dict[str, Any]) -> set[str]:
 
     add(header.get("id"))
     for key in ("styles", "opening", "endings", "chapters", "lore", "systems", "roles"):
-        for item in header.get(key) or []:
+        for item in _list_entries(header.get(key)):
             if isinstance(item, dict):
                 add(item.get("id"))
-    for panel in header.get("panels") or []:
+    for panel in _list_entries(header.get("panels")):
         if isinstance(panel, dict):
             add(panel.get("id"))
-            for field in panel.get("fields") or []:
+            for field in _list_entries(panel.get("fields")):
                 if isinstance(field, dict):
                     add(field.get("id"))
     return ids
@@ -553,15 +560,15 @@ def _normalize_ids(header: dict[str, Any]) -> tuple[dict[str, Any], dict[str, st
     if isinstance(body.get("id"), str) and body["id"].strip() in rename:
         body["id"] = rename[body["id"].strip()]
     for key in ("styles", "opening", "endings", "chapters", "lore", "systems", "roles"):
-        for item in body.get(key) or []:
+        for item in _list_entries(body.get(key)):
             fix(item)
-    for panel in body.get("panels") or []:
+    for panel in _list_entries(body.get("panels")):
         fix(panel)
         if isinstance(panel, dict):
-            for field in panel.get("fields") or []:
+            for field in _list_entries(panel.get("fields")):
                 fix(field)
     for group in ("panels", "endings", "chapters"):
-        for item in body.get(group) or []:
+        for item in _list_entries(body.get(group)):
             if isinstance(item, dict) and isinstance(item.get("when"), str):
                 item["when"] = _rewrite_when(item["when"], rename)
     return body, rename
@@ -813,7 +820,12 @@ def _salvage_panels(body: dict[str, Any], warnings: list[str]) -> None:
         if "label" in p and not _has_label(p["label"]):
             p["label"] = str(p.get("id") or f"panel-{i}")
             warnings.append(f"defaulted panel label to {p['label']!r}")
-        for j, f in enumerate(p.get("fields") or []):
+        if not _has_label(p.get("region")):
+            # Use the UI's existing unnamed-scenes bucket, not a guessed world
+            # category or one new tab per panel. Explicit regions stay untouched.
+            p["region"] = "system"
+            warnings.append(f"panel {p.get('id')!r} had no region; placed in the shared system tab")
+        for j, f in enumerate(_list_entries(p.get("fields"))):
             if not isinstance(f, dict):
                 continue
             new = _coerce_primitive(f.get("primitive"))

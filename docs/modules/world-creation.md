@@ -102,22 +102,23 @@ but never import each other; `drafts.py` is stdlib-only.
   `test_ordinary_sibling_paths_do_not_warn` pin both directions.
 
 - **A declaration the player sees, left half-written, is warned about rather than
-  repaired.** `_flag_display_gaps` runs on every accepted header and reports the gaps
-  nothing else can catch, because each one leaves a world that parses and plays: a
-  `lore` entry or a `role` with no `name` (`view.world_detail` renders `name or id`, and
-  a role's name also labels a button in character creation), a `lore` entry with no
-  `category` (filed under "other" with everything else), a `panel` with no `region` (no
-  phone tab), a `system` with `tiers` but no `tierInto` (wholly inert — `apply_systems`
-  needs both), and a `tier` with no `name` (`_tier_name` returns `''` and no rank is
-  written). It invents nothing, deliberately: a slug cannot be turned back into the
-  world's language, and only the world knows which tab a panel belongs behind — so the
-  honest move is to surface the gap in the review where the brief's instruction can be
-  repeated. Refusing instead would be wrong too; every one of these worlds is playable.
-  Pinned in both directions by `test_a_lore_entry_with_no_display_name_is_warned_about`,
+  guessed.** `_flag_display_gaps` reports missing lore/role names, lore categories,
+  and incomplete tier declarations; only the worldsmith can supply those meanings.
+  `_salvage_panels` gives a compiled panel with an absent, blank, or wrong-typed
+  `region` the existing `system` bucket. This is the same localized catch-all used
+  for unnamed scenes, not a guess at status/world/pack/tasks or a new tab per panel.
+  Each fallback is warned about, and explicit canonical/custom regions are kept.
+  Hand-written packs and already-installed worlds are not changed. This prevents
+  an accepted generated world from losing all its phone tabs while preserving the
+  strict reader's optional-region contract. Enforced by `_salvage_panels`; pinned by
+  `test_compile_recovery.test_untagged_compiled_panels_get_a_shared_phone_tab`,
+  `test_compile_recovery.test_blank_or_wrong_typed_region_uses_the_shared_phone_tab`,
+  and `test_compile_recovery.test_declared_regions_and_handwritten_worlds_are_not_reassigned`.
+  The remaining display diagnostics are pinned by
+  `test_a_lore_entry_with_no_display_name_is_warned_about`,
   `test_a_named_lore_entry_stays_quiet`,
   `test_a_lore_entry_with_no_category_is_warned_about`,
   `test_a_role_with_no_display_name_is_warned_about`,
-  `test_a_panel_with_no_region_is_warned_about`,
   `test_tiers_without_a_tier_into_are_warned_about`,
   `test_an_unnamed_tier_is_warned_about`, and `test_a_fully_declared_system_stays_quiet`.
 
@@ -177,3 +178,21 @@ but never import each other; `drafts.py` is stdlib-only.
 - **The worldsmith prompt is pull-only.** `worldsmith_prompt` is deliberately tiny: it
   names the draft id and tells the agent to pull the draft itself via
   `endless_read_draft`, rather than pushing the raw text into the prompt.
+
+### Malformed submissions remain retryable
+
+`_as_mapping` distinguishes a valid JSON `null` from a decode failure and returns
+an object-shape refusal rather than raising an assertion. `_list_entries` makes
+normalization safe before validation: required lists still get field-named
+refusals, while invalid optional lists retain the existing drop-and-warn recovery.
+Nested `relations`/`tiers` list checks live in the strict parser so malformed
+entries can also be dropped without masking programming errors with a broad catch.
+The normal `_submit_world_draft` refusal path then writes `failed` immediately,
+with a readable problem, instead of leaving the draft `generating` until timeout.
+A later valid submission to the same draft becomes `ready`.
+Pinned by `test_compile_recovery.test_null_header_is_a_readable_refusal`,
+`test_compile_recovery.test_wrong_typed_required_lists_never_crash_the_compile`,
+`test_compile_recovery.test_wrong_typed_optional_lists_are_dropped_with_a_warning`,
+`test_compile_recovery.test_wrong_typed_panel_fields_return_a_named_refusal`,
+`test_compile_recovery.test_wrong_typed_nested_optional_lists_drop_only_the_bad_entry`,
+and `test_compile_recovery.test_malformed_submission_leaves_a_retryable_draft`.

@@ -234,3 +234,26 @@ sent only the slices its state unlocks.
   `test_chapters.test_the_contents_is_not_sent_every_turn`,
   `test_chapters.test_a_chapter_the_world_just_opened_is_announced`, and
   `test_chapters.test_a_chapter_that_closed_again_is_not_announced`.
+
+## Compiled-header shape recovery
+
+The hand-written reader remains strict. `compile._list_entries` lets id repair
+inspect actual lists only; it does not coerce wrong-shaped required lists. Those
+reach `parse_template` for a field-named refusal, while optional top-level lists
+follow `compile._salvage_optional_lists`' existing drop-and-warn path. A missing
+styles list still gets its documented default. `_parse_lore` checks that
+`relations` is a list and `_parse_systems` checks that `tiers` is a list before
+iterating, so malformed nested declarations produce `TemplateError`, not a Python
+iteration crash. The compile gate can then drop only that optional entry.
+Pinned by `test_compile_recovery.test_wrong_typed_required_lists_never_crash_the_compile`,
+`test_compile_recovery.test_wrong_typed_optional_lists_are_dropped_with_a_warning`,
+`test_compile_recovery.test_wrong_typed_panel_fields_return_a_named_refusal`, and
+`test_compile_recovery.test_wrong_typed_nested_optional_lists_drop_only_the_bad_entry`.
+
+A panel's `region` remains optional in a hand-written pack. For generated packs
+only, `compile._salvage_panels` supplies `system` when a region is missing, blank,
+or not a string. This uses the existing localized catch-all tab, preserves explicit
+regions, and warns about the fallback rather than guessing the world's grouping.
+The chosen region round-trips through `read_world`/`serialize_world`, pinned by
+`test_compile_recovery.test_untagged_compiled_panels_get_a_shared_phone_tab` and
+`test_compile_recovery.test_declared_regions_and_handwritten_worlds_are_not_reassigned`.

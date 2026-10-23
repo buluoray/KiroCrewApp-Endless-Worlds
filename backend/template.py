@@ -639,7 +639,10 @@ def _parse_lore(raw: Any) -> list[Lore]:
         summary = str(item.get("summary") or "").strip()
         category = str(item.get("category") or "").strip()
         relations: list[dict[str, str]] = []
-        for rel in item.get("relations") or []:
+        raw_relations = item.get("relations")
+        if raw_relations is not None and not isinstance(raw_relations, list):
+            raise TemplateError(f"lore[{lid}].relations", "a list of relations")
+        for rel in raw_relations or []:
             if isinstance(rel, dict) and str(rel.get("to") or "").strip():
                 edge = {"to": str(rel["to"]).strip()}
                 if str(rel.get("label") or "").strip():
@@ -743,7 +746,10 @@ def _parse_systems(raw: Any) -> list[System]:
         cap = _numopt("cap")
         per_turn = _numopt("perTurn") or 0.0
         tiers: list[dict[str, Any]] = []
-        for j, tr in enumerate(item.get("tiers") or []):
+        raw_tiers = item.get("tiers")
+        if raw_tiers is not None and not isinstance(raw_tiers, list):
+            raise TemplateError(f"systems[{sid}].tiers", "a list of tiers")
+        for j, tr in enumerate(raw_tiers or []):
             at = tr.get("at") if isinstance(tr, dict) else None
             if not isinstance(at, (int, float)) or isinstance(at, bool):
                 raise TemplateError(f"systems[{sid}].tiers[{j}]", "an object with a numeric `at`")
