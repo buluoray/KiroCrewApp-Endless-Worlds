@@ -130,7 +130,7 @@ def candidates(index: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
             row["relations"] = relations_of[eid]
         if ent["kind"] == "thread":
             rec = index["threads"].get(eid) or {}
-            row["open"] = bool(rec.get("opened")) and not rec.get("resolved")
+            row["open"] = eid in index["threads"] and rec.get("resolved") is None
         groups[kind_to_group[ent["kind"]]].append(row)
     return groups
 
@@ -230,6 +230,16 @@ def build_bridge_record(
                 "summary": _s(lang, "summary"),
                 "importance": "major",
                 "participants": [PLAYER] + picked,
+                "threads": [
+                    {
+                        "id": eid,
+                        "effect": "resolved"
+                        if source_index["threads"][eid].get("resolved") is not None
+                        else "opened",
+                    }
+                    for eid in picked
+                    if eid in source_index["threads"]
+                ],
                 "disclosure": "known",
             }
         ],

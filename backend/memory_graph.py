@@ -299,15 +299,12 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
             }
             for th in ev.get("threads") or []:
                 tid = str(th.get("id") or "")
-                rec = threads.setdefault(tid, {"opened": 0, "resolved": 0, "lastTouched": 0})
+                rec = threads.setdefault(
+                    tid, {"opened": turn, "resolved": None, "lastTouched": turn}
+                )
                 effect = str(th.get("effect") or "")
-                # The FIRST record of a thread opens it, whatever the effect says.
-                # A narrator that advances a thread it never explicitly opened has
-                # still told us the thread exists; leaving `opened` at 0 would keep
-                # it out of every open-threads reading (recall, legacy, story cards)
-                # and lose it silently.
-                if not rec["opened"]:
-                    rec["opened"] = turn
+                # The first touch opens the thread, including an inherited turn 0.
+                # None, not zero, means no resolution has occurred.
                 if effect == "resolved":
                     rec["resolved"] = turn
                 rec["lastTouched"] = turn
@@ -912,9 +909,7 @@ def recall_candidates(
                 recent_entities.add(ev["place"])
             recent_entities.update(th["id"] for th in ev["threads"])
 
-    open_threads = {
-        tid for tid, rec in index["threads"].items() if rec["opened"] and not rec["resolved"]
-    }
+    open_threads = {tid for tid, rec in index["threads"].items() if rec["resolved"] is None}
     action_lower = action.lower()
 
     def last_echo(cid: str) -> int:
@@ -1132,9 +1127,7 @@ def star_payload(
         cited.update(str(c) for c in kp.get("cites") or [])
 
     echo_sources: set[str] = set(index["echoedAt"])
-    open_threads = {
-        tid for tid, rec in index["threads"].items() if rec["opened"] and not rec["resolved"]
-    }
+    open_threads = {tid for tid, rec in index["threads"].items() if rec["resolved"] is None}
 
     picked_events: dict[str, dict[str, Any]] = {}
     for cid, ev in events.items():

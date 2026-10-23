@@ -58,7 +58,7 @@ class KeepsakeStore:
             # A corrupt file loses the meaning layer, never the facts — and it
             # must not take the star map down with it.
             return []
-        return raw if isinstance(raw, list) else []
+        return [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
 
     def get(self, keepsake_id: str) -> dict[str, Any] | None:
         for kp in self.entries():

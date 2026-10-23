@@ -67,7 +67,7 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
 
 - **Systems compute derived state at commit, and read their base from the PRIOR
   committed state — so the number is the app's, not the narrator's.** After the
-  reserved-key carry-forward and the milestone rebuild, `_advance_turn` runs the
+  reserved-key carry-forward, and before the milestone rebuild, `_advance_turn` runs the
   world's declared `systems` (`systems.apply_systems`) against the narrator's
   `gains` for this turn, reading each system's base value from the prior committed
   state and overwriting its `into` path in the state about to be committed. Because
@@ -193,3 +193,16 @@ shelf, and return `False` (→ 404) on a missing life. The Lives view groups off
 the same `archived` flag and index rows. Pinned by
 `test_store.test_patch_index_merges_metadata_without_reordering` and
 `test_store.test_patch_index_reports_a_missing_life`.
+
+### Identity restoration on turn commits
+
+Both full declarations and patches restore reserved metadata from the prior
+state; an incoming value cannot replace or delete it. The `status` exception
+remains writable because it is also a world-defined panel. `runId` is stamped
+from the addressed run even if an older save omitted it. Systems run before
+milestones, preventing an invented experience total from granting a permanent
+achievement or a newly earned total from waiting another turn. Enforced by
+`mcp_server._advance_turn`; pinned by
+`test_game_state_integrity.test_app_metadata_cannot_be_replaced_or_removed`,
+`test_run_identity_survives_an_omitted_full_declaration`, and
+`test_milestones_observe_computed_system_values`.

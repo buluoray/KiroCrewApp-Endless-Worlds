@@ -59,8 +59,19 @@ value. Gain isolation is pinned by
 ## Commit lifecycle
 
 `mcp_server._advance_turn` validates and salvages the narrator payload, performs
-reserved-key carry-forward and merge-forward, stamps the turn, applies milestones,
-and then calls `_apply_systems` before the state is committed. `_apply_systems`
+reserved-key carry-forward and merge-forward, restores app-owned metadata, stamps
+the turn, calls `_apply_systems`, and then applies milestones before committing.
+`apply_systems` first resets unlocks from the prior state and computes numeric
+ledgers, then evaluates unlock conditions. Milestones therefore see the final
+system values, not the narrator's proposed totals. A false unlock is written as
+`false`; a tier below its first threshold is `null`, so an invented rank cannot
+survive and an empty panel still warns. Unlock-to-unlock conditions retain their
+declaration order after numeric ledgers settle.
+
+Pinned by `test_game_state_integrity.test_a_false_unlock_overwrites_a_narrator_grant`,
+`test_unlocks_observe_computed_values_even_before_the_accrual`,
+`test_a_tier_below_the_first_threshold_clears_a_narrator_rank`, and
+`test_milestones_observe_computed_system_values`. `_apply_systems`
 loads the run's world variant and delegates to `systems.apply_systems` with both the
 new declaration and the prior committed state. The persistence ordering and
 full-state replacement are specified in [data-model.md](data-model.md).

@@ -130,3 +130,16 @@ directory, so deleting a life leaves no residue.
   world-declared ending still opens the bridge even without a narrator `ended`
   flag; a mid-life request is refused (409), so the bridge cannot become a
   duplication device. Pinned by the tests in `test_legacy.py`.
+
+## Damaged rows and duplicate citations
+
+`KeepsakeStore.entries` drops non-object rows from a parsed array while retaining
+valid siblings, so lookup and edits do not crash on a stray null or string.
+Pinned by
+`test_game_state_integrity.test_nonobject_keepsake_rows_do_not_hide_valid_keepsakes`.
+
+`build_draft` deduplicates cited event ids before sorting and applying the event
+cap. `apply_edits` requires both the same id set and the same count for `order`;
+a reorder cannot duplicate a fact. Pinned by
+`test_game_state_integrity.test_repeated_citations_do_not_duplicate_card_events`
+and `test_card_reorder_cannot_duplicate_a_fact`.

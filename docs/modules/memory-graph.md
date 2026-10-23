@@ -221,3 +221,15 @@ Pinned by `test_the_declared_protagonist_becomes_the_centre_when_player_is_unuse
 `test_no_character_with_a_majority_leaves_the_centre_where_it_was`,
 `test_a_non_character_in_every_event_is_never_the_centre`, and
 `test_the_centre_rides_in_the_star_payload_so_the_client_guesses_nothing`.
+
+## Turn-zero thread state
+
+`build_index` records a thread's first touch as `opened`, including turn zero.
+An unresolved thread has `resolved: null`; zero is a real resolution turn, not
+an absence marker. `recall_candidates`, `star_payload`, and `legacy.candidates`
+check for `None` rather than truthiness. This keeps an inherited open thread
+open and an inherited resolved thread closed, without rewriting its first turn
+when the heir mentions it. The index is rebuilt, so no saved-file migration is
+needed. Pinned by
+`test_game_state_integrity.test_an_inherited_thread_keeps_its_open_state_at_turn_zero`
+and `test_an_inherited_resolved_thread_stays_resolved`.
