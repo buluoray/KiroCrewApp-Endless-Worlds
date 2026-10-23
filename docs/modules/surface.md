@@ -100,7 +100,10 @@ processes self-locate the same data dir so routes and tools see one set of files
   and chronicle JSON expose only `mobile: bool`, never duplicate SVG bytes. Enforced
   by `routes.get_backdrop`, `get_run`, and `get_chronicle`; pinned by
   `test_backdrop_route_selects_variants_and_preserves_legacy_fallback` and
-  `test_live_and_chronicle_metadata_report_mobile_availability`.
+  `test_live_and_chronicle_metadata_report_mobile_availability`. The SVG response
+  carries a script-free `sandbox` CSP, so opening the URL as a page runs nothing
+  (`test_backdrop_image_is_response_sandboxed_even_when_navigated_directly`; the
+  full rule is in [scenes-and-backdrop.md](scenes-and-backdrop.md)).
 
 - **A scene document stays sandboxed even outside its iframe.** `get_scene` serves
   compiler-owned HTML with a response-level CSP `sandbox allow-scripts allow-forms`

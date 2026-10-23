@@ -246,6 +246,16 @@ def compile_backdrop(svg: str) -> str:
     # repair for compatibility). Embedded data, relative paths, and every scheme
     # are refused even though the final browser image context would neuter them.
     for element in root.iter():
+        # The substring denylist above reads TEXT, so a namespace prefix
+        # (``<s:script>`` with ``s`` bound to the SVG namespace) slips past it while
+        # an XML parser still builds a real script element. Judge the parsed local
+        # name, which no prefix can disguise.
+        tag = element.tag if isinstance(element.tag, str) else ""
+        if tag.rsplit("}", 1)[-1].lower() in {"script", "foreignobject"}:
+            raise BackdropError(
+                "a background may not contain a script or foreignObject element — it "
+                "is a self-contained SVG drawing, never script or a nested document"
+            )
         for attr, value in element.attrib.items():
             if attr.rsplit("}", 1)[-1].lower() != "href":
                 continue

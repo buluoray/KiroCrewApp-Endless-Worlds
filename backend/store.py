@@ -645,19 +645,22 @@ class RunStore:
         recovering = bool(
             prior and int(prior.get("turn") or 0) == int(turn) and prior.get("fallbackAllowed")
         )
-        self._kv.set(
-            self._backdrop_request_key(run_id),
-            {
-                "turn": int(turn),
-                "brief": str(brief),
-                "lane": brief_lane(brief),
-                "style": brief_style(brief),
-                "askedAt": time.time(),
-                "attempts": 0,
-                "fallbackAllowed": recovering,
-                "narratorNotified": recovering,
-            },
-        )
+        record: dict[str, Any] = {
+            "turn": int(turn),
+            "brief": str(brief),
+            "lane": brief_lane(brief),
+            "style": brief_style(brief),
+            "askedAt": time.time(),
+            "attempts": 0,
+            "fallbackAllowed": recovering,
+            "narratorNotified": recovering,
+        }
+        if recovering and prior is not None:
+            # The narrator's repair budget belongs to the PAGE, not to one brief:
+            # a replacement brief that dropped it let a narrator that always
+            # re-briefs be re-prompted forever.
+            record["recoveryCycles"] = int(prior.get("recoveryCycles") or 0)
+        self._kv.set(self._backdrop_request_key(run_id), record)
 
     def read_backdrop_request(self, run_id: str) -> dict[str, Any] | None:
         """The pending backdrop brief/recovery record, or ``None``."""
@@ -809,7 +812,9 @@ class RunStore:
         self._kv.delete(self._brief_key(run_id))
         self._kv.delete(self._provenance_key(run_id))
         self._kv.delete(self._rotation_key(run_id))
+        self._kv.delete(self._recall_sent_key(run_id))
         self._kv.delete(self._pending_key(run_id))
+        self._kv.delete(self._heal_key(run_id))
         self._kv.delete(self._backdrop_request_key(run_id))
         rows = [r for r in self.read_index() if r.get("runId") != run_id]
         self._kv.set(_INDEX_KEY, {"runs": rows})
