@@ -481,6 +481,24 @@ def test_the_waiting_phrase_is_chosen_once_not_per_render():
     )
 
 
+def test_turn_progress_names_the_server_stage_and_creeps_between_calls():
+    """A narrator makes two or three tool calls a month and the write is the long
+    one, so a bar driven by calls alone stood still for about a minute. The bar
+    also moves with time since the ask, and every stage the server reports has a
+    label in both languages."""
+    import json
+
+    src = module("play.tsx")
+    body = src.split("function TurnProgress", 1)[1].split("\nfunction ", 1)[0]
+    assert "g?.askedAt" in body and "setInterval" in body, "the bar never moves between calls"
+    assert "progressPct(" in body
+    for stage in ("reading", "writing", "painting"):
+        assert f"t('play.stage.{stage}')" in body, f"stage {stage} is never shown"
+        for lang in ("en", "zh"):
+            strings = json.loads((WEB_SRC / "strings" / f"{lang}.json").read_text("utf-8"))
+            assert strings.get(f"play.stage.{stage}"), f"{lang} lacks play.stage.{stage}"
+
+
 def test_both_languages_offer_the_same_number_of_variants():
     """A world played in one language would otherwise have fewer ways to say it — and
     with English as the fallback, a missing zh variant silently shows English mid-run.

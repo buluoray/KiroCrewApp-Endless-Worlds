@@ -1129,6 +1129,69 @@ def _clean_choices(choices: list[Any]) -> list[Any]:
     return out
 
 
+#: A weighty choice (``fateful``, or carrying its own ``art``, which the play page
+#: draws with the same heavier look) may appear on at most one page in this many.
+#: Measured on live lives before this gate: 71 of 111 pages offered one, with a
+#: run of 20 pages in a row, and 49 of 103 picks were "fateful" — a look that is on
+#: every other page marks nothing. One in three keeps a turning point regular
+#: without making it wallpaper.
+FATEFUL_GAP = 3
+
+#: The keys that make a choice look weighty. Demoting a choice strips all of them,
+#: so a demoted choice reads as an ordinary one rather than half-decorated.
+_WEIGHTY_KEYS = ("fateful", "art", "effect", "tint")
+
+
+def _is_weighty(choice: Any) -> bool:
+    return isinstance(choice, dict) and (choice.get("fateful") is True or bool(choice.get("art")))
+
+
+def _space_fateful(
+    choices: list[Any], earlier: list[dict[str, Any]]
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Keep turning points rare: at most one weighty choice per page, and none
+    when one of the previous ``FATEFUL_GAP - 1`` pages already offered one.
+
+    ``earlier`` is the committed chronicle before this turn. The choice itself
+    always survives; only its weight is removed, and the narrator is told so in a
+    warning, never refused — a month that over-dramatised still narrated a month.
+    """
+    recent = earlier[-(FATEFUL_GAP - 1) :] if FATEFUL_GAP > 1 else []
+    cooling = any(
+        _is_weighty(c)
+        for e in recent
+        for c in (e.get("choices") if isinstance(e.get("choices"), list) else [])
+    )
+    out: list[Any] = []
+    kept = False
+    demoted: list[str] = []
+    for c in choices:
+        if _is_weighty(c) and (cooling or kept):
+            c = {k: v for k, v in c.items() if k not in _WEIGHTY_KEYS}
+            demoted.append(str(c.get("id") or ""))
+        elif _is_weighty(c):
+            kept = True
+        out.append(c)
+    warnings: list[dict[str, Any]] = []
+    if demoted:
+        why = (
+            f"a turning point was already offered in the last {FATEFUL_GAP - 1} pages"
+            if cooling
+            else "only one choice per page may be fateful"
+        )
+        warnings.append(
+            {
+                "field": "choices",
+                "expected": f"at most one fateful choice, at most once every {FATEFUL_GAP} pages",
+                "detail": (
+                    f"Shown as ordinary choices: {', '.join(demoted)} — {why}. Save "
+                    "`fateful`, `art` and `effect` for the moment that truly turns this life."
+                ),
+            }
+        )
+    return out, warnings
+
+
 def _clean_gains(gains: list[Any]) -> tuple[list[Any], list[dict[str, Any]]]:
     """Salvage the anti-halo ``gains`` list the way choices are salvaged. An entry
     with no string ``field`` anchors nothing, so it is dropped; unknown keys are
@@ -1555,6 +1618,13 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # committed state fires a declared world ending. Gated on a loadable pack: a
     # synthetic turn with no world cannot be judged for endings and is left alone.
     choices = _clean_choices(args.get("choices") or [])
+    try:
+        _earlier = [
+            e for e in store.read_chronicle(run_id) if int(e.get("turn") or 0) < int(turn)
+        ]
+    except Exception:  # noqa: BLE001
+        _earlier = []  # an unreadable history only loses the spacing, never the turn
+    choices, fateful_drops = _space_fateful(choices, _earlier)
     if not choices and pack is not None:
         fired = any(e.when is not None and e.when.evaluate(state) for e in pack.template.endings)
         if args.get("ending") is not True and not fired:
@@ -1683,6 +1753,7 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # Salvaged enrichment: gains that named no field, and stray top-level args the
     # schema would once have refused the whole turn over.
     warnings.extend(gain_drops)
+    warnings.extend(fateful_drops)
     for _key in args.get("_dropped_top_level") or []:
         warnings.append(
             {

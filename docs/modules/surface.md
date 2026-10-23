@@ -223,6 +223,19 @@ processes self-locate the same data dir so routes and tools see one set of files
   `items` on `choices` also turns
   `test_choice_captions_are_salvaged_from_common_alias_keys` red.
 
+- **Turning points stay rare: one weighty choice per page, one page in
+  `FATEFUL_GAP`.** A choice is weighty when it is `fateful` or carries its own
+  `art` (the play page draws both with the heavier look). `_space_fateful`, run in
+  `_advance_turn` right after `_clean_choices`, keeps the first weighty choice of a
+  page and demotes the rest, and demotes every one when any of the previous
+  `FATEFUL_GAP - 1` committed pages already offered one. Demotion strips
+  `fateful`, `art`, `effect` and `tint` together, so the choice survives as an
+  ordinary button; the narrator gets a `choices` warning and the turn commits — it
+  is never refused. Before the gate, live lives offered a weighty choice on most
+  pages, so the look marked nothing. Pinned by
+  `test_fateful_choices_are_spaced_and_one_per_page` and
+  `test_choice_art_counts_as_weighty_for_spacing`.
+
 - **`call_tool` validates the whole call, then dispatches, and returns errors as
   data.** An unknown tool, a bad field, or a malformed turn comes back as JSON
   (`{ok:false, field, expected, …}`), never a raised exception — a raise is a
