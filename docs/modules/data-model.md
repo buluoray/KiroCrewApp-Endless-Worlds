@@ -145,11 +145,15 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   `test_pending.test_marking_a_turn_in_flight_does_not_spend_the_rollback_point`.
 
 - **`delete_run` drops every key a life owns.** State, prev, `briefed-`,
-  `pending-`, the index row, and the `runs/<id>/` tree all go. Load-bearing
+  `pending-`, `recall-sent-`, `slot-heals-`, `rotation-`, `provenance-`,
+  `narrator-generation-`, `backdrop-request-`, the index row, and the
+  `runs/<id>/` tree all go. Load-bearing
   because a leaked `pending-` makes `turn.generating` report a turn in flight for
   a life that no longer exists, and a leaked `briefed-` misreports rulebook
   delivery for a reused id. Enforced by `store.delete_run`; pinned by
-  `test_store.test_delete_removes_state_index_row_and_chronicle`, with the cascade
+  `test_store.test_delete_removes_state_index_row_and_chronicle` and
+  `test_store.test_delete_leaves_no_kv_record_naming_the_life` (every per-life
+  writer exercised once, then no `kv/` file may name the life), with the cascade
   key-sweep pinned by
   `test_delete_life.test_one_life_is_erased_and_its_world_is_untouched`.
 

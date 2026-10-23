@@ -462,7 +462,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   hand-drawing one. Only a page with no traced underlay at all (a motif page, or an
   illustrator that never reached the trace tool) still queues the internal repair
   message in the same narrator slot, which may send a simpler brief or draw directly
-  through the separate `endless_commit_fallback_backdrop` capability. That handler
+  through the separate `endless_commit_fallback_backdrop` capability. The budget is
+  per BRIEF: a replacement brief (a new `askedAt`) restarts `_BACKDROP_FALLBACK_SECS`
+  and its illustrator attempts, so the simpler direction is actually painted
+  (`test_a_replacement_brief_gets_its_own_illustrator_budget`). Every repair prompt
+  spends one of `_BACKDROP_NARRATOR_CYCLES`, whether the narrator then stalls or
+  re-briefs, and `store.request_backdrop` carries `recoveryCycles` across a same-page
+  replacement — so a narrator that always re-briefs is asked a bounded number of
+  times (`test_replacement_briefs_spend_the_narrator_cycle_budget`,
+  `test_backdrop_recovery_stops_after_the_narrator_cycle_budget`). That handler
   requires a persisted same-run/same-turn fallback gate, so merely possessing the
   tool cannot bypass the illustrator during an ordinary turn. The player sees only
   the existing generation state, never an implementation failure or retry control.
@@ -580,9 +588,15 @@ sees is produced locally from a closed, code-owned vocabulary.
   in-app webviews; an `<img>` of `image/svg+xml` sizes reliably everywhere and is the
   stronger boundary, because image-context SVG runs no script and fetches nothing
   with or without a sandbox. The real invariant is *we never run it at all*, not *we
-  sanitize it well enough to run* — so the CSP/iframe surface is deliberately absent.
-  The `<img>` sits behind the prose with `pointer-events:none` so a painted button
-  cannot be clicked.
+  sanitize it well enough to run* — so there is no iframe. The `<img>` sits behind
+  the prose with `pointer-events:none` so a painted button cannot be clicked.
+
+  The same URL opened as a page (a new tab, a link, "open image") is NOT an image
+  context: it is a live SVG document on the app's origin. So `routes.get_backdrop`
+  answers with a response CSP of `default-src 'none'; style-src 'unsafe-inline';
+  sandbox` (no `allow-*` token: no script, opaque origin) plus `nosniff`; inline
+  styles stay so the art renders either way
+  (`test_backdrop_image_is_response_sandboxed_even_when_navigated_directly`).
 
   > This module validates the markup but cannot enforce the delivery context. If the
   > serving layer ever inlines a backdrop as a live document instead of an `<img>`
@@ -597,7 +611,11 @@ sees is produced locally from a closed, code-owned vocabulary.
   references (`_EXTERNAL_REF_RE`, including protocol-relative), and non-SVG input, and
   it is told, not silently stripped
   (`test_compile_refuses_script_handlers_foreignobject_external_and_non_svg`,
-  `test_ordinary_attributes_are_not_mistaken_for_handlers`). A self-contained SVG with
+  `test_ordinary_attributes_are_not_mistaken_for_handlers`). `script` and
+  `foreignObject` are also refused by the PARSED element's local name, because the
+  substring scan reads text and a namespace prefix (`<s:script>` with `s` bound to
+  the SVG namespace) hides the tag from it
+  (`test_compile_refuses_script_and_foreignobject_behind_a_namespace_prefix`). A self-contained SVG with
   gradients, patterns, filters, and animation — both SMIL and inline CSS (a `<style>`
   block with `@keyframes`, or `style=` transitions) — is accepted; only SCRIPTS are
   inert in the image context, so declarative CSS animation plays, and the gate blocks

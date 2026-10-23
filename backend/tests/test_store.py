@@ -312,3 +312,27 @@ def test_delete_removes_state_index_row_and_chronicle(store: RunStore, tmp_path:
     with pytest.raises(StoreError):
         store.read_state(run_id)
     assert json.loads(json.dumps({})) == {}  # sanity: no stray state leaked
+
+
+def test_delete_leaves_no_kv_record_naming_the_life(store: RunStore, tmp_path: Path) -> None:
+    """Every per-life KV writer, exercised once, then deleted: nothing may survive.
+
+    ``recall-sent-`` and ``slot-heals-`` were written by the turn loop but never
+    swept, so every erased life left them behind in ``kv/`` for good.
+    """
+    run_id = store.create_run(_state(1), {"templateId": "t"})
+    store.commit_state(run_id, _state(2))
+    store.mark_narrator_generation(run_id, "install-a")
+    store.mark_briefed(run_id, slot="slot-a")
+    store.mark_provenance(run_id, turn=2, paths=["status.age"])
+    store.mark_rotation(run_id, turn=2)
+    store.mark_recall_sent(run_id, ["lore-1"])
+    store.mark_pending(run_id, turn=3, slot="slot-a")
+    store.note_slot_heal(run_id, 3)
+    store.request_backdrop(run_id, turn=3, brief="LANE: motif\na lantern")
+    assert any(run_id in p.name for p in (tmp_path / "kv").iterdir())
+
+    store.delete_run(run_id)
+
+    leaked = sorted(p.name for p in (tmp_path / "kv").iterdir() if run_id in p.name)
+    assert leaked == [], f"delete_run left per-life records behind: {leaked}"

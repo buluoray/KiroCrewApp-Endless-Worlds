@@ -108,6 +108,25 @@ def test_compile_refuses_the_empty_and_the_oversized():
         )
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        # A namespace prefix bound to the SVG namespace makes this a real SVG
+        # <script> to an XML parser, yet the text never contains "<script".
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg">'
+        "<s:script>alert(1)</s:script></svg>",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg">'
+        "<svg:script>alert(1)</svg:script></svg>",
+        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg">'
+        '<s:foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div>'
+        "</s:foreignObject></svg>",
+    ],
+)
+def test_compile_refuses_script_and_foreignobject_behind_a_namespace_prefix(bad):
+    with pytest.raises(BackdropError):
+        compile_backdrop(bad)
+
+
 def test_ordinary_attributes_are_not_mistaken_for_handlers():
     out = compile_backdrop('<svg xmlns="http://www.w3.org/2000/svg"><rect class="on-stage"/></svg>')
     assert "on-stage" in out

@@ -324,7 +324,8 @@ async def _recover_backdrop(
         # The model's whole-recovery budget. When it elapses, the server publishes
         # the traced underlay directly rather than waiting longer or hand-drawing.
         loop = asyncio.get_running_loop()
-        recovery_deadline = loop.time() + _BACKDROP_FALLBACK_SECS
+        recovery_deadline = 0.0
+        budget_brief: float | None = None
         while True:
             request = store.read_backdrop_request(run_id)
             if not request:
@@ -333,6 +334,14 @@ async def _recover_backdrop(
             if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
                 store.clear_backdrop_request(run_id)
                 return
+            # The budget is per BRIEF: a replacement brief (new askedAt) from the
+            # narrator's repair turn starts a fresh illustrator cycle, as the
+            # repair prompt promises. Fixed once per task, it had always run out
+            # before the narrator was asked, so a simpler brief got no illustrator.
+            brief_at = float(request.get("askedAt") or 0.0)
+            if brief_at != budget_brief:
+                budget_brief = brief_at
+                recovery_deadline = loop.time() + _BACKDROP_FALLBACK_SECS
 
             attempts = int(request.get("attempts") or 0)
             spawn = getattr(ctx, "spawn", None)
@@ -430,7 +439,8 @@ async def _recover_backdrop(
             # direction or use the exceptional direct fallback.
             if state_obj is None:
                 return  # a later real gateway GET restarts the durable request
-            if int(request.get("recoveryCycles") or 0) >= _BACKDROP_NARRATOR_CYCLES:
+            cycles = int(request.get("recoveryCycles") or 0)
+            if cycles >= _BACKDROP_NARRATOR_CYCLES:
                 # Budget spent: stop re-dispatching. The request stays for a
                 # possible late commit, and staleness releases the page.
                 logger.warning(
@@ -440,8 +450,15 @@ async def _recover_backdrop(
                     _BACKDROP_NARRATOR_CYCLES,
                 )
                 return
+            # Every repair prompt is a model turn, so EVERY dispatch spends a cycle —
+            # whether the narrator then stalls or answers with a replacement brief.
             request = (
-                store.update_backdrop_request(run_id, fallbackAllowed=True, narratorNotified=True)
+                store.update_backdrop_request(
+                    run_id,
+                    fallbackAllowed=True,
+                    narratorNotified=True,
+                    recoveryCycles=cycles + 1,
+                )
                 or request
             )
             marker = float(request.get("askedAt") or 0.0)
@@ -477,14 +494,10 @@ async def _recover_backdrop(
                     break
                 await asyncio.sleep(_BACKDROP_POLL_SECS)
             else:
-                # A silent stall: no art, no replacement brief. Spend one cycle
-                # of the narrator budget before asking again — this counter is
-                # what makes the loop above finite.
-                store.update_backdrop_request(
-                    run_id,
-                    narratorNotified=False,
-                    recoveryCycles=int(request.get("recoveryCycles") or 0) + 1,
-                )
+                # A silent stall: no art, no replacement brief. The cycle was
+                # already spent at dispatch; mark the narrator un-notified so the
+                # next lap asks again.
+                store.update_backdrop_request(run_id, narratorNotified=False)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — GET can resume the durable request
@@ -2047,7 +2060,15 @@ async def get_backdrop(request: web.Request, ctx: AppContext) -> web.Response:
         text=svg,
         content_type="image/svg+xml",
         charset="utf-8",
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store",
+            # The <img> context is inert, but this same URL opened as a page (new
+            # tab, a link, "open image") is a live SVG document on the app's
+            # origin. A bare `sandbox` (no allow-*) gives it no script and an
+            # opaque origin; inline styles stay so the art still renders.
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

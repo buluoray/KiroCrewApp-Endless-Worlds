@@ -132,6 +132,27 @@ def test_scene_document_is_response_sandboxed_even_when_navigated_directly(app):
     assert res.headers["X-Frame-Options"] == "SAMEORIGIN"
 
 
+def test_backdrop_image_is_response_sandboxed_even_when_navigated_directly(app):
+    """The backdrop is meant to be an <img>, where SVG runs no script — but the
+    same URL opened as a page is a live SVG document on the app's origin. The
+    response itself has to forbid script there."""
+    run_id = app["store"].create_run(
+        {"turn": 1, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    BackdropStore(app["data"], run_id).set(_svg("#123"), turn=1)
+
+    res = call(routes_mod.get_backdrop, app["ctx"], match={"run_id": run_id})
+
+    assert res.status == 200
+    csp = res.headers.get("Content-Security-Policy", "")
+    directives = {d.strip().split(" ")[0]: d.strip() for d in csp.split(";") if d.strip()}
+    assert directives.get("sandbox") == "sandbox", "no allow-* token: no script, no origin"
+    assert directives.get("default-src") == "default-src 'none'"
+    assert "script-src" not in directives
+    assert res.headers["X-Content-Type-Options"] == "nosniff"
+
+
 def _svg(color: str) -> str:
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
@@ -286,6 +307,95 @@ def test_backdrop_recovery_stops_after_the_narrator_cycle_budget(app, monkeypatc
     )
 
     assert not asked, "recovery kept dispatching past its narrator budget"
+
+
+def _narrator_that_always_rebriefs(app, monkeypatch, run_id, limit=8):
+    """A recovery narrator that answers every repair prompt with a NEW brief —
+    the first option the prompt offers it. Raises past ``limit`` so an unbounded
+    loop ends the test (recovery logs and returns) instead of hanging it."""
+    prompts = []
+    monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (object(), False))
+    monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
+
+    def fake_dispatcher(_runner):
+        def dispatch(_state, _slot, prompt):
+            prompts.append(prompt)
+            if len(prompts) > limit:
+                raise RuntimeError("narrator dispatched without bound")
+            app["store"].request_backdrop(
+                run_id, turn=2, brief=f"LANE: motif\nsimpler, take {len(prompts)}"
+            )
+            return True
+
+        return dispatch
+
+    monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_POLL_SECS", 0.01)
+    return prompts
+
+
+def _run_recovery(app, run_id):
+    import asyncio
+
+    asyncio.run(
+        routes_mod._recover_backdrop(
+            app["ctx"],
+            app["store"],
+            object(),
+            run_id,
+            painter_model="",
+            narrator_model="",
+            reasoning_effort="",
+        )
+    )
+
+
+def test_replacement_briefs_spend_the_narrator_cycle_budget(app, monkeypatch):
+    """A replacement brief used to wipe ``recoveryCycles`` and skip the counter, so
+    a narrator that keeps re-briefing was re-prompted forever — a model turn per
+    lap, and a page withheld for good because each brief restarts its clock."""
+    run_id = app["store"].create_run(
+        {"turn": 2, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 2},
+    )
+    app["store"].request_backdrop(run_id, turn=2, brief="LANE: motif\ngold arches")
+    prompts = _narrator_that_always_rebriefs(app, monkeypatch, run_id)
+
+    _run_recovery(app, run_id)  # no spawn on this ctx: no illustrator, no trace
+
+    assert len(prompts) == routes_mod._BACKDROP_NARRATOR_CYCLES
+
+
+def test_a_replacement_brief_gets_its_own_illustrator_budget(app, monkeypatch):
+    """The repair prompt offers a simpler brief as "a fresh illustrator cycle". The
+    whole-recovery deadline was fixed when the task started, so a brief that
+    arrived after it went straight back to the narrator with no illustrator."""
+    run_id = app["store"].create_run(
+        {"turn": 2, "worldId": "test-world"},
+        {"worldId": "test-world", "title": "Test World", "turn": 2},
+    )
+    app["store"].request_backdrop(run_id, turn=2, brief="LANE: motif\ngold arches")
+
+    class NeverFinishes:
+        def __init__(self):
+            self.briefs = []
+
+        async def run(self, task, *, agent, silent, model):
+            self.briefs.append(task.rsplit("Brief:\n", 1)[-1])
+            return f"spawn-{len(self.briefs)}"
+
+        def is_done(self, _spawn_id):
+            return False
+
+    spawn = NeverFinishes()
+    app["ctx"].spawn = spawn
+    monkeypatch.setattr(routes_mod, "_BACKDROP_FALLBACK_SECS", 0.2)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_ATTEMPT_SECS", 0.2)
+    _narrator_that_always_rebriefs(app, monkeypatch, run_id, limit=1)
+
+    _run_recovery(app, run_id)
+
+    assert "LANE: motif\nsimpler, take 1" in spawn.briefs, spawn.briefs
 
 
 def test_a_retried_opening_of_a_legacy_life_answers_its_real_first_month(app):
