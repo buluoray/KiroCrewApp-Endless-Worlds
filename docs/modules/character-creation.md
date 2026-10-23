@@ -125,11 +125,20 @@ property of the world, not a judgement about the prose.
   `test_halo.test_a_gain_with_no_source_is_flagged_not_refused` and
   `test_halo.test_a_source_credited_over_and_over_becomes_leaning`.
 
-- **Density counts marked events, not prose length.** `event_density` counts the
-  events the narrator marked, not how much it wrote, and calls a turn `busy` above
-  a per-turn threshold; a quiet turn is not a fault. Load-bearing because inferring
-  drama from verbosity rewards padding. Enforced by `halo.event_density`; pinned by
-  `test_halo.test_density_counts_what_the_narrator_marked_not_how_much_it_wrote`.
+- **Density counts declared events, not prose length.** `event_density` reads
+  both the top-level notable events and described `memory.events`, through
+  `_event_count`. Per turn it uses the larger count, not the sum: the declarations
+  can overlap without sharing an identity, so this is a lower bound rather than
+  a claimed exact union. Empty top-level events do not erase events in memory.
+  Memory entries count when they carry a nonblank title or summary; entities,
+  empty fragments, and malformed containers contribute nothing. Both sources
+  use the same bounded window. A `quiet` reading means no declared events in that
+  window, not proof that nothing happened. Neither declaration nor prose changes.
+  Pinned by `test_story_density.test_memory_only_events_do_not_report_a_quiet_life`,
+  `test_memory_event_density_reaches_the_existing_busy_reading`,
+  `test_parallel_event_declarations_use_a_lower_bound_not_a_sum`,
+  `test_memory_observations_and_legacy_events_share_the_same_window`, and
+  `test_readings_leave_story_and_declarations_untouched`.
 
 - **The restraint reading says nothing when there is nothing to say, and leaks no
   implementation vocabulary.** `compose_restraint` returns `""` when there is no

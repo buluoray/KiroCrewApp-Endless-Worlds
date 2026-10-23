@@ -22,6 +22,21 @@ argument.
 
 ## Load-bearing contracts
 
+- **Restraint readings include declared memory events.** On a full runtime read,
+  `_read_runtime` obtains the density and its localized note from `halo.event_density`
+  and `compose_restraint`. The per-turn measurement uses the larger of the legacy
+  event count and described structured memory-event count, avoiding double-counting
+  overlapping declarations. A missing legacy declaration therefore does not tell
+  the narrator that an eventful stretch was quiet. The note distinguishes recorded
+  events from a claim about everything that happened. This remains an observation:
+  the backend does not invent, remove, or rewrite story events. Delta-read delivery,
+  the pull-only turn prompt, and final quoted player intent are unchanged.
+  Pinned by `test_story_density.test_memory_only_events_do_not_report_a_quiet_life`,
+  `test_memory_event_density_reaches_the_existing_busy_reading`,
+  `test_parallel_event_declarations_use_a_lower_bound_not_a_sum`,
+  `test_full_runtime_read_delivers_memory_density_without_rewriting_history`, and
+  `test_readings_leave_story_and_declarations_untouched`.
+
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
   This is the R26 control: the narrator must not read or write the player's memory,
