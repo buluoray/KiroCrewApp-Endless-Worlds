@@ -470,7 +470,20 @@ sees is produced locally from a closed, code-owned vocabulary.
   re-briefs, and `store.request_backdrop` carries `recoveryCycles` across a same-page
   replacement — so a narrator that always re-briefs is asked a bounded number of
   times (`test_replacement_briefs_spend_the_narrator_cycle_budget`,
-  `test_backdrop_recovery_stops_after_the_narrator_cycle_budget`). That handler
+  `test_backdrop_recovery_stops_after_the_narrator_cycle_budget`). Before a
+  repair turn is paid for, an illustrator that is STILL RUNNING and already holds a
+  submitted draft for this exact turn (`BackdropDraftStore.has_draft`) gets one
+  bounded grace, `_BACKDROP_LATE_COMMIT_GRACE_SECS`, to land its commit
+  (`_await_late_commit`): it is in its review-and-commit step, and a late commit is
+  accepted anyway, so a repair raced against it bought a hand-drawn page that the
+  illustrator's art then replaced. The grace is spent at most once per dispatched
+  illustrator (a replacement brief's new illustrator may earn its own), ends the
+  moment the illustrator ends, is never given to an illustrator with no draft, and
+  never delays the server's underlay fallback, which costs no model call. A landed
+  late commit is recorded as `recover:illustrator-late-commit`. Pinned by
+  `test_a_drafted_illustrator_finishing_late_is_waited_for_not_repaired`,
+  `test_an_illustrator_with_no_draft_gets_no_grace`, and
+  `test_an_ended_illustrator_gets_no_grace_even_with_a_draft`. That handler
   requires a persisted same-run/same-turn fallback gate, so merely possessing the
   tool cannot bypass the illustrator during an ordinary turn. The player sees only
   the existing generation state, never an implementation failure or retry control.
@@ -538,6 +551,13 @@ sees is produced locally from a closed, code-owned vocabulary.
   naming the single longest gap and the slowest server step, so "which step stuck the
   longest" is answerable after the fact. Diagnostic only — nothing reads it to make a
   decision. Pinned by `backend/tests/test_backdrop_timing.py`.
+
+  Across many lives, `tools/perf_audit.py` joins this timeline with each run's
+  `perf.jsonl` and the narrator transcripts' `turn_stats` into one read-only report:
+  median/p90 story time, narrator credits per turn, repair-turn credits, time from
+  brief to illustrator dispatch, timeouts and late commits — each with its sample
+  size. Illustrator spawns keep no transcript, so their credits are reported as not
+  measurable rather than guessed. Pinned by `backend/tests/test_perf_audit.py`.
 
 - **One turn in flight, across every surface.** A scene answer dispatches from
   `main.tsx` (`onSceneChoice`), not from the play page, so the page's own `busy`

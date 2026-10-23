@@ -143,7 +143,12 @@ def _drop_stale_siblings(modules: dict[str, Any] | None = None) -> None:
 
 _drop_stale_siblings()
 
-from backdrop import BackdropError, BackdropStore, compile_backdrop  # noqa: E402
+from backdrop import (  # noqa: E402
+    BackdropDraftStore,
+    BackdropError,
+    BackdropStore,
+    compile_backdrop,
+)
 from backdrop_timing import BackdropTimeline  # noqa: E402
 from chapters import brief as world_brief  # noqa: E402
 from chapters import opened_since  # noqa: E402
@@ -199,6 +204,16 @@ _BACKDROP_POLL_SECS = 0.25
 #: ``_BACKDROP_ATTEMPT_SECS`` × attempts: a scene page's underlay is already the
 #: bulk of the image, so a fast real image beats waiting minutes for the overlay.
 _BACKDROP_FALLBACK_SECS = 120.0
+#: How long an illustrator that is still running AND already holds a submitted
+#: draft for this page may finish, once the budget above is spent, before the
+#: narrator is asked to repair the page by hand. Such an illustrator is in its
+#: review-and-commit step, and on real play its commit usually lands seconds to
+#: tens of seconds after the budget fires — while the narrator repair it raced
+#: costs a whole model turn and is then overwritten by that same late commit.
+#: Spent at most once per dispatched illustrator, only before the narrator path (the server's
+#: underlay fallback costs no model call and is not delayed), and cut short the
+#: moment the illustrator ends.
+_BACKDROP_LATE_COMMIT_GRACE_SECS = 60.0
 #: How long one brief may withhold its committed page. Art is part of its page,
 #: but a request with no age bound violated the fail-soft principle in the one
 #: place it matters most: a pipeline that can never produce art (no renderer,
@@ -290,6 +305,31 @@ async def _wait_for_backdrop(
     return False
 
 
+async def _await_late_commit(
+    ctx: AppContext, store: RunStore, run_id: str, turn: int, spawn_id: str
+) -> bool:
+    """Give a still-running illustrator that already drafted this page its grace.
+
+    Returns ``True`` only when its commit landed. An illustrator that never
+    submitted a draft for ``turn`` gets no grace at all: no commit is on its way.
+    One that has ended gets none either — ``_wait_for_backdrop`` returns the
+    moment the spawn reports done, so a leftover draft cannot hold the repair.
+    """
+    if getattr(ctx, "spawn", None) is None:
+        return False
+    try:
+        if not BackdropDraftStore(ctx.data_dir, run_id).has_draft(turn):
+            return False
+    except BackdropError:
+        return False
+    if await _wait_for_backdrop(
+        ctx, store, run_id, turn, spawn_id, deadline_secs=_BACKDROP_LATE_COMMIT_GRACE_SECS
+    ):
+        BackdropTimeline(ctx.data_dir, run_id).mark(turn, "recover:illustrator-late-commit")
+        return True
+    return False
+
+
 def _narrator_runner() -> Any:
     """The platform runner, imported lazily so backend unit tests stay standalone."""
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
@@ -326,6 +366,9 @@ async def _recover_backdrop(
         loop = asyncio.get_running_loop()
         recovery_deadline = 0.0
         budget_brief: float | None = None
+        # The newest illustrator this recovery dispatched, kept so the narrator
+        # path can first let it finish a commit it is already making.
+        last_spawn_id: str | None = None
         while True:
             request = store.read_backdrop_request(run_id)
             if not request:
@@ -401,6 +444,7 @@ async def _recover_backdrop(
                         exc,
                     )
                     continue
+                last_spawn_id = spawn_id
                 # Wait only for what is left of the budget, so a slow illustrator
                 # cannot push the total past the server-fallback point.
                 remaining = max(_BACKDROP_POLL_SECS, recovery_deadline - loop.time())
@@ -433,6 +477,14 @@ async def _recover_backdrop(
                     turn,
                     exc,
                 )
+
+            # An illustrator still running with a submitted draft for this page is
+            # one review away from committing. Let it, once, before paying for a
+            # narrator repair turn that its late commit would overwrite anyway.
+            if last_spawn_id is not None:
+                late_id, last_spawn_id = last_spawn_id, None
+                if await _await_late_commit(ctx, store, run_id, turn, late_id):
+                    return
 
             # No traced underlay to publish (a motif page, or the illustrator never
             # traced). Ask the narrator that wrote this page to simplify the

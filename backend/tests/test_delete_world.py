@@ -583,3 +583,131 @@ def test_fast_art_quality_dispatches_one_illustrator_and_skips_the_revision_pass
     task = spawn.calls[0][0]
     assert "fast art mode: no revision pass" in task
     assert "revise at most once" not in task
+
+
+# -- late illustrator commit grace ------------------------------------------------
+
+
+_ART = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+
+
+class _Illustrator:
+    """A spawn double: alive until it commits (or forever), optionally drafting."""
+
+    def __init__(self, world, run_id, *, commit_after=None, alive=True):
+        self.world = world
+        self.run_id = run_id
+        self.commit_after = commit_after
+        self.alive = alive
+        self.calls = []
+
+    async def run(self, task, *, agent, silent, model):
+        from backdrop import BackdropStore
+
+        self.calls.append(agent)
+        if self.commit_after is not None:
+
+            def commit():
+                BackdropStore(self.world["data"], self.run_id).set(_ART, turn=1)
+                self.alive = False
+
+            asyncio.get_running_loop().call_later(self.commit_after, commit)
+        return f"spawn-{len(self.calls)}"
+
+    def is_done(self, _spawn_id):
+        return not self.alive
+
+
+def _recover_with(world, monkeypatch, spawn, *, drafted, grace):
+    """Run one recovery with a tiny model budget; return the narrator prompts."""
+    from backdrop import BackdropDraftStore, BackdropStore
+
+    store = world["store"]
+    run_id = spawn.run_id
+    store.request_backdrop(run_id, turn=1, brief="a red gate closes")
+    if drafted:
+        BackdropDraftStore(world["data"], run_id)._save(
+            {"draftId": "d1", "turn": 1, "previews": {}}
+        )
+    world["ctx"].spawn = spawn
+    monkeypatch.setattr(routes_mod, "_BACKDROP_FALLBACK_SECS", 0.1)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_POLL_SECS", 0.01)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_LATE_COMMIT_GRACE_SECS", grace)
+    monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (object(), False))
+    prompts = []
+
+    def fake_dispatcher(_runner):
+        def dispatch(_state, _slot, prompt):
+            prompts.append(prompt)
+            BackdropStore(world["data"], run_id).set(_ART, turn=1)
+            store.clear_backdrop_request(run_id)
+            return True
+
+        return dispatch
+
+    monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
+    monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
+    asyncio.run(
+        routes_mod._recover_backdrop(
+            world["ctx"],
+            store,
+            object(),
+            run_id,
+            painter_model="",
+            narrator_model="",
+            reasoning_effort="",
+        )
+    )
+    return prompts
+
+
+def _new_life(world):
+    return world["store"].create_run(
+        {"turn": 1, "worldId": "test-world", "style": "standard"},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+
+
+def test_a_drafted_illustrator_finishing_late_is_waited_for_not_repaired(world, monkeypatch):
+    """The budget fires while the illustrator is one commit away: its commit lands
+    inside the grace, so no narrator repair turn is paid for and no second artist
+    paints over the page."""
+    from backdrop_timing import BackdropTimeline
+
+    run_id = _new_life(world)
+    spawn = _Illustrator(world, run_id, commit_after=0.3)
+    prompts = _recover_with(world, monkeypatch, spawn, drafted=True, grace=5.0)
+
+    assert prompts == []
+    assert spawn.calls == ["endless-illustrator"]
+    assert world["store"].read_backdrop_request(run_id) is None
+    steps = [e["step"] for e in BackdropTimeline(world["data"], run_id).read(1)]
+    assert steps[-1] == "recover:illustrator-late-commit"
+
+
+def test_an_illustrator_with_no_draft_gets_no_grace(world, monkeypatch):
+    """Still drawing, nothing submitted: no commit is on its way, so the repair is
+    not delayed by the grace."""
+    import time as _time
+
+    run_id = _new_life(world)
+    spawn = _Illustrator(world, run_id)
+    started = _time.monotonic()
+    prompts = _recover_with(world, monkeypatch, spawn, drafted=False, grace=30.0)
+
+    assert len(prompts) == 1
+    assert _time.monotonic() - started < 10.0
+
+
+def test_an_ended_illustrator_gets_no_grace_even_with_a_draft(world, monkeypatch):
+    """A draft left by an illustrator that has already ended will never be
+    committed, so the narrator repair runs at once."""
+    import time as _time
+
+    run_id = _new_life(world)
+    spawn = _Illustrator(world, run_id, alive=False)
+    started = _time.monotonic()
+    prompts = _recover_with(world, monkeypatch, spawn, drafted=True, grace=30.0)
+
+    assert len(prompts) == 1
+    assert _time.monotonic() - started < 10.0
