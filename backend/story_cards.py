@@ -68,7 +68,7 @@ def build_draft(
     ending content for the spoiler filter — 0 means the life continues.
     """
     events = []
-    for cid in keepsake.get("cites") or []:
+    for cid in dict.fromkeys(str(cid) for cid in keepsake.get("cites") or []):
         ev = index["events"].get(str(cid))
         if ev is None or ev["disclosure"] != "known":
             continue
@@ -187,7 +187,7 @@ def apply_edits(card: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]
     if "order" in changes:
         order = [str(x) for x in changes["order"] or []]
         known = {ev["id"] for ev in card["events"]}
-        if set(order) != known:
+        if len(order) != len(known) or set(order) != known:
             raise StoryCardError("order", "exactly the ids already on this card, reordered")
         by_id = {ev["id"]: ev for ev in card["events"]}
         card["events"] = [by_id[i] for i in order]

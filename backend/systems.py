@@ -129,13 +129,12 @@ def apply_systems(
     """Apply every declared system to ``state`` in place, reading base values from
     ``prev`` (the prior committed state) and this turn's ``gains``. Mutates ``state``.
     """
-    for s in getattr(template, "systems", None) or []:
+    systems = getattr(template, "systems", None) or []
+    for s in systems:
         try:
             if s.kind == "unlock":
-                # Monotonic: once unlocked, stays unlocked (base from prior state).
-                already = _get(prev, s.into) is True
-                if already or (s.when is not None and s.when.evaluate(state)):
-                    _set(state, s.into, True)
+                # Reset every switch before any condition can read another one.
+                _set(state, s.into, _get(prev, s.into) is True)
                 continue
 
             base = _num(_get(prev, s.into))
@@ -143,9 +142,7 @@ def apply_systems(
                 value = _clamp(base + _matched_sum(gains, s.into), s.floor, s.cap)
                 _set(state, s.into, _tidy(value))
                 if s.tiers and s.tier_into:
-                    name = _tier_name(s.tiers, value)
-                    if name:
-                        _set(state, s.tier_into, name)
+                    _set(state, s.tier_into, _tier_name(s.tiers, value) or None)
             elif s.kind == "resource":
                 value = _clamp(base + _matched_sum(gains, s.into) + s.per_turn, s.floor, s.cap)
                 _set(state, s.into, _tidy(value))
@@ -154,3 +151,13 @@ def apply_systems(
                 _set(state, s.into, _tidy(value))
         except Exception:  # noqa: BLE001
             continue  # a system is enrichment; one bad system never blocks the turn
+
+    # Conditions see the computed ledgers, never the narrator's proposed totals.
+    for s in systems:
+        try:
+            if s.kind == "unlock":
+                already = _get(prev, s.into) is True
+                unlocked = already or (s.when is not None and s.when.evaluate(state))
+                _set(state, s.into, bool(unlocked))
+        except Exception:  # noqa: BLE001
+            continue

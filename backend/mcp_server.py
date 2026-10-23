@@ -1510,19 +1510,29 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # exactly what a delta read is allowed to send back (the narrator remembers
     # its own declarations; it cannot know these).
     declared = json.loads(json.dumps(state, default=str))
+    # Neither carry-forward nor a partial patch may alias the prior state while
+    # systems amend nested leaves. Keep the declaration for provenance too.
+    state = json.loads(json.dumps(declared))
+    for key in RESERVED_STATE_KEYS:
+        # `status` is also a world panel and remains narrator-writable. The
+        # remaining reserved fields describe the app's identity and birth grants.
+        if key == "status":
+            continue
+        if key in current:
+            state[key] = json.loads(json.dumps(current[key]))
+        else:
+            state.pop(key, None)
+    state["runId"] = run_id
     state["turn"] = turn
-    # Record milestones reached this turn (permanent, app-owned) before committing.
-    try:
-        _apply_milestones(run_id, state, current)
-    except Exception:  # noqa: BLE001
-        pass  # an achievement is a reward, never a reason to block a committed turn
-    # Then the world's systems: mechanics the backend runs off this turn's gains and
-    # the prior state, writing derived keys (xp/level, resources, unlocks) the
-    # narrator declared but does not own.
+    # Compute ledgers before evaluating achievements against their final values.
     try:
         _apply_systems(run_id, state, current, gains)
     except Exception:  # noqa: BLE001
         pass  # a system is enrichment; a bad one never blocks a committed turn
+    try:
+        _apply_milestones(run_id, state, current)
+    except Exception:  # noqa: BLE001
+        pass  # an achievement is a reward, never a reason to block a committed turn
 
     # Load the world pack once (reused for the choices gate and the panel warnings).
     pack = None

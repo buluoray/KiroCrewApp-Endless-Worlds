@@ -101,3 +101,14 @@ source of truth and keep no drifting secondary index.
   the ancestor run id — and the source life's bytes are immutable across bridging and
   heir play. `test_parallel_lives_share_nothing`, `test_a_bridged_life_reads_only_what_was_carried`,
   and `test_the_source_life_is_never_modified_by_the_bridge_or_the_heir` pin it.
+
+## Thread inheritance
+
+`build_bridge_record` includes a thread effect on the turn-zero bridge event for
+every selected entity that has a thread record. The effect is `opened` or
+`resolved` according to the source record; copying the entity alone does not
+carry its thread state. `candidates` treats turn zero as a real turn and only
+`resolved: null` as unresolved. This applies to new bridges; existing chronicles
+are not rewritten. Pinned by
+`test_game_state_integrity.test_an_inherited_thread_keeps_its_open_state_at_turn_zero`
+and `test_an_inherited_resolved_thread_stays_resolved`.

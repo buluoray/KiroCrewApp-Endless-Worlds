@@ -331,3 +331,23 @@ processes self-locate the same data dir so routes and tools see one set of files
   the same `accept_compiled_header` gate a hand-written world passes; a refusal is
   stored as the draft's `problem`, not raised. The web tools exist so it can
   research a named work rather than invent its canon.
+
+### Reserved-field ownership on both declaration paths
+
+After assembling a full declaration or a fingerprint-checked patch,
+`_advance_turn` restores every `RESERVED_STATE_KEYS` field except `status` from
+the prior state, removing invented values where the prior field is absent.
+`status` remains narrator-writable because worlds use it as a story panel as well
+as a lifecycle marker. `runId` is stamped from the addressed run, so an old life
+that lost the field regains it on its next successful turn. The assembled state
+is detached from the prior state before backend amendments; the intended
+narrator declaration remains available for provenance comparison.
+
+This protects `worldId`, `style`, `language`, `opening`, `role`, `granted`, and
+`milestones` from replacement or null-removal through either payload form.
+Systems then compute numeric ledgers and unlocks before milestones are evaluated.
+No live save is rewritten outside a normal turn commit. Pinned by
+`test_game_state_integrity.test_app_metadata_cannot_be_replaced_or_removed`,
+`test_run_identity_survives_an_omitted_full_declaration`,
+`test_undeclared_milestones_cannot_be_invented_without_a_world`, and
+`test_milestones_observe_computed_system_values`.
