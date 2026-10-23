@@ -63,7 +63,10 @@ jobs:
           # host-package-free: backend/pyproject.toml sets ignore_missing_imports
           # (and treats the kiro_crew.* namespace as untyped), so neither the
           # gateway package nor the runtime deps need installing to type-check.
-          pip install ruff mypy
+          # mypy is pinned EXACTLY: an unpinned install moved 2.3.1 -> 2.4.0 between
+          # two runs of an unchanged tree and the new release's stricter inference
+          # turned every open PR red at once. Bump it deliberately, in its own PR.
+          pip install ruff mypy==2.4.0
 
       - name: Ruff lint
         working-directory: backend

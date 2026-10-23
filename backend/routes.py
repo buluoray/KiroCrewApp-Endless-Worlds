@@ -1656,7 +1656,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         # so ``chronicle[0]`` handed a retried opening a blank first month.
         wanted = int(run_state["turn"])
         chronicle = store.read_chronicle(run_id)
-        entry = next(
+        entry: dict[str, Any] = next(
             (e for e in reversed(chronicle) if int(e.get("turn") or 0) == wanted),
             {},
         )

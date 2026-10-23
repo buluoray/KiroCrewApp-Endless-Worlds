@@ -342,8 +342,19 @@ def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instan
     # Third-party app code does not execute unless the operator trusts it. This home
     # is thrown away and the app IS the thing under test, so trust it by name — never
     # by flipping the allow-every-third-party-app switch.
+    #
+    # The grant is written in the shape the gateway's own trust endpoint writes for a
+    # reviewed LOCAL app (dashboard/handlers/security.py): the name in
+    # `apps_trusted` plus the same name in `apps_trusted_local`. A bare name entry is
+    # a legacy grant, which current gateways refuse for a fresh install ("execution
+    # trust predates repository binding"). We install from a path, so there is no
+    # repository to bind — `apps_trusted_repositories` stays empty.
     (home / "config.json").write_text(
-        json.dumps({"agent": {"apps_trusted": [APP_NAME]}}, indent=2), encoding="utf-8"
+        json.dumps(
+            {"agent": {"apps_trusted": [APP_NAME], "apps_trusted_local": [APP_NAME]}},
+            indent=2,
+        ),
+        encoding="utf-8",
     )
     _install_into(home, interpreter)
     _assert_untouched(shared_before, home)
