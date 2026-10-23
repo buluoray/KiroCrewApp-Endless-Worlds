@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import narrator
+from backdrop import BackdropStore
 from content import Content
 from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from perf import TurnPerf
@@ -702,6 +703,12 @@ def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str,
     # generating, so the life froze on a page it had already been shown, with no
     # retry and no way to delete it. Past the ceiling the art becomes an enrichment
     # that simply never arrived: the page stays, the controls come back.
+    #
+    # Art already committed for the exact page also releases it. That is the same
+    # answer ``routes._backdrop_is_pending`` gives, and the two must agree: a
+    # request re-created for a page that already has its art is never serviced
+    # (the recovery task reads that predicate and does not start), so a waiting
+    # state that ignored the art would hold the page until the ceiling.
     art = store.read_backdrop_request(run_id)
     if art and int(art.get("turn") or 0) == committed:
         asked_at = art.get("askedAt")
@@ -709,7 +716,7 @@ def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str,
             isinstance(asked_at, (int, float))
             and time.time() - float(asked_at) <= BACKDROP_STALE_SECS
         )
-        if fresh:
+        if fresh and BackdropStore(store.data_dir, run_id).exact(committed) is None:
             return {
                 "turn": committed,
                 "slot": "",

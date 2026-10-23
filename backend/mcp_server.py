@@ -2201,6 +2201,18 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
                 "will be drawn. Skip endless_paint_backdrop for the rest of this life."
             ),
         }
+    if _backdrop_store(run_id).exact(turn) is not None:
+        # The page already has its art. A request stored now would never be
+        # serviced (recovery starts only for a page with no exact art) yet would
+        # still read as "painting" — the late-illustrator race: recovery asks the
+        # narrator to repair, the illustrator commits a beat later, and the
+        # narrator's replacement brief re-opens a page that is already finished.
+        BackdropTimeline(_DATA, run_id).mark(turn, "declined:already-painted")
+        return {
+            "backdrop": "kept",
+            "turn": turn,
+            "note": "this page already has its art; continue without another brief.",
+        }
     brief = rewrite_brief_style(str(args["brief"]), cfg["styles"], preferred_style(cfg["styles"]))
     if cfg["backdropCadence"] == "sparse":
         pending = _store().read_backdrop_request(run_id)

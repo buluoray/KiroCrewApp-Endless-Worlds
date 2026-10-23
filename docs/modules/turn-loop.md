@@ -287,6 +287,15 @@ turn 200 as at turn 1.
   `turn.generating`; pinned by
   `test_requested_art_withholds_the_new_page_until_its_exact_commit` and
   `test_a_committed_page_stays_generating_while_its_requested_art_is_pending`.
+  Both readers release the page once its exact art exists, even if a request is
+  still on disk, and `endless_paint_backdrop` refuses to queue a brief for a page
+  that already has its exact art, so a replacement brief racing a late
+  illustrator commit cannot re-open a finished page. Enforced by
+  `turn.generating` and `mcp_server._paint_backdrop`; pinned by
+  `test_a_page_that_already_has_its_art_is_not_reported_painting` and
+  `test_paint_backdrop_declines_a_page_that_already_has_its_art`. The sparse
+  cadence's replacement exemption does not reopen such a page either; pinned by
+  `test_sparse_replacement_brief_is_declined_once_the_page_has_its_art`.
 
 - **Illustration failure is recovered behind the normal generation state.** A
   durable request survives the HTTP request and a gateway restart; `get_run`

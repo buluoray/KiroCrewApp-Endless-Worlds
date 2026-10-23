@@ -619,6 +619,28 @@ def test_a_backdrop_request_inside_the_ceiling_still_reports_painting(store, run
     assert live is not None and live["stage"] == "painting"
 
 
+def test_a_page_that_already_has_its_art_is_not_reported_painting(store, run):
+    """The late-illustrator race that froze a live life for the full ceiling.
+
+    Recovery gave up on an illustrator one second before it committed, asked the
+    narrator to repair, and the narrator's replacement brief re-created a request
+    for a page whose exact art had already landed. ``_backdrop_is_pending`` saw the
+    art and never restarted recovery, while this answered "painting" until the
+    ceiling — every choice disabled for fifteen minutes on a finished page.
+    """
+    from backdrop import BackdropStore
+
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "the gate closed"})
+    BackdropStore(store.data_dir, run).set('<svg xmlns="http://www.w3.org/2000/svg"/>', turn=1)
+    store.request_backdrop(run, turn=1, brief="a closed red gate")
+
+    assert generating(store, run) is None, (
+        "a page whose exact art is committed still reports painting, so a stray "
+        "request nobody will service holds every choice disabled until the ceiling"
+    )
+
+
 def test_a_backdrop_request_with_no_timestamp_is_not_believed(store, run):
     """A record with no readable ``askedAt`` cannot be aged, so it cannot be trusted
     to hold the page: an unagexable record is the unbounded wait by another name."""
