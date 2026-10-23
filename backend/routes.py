@@ -179,6 +179,7 @@ from turn import (  # noqa: E402
     declaration_shape,
     generating,
     make_dispatcher,
+    unanswered,
 )
 from view import build_play_view, resolve_ending, world_detail  # noqa: E402
 from widget import CSP, SceneSpecError, bound_values, compile_cached  # noqa: E402
@@ -1992,6 +1993,9 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     # What a returning player is owed: leaving the page while a turn was being
     # written used to look identical to never having asked for it.
     view["generating"] = generation
+    # The newest ask ended with no month (its narrator run is over). Lets the page
+    # say so the moment it happens instead of waiting out its own poll cap.
+    view["unanswered"] = generation is None and unanswered(store, run_id)
     # The current background, if the narrator has set one. The frontend loads the
     # compiled HTML into a scriptless, behind-text sandbox frame; `version` is the
     # cache-buster so a replaced background actually swaps.

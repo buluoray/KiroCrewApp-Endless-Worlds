@@ -318,7 +318,7 @@ def _narrator_that_always_rebriefs(app, monkeypatch, run_id, limit=8):
     monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
 
     def fake_dispatcher(_runner):
-        def dispatch(_state, _slot, prompt):
+        def dispatch(_state, _slot, prompt, **_kw):
             prompts.append(prompt)
             if len(prompts) > limit:
                 raise RuntimeError("narrator dispatched without bound")

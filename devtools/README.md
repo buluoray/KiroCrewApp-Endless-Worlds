@@ -267,7 +267,11 @@ skip is reported and the expectations still decide the verdict.
   fatal. `backend/tests/test_devtools_isolation_guard.py` pins both halves.
 - **The instance's ready line is how it is reached.** `--test-mode` prints port and a
   dashboard credential on stdout; there is no other supported way into a fresh
-  instance's dashboard without a browser session.
+  instance's dashboard without a browser session. That stdout goes to a FILE
+  (`gateway.stdout` beside `gateway.log`), which `up` polls for the line, never to
+  a pipe: `up` exits once the gateway is ready, and a pipe dies with it, so the
+  gateway's next print raised `BrokenPipeError` and the instance was gone seconds
+  after `up` reported it ready. Pinned by `test_devtools_ready_line.py`.
 - **Seeding runs under an interpreter that can import the host gateway package**,
   because the app's store is built on the host's `AppStorage`. Search order: the
   `UISHOT_GATEWAY_PYTHON` override, the current interpreter if it already has the

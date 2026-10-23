@@ -434,7 +434,13 @@ export function PlayPage({
   // opening turn in the background, so its "generating" mark can land a beat after
   // this page first loads. Polling catches it and flips to the arranging screen
   // rather than stranding the player on the birth button.
-  const awaiting = !!v?.awaitingOpening
+  // The server's word that the birth's narrator run is over with no month written.
+  // Waiting for a late `generating` mark is pointless then, so the poll stops and
+  // the screen says so at once — before this, a narrator that never started (an
+  // agent refused at spawn) left the arranging screen cycling its flavour lines
+  // for the full five-minute opening budget with nothing coming.
+  const birthUnanswered = !!v?.awaitingOpening && !!v?.unanswered
+  const awaiting = !!v?.awaitingOpening && !birthUnanswered
   useEffect(() => {
     if (!generating && !awaiting) return undefined
     if (generating) setPhrase((p) => p || pick('play.waiting'))
@@ -678,7 +684,11 @@ export function PlayPage({
         ) : (
           <>
             <div className="ew-note">{busy ? t('opening.arranging') : t('opening.notStarted')}</div>
-            {openSilent && !busy ? <div className="ew-note">{t('opening.silent')}</div> : null}
+            {(openSilent || birthUnanswered) && !busy ? (
+              <div className="ew-note" role="status">
+                {t('opening.silent')}
+              </div>
+            ) : null}
             <div className="ew-bar">
               <button
                 className="ew-btn ew-btn-go"

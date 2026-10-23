@@ -6272,7 +6272,8 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 	* instead of needing the player to guess whether to tap again.
 	*/
 	const generating = !!v?.generating;
-	const awaiting = !!v?.awaitingOpening;
+	const birthUnanswered = !!v?.awaitingOpening && !!v?.unanswered;
+	const awaiting = !!v?.awaitingOpening && !birthUnanswered;
 	useEffect(() => {
 		if (!generating && !awaiting) return void 0;
 		if (generating) setPhrase((p) => p || pick("play.waiting"));
@@ -6452,8 +6453,9 @@ function PlayPage({ runId, onBack, onScenes, onBackdrop, onReplay, onReplaySame,
 				className: "ew-note",
 				children: busy ? t("opening.arranging") : t("opening.notStarted")
 			}),
-			openSilent && !busy ? /* @__PURE__ */ jsx("div", {
+			(openSilent || birthUnanswered) && !busy ? /* @__PURE__ */ jsx("div", {
 				className: "ew-note",
+				role: "status",
 				children: t("opening.silent")
 			}) : null,
 			/* @__PURE__ */ jsx("div", {

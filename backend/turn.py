@@ -330,10 +330,68 @@ def make_dispatcher(run_chat: Callable[..., Any], background: bool = True) -> Ca
             return
         await state.run_background_turn(slot, coro)
 
-    def dispatch(state: Any, slot: Any, prompt: str) -> bool:
-        return bool(slot.enqueue_or_run_prompt(prompt, _capped, state))
+    def dispatch(
+        state: Any, slot: Any, prompt: str, on_settled: Callable[[], None] | None = None
+    ) -> bool:
+        """Start (or queue) the turn; call ``on_settled`` once the narrator's run ends.
+
+        ``on_settled`` fires however the run ends — a commit, a narrator that stopped
+        talking without one, or an agent that never started (a sandbox or credential
+        refusal raises before the first tool call). It is the only moment the app
+        KNOWS nobody is writing, so it is what lets a page stop waiting at once.
+        """
+        if on_settled is None:
+            return bool(slot.enqueue_or_run_prompt(prompt, _capped, state))
+
+        async def _settling(state: Any, slot: Any, prompt: str) -> None:
+            try:
+                await _capped(state, slot, prompt)
+            finally:
+                try:
+                    on_settled()
+                except Exception:  # noqa: BLE001 — bookkeeping must not mask the run
+                    logger.warning("endless-worlds: settling a narrator run failed", exc_info=True)
+
+        return bool(slot.enqueue_or_run_prompt(prompt, _settling, state))
 
     return dispatch
+
+
+def settle_unanswered(store: RunStore, run_id: str, wanted: int, asked_at: float) -> bool:
+    """Record that the narrator run asked for ``wanted`` ended with no month.
+
+    Called when the run is over. If the month landed, a NEWER ask replaced this
+    one (a retry, another tab), or the narrator made any tool call (its writer
+    may outlive the run), there is nothing to say and the record is left
+    alone — matching on ``askedAt`` is what keeps a late callback from closing an
+    ask it does not own. Otherwise the pending record is marked ``endedAt``, which
+    ``generating`` reads as "nobody is writing" and the play view as "this did not
+    come through". Returns whether it marked anything.
+    """
+    if int(store.read_state(run_id).get("turn") or 0) >= wanted:
+        return False
+    pending = store.read_pending(run_id)
+    if not pending or int(pending.get("turn") or 0) != wanted:
+        return False
+    if float(pending.get("askedAt") or 0.0) != float(asked_at):
+        return False
+    if int(pending.get("steps") or 0) > 0:
+        # The narrator reached this app's tools, so it may still be writing: a
+        # runtime that dies mid-prompt can leave its tool process alive, and in a
+        # playtest exactly that committed the month 75s after the run "ended".
+        # Only a run that never made one call is known to have no writer.
+        return False
+    store.mark_pending_ended(run_id)
+    return True
+
+
+def unanswered(store: RunStore, run_id: str) -> bool:
+    """Whether the newest ask for the next month ended without one being written."""
+    committed = int(store.read_state(run_id).get("turn") or 0)
+    pending = store.read_pending(run_id)
+    return bool(
+        pending and int(pending.get("turn") or 0) == committed + 1 and pending.get("endedAt")
+    )
 
 
 # ── the loop ────────────────────────────────────────────────────────────
@@ -574,8 +632,20 @@ async def advance_turn(
     # about. A test asserts this ordering, because reversing the two lines leaves
     # every symptom intact and reintroduces the whole bug.
     store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action)
+    asked_at = float((store.read_pending(run_id) or {}).get("askedAt") or 0.0)
 
-    started = dispatch(state_obj, slot, prompt)
+    def _settled() -> None:
+        # The narrator's run is over. A month it wrote is already on disk; one it
+        # did not write is never coming, so say so now instead of letting the page
+        # wait out the whole stale window on a narrator that never started.
+        if settle_unanswered(store, run_id, wanted, asked_at):
+            logger.warning(
+                "endless-worlds: narrator run for %s turn %d ended without a month",
+                run_id,
+                wanted,
+            )
+
+    started = dispatch(state_obj, slot, prompt, on_settled=_settled)
     if brief_now:
         store.mark_briefed(run_id, slot=slot_key)
     if not started:
@@ -669,6 +739,9 @@ def _in_flight(store: RunStore, run_id: str, wanted: int) -> dict[str, Any] | No
         return None
     if time.time() - float(asked_at) > PENDING_STALE_SECS:
         return None
+    if pending.get("endedAt"):
+        # The narrator's run finished without this month (settle_unanswered).
+        return None
     return pending
 
 
@@ -717,13 +790,22 @@ def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str,
             and time.time() - float(asked_at) <= BACKDROP_STALE_SECS
         )
         if fresh and BackdropStore(store.data_dir, run_id).exact(committed) is None:
+            # The page being painted is the one the player asked for, so keep
+            # quoting their ask. Without it the progress jumped out of the chosen
+            # option into an anonymous bar the moment the prose committed — for
+            # the longest stretch of the wait, the player lost which fork it was.
+            asked = ""
+            for entry in reversed(store.read_chronicle(run_id)):
+                if int(entry.get("turn") or 0) == committed:
+                    asked = str(entry.get("action") or "")
+                    break
             return {
                 "turn": committed,
                 "slot": "",
                 "askedAt": float(art.get("askedAt") or 0.0),
                 "readAt": float(art.get("askedAt") or 0.0),
                 "stage": "painting",
-                "action": "",
+                "action": asked,
                 # Five steps maps to TurnProgress's existing 92% cap: the page is
                 # waiting on its final visual half, so progress must not jump
                 # backwards after the narrator already completed several tools.

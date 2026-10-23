@@ -331,6 +331,29 @@ def _assert_dashboard_is_served(inst: Instance) -> None:
         )
 
 
+_READY_PREFIX = "KIROCREW_READY:"
+
+
+def gateway_stdout_path(log_file: Path) -> Path:
+    """Where the gateway's stdout lands: beside its stderr log."""
+    return log_file.with_name(log_file.stem + ".stdout")
+
+
+def read_ready_line(out_file: Path) -> dict | None:
+    """The parsed ready line from the gateway's stdout file, or None if not yet written."""
+    try:
+        text = out_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith(_READY_PREFIX):
+            try:
+                return json.loads(line[len(_READY_PREFIX) :])
+            except ValueError:
+                return None  # a partially flushed line; the next poll reads it whole
+    return None
+
+
 def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instance:
     """Create the throwaway home, install this app into it, and start a gateway.
 
@@ -365,28 +388,29 @@ def start(home: Path, log_file: Path, *, ready_timeout: float = 240.0) -> Instan
     _install_into(home, interpreter)
     _assert_untouched(shared_before, home)
 
+    # stdout goes to a FILE, never a pipe. `up` returns as soon as the gateway is
+    # ready, and a pipe dies with it: the gateway's next print raised BrokenPipeError
+    # and took the instance down seconds after `up` reported it ready, so every later
+    # `shot` or browser session found nothing listening.
+    out_file = gateway_stdout_path(log_file)
     proc = subprocess.Popen(
         [str(interpreter), "-m", "kiro_crew", "gateway", "--test-mode", "--no-crons"],
         env=_child_env(home),
-        stdout=subprocess.PIPE,
+        stdout=out_file.open("w"),
         stderr=log_file.open("w"),
         text=True,
         start_new_session=True,
     )
-    assert proc.stdout is not None
     deadline = time.time() + ready_timeout
-    prefix = "KIROCREW_READY:"
     while time.time() < deadline:
-        line = proc.stdout.readline()
-        if not line:
-            if proc.poll() is not None:
-                break
-            continue
-        if line.startswith(prefix):
-            got = json.loads(line[len(prefix) :])
+        got = read_ready_line(out_file)
+        if got is not None:
             inst = Instance(home, int(got["port"]), str(got["token"]), proc.pid)
             _assert_dashboard_is_served(inst)
             return inst
+        if proc.poll() is not None:
+            break
+        time.sleep(0.2)
     tail = (
         log_file.read_text(encoding="utf-8", errors="replace")[-800:] if log_file.exists() else ""
     )

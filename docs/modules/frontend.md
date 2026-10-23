@@ -204,8 +204,12 @@ guarantee.
   permanent "this page did not come through" over a month that had committed, which
   only remounting the view could clear. Pinned by
   `test_pending.py::test_a_request_that_never_answered_does_not_freeze_the_page` and
-  `test_a_birth_is_fired_and_handed_off_never_waited_on`; the two un-advanced reasons
-  it branches on are specified in [turn-loop](turn-loop.md).
+  `test_a_birth_is_fired_and_handed_off_never_waited_on`. When the server reports
+  the birth's narrator run ended with nothing written (`unanswered`, see
+  [turn-loop](turn-loop.md)), the awaiting poll stops and `opening.silent` shows at
+  once beside "continue birth", instead of after `AWAITING_POLL_CAP`; the view
+  field is pinned by `test_the_play_view_carries_every_field_the_ui_reads`. The two
+  un-advanced reasons it branches on are specified in [turn-loop](turn-loop.md).
 
 - **The play page is one page per life.** `main.tsx` keys `PlayPage` by the
   open run id, so entering another life (rail, shelf, legacy heir) remounts it.

@@ -136,7 +136,10 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   neither spends the rollback point nor is subject to carry-forward. Load-bearing
   because idempotence only protects a *landed* turn; the pre-dispatch write is
   what protects an *in-flight* one. Enforced by `turn.advance_turn` +
-  `store.mark_pending`; pinned by
+  `store.mark_pending`. `mark_pending_ended` stamps `endedAt` on the record when
+  its narrator run ended with no month and no tool call
+  ([turn-loop](turn-loop.md)); the record is kept so the play view can say the ask
+  did not come through, and the next `mark_pending` replaces it whole. Pinned by
   `test_pending.test_the_record_exists_before_the_narrator_is_spoken_to`,
   `test_pending.test_asking_twice_while_in_flight_does_not_dispatch_twice`,
   `test_pending.test_a_returning_request_attaches_to_the_first_narrators_turn`,

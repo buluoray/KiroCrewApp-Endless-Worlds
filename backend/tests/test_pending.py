@@ -89,7 +89,7 @@ def run(store):
 def _commits(store, run_id, turn=1, prose="the snow stopped"):
     """A dispatcher that behaves like a narrator who commits immediately."""
 
-    def dispatch(state, slot, prompt):
+    def dispatch(state, slot, prompt, **_kw):
         state_now = store.read_state(run_id)
         store.commit_state(run_id, {**state_now, "turn": turn})
         store.append_turn(run_id, {"turn": turn, "prose": prose})
@@ -102,7 +102,7 @@ def _silent(calls: list):
     """A dispatcher that is spoken to and never commits — a narrator still working,
     or one that died."""
 
-    def dispatch(state, slot, prompt):
+    def dispatch(state, slot, prompt, **_kw):
         calls.append(prompt)
         return True
 
@@ -139,7 +139,7 @@ def test_the_record_exists_before_the_narrator_is_spoken_to(store, run):
     """
     seen: dict[str, object] = {}
 
-    def dispatch(state, slot, prompt):
+    def dispatch(state, slot, prompt, **_kw):
         seen["pending"] = store.read_pending(run)
         return True
 
@@ -357,7 +357,7 @@ def test_a_poll_in_the_commit_gap_returns_the_wanted_prose_not_the_previous(stor
     store.commit_state(run, {**state, "turn": 1})
     store.append_turn(run, {"turn": 1, "prose": "old prose"})
 
-    def half_committed(state_obj, slot, prompt):
+    def half_committed(state_obj, slot, prompt, **_kw):
         # A narrator mid-commit: the counter moves, the chronicle line has not.
         s = store.read_state(run)
         store.commit_state(run, {**s, "turn": 2})
@@ -617,6 +617,20 @@ def test_a_backdrop_request_inside_the_ceiling_still_reports_painting(store, run
 
     live = generating(store, run)
     assert live is not None and live["stage"] == "painting"
+
+
+def test_painting_keeps_quoting_what_the_player_asked_for(store, run):
+    """The art stage is the longest part of a rich month. Reporting it with an empty
+    action made the page drop the quote of the player's own choice the instant the
+    prose committed, so for most of the wait they could not see which fork it was."""
+    store.commit_state(run, {**store.read_state(run), "turn": 1})
+    store.append_turn(run, {"turn": 1, "prose": "p", "action": "I carry the ink myself."})
+    store.request_backdrop(run, turn=1, brief="a hill road in thaw")
+
+    live = generating(store, run)
+
+    assert live is not None and live["stage"] == "painting"
+    assert live["action"] == "I carry the ink myself."
 
 
 def test_a_page_that_already_has_its_art_is_not_reported_painting(store, run):

@@ -85,7 +85,7 @@ def run(store):
 
 
 def _prompts(sent: list[str]):
-    def dispatch(state, slot, prompt):
+    def dispatch(state, slot, prompt, **_kw):
         sent.append(prompt)
         return True
 
@@ -234,7 +234,7 @@ def test_the_marker_is_written_after_the_prompt_that_carries_it(store, run):
     """
     seen: dict[str, str] = {}
 
-    def dispatch(state, slot, prompt):
+    def dispatch(state, slot, prompt, **_kw):
         seen["at_dispatch"] = store.briefed_slot(run)
         return True
 

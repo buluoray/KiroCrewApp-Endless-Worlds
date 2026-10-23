@@ -114,6 +114,7 @@ def test_the_play_view_carries_every_field_the_ui_reads(ui_src, pack):
             "awaitingOpening": False,
             "language": "en",
             "generating": None,
+            "unanswered": False,
             "backdrop": None,
         }
     )
