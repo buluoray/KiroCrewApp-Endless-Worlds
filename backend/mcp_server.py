@@ -1163,7 +1163,8 @@ def _space_fateful(
     cooling = any(
         _is_weighty(c)
         for e in recent
-        for c in (e.get("choices") if isinstance(e.get("choices"), list) else [])
+        for ch in (e.get("choices"),)
+        for c in (ch if isinstance(ch, list) else [])
     )
     out: list[Any] = []
     kept = False
@@ -1622,9 +1623,7 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     # synthetic turn with no world cannot be judged for endings and is left alone.
     choices = _clean_choices(args.get("choices") or [])
     try:
-        _earlier = [
-            e for e in store.read_chronicle(run_id) if int(e.get("turn") or 0) < int(turn)
-        ]
+        _earlier = [e for e in store.read_chronicle(run_id) if int(e.get("turn") or 0) < int(turn)]
     except Exception:  # noqa: BLE001
         _earlier = []  # an unreadable history only loses the spacing, never the turn
     choices, fateful_drops = _space_fateful(choices, _earlier)
