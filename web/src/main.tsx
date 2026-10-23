@@ -816,9 +816,14 @@ export default function EndlessWorlds() {
             <div className="ew-section">{t('shelf.continue')}</div>
             <LifeRow run={newest} onOpen={enterLife} />
           </div>
-        ) : (
-          <div className="ew-onlywide ew-meta">{t('shelf.pick')}</div>
-        )}
+        ) : runs.length === 0 && worlds.some((w) => w.usable) ? (
+          <section className="ew-block" aria-labelledby="ew-first-life">
+            <h3 id="ew-first-life" className="ew-detail-title">
+              {t('shelf.firstLife')}
+            </h3>
+            <p className="ew-meta">{t('shelf.firstLifeHint')}</p>
+          </section>
+        ) : null}
 
         <div className="ew-shelflist ew-shelf-lives">
           {active.length ? (

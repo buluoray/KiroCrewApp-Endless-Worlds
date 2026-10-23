@@ -983,11 +983,11 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 .ew-pager-turn {
   font-size: 13px; color: var(--muted, #6b7280); letter-spacing: .04em;
-  min-width: 6em; text-align: center;
+  min-width: 0; text-align: center;
 }
 .ew-pager-arw {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border-radius: 8px; cursor: pointer;
+  width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
   background: transparent; border: 1px solid var(--border, #2d2f3d);
   color: var(--text, #e2e8f0);
 }
@@ -1842,4 +1842,23 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   .ew-perfbar { width: 40px; }
   .ew-perf-openhint { display: none; }
   .ew-perf-table th, .ew-perf-table td { padding: 4px 6px; }
+}
+
+/* Reader accessibility: retain hidden announcements without hiding them from AT. */
+.ew-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+.ew-action-label { display: block; margin-top: 16px; font-size: 14px; }
+.ew-action-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+/* A scroll-hidden bar must return as soon as a keyboard user reaches it. */
+.ew-topbar-hidden:focus-within { transform: none; opacity: 1; pointer-events: auto; }
+.ew-tabbar-hidden:focus-within { transform: none; }
+@media (max-width: 480px) {
+  .ew-topbar { gap: 8px; }
+  .ew-topbar .ew-back { min-width: 0; flex: 1; white-space: normal; }
+  .ew-pager { flex: 0 0 auto; gap: 6px; }
+  .ew-act { flex-direction: column; }
+  .ew-act > .ew-btn { min-height: 44px; }
+  .ew-confirm .ew-btn { min-height: 44px; }
 }

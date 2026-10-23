@@ -36,6 +36,7 @@ import { LegacyPicker } from './legacy'
 import { StarMap } from './memory'
 import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
+import { StoryPage } from './story-page'
 import { buildTabs, tabIcon } from './tabbar'
 
 function Chevron({ dir }: { dir: 'l' | 'r' }) {
@@ -237,6 +238,15 @@ export function PlayPage({
   const [action, setAction] = useState('')
   const [tapped, setTapped] = useState('')
   const [arm, setArm] = useState('')
+  const playRoot = useRef<HTMLDivElement>(null)
+  const cancelAction = () => {
+    const root = playRoot.current
+    const target = root?.querySelector<HTMLElement>(
+      arm === ACT ? '#ew-free-action' : '.ew-choice-armed',
+    )
+    setArm('')
+    target?.focus()
+  }
   // Picked once per commit. Re-rolling during render would cycle the phrase every
   // poll while the month is being written.
   const [phrase, setPhrase] = useState('')
@@ -693,7 +703,7 @@ export function PlayPage({
   // the way onward being another life in the same world or the shelf.
   if (v.ended) {
     return (
-      <div>
+      <div className="ew-play-root">
         {legacyOpen ? (
           <LegacyPicker
             runId={runId}
@@ -719,7 +729,9 @@ export function PlayPage({
         <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
         <h3 className="ew-detail-title">{v.title}</h3>
         <div className="ew-note ew-note-live">{t('play.endedBadge')}</div>
-        <Prose text={v.prose} />
+        <StoryPage page={v.turn}>
+          <Prose text={v.prose} />
+        </StoryPage>
         <div className="ew-meta">{t('play.endedMeta', { turn: v.turn })}</div>
         <LifeSummary runId={runId} />
         <div className="ew-bar">
@@ -895,13 +907,15 @@ export function PlayPage({
         <div className="ew-hint">{t('history.chose', { action: pastAction })}</div>
       ) : null}
 
-      <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
-        {pageLoading ? (
-          <div className="ew-meta">{t('history.reading')}</div>
-        ) : (
-          <Prose text={shownProse} />
-        )}
-      </div>
+      <StoryPage page={shownTurn} loading={pageLoading}>
+        <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
+          {pageLoading ? (
+            <div className="ew-meta">{t('history.reading')}</div>
+          ) : (
+            <Prose text={shownProse} />
+          )}
+        </div>
+      </StoryPage>
 
       {/* After the prose, never before it (design §8.1): the story is the
           protagonist and an echo is a footnote to it. Live turn only — a past
@@ -952,6 +966,10 @@ export function PlayPage({
             {t('play.retry')}
           </button>
         </div>
+      ) : null}
+
+      {isLive && v.turn === 1 && !busy ? (
+        <p className="ew-hint">{t('play.firstTurnHint')}</p>
       ) : null}
 
       {isLive && (v.choices ?? []).length ? (
@@ -1048,7 +1066,7 @@ export function PlayPage({
                     >
                       {t('play.confirmYes')}
                     </button>
-                    <button className="ew-btn ew-btn-sm" type="button" onClick={() => setArm('')}>
+                    <button className="ew-btn ew-btn-sm" type="button" onClick={cancelAction}>
                       {t('play.confirmNo')}
                     </button>
                   </div>
@@ -1061,8 +1079,13 @@ export function PlayPage({
 
       {isLive ? (
         <div>
+          <label htmlFor="ew-free-action" className="ew-action-label">
+            {t('play.actionLabel')}
+          </label>
           <div className="ew-act">
             <textarea
+              id="ew-free-action"
+              aria-describedby="ew-action-help"
               value={action}
               maxLength={500}
               rows={2}
@@ -1073,6 +1096,7 @@ export function PlayPage({
                 setArm('')
               }}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return
                 // Cmd/Ctrl+Enter is itself the deliberate act, so it commits directly
                 // rather than only arming the two-step confirm.
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && action.trim() && !busy) {
@@ -1093,6 +1117,9 @@ export function PlayPage({
               {t('play.act')}
             </button>
           </div>
+          <p id="ew-action-help" className="ew-action-help">
+            {t('play.actionHelp')}
+          </p>
 
           {/* Typed text gets the same second step as a tapped choice. It is the same
             irreversible month, and the reason to confirm has nothing to do with how
@@ -1110,7 +1137,7 @@ export function PlayPage({
               >
                 {t('play.confirmYes')}
               </button>
-              <button className="ew-btn ew-btn-sm" type="button" onClick={() => setArm('')}>
+              <button className="ew-btn ew-btn-sm" type="button" onClick={cancelAction}>
                 {t('play.confirmNo')}
               </button>
             </div>
@@ -1191,7 +1218,16 @@ export function PlayPage({
   }
 
   return (
-    <div className="ew-play-root">
+    <div
+      className="ew-play-root"
+      ref={playRoot}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && arm) {
+          e.preventDefault()
+          cancelAction()
+        }
+      }}
+    >
       {starOpen ? (
         <StarMap
           runId={runId}
