@@ -602,6 +602,34 @@ def _library(ctx: AppContext) -> WorldLibrary:
     return WorldLibrary(ctx.data_dir, _SEEDS_DIR)
 
 
+def _life_ended(
+    ctx: AppContext, state: dict[str, Any], packs: dict[tuple[str, str], Any] | None = None
+) -> bool:
+    """Is this life over — the same answer the play view gives.
+
+    Commits now stamp ``ended`` (mcp_server), but a life closed by a world-law
+    ending before that never carried the flag, and keying the shelf on the flag
+    alone listed it as still being lived — offered as "continue" on a dead life.
+    ``packs`` caches a world read across one listing. Falls back to the flag when
+    the world cannot be read.
+    """
+    if state.get("ended"):
+        return True
+    world_id = state.get("worldId")
+    if not isinstance(world_id, str) or not world_id:
+        return False
+    lang = str(state.get("language") or "")
+    key = (world_id, lang)
+    cache = packs if packs is not None else {}
+    if key not in cache:
+        try:
+            cache[key] = _library(ctx).read(world_id, lang or None)
+        except Exception:  # noqa: BLE001 — an unreadable world falls back to the flag
+            cache[key] = None
+    pack = cache[key]
+    return bool(pack is not None and resolve_ending(pack.template, state))
+
+
 def _drafts(ctx: AppContext) -> DraftStore:
     """The world-draft store — the same files the MCP server reaches from its own
     process (both self-locate from the app data dir)."""
@@ -846,7 +874,10 @@ async def get_world(request: web.Request, ctx: AppContext) -> web.Response:
 
 
 def lives_claiming(
-    store: RunStore, world_id: str, gateway_state: Any = None
+    store: RunStore,
+    world_id: str,
+    gateway_state: Any = None,
+    ctx: AppContext | None = None,
 ) -> list[dict[str, Any]]:
     """Every life that belongs to this world, and what it would cost to lose it.
 
@@ -861,6 +892,7 @@ def lives_claiming(
     it behind would strand it permanently once its world is gone.
     """
     out: list[dict[str, Any]] = []
+    packs: dict[tuple[str, str], Any] = {}
     for row in store.read_index():
         run_id = row.get("runId")
         if not isinstance(run_id, str) or not run_id:
@@ -884,7 +916,9 @@ def lives_claiming(
             continue
         life["turn"] = int(state.get("turn") or 0)
         life["subtitle"] = life_subtitle(state)
-        life["ended"] = bool(state.get("ended"))
+        life["ended"] = (
+            _life_ended(ctx, state, packs) if ctx is not None else bool(state.get("ended"))
+        )
         try:
             life["generating"] = generating(store, run_id, gateway_state) is not None
         except Exception:  # noqa: BLE001
@@ -900,7 +934,7 @@ def _deletion_facts(ctx: AppContext, world_id: str, gateway_state: Any = None) -
     name the number of lives it ends is a confirmation of the wrong question.
     """
     library = _library(ctx)
-    lives = lives_claiming(_store(ctx), world_id, gateway_state)
+    lives = lives_claiming(_store(ctx), world_id, gateway_state, ctx)
     title = world_id
     try:
         title = library.read(world_id).template.title
@@ -1132,7 +1166,7 @@ def _life_deletion_facts(ctx: AppContext, run_id: str, gateway_state: Any = None
         return facts
     facts["turn"] = int(state.get("turn") or 0)
     facts["subtitle"] = life_subtitle(state)
-    facts["ended"] = bool(state.get("ended"))
+    facts["ended"] = _life_ended(ctx, state)
     facts["worldId"] = state.get("worldId") or facts.get("worldId", "")
     try:
         facts["generating"] = generating(store, run_id, gateway_state) is not None
@@ -1838,6 +1872,7 @@ async def list_runs(request: web.Request, ctx: AppContext) -> web.Response:
 
     store = _store(ctx)
     rows: list[dict[str, Any]] = []
+    packs: dict[tuple[str, str], Any] = {}
     for row in store.read_index():
         run_id = row.get("runId")
         if not isinstance(run_id, str) or not run_id:
@@ -1851,7 +1886,7 @@ async def list_runs(request: web.Request, ctx: AppContext) -> web.Response:
             continue
         live["turn"] = int(state.get("turn") or 0)
         live["awaitingOpening"] = state.get("status") == "awaiting-opening" and live["turn"] == 0
-        live["ended"] = bool(state.get("ended"))
+        live["ended"] = _life_ended(ctx, state, packs)
         live["subtitle"] = life_subtitle(state)
         rows.append(live)
 

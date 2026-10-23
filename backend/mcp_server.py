@@ -124,7 +124,7 @@ from settings import SPARSE_GAP_TURNS, preferred_style, read_settings  # noqa: E
 from store import RunStore, StoreError, brief_lane, rewrite_brief_style  # noqa: E402
 from systems import apply_systems  # noqa: E402
 from turn import declaration_shape  # noqa: E402
-from view import always_panels_empty, shape_panels  # noqa: E402
+from view import always_panels_empty, resolve_ending, shape_panels  # noqa: E402
 from widget import scene_warnings  # noqa: E402
 from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
 
@@ -1660,6 +1660,20 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                 "reason": "choices-required",
                 "detail": detail,
             }
+    # A terminal turn closes the life ON DISK, not only on the page it commits.
+    # `ending: true` used to buy a choiceless page and nothing else: no `ended` in
+    # state, so resolve_ending said the life went on, the play view showed a dead
+    # page with no controls and no ending, and the turn route would narrate a month
+    # after the death. A world-law ending had the opposite split — the play view
+    # judged it over while every shelf reader keyed on the flag listed it as being
+    # lived. Stamping here makes the flag the one record every reader agrees on. A
+    # narrator's own ending id is kept; else the world ending that fired names it.
+    fired_id = ""
+    if pack is not None:
+        fired_id = resolve_ending(pack.template, state)
+    if args.get("ending") is True or fired_id:
+        flag = state.get("ended")
+        state["ended"] = flag if isinstance(flag, str) and flag else (fired_id or True)
     store.commit_state(run_id, state)
     # Provenance rides with the commit: leaves where the final state differs from
     # the narrator's declaration were backend-written (reserved-key carry,
