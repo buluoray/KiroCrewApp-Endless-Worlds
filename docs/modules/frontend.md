@@ -212,10 +212,15 @@ guarantee.
   `test_save_waits_for_the_players_settings_to_be_read`, and
   `test_a_failed_read_or_save_is_said_out_loud`.
 
-- **Turn progress is a tool-call count; retry preserves the input; paging is by
-  turn number.** The progress bar advances by the narrator's tool-call count
-  (capped short of completion until the commit lands) rather than a timer; a
-  failed turn preserves the player's input for retry; and the top-of-story pager
+- **Turn progress follows tool calls and time, and names the real stage; retry
+  preserves the input; paging is by turn number.** `TurnProgress` takes the larger
+  of a notch per narrator tool call and a slow creep from `generating.askedAt`
+  (`progressPct`, both capped at 92% until the commit lands), because a month is
+  only two or three calls and the long one is the write, so a call-only bar stood
+  still for about a minute. Beside the tuned waiting phrase it shows the server's
+  own `generating.stage` (`play.stage.reading` / `writing` / `painting`). Pinned by
+  `test_rail.py::test_turn_progress_names_the_server_stage_and_creeps_between_calls`.
+  A failed turn preserves the player's input for retry; and the top-of-story pager
   addresses months by turn *number*, not an offset — an offset shifts under a turn
   committed mid-paging. `api.chronicle(before)` therefore takes a turn number.
 

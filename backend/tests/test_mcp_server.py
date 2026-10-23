@@ -1318,6 +1318,59 @@ def test_choice_captions_are_salvaged_from_common_alias_keys(app):
     assert all(c.get("id") for c in committed)
 
 
+def test_fateful_choices_are_spaced_and_one_per_page(app):
+    """Live lives offered a fateful choice on 71 of 111 pages, 20 in a row, so the
+    weighty look marked nothing. The gate keeps one per page and one per
+    FATEFUL_GAP pages; a demoted choice survives as a plain one and the narrator
+    is warned, never refused."""
+    store = srv._store()
+    run = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+
+    def advance(turn, choices):
+        out = call(
+            "endless_advance_turn",
+            runId=run,
+            turn=turn,
+            prose="p",
+            state={"worldId": "w"},
+            choices=choices,
+        )
+        assert out["ok"] is True and out["committed"] is True
+        return out, store.read_chronicle(run)[-1]["choices"]
+
+    fate = {"id": "vow", "label": "swear", "fateful": True, "effect": "aura", "tint": "#aa3300"}
+    two = [dict(fate), dict(fate, id="war", label="march")]
+    out, kept = advance(2, two + [{"id": "rest", "label": "rest"}])
+    assert [c.get("fateful") for c in kept] == [True, None, None]
+    assert kept[0]["effect"] == "aura"
+    assert not {"fateful", "effect", "tint", "art"} & set(kept[1])
+    assert kept[1]["label"] == "march"
+    assert any(w.get("field") == "choices" and "war" in w["detail"] for w in out["warnings"])
+
+    for turn in range(3, srv.FATEFUL_GAP + 3):
+        out, kept = advance(turn, [dict(fate), {"id": "rest", "label": "rest"}])
+        if turn < 2 + srv.FATEFUL_GAP:
+            assert not any(c.get("fateful") for c in kept), turn
+            assert [c["label"] for c in kept] == ["swear", "rest"]
+        else:
+            assert kept[0].get("fateful") is True, turn
+            assert "warnings" not in out or not any(
+                w.get("field") == "choices" for w in out["warnings"]
+            )
+
+
+def test_choice_art_counts_as_weighty_for_spacing():
+    """The play page draws a choice with its own `art` exactly like a fateful one,
+    so art alone must count toward the spacing and be stripped on demotion."""
+    arted = {"id": "a", "label": "go", "art": "<svg/>"}
+    earlier = [{"turn": 1, "choices": [dict(arted)]}]
+    out, warnings = srv._space_fateful([dict(arted)], earlier)
+    assert out == [{"id": "a", "label": "go"}]
+    assert warnings
+    out, warnings = srv._space_fateful([dict(arted)], [{"turn": 1, "choices": []}] * 3)
+    assert out[0]["art"] == "<svg/>" and not warnings
+
+
 def test_events_are_coerced_to_bounded_strings(app):
     """The anti-halo events log is enrichment: non-strings are coerced, long lines
     truncated, and the list capped at 12 — a mangled entry never refuses the turn."""

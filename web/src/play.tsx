@@ -55,15 +55,43 @@ function Chevron({ dir }: { dir: 'l' | 'r' }) {
   )
 }
 
+/** Time constant of the bar's slow creep, in seconds. A narrator makes only two or
+ *  three tool calls a month (measured: 50 of 52 turns), and the long one is the
+ *  write itself, so a bar driven by calls alone sat still for about a minute
+ *  (median turn 65 s, p90 116 s). The creep keeps it visibly moving. */
+const PROGRESS_CREEP_S = 60
+
+/** The bar's width: the larger of the per-call notch and a slow time-based creep
+ *  toward the same 92% cap, so it never jumps back and never claims to be done. */
+function progressPct(steps: number, elapsedS: number): number {
+  const byStep = 12 + steps * 16
+  const byTime = 12 + 80 * (1 - Math.exp(-Math.max(0, elapsedS) / PROGRESS_CREEP_S))
+  return Math.min(Math.max(byStep, byTime), 92)
+}
+
 /**
  * Live feedback while a month is written. The bar advances a notch per narrator
- * tool call (`generating.steps`, ~16% each, capped at 92% until commit); the
- * label reuses the app's existing, already-tuned waiting copy rather than a
- * generic stage name, so the wording stays consistent with the rest of the wait.
+ * tool call (`generating.steps`) and creeps with time between calls; the left
+ * label keeps the app's tuned waiting copy, and the right one names the real
+ * stage the server reports (`generating.stage`: reading, writing, painting).
  */
 function TurnProgress({ g, label }: { g?: PlayView['generating']; label: string }) {
-  const steps = g?.steps ?? 0
-  const pct = Math.min(12 + steps * 16, 92)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const askedAt = g?.askedAt ?? 0
+  const elapsed = askedAt ? now / 1000 - askedAt : 0
+  const pct = progressPct(g?.steps ?? 0, elapsed)
+  const stage =
+    g?.stage === 'reading'
+      ? t('play.stage.reading')
+      : g?.stage === 'writing'
+        ? t('play.stage.writing')
+        : g?.stage === 'painting'
+          ? t('play.stage.painting')
+          : ''
   return (
     <div className="ew-progress" role="status" aria-live="polite">
       <div className="ew-progress-track">
@@ -71,6 +99,7 @@ function TurnProgress({ g, label }: { g?: PlayView['generating']; label: string 
       </div>
       <div className="ew-progress-steps">
         <span className="ew-progress-label">{label}</span>
+        {stage ? <span className="ew-progress-count">{stage}</span> : null}
       </div>
     </div>
   )

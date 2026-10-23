@@ -497,6 +497,9 @@ var TABLES$1 = {
 		"play.pollHiccup": "连接不稳，正在重试……",
 		"play.writingAction": "正在书写你的选择：「{action}」",
 		"play.retry": "再试一次",
+		"play.stage.reading": "回顾你的一生",
+		"play.stage.writing": "书写这个月",
+		"play.stage.painting": "描绘这一幕",
 		"play.rumour": "传闻",
 		"play.rumourSuffix": "——只是听说",
 		"play.sceneFailed": "这一幕没能画出来。",
@@ -899,6 +902,9 @@ var TABLES$1 = {
 		"play.pollHiccup": "Connection hiccup — retrying…",
 		"play.writingAction": "Writing your choice: “{action}”",
 		"play.retry": "Try again",
+		"play.stage.reading": "Recalling your life",
+		"play.stage.writing": "Writing the month",
+		"play.stage.painting": "Painting the scene",
 		"play.rumour": "Rumor",
 		"play.rumourSuffix": " — only hearsay",
 		"play.sceneFailed": "This scene could not be drawn.",
@@ -6011,15 +6017,34 @@ function Chevron({ dir }) {
 		})
 	});
 }
+/** Time constant of the bar's slow creep, in seconds. A narrator makes only two or
+*  three tool calls a month (measured: 50 of 52 turns), and the long one is the
+*  write itself, so a bar driven by calls alone sat still for about a minute
+*  (median turn 65 s, p90 116 s). The creep keeps it visibly moving. */
+var PROGRESS_CREEP_S = 60;
+/** The bar's width: the larger of the per-call notch and a slow time-based creep
+*  toward the same 92% cap, so it never jumps back and never claims to be done. */
+function progressPct(steps, elapsedS) {
+	const byStep = 12 + steps * 16;
+	const byTime = 12 + 80 * (1 - Math.exp(-Math.max(0, elapsedS) / PROGRESS_CREEP_S));
+	return Math.min(Math.max(byStep, byTime), 92);
+}
 /**
 * Live feedback while a month is written. The bar advances a notch per narrator
-* tool call (`generating.steps`, ~16% each, capped at 92% until commit); the
-* label reuses the app's existing, already-tuned waiting copy rather than a
-* generic stage name, so the wording stays consistent with the rest of the wait.
+* tool call (`generating.steps`) and creeps with time between calls; the left
+* label keeps the app's tuned waiting copy, and the right one names the real
+* stage the server reports (`generating.stage`: reading, writing, painting).
 */
 function TurnProgress({ g, label }) {
-	const steps = g?.steps ?? 0;
-	const pct = Math.min(12 + steps * 16, 92);
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const timer = window.setInterval(() => setNow(Date.now()), 1e3);
+		return () => window.clearInterval(timer);
+	}, []);
+	const askedAt = g?.askedAt ?? 0;
+	const elapsed = askedAt ? now / 1e3 - askedAt : 0;
+	const pct = progressPct(g?.steps ?? 0, elapsed);
+	const stage = g?.stage === "reading" ? t("play.stage.reading") : g?.stage === "writing" ? t("play.stage.writing") : g?.stage === "painting" ? t("play.stage.painting") : "";
 	return /* @__PURE__ */ jsxs("div", {
 		className: "ew-progress",
 		role: "status",
@@ -6030,12 +6055,15 @@ function TurnProgress({ g, label }) {
 				className: "ew-progress-fill",
 				style: { width: `${pct}%` }
 			})
-		}), /* @__PURE__ */ jsx("div", {
+		}), /* @__PURE__ */ jsxs("div", {
 			className: "ew-progress-steps",
-			children: /* @__PURE__ */ jsx("span", {
+			children: [/* @__PURE__ */ jsx("span", {
 				className: "ew-progress-label",
 				children: label
-			})
+			}), stage ? /* @__PURE__ */ jsx("span", {
+				className: "ew-progress-count",
+				children: stage
+			}) : null]
 		})]
 	});
 }
