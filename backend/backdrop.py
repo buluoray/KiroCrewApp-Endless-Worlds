@@ -565,8 +565,13 @@ class BackdropDraftStore:
         *,
         turn: int,
         buttons: str | None = None,
+        brief_id: str = "",
     ) -> dict[str, Any]:
-        """Validate all draft SVGs, then atomically expose only raster previews."""
+        """Validate all draft SVGs, then atomically expose only raster previews.
+
+        ``brief_id`` records which brief the illustrator said it drew, so the commit
+        can refuse a draft drawn for a brief that is no longer the page's.
+        """
         clean_markup = compile_backdrop(markup)
         clean_mobile = compile_backdrop(mobile)
         clean_buttons = (
@@ -589,6 +594,8 @@ class BackdropDraftStore:
                 created.append(path)
                 previews[label] = str(path.resolve())
             draft = {"draftId": draft_id, "turn": int(turn), "previews": previews}
+            if brief_id:
+                draft["briefId"] = str(brief_id)
             old = self._load()
             self._save(draft)
             self._remove_previews(old)
@@ -773,6 +780,7 @@ class BackdropStore:
         mobile: str | None = None,
         source: dict[str, str] | None = None,
         trace: dict[str, Any] | None = None,
+        brief_id: str = "",
     ) -> int:
         """Validate and append coordinated desktop/mobile backgrounds (and the
         optional common button motif),
@@ -812,12 +820,39 @@ class BackdropStore:
             entry["source"] = clean_source
         if clean_trace:
             entry["trace"] = clean_trace
+        if brief_id:
+            # Bookkeeping only, never part of the public view: which brief this art
+            # answers, so a late commit for a different brief cannot replace it.
+            entry["briefId"] = str(brief_id)[:64]
         if history and int(history[-1].get("turn") or 0) == int(turn):
             history[-1] = entry  # a second set on the same page replaces it
         else:
             history.append(entry)
         self._save(history)
         return version
+
+    def brief_id(self, turn: int) -> str:
+        """The brief the art committed for exactly ``turn`` answers, or ``""``."""
+        for entry in reversed(self._load()):
+            entry_turn = int(entry.get("turn") or 0)
+            if entry_turn == int(turn):
+                return str(entry.get("briefId") or "")
+            if entry_turn < int(turn):
+                break
+        return ""
+
+    def discard_from(self, turn: int) -> None:
+        """Remove every entry stamped at or after ``turn``, as if never set.
+
+        Not a tombstone: a tombstone is a page's own choice to show no background.
+        This undoes art drawn for a page whose prose never committed, so the
+        earlier pages' effective art is left exactly as it was. A no-op (no write)
+        when there is nothing to remove.
+        """
+        history = self._load()
+        kept = [e for e in history if int(e.get("turn") or 0) < int(turn)]
+        if len(kept) != len(history):
+            self._save(kept)
 
     def clear(self, turn: int = 0) -> None:
         """Clear the background FROM this turn onward, keeping earlier pages' scenes.

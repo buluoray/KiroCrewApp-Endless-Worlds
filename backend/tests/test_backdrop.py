@@ -568,3 +568,147 @@ def test_the_store_serves_stored_art_still_once_reduced_motion_is_on(tmp_path):
     write_settings(tmp_path, model="", reasoning_effort="", reduced_motion=False)
     moving = BackdropStore(tmp_path, "run-abc").current()
     assert moving and "<animate" in moving["markup"]
+
+
+# -- a brief bound to the turn still being written ---------------------------------
+
+
+def _writing(data):
+    """A life on page 1 whose narrator is writing page 2."""
+    store = srv._store()
+    run_id = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.mark_pending(run_id, turn=2, slot="endless-run-x")
+    return store, run_id
+
+
+def test_a_brief_recorded_mid_turn_is_bound_to_the_attempt_writing_it(data):
+    """``pendingAt`` is what lets the backend start the illustrator before the
+    prose commits while still telling this attempt's brief from an abandoned one."""
+    store, run_id = _writing(data)
+
+    out = _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a gate")
+
+    assert out["ok"] is True and out["backdrop"] == "queued" and out["turn"] == 2
+    request = store.read_backdrop_request(run_id)
+    assert request["pendingAt"] == store.read_pending(run_id)["askedAt"]
+    assert request["briefId"]
+
+
+def test_a_second_brief_while_the_first_is_being_painted_is_declined(data):
+    """The illustrator already started on the first brief; a replacement would be
+    ignored by it or race a second illustrator for the same page."""
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: first")
+    store.update_backdrop_request(run_id, attempts=1)
+
+    out = _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: second")
+
+    assert out["ok"] is True and out["backdrop"] == "queued"
+    assert "already being painted" in out["note"]
+    assert "first" in store.read_backdrop_request(run_id)["brief"]
+
+
+def test_a_recovery_rebrief_still_replaces_a_painted_brief(data):
+    """The decline is for a second brief in the same writing turn, never for the
+    narrator's repair brief once recovery opened its gate."""
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: first")
+    store.update_backdrop_request(run_id, attempts=2, fallbackAllowed=True)
+
+    out = _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: simpler")
+
+    assert out["backdrop"] == "queued"
+    assert "simpler" in store.read_backdrop_request(run_id)["brief"]
+
+
+def _early_draft(run_id, turn, brief_id, color="#111"):
+    args = {"runId": run_id, "turn": turn, "markup": _svg(color), "mobile": _svg(color)}
+    if brief_id is not None:
+        args["briefId"] = brief_id
+    return _call("endless_submit_backdrop_draft", **args)
+
+
+def test_an_early_draft_must_name_the_live_brief(data):
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a gate")
+    brief_id = store.read_backdrop_request(run_id)["briefId"]
+
+    assert _early_draft(run_id, 2, None)["ok"] is False, "an unnamed early draft passed"
+    assert _early_draft(run_id, 2, "0" * 12)["ok"] is False, "a stale brief's draft passed"
+    assert _early_draft(run_id, 2, brief_id)["ok"] is True
+
+
+def test_art_for_an_abandoned_attempt_cannot_reach_the_retry(data):
+    """The old illustrator keeps running after its narrator attempt was abandoned.
+    Its draft names the old brief, so neither the retry's live brief nor an empty
+    request can carry it onto a page written from different words."""
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: old")
+    old = store.read_backdrop_request(run_id)["briefId"]
+    draft = _early_draft(run_id, 2, old)
+    assert draft["ok"] is True
+
+    def commit():
+        return _call(
+            "endless_commit_backdrop",
+            runId=run_id,
+            turn=2,
+            draftId=draft["draftId"],
+            markup=_svg("#111"),
+            mobile=_svg("#111"),
+        )
+
+    # Abandoned, nothing replaced it yet: the page has no words, so no art.
+    store.clear_backdrop_request(run_id)
+    assert commit()["ok"] is False
+    assert BackdropStore(data, run_id).exact(2) is None
+
+    # The retry briefs the same turn: the old draft is not its art.
+    store.mark_pending(run_id, turn=2, slot="endless-run-x")
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: new")
+    assert commit()["ok"] is False
+    assert BackdropStore(data, run_id).exact(2) is None
+
+
+def test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_briefs_art(data):
+    """After the server's underlay fallback publishes, the same brief's late
+    commit still replaces it (unchanged behaviour); a commit drawn for another
+    brief does not overwrite the page's art."""
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a gate")
+    live = store.read_backdrop_request(run_id)["briefId"]
+    draft = _early_draft(run_id, 2, live)
+    BackdropStore(data, run_id).set(_svg("#999"), turn=2, brief_id=live)
+    store.clear_backdrop_request(run_id)
+
+    ok = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=2,
+        draftId=draft["draftId"],
+        markup=_svg("#123"),
+        mobile=_svg("#123"),
+    )
+    assert ok["ok"] is True
+    assert "#123" in BackdropStore(data, run_id).exact(2)["markup"]
+
+    BackdropStore(data, run_id).set(_svg("#999"), turn=2, brief_id="f" * 12)
+    store.request_backdrop(run_id, turn=2, brief="LANE: motif\nTHESIS: again")
+    other = _early_draft(run_id, 2, None)
+    store.clear_backdrop_request(run_id)
+    # Committed page, request gone, art answering brief "fff…": a draft drawn for
+    # the earlier brief must not replace it.
+    store.commit_state(run_id, {"turn": 2, "worldId": "w"})
+    BackdropDraftStore(data, run_id)._save(
+        {"draftId": other["draftId"], "turn": 2, "previews": {}, "briefId": live}
+    )
+    refused = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=2,
+        draftId=other["draftId"],
+        markup=_svg("#456"),
+        mobile=_svg("#456"),
+    )
+    assert refused["ok"] is False
+    assert "#999" in BackdropStore(data, run_id).exact(2)["markup"]

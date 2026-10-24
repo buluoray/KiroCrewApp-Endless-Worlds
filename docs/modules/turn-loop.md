@@ -331,6 +331,18 @@ turn 200 as at turn 1.
   cadence's replacement exemption does not reopen such a page either; pinned by
   `test_sparse_replacement_brief_is_declined_once_the_page_has_its_art`.
 
+- **The illustrator starts when the brief lands, not when the prose commits.**
+  The narrator briefs before `endless_advance_turn`, so the brief exists while the
+  turn is still in flight. `turn.brief_in_flight` recognises it (bound to the live
+  attempt by `pendingAt`), and the play view's generating poll and the request's
+  own inline wait (`advance_turn(on_poll=...)`) both start recovery for it. A new
+  narrator attempt for a turn first drops any brief or art an abandoned attempt
+  left for it (`turn.forget_unpublished_art`, called just before `mark_pending`).
+  The details and their tests live in
+  [scenes-and-backdrop.md](scenes-and-backdrop.md); this loop's half is pinned by
+  `test_a_new_attempt_drops_the_art_and_brief_its_abandoned_attempt_left` and
+  `test_the_inline_wait_runs_its_poll_hook_and_survives_one_that_fails`.
+
 - **Illustration failure is recovered behind the normal generation state.** A
   durable request survives the HTTP request and a gateway restart; `get_run`
   re-arms one recovery task per run. Two independent illustrator attempts are

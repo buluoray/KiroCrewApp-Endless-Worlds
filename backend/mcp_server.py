@@ -667,7 +667,8 @@ _TOOLS: list[dict[str, Any]] = [
             "and returns their local paths plus an opaque `draftId`. This does NOT "
             "publish art or clear the waiting page. Read every returned PNG together "
             "with the built-in `read` tool in Image mode before making at most one "
-            "revision and calling endless_commit_backdrop."
+            "revision and calling endless_commit_backdrop. Pass the `briefId` from "
+            "your task exactly; a draft for a brief that was replaced is refused."
         ),
         "inputSchema": {
             "type": "object",
@@ -676,6 +677,7 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
+                "briefId": {"type": "string", "maxLength": 64},
                 "markup": {"type": "string", "maxLength": 24000},
                 "mobile": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
@@ -1029,6 +1031,34 @@ def _backdrop_turn(run_id: str) -> int:
         return pend_turn if pend_turn > committed else committed
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _writing_attempt(run_id: str, turn: int) -> float | None:
+    """The ``askedAt`` of the narrator attempt writing ``turn``, if it is uncommitted.
+
+    A brief recorded while its turn is still being written is bound to that attempt
+    (``RunStore.request_backdrop``'s ``pending_at``), which is what lets the backend
+    start the illustrator before the prose commits. ``None`` for a page already
+    committed (a recovery re-brief) or when the store cannot say.
+    """
+    try:
+        store = _store()
+        committed = int((store.read_state(run_id) or {}).get("turn") or 0)
+        pending = store.read_pending(run_id) or {}
+        if int(turn) <= committed or int(pending.get("turn") or 0) != int(turn):
+            return None
+        asked_at = pending.get("askedAt")
+        return float(asked_at) if isinstance(asked_at, (int, float)) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _turn_uncommitted(run_id: str, turn: int) -> bool:
+    """Whether ``turn``'s prose has not committed yet (best-effort: ``False`` on error)."""
+    try:
+        return int((_store().read_state(run_id) or {}).get("turn") or 0) < int(turn)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 #: The only keys a stored choice carries. Anything else the narrator sends is
@@ -2310,6 +2340,27 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
             "turn": turn,
             "note": "this page already has its art; continue without another brief.",
         }
+    live = _store().read_backdrop_request(run_id)
+    if (
+        live
+        and int(live.get("turn") or 0) == turn
+        and int(live.get("attempts") or 0) > 0
+        and not live.get("fallbackAllowed")
+    ):
+        # The illustrator starts as soon as a brief lands, so a second brief in
+        # the same turn would either be ignored by the illustrator already
+        # painting the first or start a second one racing it for the same page.
+        # The first brief stands; a recovery re-brief (fallbackAllowed) still
+        # replaces it.
+        BackdropTimeline(_DATA, run_id).mark(turn, "declined:already-painting")
+        return {
+            "backdrop": "queued",
+            "turn": turn,
+            "note": (
+                "this page's art is already being painted from your first brief; "
+                "continue the turn without another one."
+            ),
+        }
     brief = rewrite_brief_style(str(args["brief"]), cfg["styles"], preferred_style(cfg["styles"]))
     if cfg["backdropCadence"] == "sparse":
         pending = _store().read_backdrop_request(run_id)
@@ -2326,7 +2377,9 @@ def _paint_backdrop(args: dict[str, Any]) -> dict[str, Any]:
                     "Continue the turn without art."
                 ),
             }
-    _store().request_backdrop(run_id, turn=turn, brief=brief)
+    _store().request_backdrop(
+        run_id, turn=turn, brief=brief, pending_at=_writing_attempt(run_id, turn)
+    )
     BackdropTimeline(_DATA, run_id).mark(turn, "requested", lane=brief_lane(brief))
     return {"backdrop": "queued", "turn": turn}
 
@@ -2797,6 +2850,28 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _require_live_brief(run_id: str, turn: int, request: dict[str, Any], brief_id: str) -> None:
+    """Refuse a draft drawn for a brief that is not this page's live brief.
+
+    The illustrator can start before its page's prose commits, so an illustrator
+    whose narrator attempt was abandoned can still be running when a retry writes a
+    new brief for the same turn. The ``briefId`` it was handed is the only thing
+    that tells the two apart. A named brief that differs from the live one is
+    refused unless the narrator's recovery gate is open (any art then repairs the
+    page, as before). While the turn is still being written under an early-bound
+    brief, naming no brief is refused too.
+    """
+    live_id = str(request.get("briefId") or "")
+    if not live_id or request.get("fallbackAllowed"):
+        return
+    if brief_id and brief_id != live_id:
+        raise BackdropError(
+            "this page's brief was replaced; stop — the current brief has its own illustrator"
+        )
+    if not brief_id and request.get("pendingAt") is not None and _turn_uncommitted(run_id, turn):
+        raise BackdropError("pass the briefId from your task to endless_submit_backdrop_draft")
+
+
 def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     """Validate one Illustrator draft and return safe raster preview paths."""
     run_id = args["runId"]
@@ -2804,11 +2879,13 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     request = _store().read_backdrop_request(run_id)
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
+    brief_id = str(args.get("briefId") or "")
+    _require_live_brief(run_id, turn, request, brief_id)
     _require_scene_underlay(run_id, turn, request)
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     draft = _backdrop_draft_store(run_id).submit(
-        markup, mobile, turn=turn, buttons=args.get("buttons")
+        markup, mobile, turn=turn, buttons=args.get("buttons"), brief_id=brief_id
     )
     # The player's art-quality tier decides what the review pass owes: standard
     # keeps the lane's full review contract; fast turns it into a structural
@@ -2832,13 +2909,52 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _require_commit_brief(run_id: str, turn: int, draft: dict[str, Any]) -> str:
+    """Refuse publishing a draft drawn for a brief that is no longer the page's.
+
+    Returns the brief id to stamp on the stored art. A draft that names no brief
+    (an older illustrator, or a page briefed after its commit) keeps today's rules.
+    A named one is refused when the live brief for this page is a different one
+    (unless the narrator's recovery gate is open), when the page's prose never
+    committed and its brief is gone (the attempt was abandoned), or when the page
+    already holds art answering a different brief.
+    """
+    drawn_for = str(draft.get("briefId") or "")
+    try:
+        live = _store().read_backdrop_request(run_id)
+    except StoreError:
+        live = None
+    if live is not None and int(live.get("turn") or 0) != int(turn):
+        live = None
+    if not drawn_for:
+        return str(live.get("briefId") or "") if live else ""
+    if live is None:
+        landed = _backdrop_store(run_id).brief_id(turn)
+        if landed:
+            # Art for this page already landed (the server's underlay fallback,
+            # or a first commit). A late commit for the SAME brief may still
+            # replace it, as before; one for another brief may not.
+            if landed != drawn_for:
+                raise BackdropError("this page already has art for its current brief; stop")
+            return drawn_for
+        if _turn_uncommitted(run_id, turn):
+            raise BackdropError("this page was abandoned before its words were written; stop")
+        return drawn_for
+    live_id = str(live.get("briefId") or "")
+    if live_id and live_id != drawn_for and not live.get("fallbackAllowed"):
+        raise BackdropError(
+            "this page's brief was replaced; stop — the current brief has its own illustrator"
+        )
+    return live_id or drawn_for
+
+
 def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     """Publish one reviewed Illustrator final; the draft itself was never public."""
     run_id = args["runId"]
     turn = int(args["turn"])
     draft_id = args["draftId"]
     drafts = _backdrop_draft_store(run_id)
-    drafts.require(draft_id, turn)
+    drawn_for = _require_commit_brief(run_id, turn, drafts.require(draft_id, turn))
     # Enforced at publication too, not only at draft: the draft store survives a
     # gateway restart, so a draft accepted before this gate existed must not walk
     # through it. `endless_commit_fallback_backdrop` is deliberately NOT gated — it
@@ -2887,6 +3003,7 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
         mobile,
         source=source if isinstance(source, dict) else None,
         trace=trace_audit,
+        brief_id=drawn_for,
     )
     try:
         drafts.discard(draft_id, turn)
@@ -2960,8 +3077,13 @@ def commit_underlay_only(data_dir: Path, store: RunStore, run_id: str, turn: int
     }
     markup = compose_with_underlay(_UNDERLAY_ONLY_DESKTOP, desktop_frag, require_placeholder=True)
     mobile = compose_with_underlay(_UNDERLAY_ONLY_MOBILE, mobile_frag, require_placeholder=True)
+    try:
+        live = store.read_backdrop_request(run_id)
+    except StoreError:
+        live = None
+    brief_id = str(live.get("briefId") or "") if live and int(live.get("turn") or 0) == turn else ""
     version = BackdropStore(data_dir, run_id).set(
-        markup, None, turn, mobile, source=source, trace=trace_audit
+        markup, None, turn, mobile, source=source, trace=trace_audit, brief_id=brief_id
     )
     try:
         TraceStore(data_dir, run_id).clear()
