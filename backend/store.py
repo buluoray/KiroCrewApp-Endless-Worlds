@@ -636,7 +636,9 @@ class RunStore:
     def _backdrop_request_key(run_id: str) -> str:
         return f"backdrop-request-{run_id}"
 
-    def request_backdrop(self, run_id: str, *, turn: int, brief: str) -> None:
+    def request_backdrop(
+        self, run_id: str, *, turn: int, brief: str, pending_at: float | None = None
+    ) -> None:
         """Record the narrator's BRIEF until that page's art actually commits.
 
         A first request starts a recovery record. If the narrator is later asked to
@@ -651,6 +653,14 @@ class RunStore:
         asked for a SCENE and whose art arrived with no traced underlay was
         indistinguishable from a MOTIF page, so nothing noticed and nothing could be
         reconstructed afterwards (the brief is cleared on commit).
+
+        ``pending_at`` is the ``askedAt`` of the in-flight turn record when the
+        brief arrives WHILE that turn is still being written. It binds the brief to
+        that one narrator attempt, which is what lets the backend start the
+        illustrator before the prose commits and still tell a brief from an
+        abandoned attempt apart from the live one. ``briefId`` names this brief to
+        the illustrator, so art drawn for a brief that has since been replaced or
+        abandoned can be refused at draft and commit.
         """
         _check_run_id(run_id)
         prior = self.read_backdrop_request(run_id)
@@ -666,7 +676,10 @@ class RunStore:
             "attempts": 0,
             "fallbackAllowed": recovering,
             "narratorNotified": recovering,
+            "briefId": uuid.uuid4().hex[:12],
         }
+        if isinstance(pending_at, (int, float)) and not isinstance(pending_at, bool):
+            record["pendingAt"] = float(pending_at)
         if recovering and prior is not None:
             # The narrator's repair budget belongs to the PAGE, not to one brief:
             # a replacement brief that dropped it let a narrator that always

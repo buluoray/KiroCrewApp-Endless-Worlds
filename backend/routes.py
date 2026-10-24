@@ -176,6 +176,7 @@ from turn import (  # noqa: E402
     OPENING_DEADLINE_SECS,
     advance_turn,
     already_committed,
+    brief_in_flight,
     declaration_shape,
     generating,
     make_dispatcher,
@@ -293,7 +294,8 @@ async def _wait_for_backdrop(
     spawn_id: str,
     deadline_secs: float = _BACKDROP_ATTEMPT_SECS,
 ) -> bool:
-    """Wait for exact page art, or until this illustrator has ended."""
+    """Wait for exact page art, until this illustrator has ended, or until the
+    page it is drawing was abandoned before its prose committed."""
     spawn = getattr(ctx, "spawn", None)
     deadline = asyncio.get_running_loop().time() + deadline_secs
     while asyncio.get_running_loop().time() < deadline:
@@ -302,8 +304,44 @@ async def _wait_for_backdrop(
             return True
         if spawn is not None and spawn.is_done(spawn_id):
             return False
+        if _page_abandoned(store, run_id, turn):
+            return False
         await asyncio.sleep(_BACKDROP_POLL_SECS)
     return False
+
+
+def _page_abandoned(store: RunStore, run_id: str, turn: int) -> bool:
+    """Whether ``turn`` is an uncommitted page nobody is writing any more.
+
+    An illustrator can start while its page's prose is still being written. If that
+    narrator attempt ends without a month, goes stale, or is replaced by a retry,
+    the brief no longer belongs to any page that will commit, and recovery for it
+    must stop rather than publish art or prompt a narrator for it.
+    """
+    if int(store.read_state(run_id).get("turn") or 0) >= turn:
+        return False
+    live = brief_in_flight(store, run_id)
+    return live is None or int(live.get("turn") or 0) != turn
+
+
+async def _await_prose(ctx: AppContext, store: RunStore, run_id: str, turn: int) -> str:
+    """Wait for an early-started page's prose before asking its narrator to repair.
+
+    The narrator repair prompt goes to the same conversation that is writing the
+    page, so it must not arrive mid-turn. Returns ``"committed"``, ``"art"`` (the
+    exact art landed meanwhile and the request was cleared) or ``"abandoned"``.
+    Bounded by ``_page_abandoned``, which turns true once the attempt ends or its
+    record goes stale.
+    """
+    while True:
+        if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
+            store.clear_backdrop_request(run_id)
+            return "art"
+        if int(store.read_state(run_id).get("turn") or 0) >= turn:
+            return "committed"
+        if _page_abandoned(store, run_id, turn):
+            return "abandoned"
+        await asyncio.sleep(_BACKDROP_POLL_SECS)
 
 
 async def _await_late_commit(
@@ -378,6 +416,11 @@ async def _recover_backdrop(
             if BackdropStore(ctx.data_dir, run_id).exact(turn) is not None:
                 store.clear_backdrop_request(run_id)
                 return
+            # Started before the prose committed: only while the attempt writing
+            # this page is still live. Abandoned, nothing here may be published or
+            # prompted for; the next attempt's dispatch drops the brief.
+            if _page_abandoned(store, run_id, turn):
+                return
             # The budget is per BRIEF: a replacement brief (new askedAt) from the
             # narrator's repair turn starts a fresh illustrator cycle, as the
             # repair prompt promises. Fixed once per task, it had always run out
@@ -426,7 +469,9 @@ async def _recover_backdrop(
                     "only the brief and the lane's provided tools, with no external "
                     "research.\n"
                     f"{_style_directive(str(request.get('style') or ''))}"
-                    f"runId: {run_id}\nturn: {turn}\n\nBrief:\n"
+                    f"runId: {run_id}\nturn: {turn}\n"
+                    f"briefId: {str(request.get('briefId') or '')}\n"
+                    "(pass this briefId to endless_submit_backdrop_draft)\n\nBrief:\n"
                     f"{str(request.get('brief') or '')}"
                 )
                 try:
@@ -486,6 +531,14 @@ async def _recover_backdrop(
                 late_id, last_spawn_id = last_spawn_id, None
                 if await _await_late_commit(ctx, store, run_id, turn, late_id):
                     return
+
+            # Early-started page whose prose is still being written: the repair
+            # prompt would land in the middle of the narrator's own turn. Wait for
+            # the commit first, then take the next lap with the budget still spent.
+            if int(store.read_state(run_id).get("turn") or 0) < turn:
+                if await _await_prose(ctx, store, run_id, turn) != "committed":
+                    return
+                continue
 
             # No traced underlay to publish (a motif page, or the illustrator never
             # traced). Ask the narrator that wrote this page to simplify the
@@ -564,8 +617,15 @@ def _ensure_backdrop_recovery(
     run_id: str,
     settings: dict[str, str],
 ) -> None:
-    """Ensure one recovery task per run; safe from POST and every polling GET."""
-    if not _backdrop_is_pending(ctx, store, run_id):
+    """Ensure one recovery task per run; safe from POST and every polling GET.
+
+    Starts for a committed page withheld for its art, AND for a brief the narrator
+    recorded for the turn it is still writing (``brief_in_flight``), so the
+    illustrator runs alongside the narrator instead of after it. The same per-run
+    task then serves the page when its prose commits: the commit's own call finds
+    it running and starts nothing.
+    """
+    if not _backdrop_is_pending(ctx, store, run_id) and brief_in_flight(store, run_id) is None:
         return
     current = _BACKDROP_RECOVERY_TASKS.get(run_id)
     if current is not None and not current.done():
@@ -1540,6 +1600,7 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         chapter_crossed=chapter_crossed,
         prose_length=_cfg["proseLength"],
         backdrops_enabled=bool(_cfg["backdrops"]),
+        on_poll=lambda: _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg),
     )
 
     # The prose may be committed, but requested art is the other half of this page.
@@ -1796,6 +1857,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         model=_cfg["model"],
         reasoning_effort=_cfg["reasoningEffort"],
         budget_secs=OPENING_DEADLINE_SECS,
+        on_poll=lambda: _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg),
     )
     if outcome.advanced:
         _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)
@@ -1902,7 +1964,12 @@ async def list_runs(request: web.Request, ctx: AppContext) -> web.Response:
             # background the play page does. Its own try/except: a missing or
             # damaged backdrop leaves the card plain, never blanks the shelf.
             try:
-                bd = BackdropStore(ctx.data_dir, rid).current()
+                # The art effective on the life's committed page, not the newest
+                # stored: an illustrator may already have drawn the page still
+                # being written, and that art publishes with its page.
+                bd = BackdropStore(ctx.data_dir, rid).at(
+                    int(store.read_state(rid).get("turn") or 0)
+                )
                 row["backdrop"] = {"version": bd["version"]} if bd else None
             except Exception:  # noqa: BLE001
                 row["backdrop"] = None
@@ -1929,10 +1996,13 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
     committed_state = state
     generation = generating(store, run_id, _gateway_state(request))
     art_pending = _backdrop_is_pending(ctx, store, run_id, committed_state)
-    if art_pending:
+    if art_pending or generation is not None:
+        # While a month is being written this poll is also what notices the
+        # narrator's art brief and starts the illustrator beside it.
         _ensure_backdrop_recovery(
             ctx, store, _gateway_state(request), run_id, read_settings(ctx.data_dir)
         )
+    if art_pending:
         previous = store.read_prev(run_id)
         if previous is not None:
             state = previous
@@ -2114,12 +2184,16 @@ async def get_backdrop(request: web.Request, ctx: AppContext) -> web.Response:
     try:
         bstore = BackdropStore(ctx.data_dir, run_id)
         # ``?turn=N`` restores the background effective on that page (re-reading the
-        # history); default is the latest, which is what the live page and home want.
+        # history); default is the one effective on the committed page, which is
+        # what the live page and home want. Not the newest stored entry: art for a
+        # page still being written may already exist, and it publishes with that
+        # page, never before it.
         turn_q = request.query.get("turn")
+        committed_turn = int((_state or {}).get("turn") or 0)
         if turn_q is not None and turn_q.isdigit():
-            current = bstore.at(int(turn_q))
+            current = bstore.at(min(int(turn_q), committed_turn))
         else:
-            current = bstore.current()
+            current = bstore.at(committed_turn)
     except BackdropError as exc:
         return web.json_response({"error": str(exc)}, status=422)
     if current is None:

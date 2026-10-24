@@ -444,6 +444,7 @@ async def advance_turn(
     chapter_crossed: bool = False,
     prose_length: str = "",
     backdrops_enabled: bool = True,
+    on_poll: Callable[[], None] | None = None,
 ) -> TurnOutcome:
     """Ask for one turn and wait, briefly, for the narrator to commit it.
 
@@ -463,6 +464,10 @@ async def advance_turn(
     turn is composed differently (there is no state and no history yet) but is
     dispatched, waited for and handed over identically. Two copies of the wait
     would be two places for the wait and the idempotence to drift apart.
+
+    ``on_poll`` runs on every tick of the inline wait. The route passes the backdrop
+    recovery starter, so a brief the narrator records while this request is still
+    holding starts its illustrator then, not after the prose commits.
     """
     run_state = store.read_state(run_id)
     baseline = int(run_state.get("turn") or 0)
@@ -595,7 +600,7 @@ async def advance_turn(
         store.clear_pending(run_id)
         live = None
     if live is not None:
-        prose = await _await_commit(store, run_id, wanted, inline_wait_secs)
+        prose = await _await_commit(store, run_id, wanted, inline_wait_secs, on_poll)
         if prose is None:
             # Someone else's ask is being written, and this one was not taken: the
             # in-flight record may name a different action entirely, so reporting
@@ -631,6 +636,7 @@ async def advance_turn(
     # it, and without this the run is indistinguishable from one nobody ever asked
     # about. A test asserts this ordering, because reversing the two lines leaves
     # every symptom intact and reintroduces the whole bug.
+    forget_unpublished_art(store, run_id, wanted)
     store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action)
     asked_at = float((store.read_pending(run_id) or {}).get("askedAt") or 0.0)
 
@@ -653,7 +659,7 @@ async def advance_turn(
         # queued prompt will run, and the store is the thing we are watching.
         pass
 
-    prose = await _await_commit(store, run_id, wanted, inline_wait_secs)
+    prose = await _await_commit(store, run_id, wanted, inline_wait_secs, on_poll)
     if prose is not None:
         store.clear_pending(run_id)
         _note_turn_context(state_obj, store, run_id, wanted, slot_key)
@@ -671,7 +677,13 @@ async def advance_turn(
     return TurnOutcome(advanced=False, turn=baseline, reason="writing")
 
 
-async def _await_commit(store: RunStore, run_id: str, wanted: int, wait_secs: float) -> str | None:
+async def _await_commit(
+    store: RunStore,
+    run_id: str,
+    wanted: int,
+    wait_secs: float,
+    on_poll: Callable[[], None] | None = None,
+) -> str | None:
     """Poll the store until ``wanted`` lands, or ``wait_secs`` passes.
 
     Returning ``None`` means "not yet", never "not going to": the caller hands the
@@ -690,6 +702,11 @@ async def _await_commit(store: RunStore, run_id: str, wanted: int, wait_secs: fl
     deadline = time.monotonic() + wait_secs
     while time.monotonic() < deadline:
         await asyncio.sleep(_POLL_SECS)
+        if on_poll is not None:
+            try:
+                on_poll()
+            except Exception:  # noqa: BLE001 — a side hook never costs the turn
+                logger.warning("endless-worlds: turn poll hook failed", exc_info=True)
         now = store.read_state(run_id)
         if int(now.get("turn") or 0) >= wanted:
             for entry in reversed(store.read_chronicle(run_id)):
@@ -743,6 +760,60 @@ def _in_flight(store: RunStore, run_id: str, wanted: int) -> dict[str, Any] | No
         # The narrator's run finished without this month (settle_unanswered).
         return None
     return pending
+
+
+def brief_in_flight(store: RunStore, run_id: str) -> dict[str, Any] | None:
+    """The art brief for the turn the narrator is STILL writing, if it is live.
+
+    ``endless_paint_backdrop`` is called before ``endless_advance_turn``, so the
+    brief usually exists tens of seconds before the prose commits. Starting the
+    illustrator only after the commit put its whole run after the narrator's; this
+    is the predicate that lets the backend start it as soon as the brief lands.
+
+    Live means bound to the in-flight attempt that is writing it: the request is for
+    the turn after the committed one, it names that attempt's ``askedAt`` as its
+    ``pendingAt``, the attempt is still believed (``_in_flight``: not stale, not
+    ended), the brief itself is inside ``BACKDROP_STALE_SECS``, and the page has no
+    exact art yet. A brief from an abandoned attempt fails the ``pendingAt`` check,
+    and a brief with no ``pendingAt`` (recorded after a commit, or by an older
+    install) is never early.
+    """
+    request = store.read_backdrop_request(run_id)
+    if not request:
+        return None
+    turn = int(request.get("turn") or 0)
+    committed = int(store.read_state(run_id).get("turn") or 0)
+    if turn != committed + 1:
+        return None
+    pending_at = request.get("pendingAt")
+    if not isinstance(pending_at, (int, float)):
+        return None
+    live = _in_flight(store, run_id, turn)
+    if live is None or float(live.get("askedAt") or 0.0) != float(pending_at):
+        return None
+    asked_at = request.get("askedAt")
+    if not isinstance(asked_at, (int, float)) or time.time() - float(asked_at) > (
+        BACKDROP_STALE_SECS
+    ):
+        return None
+    if BackdropStore(store.data_dir, run_id).exact(turn) is not None:
+        return None
+    return request
+
+
+def forget_unpublished_art(store: RunStore, run_id: str, turn: int) -> None:
+    """Drop art and a brief left for ``turn`` by an attempt that never committed it.
+
+    Called just before a NEW narrator attempt for ``turn`` is dispatched. Nothing at
+    or after ``turn`` can belong to a committed page (the committed turn is below
+    it), so a brief or an early-drawn backdrop found there came from an attempt
+    whose prose never landed. Left in place, the retry's page would publish with art
+    drawn for words it does not contain, or wait on a brief it never wrote.
+    """
+    request = store.read_backdrop_request(run_id)
+    if request and int(request.get("turn") or 0) >= turn:
+        store.clear_backdrop_request(run_id)
+    BackdropStore(store.data_dir, run_id).discard_from(turn)
 
 
 def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str, Any] | None:

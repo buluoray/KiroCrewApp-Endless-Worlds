@@ -745,3 +745,86 @@ def test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop(store):
     second_slot = next(iter(state.slots.values()))
     expire_once()  # would be heal #2: capped
     assert next(iter(state.slots.values())) is second_slot
+
+
+# -- art drawn for an attempt that never committed --------------------------------
+
+
+_EARLY_SVG = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+
+
+def test_a_new_attempt_drops_the_art_and_brief_its_abandoned_attempt_left(store):
+    """The illustrator can finish a page whose prose never commits. The retry for
+    that page must start clean: neither the old brief nor the old art may reach a
+    month written from different words. The committed page's art is untouched."""
+    from backdrop import BackdropStore
+
+    state = FakeState()
+    run = store.create_run({"turn": 1}, {"runId": "r1"})
+    art = BackdropStore(store.data_dir, run)
+    art.set(_EARLY_SVG, turn=1)
+    store.mark_pending(run, turn=2, slot="endless-run-r1")
+    store.request_backdrop(
+        run, turn=2, brief="LANE: motif\nold", pending_at=store.read_pending(run)["askedAt"]
+    )
+    art.set(_EARLY_SVG, turn=2)
+    store.mark_pending_ended(run)
+    seen = {}
+
+    def dispatch(st, slot, prompt, **_kw):
+        seen["request"] = store.read_backdrop_request(run)
+        seen["art"] = art.exact(2)
+        return True
+
+    asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=dispatch,
+            inline_wait_secs=0.3,
+        )
+    )
+
+    assert seen == {"request": None, "art": None}
+    assert art.at(2)["version"] == 1, "the committed page lost its art"
+
+
+def test_the_inline_wait_runs_its_poll_hook_and_survives_one_that_fails(store):
+    """The route starts backdrop recovery from this hook, so a brief recorded while
+    the request is still holding starts its illustrator then. A failing hook is a
+    side effect, never a lost turn."""
+    state = FakeState()
+    run = store.create_run({"turn": 1}, {"runId": "r1"})
+    ticks = []
+
+    def hook():
+        ticks.append(1)
+        if len(ticks) == 1:
+            raise RuntimeError("boom")
+
+    def commit_late(st, slot, prompt, **_kw):
+        asyncio.get_running_loop().call_later(
+            0.6,
+            lambda: (
+                store.commit_state(run, {"turn": 2}),
+                store.append_turn(run, {"turn": 2, "prose": PROSE}),
+            ),
+        )
+        return True
+
+    out = asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=commit_late,
+            inline_wait_secs=3,
+            on_poll=hook,
+        )
+    )
+
+    assert out.advanced is True
+    assert len(ticks) >= 2

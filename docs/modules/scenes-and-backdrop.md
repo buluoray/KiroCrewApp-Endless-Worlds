@@ -540,6 +540,68 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_successful_illustrator_commit_clears_the_waiting_request`, and
   `test_narrator_fallback_commit_is_refused_until_recovery_opens_its_gate`.
 
+- **The illustrator starts as soon as the narrator briefs, while the prose is
+  still being written.** The narrator calls `endless_paint_backdrop` before
+  `endless_advance_turn`, so its brief is on disk tens of seconds before the page
+  commits. Recovery used to start only for a COMMITTED page withheld for its art
+  (`_backdrop_is_pending`), which put the illustrator's whole run after the
+  narrator's: a measured playtest had art pages at 183-294s against 30-43s without
+  art, with the illustrator dispatched only after a 35-110s prose commit and often
+  spending its full budget. Now `_paint_backdrop` binds a mid-turn brief to the
+  attempt writing it (`pendingAt`, the in-flight record's `askedAt`) and gives every
+  brief a `briefId`. `turn.brief_in_flight` recognises a brief for the turn after the
+  committed one whose `pendingAt` matches a live in-flight record, and
+  `_ensure_backdrop_recovery` starts the same one-per-run task for it. Both places
+  that watch a month being written trigger it: `get_run`'s generating poll and the
+  POST's inline wait (`advance_turn(on_poll=...)`). When the prose later commits, the
+  commit's own call finds the task running and starts nothing, so the page is
+  painted once, and the `_BACKDROP_FALLBACK_SECS` budget still runs from the
+  illustrator's dispatch.
+
+  Five rules keep publication atomic and bound to the right page:
+
+  1. **Early art waits for its page.** An early commit is stored at the page's turn
+     and clears the request. Every reader resolves art against the COMMITTED turn:
+     `get_run` uses the visible turn, the shelf row and `get_backdrop`'s default use
+     `at(committed)`, and `?turn=` is clamped to it. So nothing shows the art until
+     its prose commits. The page then publishes with its art and no `painting` wait.
+  2. **An abandoned page gets nothing.** If the attempt ends without a month, goes
+     stale, or a retry replaces its record, `_page_abandoned` turns true. The waits
+     stop, recovery returns without another illustrator or a repair prompt, and the
+     next attempt for that turn drops the brief and any early art
+     (`turn.forget_unpublished_art`, `BackdropStore.discard_from`).
+  3. **An old illustrator cannot paint the retry.** The illustrator task carries the
+     `briefId`, `endless_submit_backdrop_draft` stores it on the draft, and
+     `_require_live_brief` / `_require_commit_brief` refuse a draft for a brief
+     that is not the page's live one. They also refuse an early draft that names no
+     brief, a commit for an uncommitted page whose brief is gone, and a commit over
+     art that answers another brief. Once the narrator's recovery gate is open, any
+     brief's art may repair the page, as before. A same-brief late commit still
+     replaces the server's underlay fallback.
+  4. **The repair prompt never lands mid-turn.** It goes to the narrator writing the
+     page, so `_await_prose` holds it until the prose commits; an abandoned page
+     gets none.
+  5. **One brief per writing turn.** A second `endless_paint_backdrop` in the same
+     turn, once an illustrator has started, is declined with `queued` and the first
+     brief stands, rather than racing a second illustrator. A recovery re-brief
+     (`fallbackAllowed`) still replaces it.
+
+  Art off and sparse-cadence declines record no request, so nothing starts early.
+  Pinned by `test_a_brief_for_the_page_being_written_starts_its_illustrator_at_once`,
+  `test_the_prose_commit_does_not_start_a_second_illustrator`,
+  `test_a_brief_from_an_abandoned_attempt_starts_nothing`,
+  `test_art_drawn_early_publishes_with_its_page_and_never_before`,
+  `test_an_illustrator_for_a_page_that_never_commits_is_dropped_not_repaired`,
+  `test_the_narrator_repair_waits_for_the_page_being_written`,
+  `test_the_illustrator_budget_runs_from_its_dispatch_not_the_prose_commit`
+  (`test_delete_world.py`), `test_a_brief_recorded_mid_turn_is_bound_to_the_attempt_writing_it`,
+  `test_a_second_brief_while_the_first_is_being_painted_is_declined`,
+  `test_a_recovery_rebrief_still_replaces_a_painted_brief`,
+  `test_an_early_draft_must_name_the_live_brief`,
+  `test_art_for_an_abandoned_attempt_cannot_reach_the_retry`, and
+  `test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_briefs_art`
+  (`test_backdrop.py`).
+
 - **A base's degradation depends on WHY the photo search missed.** When the trace
   returns `underlay: base` the illustrator follows the result's `next`. A *transient*
   miss (`search-failed` / `fetch-failed`) leaves a finished tonal backdrop to commit

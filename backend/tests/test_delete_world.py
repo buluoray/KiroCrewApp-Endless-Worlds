@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -711,3 +712,270 @@ def test_an_ended_illustrator_gets_no_grace_even_with_a_draft(world, monkeypatch
 
     assert len(prompts) == 1
     assert _time.monotonic() - started < 10.0
+
+
+# -- the illustrator starts with the brief, not after the prose ------------------
+
+
+def _svg_of(color):
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        f'<rect fill="{color}" width="10" height="10"/></svg>'
+    )
+
+
+class _Recorder:
+    """A spawn double that records each task; alive until told otherwise."""
+
+    def __init__(self, *, alive=True):
+        self.alive = alive
+        self.tasks = []
+        self.turns_at_dispatch = []
+        self.store = None
+        self.run_id = ""
+
+    async def run(self, task, *, agent, silent, model):
+        self.tasks.append(task)
+        if self.store is not None:
+            self.turns_at_dispatch.append(int(self.store.read_state(self.run_id)["turn"]))
+        return f"spawn-{len(self.tasks)}"
+
+    def is_done(self, _spawn_id):
+        return not self.alive
+
+
+def _writing_page_two(world, brief="LANE: motif\nTHESIS: a gate closes"):
+    """A life on page 1 whose narrator is writing page 2 and has briefed its art."""
+    store = world["store"]
+    run_id = store.create_run(
+        {"turn": 1, "worldId": "test-world", "style": "standard", "status": {"age": "one"}},
+        {"worldId": "test-world", "title": "Test World", "turn": 1},
+    )
+    store.append_turn(run_id, {"turn": 1, "prose": "the old page"})
+    store.mark_pending(run_id, turn=2, slot="endless-run-x")
+    pending_at = store.read_pending(run_id)["askedAt"]
+    store.request_backdrop(run_id, turn=2, brief=brief, pending_at=pending_at)
+    return run_id
+
+
+def _commit_page_two(store, run_id):
+    store.commit_state(
+        run_id,
+        {"turn": 2, "worldId": "test-world", "style": "standard", "status": {"age": "two"}},
+    )
+    store.append_turn(run_id, {"turn": 2, "prose": "the new page"})
+    store.clear_pending(run_id)
+
+
+def _with_spawn(world, run_id, spawn):
+    spawn.store = world["store"]
+    spawn.run_id = run_id
+    world["ctx"].spawn = spawn
+    return spawn
+
+
+def _stop_recovery(run_id):
+    task = routes_mod._BACKDROP_RECOVERY_TASKS.get(run_id)
+    if task is not None:
+        task.cancel()
+
+
+def test_a_brief_for_the_page_being_written_starts_its_illustrator_at_once(world):
+    """The polling GET that runs while a month is written notices the brief and
+    dispatches the illustrator for THAT page, before its prose commits. Started
+    only after the commit, the illustrator's whole run sat behind the narrator's."""
+    run_id = _writing_page_two(world)
+    spawn = _with_spawn(world, run_id, _Recorder())
+    brief_id = world["store"].read_backdrop_request(run_id)["briefId"]
+
+    async def main():
+        res = await routes_mod.get_run(FakeRequest(match={"run_id": run_id}), world["ctx"])
+        await asyncio.sleep(0.05)
+        _stop_recovery(run_id)
+        return res
+
+    res = asyncio.run(main())
+
+    assert body_of(res)["turn"] == 1
+    assert len(spawn.tasks) == 1, "no illustrator started for the page being written"
+    assert spawn.turns_at_dispatch == [1], "dispatched only after the prose committed"
+    assert "turn: 2" in spawn.tasks[0]
+    assert f"briefId: {brief_id}" in spawn.tasks[0]
+
+
+def test_the_prose_commit_does_not_start_a_second_illustrator(world):
+    """One recovery task per run: the commit's own call finds the early task
+    running and starts nothing, so the page is painted once."""
+    run_id = _writing_page_two(world)
+    spawn = _with_spawn(world, run_id, _Recorder())
+    store = world["store"]
+
+    async def main():
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        await asyncio.sleep(0.05)
+        _commit_page_two(store, run_id)
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        await routes_mod.get_run(FakeRequest(match={"run_id": run_id}), world["ctx"])
+        await asyncio.sleep(0.05)
+        _stop_recovery(run_id)
+
+    asyncio.run(main())
+    assert len(spawn.tasks) == 1
+
+
+def test_a_brief_from_an_abandoned_attempt_starts_nothing(world):
+    """A brief bound to an attempt that is no longer the in-flight one (it ended,
+    or a retry replaced its record) must not start an illustrator."""
+    store = world["store"]
+
+    async def main(run_id):
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        await asyncio.sleep(0.05)
+        _stop_recovery(run_id)
+
+    ended = _writing_page_two(world)
+    spawn = _with_spawn(world, ended, _Recorder())
+    store.mark_pending_ended(ended)
+    asyncio.run(main(ended))
+    assert spawn.tasks == []
+
+    # A retry's fresh in-flight record for the same page, before it briefed.
+    replaced = _writing_page_two(world)
+    spawn = _with_spawn(world, replaced, _Recorder())
+    time.sleep(0.01)
+    store.mark_pending(replaced, turn=2, slot="endless-run-x")
+    asyncio.run(main(replaced))
+    assert spawn.tasks == []
+
+
+def test_art_drawn_early_publishes_with_its_page_and_never_before(world):
+    """Art the illustrator commits while the prose is still being written is
+    stored for page 2, but no reader shows it until page 2 commits — then the page
+    and its art publish together, with no painting wait."""
+    from backdrop import BackdropStore
+
+    run_id = _writing_page_two(world)
+    store = world["store"]
+    art = BackdropStore(world["data"], run_id)
+    art.set(_svg_of("#111111"), turn=1)
+    art.set(_svg_of("#222222"), turn=2)
+    store.clear_backdrop_request(run_id)  # what the illustrator's commit does
+
+    page = body_of(call(routes_mod.get_run, world["ctx"], match={"run_id": run_id}))
+    assert page["turn"] == 1
+    assert page["backdrop"]["version"] == 1
+    shelf = body_of(call(routes_mod.list_runs, world["ctx"]))
+    assert [row["backdrop"]["version"] for row in shelf["runs"]] == [1]
+    live = call(routes_mod.get_backdrop, world["ctx"], match={"run_id": run_id})
+    assert b"#111111" in live.body
+    ahead = call(
+        routes_mod.get_backdrop, world["ctx"], match={"run_id": run_id}, query={"turn": "2"}
+    )
+    assert b"#111111" in ahead.body, "the next page's art leaked through ?turn="
+
+    _commit_page_two(store, run_id)
+
+    page = body_of(call(routes_mod.get_run, world["ctx"], match={"run_id": run_id}))
+    assert page["turn"] == 2
+    assert page["prose"] == "the new page"
+    assert page["generating"] is None
+    assert page["backdrop"]["version"] == 2
+    live = call(routes_mod.get_backdrop, world["ctx"], match={"run_id": run_id})
+    assert b"#222222" in live.body
+
+
+def _narrator_recorder(world, monkeypatch, run_id):
+    """Record the repair prompts and the committed turn each one saw."""
+    from backdrop import BackdropStore
+
+    store = world["store"]
+    seen = []
+    monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (object(), False))
+
+    def fake_dispatcher(_runner):
+        def dispatch(_state, _slot, prompt, **_kw):
+            seen.append((int(store.read_state(run_id)["turn"]), time.monotonic()))
+            BackdropStore(world["data"], run_id).set(_svg_of("#333333"), turn=2)
+            store.clear_backdrop_request(run_id)
+            return True
+
+        return dispatch
+
+    monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
+    monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
+    return seen
+
+
+def _recover(world, run_id):
+    return routes_mod._recover_backdrop(
+        world["ctx"],
+        world["store"],
+        object(),
+        run_id,
+        painter_model="",
+        narrator_model="",
+        reasoning_effort="",
+    )
+
+
+def test_an_illustrator_for_a_page_that_never_commits_is_dropped_not_repaired(world, monkeypatch):
+    """The narrator briefs, the illustrator starts, then the narrator's run ends
+    with no month. Recovery stops at once: no second illustrator, no repair prompt
+    into a conversation that has no page, no art for a page that never existed."""
+    from backdrop import BackdropStore
+
+    run_id = _writing_page_two(world)
+    spawn = _with_spawn(world, run_id, _Recorder())
+    seen = _narrator_recorder(world, monkeypatch, run_id)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_FALLBACK_SECS", 5.0)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_POLL_SECS", 0.01)
+
+    async def main():
+        asyncio.get_running_loop().call_later(0.2, world["store"].mark_pending_ended, run_id)
+        started = time.monotonic()
+        await _recover(world, run_id)
+        return time.monotonic() - started
+
+    elapsed = asyncio.run(main())
+
+    assert len(spawn.tasks) == 1, "a second illustrator was sent to an abandoned page"
+    assert seen == []
+    assert elapsed < 2.0, "recovery waited out the budget for an abandoned page"
+    assert BackdropStore(world["data"], run_id).exact(2) is None
+
+
+def test_the_narrator_repair_waits_for_the_page_being_written(world, monkeypatch):
+    """The repair prompt goes to the same conversation that is writing the page;
+    sent mid-turn, it would interrupt the month it is meant to illustrate."""
+    run_id = _writing_page_two(world)
+    _with_spawn(world, run_id, _Recorder(alive=False))  # ends without art
+    seen = _narrator_recorder(world, monkeypatch, run_id)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_FALLBACK_SECS", 0.05)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_POLL_SECS", 0.01)
+
+    async def main():
+        asyncio.get_running_loop().call_later(0.4, _commit_page_two, world["store"], run_id)
+        await _recover(world, run_id)
+
+    asyncio.run(main())
+    assert [turn for turn, _at in seen] == [2], "the repair reached the narrator mid-turn"
+
+
+def test_the_illustrator_budget_runs_from_its_dispatch_not_the_prose_commit(world, monkeypatch):
+    """An early start is only worth it if the budget does not restart when the
+    prose lands: the page's fallback point is dispatch + budget."""
+    run_id = _writing_page_two(world)
+    _with_spawn(world, run_id, _Recorder())  # never ends, never drafts
+    seen = _narrator_recorder(world, monkeypatch, run_id)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_FALLBACK_SECS", 0.8)
+    monkeypatch.setattr(routes_mod, "_BACKDROP_POLL_SECS", 0.01)
+
+    async def main():
+        asyncio.get_running_loop().call_later(0.5, _commit_page_two, world["store"], run_id)
+        started = time.monotonic()
+        await _recover(world, run_id)
+        return started
+
+    started = asyncio.run(main())
+    assert len(seen) == 1
+    assert seen[0][1] - started < 1.15, "the budget restarted at the prose commit"
