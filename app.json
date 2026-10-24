@@ -41,9 +41,6 @@
       "routes": "backend.routes:register_routes"
     }
   },
-  "setup": {
-    "onInstall": "bash setup.sh"
-  },
   "agents": [
     "agents/narrator.json",
     "agents/worldsmith.json",
@@ -51,7 +48,7 @@
   ],
   "mcpServers": {
     "endless-mcp": {
-      "command": "python3",
+      "command": "python",
       "args": [
         "backend/mcp_server.py"
       ],
