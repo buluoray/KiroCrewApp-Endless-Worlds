@@ -47,6 +47,16 @@ argument.
   cannot change it: `voice` is a reserved state key. Pinned by
   `test_story_memory.test_every_read_carries_the_voice_and_its_own_rule`.
 
+- **A full read re-anchors with four whole months and a year of short rows.** The
+  narrator re-reads the newest four months as it wrote them and the older eight
+  as app-built `short: true` rows, so a full read stays under the harness's
+  30,000-character tool-result limit instead of spilling to a file the narrator
+  only sees a preview of. What a full read had to cut to fit is named in
+  `recentTrimmed`, never cut silently, and the state is never cut. The short rows
+  are built from what was committed, in the life's own language; they add no
+  words of the app's own except the `recentTrimmed.note`, which is English like
+  the read's other notes. Contract and tests in [turn-loop](turn-loop.md).
+
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
   This is the R26 control: the narrator must not read or write the player's memory,

@@ -448,8 +448,11 @@ _TOOLS: list[dict[str, Any]] = [
                     "description": (
                         "How many recent months to re-read. Applies to a FULL read "
                         "only — on a `since` read you wrote those months and they "
-                        "are not sent back at any depth. To reach one specific "
-                        "older month, name it in `memoryEvents`."
+                        "are not sent back at any depth. The newest four come as "
+                        "you wrote them; older ones come as `short` rows naming "
+                        "their `eventIds`. A read cut to fit says so in "
+                        "`recentTrimmed`. To reach one specific older month, name "
+                        "its event in `memoryEvents`."
                     ),
                 },
                 "includeProse": {"type": "boolean"},
@@ -1964,8 +1967,148 @@ _PAGE_ONLY_FIELDS = ("panels", "digest")
 
 
 def _narrator_month(entry: dict[str, Any]) -> dict[str, Any]:
-    """A chronicle entry as the narrator re-reads it: the page snapshots left out."""
-    return {k: v for k, v in entry.items() if k not in _PAGE_ONLY_FIELDS}
+    """A chronicle entry as the narrator re-reads it: the page snapshots left out.
+
+    A choice's ``art`` goes too. It is the drawing the page shows on a weighty
+    option, which the narrator made once and never needs to read back; on a real
+    life it was 4 KB of a 12-month re-read. The month's ``memory`` keeps only the
+    names and ids of what it remembered: each summary there retells the prose that
+    is sent whole beside it, measured larger than the prose itself on two of four
+    lives, and the graph still holds it for ``memoryEvents``.
+    """
+    month = {k: v for k, v in entry.items() if k not in _PAGE_ONLY_FIELDS}
+    memory = month.get("memory")
+    if isinstance(memory, dict):
+        month["memory"] = _memory_names(int(entry.get("turn") or 0), memory)
+    choices = month.get("choices")
+    if isinstance(choices, list):
+        month["choices"] = [
+            {k: v for k, v in c.items() if k != "art"} if isinstance(c, dict) else c
+            for c in choices
+        ]
+    return month
+
+
+#: How many of the newest months in the window a full read gives as whole prose.
+#: The rest of the window comes as `_month_summary` rows. Measured on four real
+#: lives, twelve whole months were 11-24 KB of a 32-35 KB read; four whole months
+#: plus eight summaries keep a year of reach at about half that.
+FULL_MONTHS = 4
+
+#: The size a full read is held under, in characters of the tool result. The
+#: harness spills a result over 30,000 characters to a file and shows the narrator
+#: only a preview, so the read must land well short of that, not just under it.
+READ_CEILING = 26_000
+
+#: How long a summary's one line, and its action, may run.
+_LINE_CHARS = 160
+
+
+def _clip(text: str, limit: int = _LINE_CHARS) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _month_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    """An older month in a few lines, built by the app from what was committed.
+
+    The turn, what the player did, the events the narrator marked that month, and
+    the first line of its prose. The ids of the month's remembered events come
+    along, so the narrator can ask for one in full with ``memoryEvents``.
+    """
+    turn = int(entry.get("turn") or 0)
+    row: dict[str, Any] = {"turn": turn, "short": True}
+    action = str(entry.get("action") or "").strip()
+    if action:
+        row["action"] = _clip(action)
+    events = [_clip(str(e)) for e in entry.get("events") or [] if str(e).strip()]
+    if events:
+        row["events"] = events
+    prose = str(entry.get("prose") or "").strip()
+    if prose:
+        first = prose.split("\n", 1)[0]
+        row["line"] = _clip(first)
+    memory = entry.get("memory")
+    if isinstance(memory, dict):
+        ids = [
+            memory_graph.event_id(turn, str(ev.get("key")))
+            for ev in memory.get("events") or []
+            if isinstance(ev, dict) and ev.get("key")
+        ]
+        if ids:
+            row["eventIds"] = ids
+    return row
+
+
+def _memory_names(turn: int, memory: dict[str, Any]) -> dict[str, Any]:
+    """A month's memory declaration reduced to what names each thing it holds."""
+    named: dict[str, Any] = {}
+    events = [
+        {"id": memory_graph.event_id(turn, str(ev["key"])), "title": ev.get("title") or ""}
+        for ev in memory.get("events") or []
+        if isinstance(ev, dict) and ev.get("key")
+    ]
+    if events:
+        named["events"] = events
+    entities = [
+        {"id": ent["id"], "name": ent.get("name") or ""}
+        for ent in memory.get("entities") or []
+        if isinstance(ent, dict) and ent.get("id")
+    ]
+    if entities:
+        named["entities"] = entities
+    return named
+
+
+def _result_chars(out: dict[str, Any]) -> int:
+    """The size of ``out`` as `call_tool` will send it."""
+    return len(json.dumps({"ok": True, **out}, ensure_ascii=False))
+
+
+def _fit_recent(out: dict[str, Any], lived: list[dict[str, Any]]) -> None:
+    """Hold a full read under `READ_CEILING` by giving up the oldest months first.
+
+    Only the re-read months are ever cut, never the state, the scenes or anything
+    else in the read: those describe the month being written now. The oldest
+    summary goes first. Once none is left, the oldest whole month is shortened to a
+    summary in its place; a shortened month is kept, because at a few hundred
+    characters it costs little and is still the only reach back to that month. The
+    newest month always stays whole. What was cut is named in ``recentTrimmed`` so
+    the narrator knows the window is shorter than it looks, and how to reach the
+    rest.
+    """
+    months: list[dict[str, Any]] = out.get("recentTurns") or []
+    if _result_chars(out) <= READ_CEILING:
+        return
+    by_turn = {int(e.get("turn") or 0): e for e in lived}
+    dropped: list[int] = []
+    shortened: list[int] = []
+
+    def report() -> None:
+        out["recentTrimmed"] = {
+            "dropped": list(dropped),
+            "shortened": list(shortened),
+            "note": (
+                "This read was cut to fit. The months in `dropped` were left out "
+                "and those in `shortened` come as summaries instead of prose. Ask "
+                "for one of their events by id with `memoryEvents`."
+            ),
+        }
+
+    report()  # counted while trimming, so the report itself fits too
+    while months and months[0].get("short") and _result_chars(out) > READ_CEILING:
+        dropped.append(int(months.pop(0).get("turn") or 0))
+        report()
+    while _result_chars(out) > READ_CEILING:
+        whole = [i for i, m in enumerate(months) if not m.get("short")]
+        if len(whole) <= 1:
+            break
+        turn = int(months[whole[0]].get("turn") or 0)
+        months[whole[0]] = _month_summary(by_turn[turn])
+        shortened.append(turn)
+        report()
+    if not dropped and not shortened:
+        out.pop("recentTrimmed", None)
 
 
 def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
@@ -2240,8 +2383,17 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # baseline is holding the months it wrote and gets none of them back. Reaching one
     # specific old month already has its own door in ``memoryEvents``, which asks by
     # id instead of by depth.
+    #
+    # Only the newest `FULL_MONTHS` come back whole. The older months of the window
+    # come as app-built summaries, so a full read still reaches a year back at a
+    # fraction of the size; `_fit_recent` cuts the window further, oldest first,
+    # if the read would still not fit under the harness's tool-result limit.
     if full_read:
-        out["recentTurns"] = [_narrator_month(e) for e in lived[-recent:]] if recent else []
+        window = lived[-recent:] if recent else []
+        cut = max(0, len(window) - FULL_MONTHS)
+        out["recentTurns"] = [_month_summary(e) for e in window[:cut]] + [
+            _narrator_month(e) for e in window[cut:]
+        ]
     else:
         out["recentTurns"] = []
     # The app's own readings of its recent behaviour (R7). A measurement, not an
@@ -2403,6 +2555,8 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # measure the behaviour first and enforce once it is known.
     if held_blocks:
         out["held"] = held_blocks
+    if full_read:
+        _fit_recent(out, lived)
     # Written LAST, so it records what this read actually put in front of the
     # narrator (recall bodies and whole blocks alike) rather than what was merely
     # selected. A full read replaces the set: the narrator has just proved it is
