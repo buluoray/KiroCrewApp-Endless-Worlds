@@ -30,6 +30,10 @@ from narrator import APP_NAME, MEMORY_MODE, narrator_slot_key  # noqa: E402
 from store import RunStore  # noqa: E402
 from turn import ROTATION_MAX_TURNS, advance_turn, generating  # noqa: E402
 
+#: Read at import, before the autouse stand-in in conftest replaces it.
+_REAL_GATEWAY_API = narrator._gateway_api
+
+
 def _hkey(slot_key: str) -> str:
     return f"dashboard:{slot_key}"
 
@@ -44,7 +48,11 @@ class Core:
         self.live: set[str] = set()
         self.unlinked: list[str] = []
         self.closed: list[str] = []
+        self.api_calls: list[str] = []
         self._next = 0
+
+    def mapped_sid(self, key):
+        return self.sid.get(key, "")
 
     # -- SessionManager surface the app calls --
     async def remove(self, key):
@@ -131,16 +139,37 @@ def core(monkeypatch):
     monkeypatch.setitem(sys.modules, "kiro_crew.apps.teardown", teardown)
     core.teardown = teardown
 
-    async def close_slot(state, slot, name):
-        # Core's close: tell the owning app, then pop the slot and stop its session.
-        hook = teardown.hooks.get(slot._app)
-        if hook is not None:
-            await hook(name)
-        state.slots.pop(name, None)
-        await core.remove(_hkey(name))
-        core.closed.append(name)
+    class Gateway:
+        """The public routes, behaving as core's handlers do for an app token."""
 
-    monkeypatch.setattr(narrator, "_core_close_slot", lambda: close_slot)
+        def __init__(self, state):
+            self.state = state
+
+        async def delete(self, path):
+            from urllib.parse import unquote
+
+            core.api_calls.append(path)
+            if path.startswith("/api/chat/slots/"):
+                name = unquote(path[len("/api/chat/slots/") :])
+                slot = self.state.slots.get(name)
+                if slot is None or slot._app != APP_NAME:
+                    return 404
+                # close_slot: tell the owning app, pop, stop the session. The
+                # resume pointer is KEPT (core preserves it for a reopen).
+                hook = teardown.hooks.get(slot._app)
+                if hook is not None:
+                    await hook(name)
+                self.state.slots.pop(name, None)
+                await core.remove(_hkey(name))
+                core.closed.append(name)
+                return 200
+            if path.startswith("/api/sessions/"):
+                key = unquote(path[len("/api/sessions/") :])
+                core.delete_session(key)
+                return 200
+            return 404
+
+    monkeypatch.setattr(narrator, "_gateway_api", Gateway)
     monkeypatch.setattr(narrator, "app_install_generation", lambda: "g1")
     return core
 
@@ -343,6 +372,29 @@ def test_two_concurrent_requests_open_one_new_slot(core, store, run):
     assert {k for k, _ in state.turns[2:]} == {narrator_slot_key(run, 1)}
 
 
+def test_two_concurrent_requests_after_an_update_open_one_new_slot(core, store, run, monkeypatch):
+    state, _old = _played(core, store, run)
+    monkeypatch.setattr(narrator, "app_install_generation", lambda: "g2")
+
+    def dispatch(st, slot, prompt, **_kw):
+        st.turns.append((slot.key, st.core.run_turn(_hkey(slot.key), prompt)))
+        return True
+
+    async def both():
+        args = dict(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            dispatch=dispatch,
+            inline_wait_secs=0.01,
+        )
+        await asyncio.gather(advance_turn(**args), advance_turn(**args))
+
+    asyncio.run(both())
+    assert store.conversation_number(run) == 1
+    assert {k for k, _ in state.turns[2:]} == {narrator_slot_key(run, 1)}
+
+
 def test_the_dismissal_hook_ignores_an_old_key(core, store, run):
     """Retiring an old slot goes through core's close, which calls the hook."""
     state, old = _played(core, store, run)
@@ -402,3 +454,84 @@ def test_deleting_a_life_removes_all_its_conversations(core, store, run, tmp_pat
         assert key not in state.slots, f"{key} still open"
         assert _hkey(key) not in core.sid, f"{key} resume pointer left"
         assert _hkey(key) not in core.transcripts, f"{key} transcript left"
+
+
+# ── the public API client, against a real HTTP server ──────────────────────
+
+
+def test_the_gateway_client_uses_the_app_secret_and_token_cookie(tmp_path, monkeypatch):
+    """Token exchange with ``X-App-Secret``, then the port-scoped cookie, the same
+    protocol as the shipped ``kirocrew_client``. Run against a real aiohttp server
+    on loopback, so the requests on the wire are what is checked."""
+    from aiohttp import web
+
+    secret_dir = tmp_path / "apps" / APP_NAME
+    secret_dir.mkdir(parents=True)
+    (secret_dir / ".app_secret").write_text("s3cret\n", encoding="utf-8")
+    monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))
+    seen: list[tuple[str, str]] = []
+
+    async def scenario():
+        async def token(request):
+            if request.headers.get("X-App-Secret") != "s3cret":
+                return web.json_response({"error": "invalid secret"}, status=403)
+            return web.json_response({"token": "app-token"})
+
+        async def delete(request):
+            port = request.url.port
+            seen.append((request.path, request.cookies.get(f"mc_token_{port}", "")))
+            return web.json_response({"ok": True})
+
+        app = web.Application()
+        app.router.add_post(f"/api/apps/{APP_NAME}/token", token)
+        app.router.add_delete("/api/chat/slots/{slot}", delete)
+        app.router.add_delete("/api/sessions/{key}", delete)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        monkeypatch.setenv("KIROCREW_BOUND_PORT", str(port))
+        try:
+            api = narrator.GatewayApi(
+                narrator._gateway_base_url(),
+                narrator._app_secret_path().read_text(encoding="utf-8").strip(),
+            )
+            a = await api.delete("/api/chat/slots/endless-run-r-c1")
+            b = await api.delete("/api/sessions/dashboard%3Aendless-run-r-c1")
+        finally:
+            await runner.cleanup()
+        return a, b
+
+    assert asyncio.run(scenario()) == (200, 200)
+    assert seen == [
+        ("/api/chat/slots/endless-run-r-c1", "app-token"),
+        ("/api/sessions/dashboard:endless-run-r-c1", "app-token"),
+    ]
+
+
+def test_no_app_secret_means_no_removal_and_a_retry(store, run, tmp_path, monkeypatch):
+    """Without credentials nothing is removed and the conversation stays on record."""
+    monkeypatch.setattr(narrator, "_gateway_api", _REAL_GATEWAY_API)
+    monkeypatch.setenv("KIROCREW_HOME", str(tmp_path))  # no .app_secret here
+    store.begin_conversation(run)
+    assert narrator._gateway_api(object()) is None
+    assert asyncio.run(narrator.retire_stale_conversations(object(), store, run)) == []
+    assert store.stale_conversations(run) == [0]
+
+
+def test_a_refused_delete_is_retried_next_turn(core, store, run, monkeypatch):
+    """A 403 (the grant not approved yet) or a 500 is not a removal."""
+    state, old = _played(core, store, run)
+
+    class Refusing:
+        def __init__(self, _state):
+            pass
+
+        async def delete(self, path):
+            return 403
+
+    monkeypatch.setattr(narrator, "_gateway_api", Refusing)
+    _ask(state, store, run, chapter_crossed=True)
+    assert store.stale_conversations(run) == [0], "kept on record for a retry"
+    assert _hkey(old) in core.sid, "nothing private ran ahead of the public delete"

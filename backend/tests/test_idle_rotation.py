@@ -207,8 +207,10 @@ def test_the_turn_after_a_pause_starts_fresh_and_forgets_what_was_sent(app):
     _ask(store, run, state)
 
     assert _rotations(store, run) == ["idle"]
-    # Discarded once, through the seam, with the transcript replay suppressed.
-    assert [replay for _, replay in state.sessions.discarded] == [False]
+    # A new conversation on a new key; the old slot is closed.
+    assert store.conversation_number(run) == 1
+    assert slot_key not in state.slots
+    assert narrator.narrator_slot_key(run, 1) in state.slots
     assert store.rotation_turn(run) == 2
     # Every "already sent" marker belongs to the discarded conversation.
     assert store.recall_sent(run) == set()
@@ -219,10 +221,10 @@ def test_the_turn_after_a_pause_starts_fresh_and_forgets_what_was_sent(app):
     assert "brief" in read and "shape" in read
     assert "statePatch" in read["commitWith"]
 
-    # A double tap on the same month neither rotates nor discards again.
+    # A double tap on the same month neither rotates nor opens another key.
     _ask(store, run, state)
     assert _rotations(store, run) == ["idle"]
-    assert len(state.sessions.discarded) == 1
+    assert store.conversation_number(run) == 1
 
 
 def test_a_short_pause_keeps_the_conversation(app):

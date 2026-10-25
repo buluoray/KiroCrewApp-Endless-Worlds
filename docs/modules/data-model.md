@@ -153,8 +153,8 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   `provenance-`, `narrator-generation-`, `backdrop-request-`, the index row, and
   the `runs/<id>/` tree all go. The delete routes read the conversation count
   BEFORE `delete_run` and then remove every conversation the life had (slot,
-  resume pointer, kiro-cli files, core transcript) through
-  `retire_all_conversations`; pinned by
+  transcript, resume pointer, kiro-cli files) through
+  `retire_all_conversations`, which uses the public API (turn-loop); pinned by
   `test_conversation_keys.test_deleting_a_life_removes_all_its_conversations`. Load-bearing
   because a leaked `pending-` makes `turn.generating` report a turn in flight for
   a life that no longer exists; `briefed-` is legacy and is dropped so an

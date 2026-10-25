@@ -95,9 +95,17 @@ turn 200 as at turn 1.
   `endless-run-<runId>-c<n>` after. `start_new_conversation` clears the legacy
   briefed marker and bumps `n` synchronously, before any await, so concurrent or retried
   requests find the same new key; `retire_stale_conversations` then closes each
-  earlier slot through core's `close_slot` (what the App Kit's `deleteSlot` runs),
-  forgets its resume pointer, unlinks kiro-cli's files and deletes core's
-  transcript. A removal that fails stays on the `stale` list and is retried at the
+  earlier conversation through the App Kit's public API, called with this app's
+  own token (`GatewayApi`: the `.app_secret` exchanged at `POST
+  /api/apps/endless-worlds/token`, then the `mc_token_<port>` cookie, the same
+  protocol as `kirocrew_client`): `DELETE /api/chat/slots/{slot}` closes a live
+  slot, `DELETE /api/sessions/{key}` deletes the transcript, and the gateway does
+  the ownership check (`permissions.api` declares `/api/chat` and
+  `/api/sessions`). The one piece with no public route, forgetting a still-mapped
+  resume pointer and unlinking kiro-cli's own session files, is
+  `_forget_provider_session`, the only private call. A 404 counts as removed (core
+  answers it for "missing" and "not yours" alike); any other answer, or no app
+  secret, leaves the number on the `stale` list to be retried at the
   start of the next turn. Every rotation reason, the reset control, a dismissed
   tab, the heal and the install change all take this path; a slot core archived
   for idleness is NOT a new conversation and resumes under its own key. Pinned by

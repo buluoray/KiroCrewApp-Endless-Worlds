@@ -64,8 +64,11 @@ argument.
   new conversation number and so a new slot key (`endless-run-<runId>-c<n>`; the
   bare `endless-run-<runId>` is conversation 0), because core finds an old
   conversation again by its key: resume pointer, transcript, history replay. The
-  old slot is closed through core's `close_slot`, its resume pointer forgotten,
-  kiro-cli's files unlinked and core's transcript deleted. The fresh
+  old conversation is removed through the App Kit's public API with this app's own
+  token (`DELETE /api/chat/slots/{slot}`, then `DELETE /api/sessions/{key}`; the
+  gateway does the ownership check), plus one private step with no public route:
+  forgetting a still-mapped resume pointer and unlinking kiro-cli's session files
+  (`_forget_provider_session`). The fresh
   conversation's prompt is the same few lines as any turn's; its first read is
   full, carries the `brief` and `shape`, and carries `commitWith` (`read.patch`,
   naming the read's fingerprint), so it commits a `statePatch` rather than

@@ -327,23 +327,6 @@ def test_reset_still_runs_on_a_core_without_the_replay_knob(store, run, monkeypa
     assert store.conversation_number(run) == 1
 
 
-def test_a_kwargs_forwarding_manager_is_offered_the_knob():
-    """A ``**kwargs`` signature forwards, so it must be treated as accepting it —
-    otherwise a wrapper around core silently downgrades every reset to replay-on."""
-    from narrator import _accepts_replay
-
-    async def forwards(key, **kw):  # pragma: no cover - signature only
-        ...
-
-    async def positional_only(key):  # pragma: no cover - signature only
-        ...
-
-    assert _accepts_replay(forwards)
-    assert not _accepts_replay(positional_only)
-    # Unintrospectable degrades to the pre-knob call rather than raising.
-    assert not _accepts_replay(object())
-
-
 def test_reset_survives_a_missing_runtime(store, run):
     """No session runtime still moves the life: the new key is what makes it fresh."""
 
@@ -481,25 +464,11 @@ def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
     assert store.conversation_number(run) == 0, "the same conversation resumes"
 
 
-# ── the purge seam: a build swap must also start empty ──────────────────────
-#
-# The update path does not go through ``reset_narrator_conversation`` — it calls
-# ``purge_narrator_session``, which tears the conversation down harder (it deletes
-# kiro-cli's transcript too) and therefore skipped the one call that arms core's
-# replay suppression. Measured on a live gateway: every turn after an app update
-# cold-started at ~106K tokens with three quarters of the prompt spent on a
-# ``[CONVERSATION HISTORY]`` rebuild of the conversation just deleted, so the
-# update looked like it had never reset anything.
+# ── core stand-ins for the reset tests above ────────────────────────────────
 
 
 class PurgeFakeSessions:
-    """Core's purge surface, faithful about the two effects order depends on.
-
-    ``remove`` clears an armed suppression (core does, correctly: it is tearing
-    down a session it expects to resume), and the suppressing call ends in
-    ``clear_sid``. Modelling both is what lets the ordering tests below fail for
-    the real reason rather than by asserting a list of strings.
-    """
+    """The session-manager calls a retired conversation's cleanup makes."""
 
     def __init__(self, sid: str = "sid-1"):
         self.calls: list[str] = []
@@ -532,12 +501,8 @@ class LegacyPurgeFakeSessions(PurgeFakeSessions):
 
 
 def _fake_core(monkeypatch) -> list[str]:
-    """Stand in for the two dashboard modules the purge seam imports.
-
-    Neither ships in this environment (``chat_utils`` transitively pulls in
-    messaging SDKs), and the identity ``_history_key_for`` keeps the assertions
-    about core's filename sanitiser out of a test about ordering.
-    """
+    """Stand in for the dashboard modules the cleanup imports; returns the ids
+    whose kiro-cli files were unlinked."""
     import types
 
     utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
@@ -549,90 +514,3 @@ def _fake_core(monkeypatch) -> list[str]:
     transfer._unlink_layer_b_files = unlinked.append
     monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.session_transfer", transfer)
     return unlinked
-
-
-def test_a_purge_spares_the_replacement_a_replay_of_what_it_replaced(store, run, monkeypatch):
-    _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions()
-
-    assert asyncio.run(narrator.purge_narrator_session(state, run))
-    assert state.sessions.replays == [False]
-    assert state.sessions.suppressed, (
-        "a purged conversation whose resume pointer is gone is exactly the state "
-        "in which core rebuilds its own conversation log as a [CONVERSATION "
-        "HISTORY] block, so a purge that never arms the suppression hands the "
-        "replacement a reconstruction of the build it was meant to replace"
-    )
-
-
-def test_the_suppression_is_armed_after_the_remove_that_would_wipe_it(store, run, monkeypatch):
-    """Ordering, not decoration: ``remove`` discards the same flag."""
-    _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions()
-
-    asyncio.run(narrator.purge_narrator_session(state, run))
-    assert state.sessions.calls.index("discard") > state.sessions.calls.index("remove")
-    assert state.sessions.suppressed, "armed before the teardown, the flag is wiped by it"
-
-
-def test_the_suppression_does_not_cost_the_id_the_unlink_needs(store, run, monkeypatch):
-    """The suppressing call ends in ``clear_sid``, so it must follow the one read."""
-    unlinked = _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions(sid="sid-42")
-
-    assert asyncio.run(narrator.purge_narrator_session(state, run))
-    assert unlinked == ["sid-42"], (
-        "armed before forget_conversation, the id is blanked and kiro-cli's own "
-        "transcript is left on disk for a life that no longer exists"
-    )
-    assert state.sessions.calls.index("discard") > state.sessions.calls.index("forget")
-
-
-def test_a_run_with_no_session_id_is_still_spared_the_replay(store, run, monkeypatch):
-    """A missing id does not mean a missing replay.
-
-    Core's log is keyed by the session key, not by that id, so a run whose
-    pointer was already gone still has a transcript to be handed back — which is
-    why the arming precedes the no-id early return.
-    """
-    unlinked = _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions(sid="")
-
-    assert not asyncio.run(narrator.purge_narrator_session(state, run))
-    assert unlinked == [], "there is no id whose files could be unlinked"
-    assert state.sessions.suppressed, "the replay is the part that still applies"
-
-
-def test_a_purge_still_completes_on_a_core_without_the_replay_knob(store, run, monkeypatch):
-    """The knob only exists on newer core. Its absence must not fail the purge."""
-    unlinked = _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = LegacyPurgeFakeSessions(sid="sid-legacy")
-
-    assert asyncio.run(narrator.purge_narrator_session(state, run)), (
-        "an older core still has to get its conversation purged, with replay, "
-        "rather than the deletion the player asked for reporting a failure"
-    )
-    assert unlinked == ["sid-legacy"]
-    assert not narrator._accepts_replay(state.sessions.discard_conversation), (
-        "the premise: this build's signature refuses the keyword, so the guard is "
-        "what keeps the seam from offering it"
-    )
-
-
-def test_a_failing_suppression_does_not_fail_the_purge(store, run, monkeypatch):
-    """It only ever spares a reconstruction; it cannot be worth a failed delete."""
-    unlinked = _fake_core(monkeypatch)
-
-    class Angry(PurgeFakeSessions):
-        async def discard_conversation(self, key, *, replay=True):
-            raise RuntimeError("core is unhappy")
-
-    state = FakeState()
-    state.sessions = Angry(sid="sid-9")
-    assert asyncio.run(narrator.purge_narrator_session(state, run))
-    assert unlinked == ["sid-9"]

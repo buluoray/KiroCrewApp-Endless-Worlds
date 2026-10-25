@@ -76,14 +76,49 @@ _ensure_gateway_importable()
 import pytest  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def _no_core_slot_close(monkeypatch):
-    """Retire old narrator slots without core's ``close_slot`` by default.
+class FakeGatewayApi:
+    """The two public DELETE routes, as the gateway answers an app token.
 
-    The real one is importable here but needs a whole dashboard state, which the
-    stand-in states these tests build do not have. Tests about the close itself
-    install their own stand-in over this.
+    ``DELETE /api/chat/slots/{slot}`` removes a live slot only when this app owns
+    it; ``DELETE /api/sessions/{key}`` deletes the transcript. Anything else, and
+    any slot or transcript the app does not own, is 404 — the gateway's own
+    answer for "not yours" and "missing" alike.
+    """
+
+    def __init__(self, state):
+        self.state = state
+        self.calls: list[str] = []
+
+    async def delete(self, path: str) -> int:
+        from urllib.parse import unquote
+
+        import narrator
+
+        self.calls.append(path)
+        if path.startswith("/api/chat/slots/"):
+            key = unquote(path[len("/api/chat/slots/") :])
+            slots = getattr(self.state, "_slots", None)
+            slot = slots.get(key) if isinstance(slots, dict) else None
+            if slot is None or getattr(slot, "_app", "") != narrator.APP_NAME:
+                return 404
+            slots.pop(key, None)
+            return 200
+        if path.startswith("/api/sessions/"):
+            key = unquote(path[len("/api/sessions/") :])
+            log = getattr(self.state, "conversation_log", None)
+            if log is not None and hasattr(log, "delete_session"):
+                log.delete_session(key)
+            return 200
+        return 404
+
+
+@pytest.fixture(autouse=True)
+def _fake_gateway_api(monkeypatch):
+    """Answer the app's public API calls in-process by default.
+
+    The real client needs a running gateway and this app's secret. Tests that
+    model core more closely install their own stand-in over this one.
     """
     import narrator
 
-    monkeypatch.setattr(narrator, "_core_close_slot", lambda: None)
+    monkeypatch.setattr(narrator, "_gateway_api", FakeGatewayApi)

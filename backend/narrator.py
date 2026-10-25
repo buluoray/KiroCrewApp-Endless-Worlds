@@ -34,11 +34,12 @@ hoped for:
 from __future__ import annotations
 
 import hashlib
-import inspect
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -232,228 +233,164 @@ def is_narrator_slot(slot_key: str) -> bool:
     return isinstance(slot_key, str) and slot_key.startswith(_SLOT_PREFIX)
 
 
-def release_narrator_slot(state: Any, run_id: str, conversation: int = 0) -> bool:
-    """Drop this run's narrator slot when its life is deleted. Returns whether a
-    slot was released.
+def _history_key(slot_key: str) -> str:
+    """The session key core gives a dashboard slot: ``dashboard:<slot key>``."""
+    return f"dashboard:{slot_key}"
 
-    Deleting a life removes its store rows, but the in-memory slot — one per run —
-    would otherwise linger for the gateway's lifetime, holding a conversation for a
-    life that no longer exists. This releases it.
 
-    Best-effort and defensive on purpose: a slot-cleanup failure must never fail
-    the deletion the player asked for, so every step is guarded and a missing
-    runtime, a bad id, or a slot this app does not own is simply a no-op. Only a
-    slot stamped with THIS app is ever removed — we never reach into another
-    owner's slot.
+def _gateway_base_url() -> str:
+    """The gateway this backend runs inside, on loopback.
 
-    This is the fallback for a core without ``close_slot``; see
-    :func:`retire_narrator_conversation` for the path that is normally taken.
+    ``KIROCREW_BOUND_PORT`` is the port the gateway actually bound (it exports it
+    for everything it starts); ``KIROCREW_PORT`` is the operator's declared one;
+    5476 is the default the App Kit client uses too.
     """
-    try:
-        slot_key = narrator_slot_key(run_id, conversation)
-    except BadRunId:
-        return False
-    slots = getattr(state, "_slots", None)
-    if not isinstance(slots, dict):
-        return False
-    slot = slots.get(slot_key)
-    if slot is None:
-        return False
-    if (getattr(slot, "_app", "") or "") != APP_NAME:
-        return False
-    slots.pop(slot_key, None)
-    # Pending question cards belong to a life that is gone; drop them, then refresh
-    # the slot list the dashboard renders. Both are conveniences — a failure here
-    # leaves the slot already removed.
-    cancel = getattr(state, "cancel_questions_for_slot", None)
-    if callable(cancel):
+    port = (os.environ.get("KIROCREW_BOUND_PORT") or os.environ.get("KIROCREW_PORT") or "").strip()
+    if not port.isdigit():
+        port = "5476"
+    return f"http://127.0.0.1:{port}"
+
+
+def _app_secret_path() -> Path:
+    """Where the gateway keeps this app's secret: ``<home>/apps/<app>/.app_secret``."""
+    home = os.environ.get("KIROCREW_HOME") or str(Path.home() / ".kiro" / "crew")
+    return Path(home) / "apps" / APP_NAME / ".app_secret"
+
+
+class GatewayApi:
+    """The App Kit's own HTTP API, called with this app's own credentials.
+
+    Same protocol as the shipped Python client (``kirocrew_client``): exchange the
+    per-app secret for an app-scoped token at ``POST /api/apps/<app>/token``, then
+    send it as the gateway's port-scoped ``mc_token_<port>`` cookie. The gateway
+    applies the app-token checks itself: the path must be declared in
+    ``permissions.api``, and a slot or transcript this app does not own answers
+    404 exactly like a missing one.
+    """
+
+    _TIMEOUT_SECS = 10.0
+
+    def __init__(self, base_url: str, secret: str):
+        self._base = base_url.rstrip("/")
+        self._secret = secret
+        self._token = ""
+
+    @property
+    def _cookie_name(self) -> str:
+        return f"mc_token_{self._base.rsplit(':', 1)[-1]}"
+
+    async def delete(self, path: str) -> int:
+        """``DELETE`` *path*; the HTTP status, or 0 when the gateway was unreachable."""
+        import aiohttp  # noqa: PLC0415 — only a running gateway needs it
+
+        timeout = aiohttp.ClientTimeout(total=self._TIMEOUT_SECS)
         try:
-            cancel(slot_key)
-        except Exception:  # noqa: BLE001
-            pass
-    push = getattr(state, "_push_slots", None)
-    if callable(push):
-        try:
-            push()
-        except Exception:  # noqa: BLE001
-            pass
-    return True
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                if not self._token:
+                    async with session.post(
+                        f"{self._base}/api/apps/{APP_NAME}/token",
+                        headers={"X-App-Secret": self._secret},
+                    ) as resp:
+                        if not resp.ok:
+                            return resp.status
+                        self._token = str((await resp.json()).get("token") or "")
+                async with session.delete(
+                    f"{self._base}{path}",
+                    headers={"Cookie": f"{self._cookie_name}={self._token}"},
+                ) as resp:
+                    return resp.status
+        except Exception:  # noqa: BLE001 — unreachable is an answer, not a crash
+            logger.debug("gateway DELETE %s failed", path, exc_info=True)
+            return 0
 
 
-def _accepts_replay(fn: Any) -> bool:
-    """Whether core's ``discard_conversation`` takes the ``replay`` keyword.
+def _gateway_api(state: Any) -> Any:
+    """A :class:`GatewayApi` for this app, or None when it has no secret.
 
-    A ``**kwargs`` signature counts: it forwards. Anything unintrospectable
-    answers False, which degrades to the pre-knob call rather than raising.
+    ``state`` is unused by the real API; tests replace this function with a
+    stand-in bound to their stand-in state.
     """
     try:
-        params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return False
-    if "replay" in params:
-        return True
-    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        secret = _app_secret_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return GatewayApi(_gateway_base_url(), secret) if secret else None
 
 
-async def _suppress_next_replay(sessions: Any, key: str) -> None:
-    """Tell core that *key*'s next cold start must begin EMPTY.
+def _forget_provider_session(state: Any, history_key: str, sid: str) -> None:
+    """The one piece with no public API: drop kiro-cli's session for a retired key.
 
-    Core arms that one-shot flag from exactly one place — ``discard_conversation``
-    with ``replay=False`` — so a teardown that took any other route has to come
-    back through this one to set it. Here the teardown has already happened, which
-    makes every other effect of the call inert: the live session was popped by
-    ``remove``, the map row by ``forget_conversation``, and the subagent-runtime
-    reap is a pop of something already gone. The flag is the whole point.
-
-    Best-effort by contract: this only ever spares the fresh narrator a
-    reconstruction it should not see, so a failure must not turn a purge that
-    otherwise succeeded into a reported failure.
+    ``DELETE /api/sessions/{key}`` deletes core's transcript, and removes the
+    resume pointer only when it also had a live slot to tear down. Neither
+    public route removes kiro-cli's own session files. So this forgets a pointer
+    that is still mapped, through the running session manager, and unlinks the
+    provider files of the id read before the public calls. Best-effort: a
+    leftover file is never read again, because the key is never reused.
     """
-    try:
-        if _accepts_replay(sessions.discard_conversation):
-            await sessions.discard_conversation(key, replay=False)
-    except Exception:  # noqa: BLE001
-        pass
-
-
-async def purge_narrator_session(state: Any, run_id: str, conversation: int = 0) -> bool:
-    """Delete the narrator's persisted conversation when a life is deleted.
-
-    ``release_narrator_slot`` drops the in-memory slot; this removes the kiro-cli
-    conversation BEHIND it so a deleted life leaves no transcript on disk. The
-    sequence mirrors the dashboard's own permanent-delete: shut the session down
-    (``sessions.remove`` preserves the files for resume), forget its map entry to
-    get the session id, then unlink that id's transcript files.
-
-    Then suppress the next cold start's replay, for the reason spelled out on
-    ``reset_narrator_conversation``: a cleared resume pointer is precisely what
-    makes core rebuild the transcript from its OWN conversation log as a
-    ``[CONVERSATION HISTORY]`` block, and that log is a separate artifact this
-    function never touches — ``_unlink_layer_b_files`` removes kiro-cli's copy,
-    not core's. Without the suppression a build swap tore the conversation down
-    and was handed a reconstruction of it on the very next turn, which is what
-    made an updated app look like it had never reset at all.
-
-    Two orderings here are load-bearing, and both fail silently if reversed.
-    The suppression must follow ``remove``, which DISCARDS that same flag (it is
-    clearing a stale one, correctly, for a session it expects to resume) — armed
-    first, it would be wiped by the next line. And it must follow
-    ``forget_conversation``, which is the only read of the session id: the
-    suppressing call ends in ``clear_sid``, so arming earlier would blank the id
-    whose files this is here to unlink.
-
-    Armed before the no-id early return, because a missing id does not mean a
-    missing replay. Core's log is keyed by the session key, not by that id, so a
-    run whose pointer was already gone still has a transcript to be handed back.
-
-    Best-effort and fully guarded: a runtime without a session store, a missing
-    dashboard import (as in unit tests), a bad id, or any per-step failure is a
-    no-op that never fails the deletion the player asked for.
-    """
-    try:
-        slot_key = narrator_slot_key(run_id, conversation)
-    except BadRunId:
-        return False
     sessions = getattr(state, "sessions", None)
-    if sessions is None:
-        return False
+    if sessions is not None:
+        try:
+            sid = sessions.forget_conversation(history_key) or sid
+        except Exception:  # noqa: BLE001
+            pass
+    if not sid:
+        return
     try:
-        from kiro_crew.dashboard.chat_utils import _history_key_for  # noqa: PLC0415
         from kiro_crew.dashboard.session_transfer import (  # noqa: PLC0415
             _unlink_layer_b_files,
         )
-    except Exception:  # noqa: BLE001
-        return False
-    key = _history_key_for(slot_key)
-    try:
-        await sessions.remove(key)
-    except Exception:  # noqa: BLE001
-        pass
-    sid = ""
-    try:
-        sid = sessions.forget_conversation(key) or ""
-    except Exception:  # noqa: BLE001
-        pass
-    await _suppress_next_replay(sessions, key)
-    if not sid:
-        return False
-    try:
+
         _unlink_layer_b_files(sid)
     except Exception:  # noqa: BLE001
-        return False
-    return True
+        logger.debug("kiro-cli session files for %s not removed", history_key, exc_info=True)
 
 
-def _core_close_slot() -> Any:
-    """Core's own slot close, or None on a core (or a test) without it.
-
-    ``close_slot`` is what the App Kit's ``DELETE /api/chat/slots/{slot}``
-    (``deleteSlot``) runs: it retires the slot's nudge loop, tells the owning app,
-    archives the transcript and tears the session down, in the order core's own
-    races need. This backend runs inside the gateway, so it calls the same
-    function instead of making an HTTP request to itself; the ownership check that
-    route adds is :func:`retire_narrator_conversation`'s own.
-    """
+def _mapped_sid(state: Any, history_key: str) -> str:
+    """The provider session id the key resumes, read before the public delete."""
+    reader = getattr(getattr(state, "sessions", None), "mapped_sid", None)
     try:
-        from kiro_crew.dashboard.chat_api.slot_lifecycle import close_slot  # noqa: PLC0415
+        return str(reader(history_key) or "") if callable(reader) else ""
     except Exception:  # noqa: BLE001
-        return None
-    return close_slot
+        return ""
 
 
-def _delete_transcript(state: Any, history_key: str) -> None:
-    """Delete core's transcript of a retired conversation through its history store.
-
-    The same store method ``DELETE /api/sessions/{key}`` ends in. Best-effort: a
-    transcript that cannot be removed is listed and nothing reads it, because no
-    later conversation is ever given this key again.
-    """
-    log = getattr(state, "conversation_log", None)
-    delete = getattr(log, "delete_session", None)
-    if not callable(delete):
-        return
-    try:
-        delete(history_key)
-    except Exception:  # noqa: BLE001
-        logger.debug("transcript delete failed for %s", history_key, exc_info=True)
+#: A 404 is a slot or transcript that is already gone, or one this app does not
+#: own; the gateway answers both the same way, and neither is ours to remove.
+_DELETE_DONE = frozenset({200, 204, 404})
 
 
 async def retire_narrator_conversation(state: Any, run_id: str, conversation: int) -> bool:
-    """Remove one earlier conversation of a life: its slot, session and transcript.
+    """Remove one earlier conversation of a life: its slot, transcript and session.
+
+    Through the App Kit's public API, in this order: ``DELETE
+    /api/chat/slots/{slot}`` closes a live slot the way the tab's close does,
+    then ``DELETE /api/sessions/{key}`` deletes the transcript. Then the one
+    private step, :func:`_forget_provider_session`.
 
     Returns True when nothing of it is left that this app may remove, so the
-    caller can stop tracking it. A slot under this key that another app (or
-    nobody) owns is never touched and answers False: it is not ours to close.
+    caller can stop tracking it. A refusal other than 404 (no token, a gateway
+    that is down, a close core refused) answers False and is retried next turn.
 
     Never called on the CURRENT conversation by the turn loop. A key is only ever
     retired after the life has moved to a newer number, so a retired key is never
-    asked for again and none of this has to guard a later reuse.
+    asked for again.
     """
     try:
         slot_key = narrator_slot_key(run_id, conversation)
     except BadRunId:
         return False
-    slot = state.get_slot(slot_key) if hasattr(state, "get_slot") else None
-    if slot is not None:
-        if (getattr(slot, "_app", "") or "") != APP_NAME:
-            return False
-        close = _core_close_slot()
-        closed = False
-        if close is not None:
-            try:
-                await close(state, slot, slot_key)
-                closed = True
-            except Exception:  # noqa: BLE001 — core refused (a history write running)
-                logger.warning("closing old narrator slot %s failed", slot_key, exc_info=True)
-                return False
-        if not closed:
-            release_narrator_slot(state, run_id, conversation)
-    await purge_narrator_session(state, run_id, conversation)
-    try:
-        from kiro_crew.dashboard.chat_utils import _history_key_for  # noqa: PLC0415
-    except Exception:  # noqa: BLE001
-        return True
-    _delete_transcript(state, _history_key_for(slot_key))
+    api = _gateway_api(state)
+    if api is None:
+        return False
+    history_key = _history_key(slot_key)
+    sid = _mapped_sid(state, history_key)
+    slot_status = await api.delete(f"/api/chat/slots/{quote(slot_key, safe='')}")
+    if slot_status not in _DELETE_DONE:
+        return False
+    session_status = await api.delete(f"/api/sessions/{quote(history_key, safe='')}")
+    if session_status not in _DELETE_DONE:
+        return False
+    _forget_provider_session(state, history_key, sid)
     return True
 
 
@@ -569,8 +506,8 @@ def install_close_hook(state: Any, store: Any) -> None:
     conversation. The dismissed slot itself is left to core, which is closing it
     as this runs; its session and transcript are removed with the other stale
     conversations on the next turn. Closing an OLD conversation's slot (which
-    :func:`retire_narrator_conversation` does through core, so it arrives here
-    too) changes nothing.
+    :func:`retire_narrator_conversation` does through ``DELETE
+    /api/chat/slots/{slot}``, so it arrives here too) changes nothing.
 
     A failure here must NOT block the close. Core refuses the dismissal when the
     hook raises — right for an app whose hook is the write that pauses a worker,
