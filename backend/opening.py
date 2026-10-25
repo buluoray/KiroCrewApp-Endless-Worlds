@@ -161,19 +161,16 @@ def build_initial_state(
 
 
 def compose_opening_prompt(*, template: Template, run_id: str) -> str:
-    """The opening turn's prompt: the run id, an instruction to go read the rest,
-    and one nudge toward a scene backdrop for the first page.
+    """The opening turn's prompt: the run id, and that this is a new life to read.
 
     Everything a first turn needs — the world's rules, the player's opening
     choices (and which the world settled rather than the player), and the shape of
     the state to record — is served by ``endless_read_runtime`` on the narrator's
-    first, no-``since`` call. It is kept OUT of this message on purpose: the
-    narrator's session is visible to the player, and a 15,000-character rulebook
-    plus a dump of every opening answer pushed into it makes that transcript a wall
-    of setup. What is pushed is only what cannot be pulled — which run this is, and
-    the one piece of art direction that is specific to a life's FIRST page (prefer
-    a traced scene over a slow hand-drawn motif; see ``opening.firstBackdrop``),
-    which the narrator has no other way to know applies to turn one alone.
+    first, no-``since`` call. How to write a first page (the circumstances a life
+    is born into, the state declared in full, a traced establishing scene for its
+    backdrop where a real place could be photographed) never changes between
+    lives, so it lives in the narrator's own prompt (agents/narrator.json). What
+    is left here is only what neither can know: which run this is.
 
     ``run_id`` is still required and still named first, for the reason the turn
     prompt names it: every tool the narrator has takes it, and the first live
@@ -182,22 +179,7 @@ def compose_opening_prompt(*, template: Template, run_id: str) -> str:
     name.
     """
     text = Content(template.language)
-    return "\n".join(
-        [
-            text("addressing", run_id=run_id, turn=1),
-            "",
-            text("opening.pull"),
-            "",
-            # The first backdrop is almost always the slowest thing the player waits
-            # on: LANE: motif is the narrator's default, and a hand-drawn motif is two
-            # illustrator attempts of up to three minutes each. Nudging the FIRST page
-            # toward LANE: scene (a traced establishing photograph) trades that for the
-            # bounded trace pipeline and gives the player a real place to open in — but
-            # only where a real photograph could exist, so a purely fantastical or
-            # anime-styled opening still falls back to motif rather than a blank base.
-            text("opening.firstBackdrop"),
-        ]
-    )
+    return "\n".join([text("addressing", run_id=run_id, turn=1), text("opening.new")])
 
 
 # ── internals ────────────────────────────────────────────────────────────

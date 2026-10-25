@@ -15,12 +15,12 @@ turn 200 as at turn 1.
 
 | Path | What it is |
 |---|---|
-| `backend/turn.py` | the turn loop: `advance_turn()` (dispatch + poll), `compose_prompt()`, `_addressing()`, `declaration_shape()`, `already_committed()`, the briefing state machine, and the wait / budget / stale constants |
+| `backend/turn.py` | the turn loop: `advance_turn()` (dispatch + poll), `compose_prompt()`, `_addressing()`, `turn_notes()`, `declaration_shape()`, `already_committed()`, and the wait / budget / stale constants |
 | `backend/opening.py` | `compose_opening_prompt()` — the opening turn's prompt, passed to the same `advance_turn()` via `prompt_override` so the wait and idempotence are not forked |
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
 | `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
 | `backend/memory_graph.py` | repairs the structured `memory` block — a mis-spelled id/vocabulary/key is fixed, only an unrepairable piece is dropped and warned, never blocking the commit |
-| `content/{en,zh}.json` | every line the prompt is built from (`turn.ask`, `turn.action.*`, `shape.*`, `opening.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
+| `content/{en,zh}.json` | every line the prompt and the read's notes are built from (`addressing`, `turn.read`, `turn.action.*`, `opening.new`, `turn.style`/`turn.length.*`/`turn.noart`/`turn.close`, `shape.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
 
 ## Load-bearing contracts
 
@@ -29,7 +29,7 @@ turn 200 as at turn 1.
   with the currently loaded app. A missing legacy marker or mismatch validates and
   releases only the app-owned, memory-sealed slot, purges its persisted conversation,
   and creates a replacement; the existing fresh-slot path clears a stale pending
-  writer and re-sends the rulebook. The generation marker is written only after the
+  writer, and the new conversation's first full read hands it the rulebook. The generation marker is written only after the
   replacement exists, so a failed replacement is retried safely. The life remains
   at the same turn with the same state, rollback, chronicle, worlds, and shelf row.
   This is deterministic update/reinstall invalidation, separate from the behavioural
@@ -44,13 +44,13 @@ turn 200 as at turn 1.
   server stamps every `endless_*` call via `note_tool_call`, and a healthy
   narrator opens every turn with `endless_read_runtime`). `advance_turn` then
   drops the conversation (`release_narrator_slot`), clears the pending record,
-  and rebuilds the slot in the same call — the fresh slot re-briefs the rulebook
-  through the existing `fresh_slot` path. Capped at one heal per turn
+  and rebuilds the slot in the same call — the fresh conversation reads the
+  rulebook back on its first full read. Capped at one heal per turn
   (`_MAX_SLOT_HEALS_PER_TURN`, per-turn counter in the store) so a fresh slot
   that also fails surfaces as a failure instead of churning a new conversation
   every budget. One endless_* call is proof of the right narrator: slow is
   never healed. Pinned by
-  `test_a_zero_contact_expired_turn_drops_the_slot_and_rebriefs`,
+  `test_a_zero_contact_expired_turn_drops_the_slot_and_asks_again`,
   `test_a_turn_with_tool_activity_is_never_healed`, and
   `test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop`.
 
@@ -67,7 +67,7 @@ turn 200 as at turn 1.
   that did not rotate would otherwise discard the narrator still writing it; an
   unknown commit time never rotates. Every reason goes through the same seam:
   `mark_rotation(turn=baseline)` before `reset_narrator_conversation` (which
-  clears the briefed marker and suppresses the transcript replay), so a retry or
+  clears the legacy briefed marker and suppresses the transcript replay), so a retry or
   double tap sees the marker at `baseline` and never rotates twice, and the
   recall-sent record (lore, recall candidates, people cards, held blocks) is
   stamped with the old rotation and reads as empty. The perf ledger records the
@@ -85,29 +85,54 @@ turn 200 as at turn 1.
   state it sent, so `endless_advance_turn` accepts a `statePatch` with
   `basedOn` = that fingerprint. Measured narrators in that position re-declared
   the full state instead (20-24 KB of output, ~115 s against ~64 s for a
-  continued turn), so the fresh prompt carries `turn.patch` and every full read
-  of a life past its opening carries `commitWith` (`read.patch`, naming the
+  continued turn), so every full read of a life past its opening carries
+  `commitWith` (`read.patch`, naming the
   fingerprint). Pinned by
   `test_the_fresh_narrator_that_follows_the_read_commits_a_patch`,
   `test_a_delta_read_carries_no_commit_note`, and
   `test_an_opening_read_carries_no_commit_note`.
 
-- **The prompt size is independent of life length.** A turn's prompt carries the
-  run id, the turn number, the player's action, and — only on the turn that needs
-  it — the rulebook; it never carries state or history, because within a
-  conversation the narrator already holds what it wrote, and a fresh conversation
-  re-anchors with one full read.
-  Enforced by `compose_prompt()`; pinned by
-  `test_no_amount_of_history_grows_the_prompt` (a 1-turn and a 200-turn life
-  differ by a bounded margin the test fixes) and
-  `test_the_prompt_carries_the_law_and_the_players_words_and_little_else`.
-  Re-adding any state or chronicle renderer to the prompt silently breaks this.
+- **The user message is a few lines; MCP supplies everything else.** Three
+  layers, each carried once. Stable how-to-narrate rules (what a turn is, the
+  first page and its backdrop lane, the page-art recovery procedure, that the
+  read's `thisTurn` notes are the app speaking) are in `agents/narrator.json`,
+  the cached system prefix of every call. Per-world and per-life material (the
+  `brief`, the `shape`, the opening groups, the voice, the state) comes from
+  `endless_read_runtime`, once per conversation on the recall-sent record: a
+  full read resets that record and always carries the brief and shape; a delta
+  read names them in `held` when this conversation already has them, and still
+  sends them when the record was emptied (a rotation stamp, or `advance_turn()`
+  creating a fresh slot, which resets the record before dispatch). The per-turn message — `compose_prompt()`, and
+  `compose_opening_prompt()` for a life's first turn — is the run id and turn
+  (`addressing`), a pull (`turn.read` / `opening.new`), and the player's quoted
+  action, last. The app's per-turn settings (style, page length, art off, a
+  close) are built by `turn_notes()`, written into the in-flight record by
+  `mark_pending(notes=)` before dispatch, and returned by the read as
+  `thisTurn` (only for the record of the month being asked, once per
+  conversation while unchanged). A fresh conversation holds no fingerprint, so
+  its first read is full and carries the rulebook before it writes, and a commit
+  with no read behind it is refused (`read-runtime-first`, below). Measured on
+  the 28 live narrator sessions (232 user messages): a re-brief message was
+  median 8.6 KB, max 21 KB (395 KB over 43 messages), and is now median 391 B;
+  an opening was median 684 B and is now 247 B; a recovery prompt went from
+  458 B to 125 B; an ordinary turn stays about 390 B. Pinned by
+  `test_brief.test_no_turn_message_carries_the_rulebook_in_a_fresh_or_kept_conversation`,
+  `test_brief.test_a_turn_message_has_no_channel_for_a_rulebook`,
+  `test_context_dedupe.test_a_full_read_carries_the_brief_and_shape_and_a_delta_read_does_not`,
+  `test_a_fresh_conversation_gets_them_again`,
+  `test_a_delta_read_in_a_rotated_conversation_still_gets_them`,
+  `test_a_rebuilt_slot_forgets_what_the_old_conversation_was_sent`,
+  `test_a_kept_slot_keeps_the_record`,
+  `test_a_fresh_slots_message_has_no_brief_and_its_first_read_does`,
+  `test_the_turns_notes_reach_the_read_once_and_again_when_they_change`,
+  `test_a_record_for_another_month_gives_no_notes`,
+  `test_no_amount_of_history_grows_the_prompt`, and
+  `test_the_prompt_carries_the_run_the_turn_and_the_players_words_and_nothing_else`.
+  Re-adding a rulebook, state or chronicle renderer to the prompt breaks this.
 
 - **The run id is named, and named first.** `_addressing(run_id, turn)` is the
-  first line of the prompt, above the rulebook, phrased as a directive not to
-  alter the identifier — because an exact identifier a tool call requires must be
-  stated, never inferred, and the rulebook is 15,000 characters the narrator would
-  otherwise read first. Enforced by `_addressing()` / `compose_prompt()`; pinned
+  first line of the prompt, phrased as a directive not to alter the identifier —
+  because an exact identifier a tool call requires must be stated, never inferred. Enforced by `_addressing()` / `compose_prompt()`; pinned
   by `test_the_prompt_names_the_run_the_narrator_is_advancing` and
   `test_the_id_is_marked_as_not_to_be_altered`.
 
@@ -162,12 +187,20 @@ turn 200 as at turn 1.
   graph still holds them. If the read is still over `READ_CEILING` (26,000),
   `_fit_recent` drops the oldest short rows first, then shortens the oldest whole
   months to short rows (kept, never dropped), and names both in `recentTrimmed`.
-  The newest month, the state, the scenes and every other block are never cut,
-  so a read whose state alone is larger stays over the ceiling. Delta reads carry
+  After that, and only for a life past its opening, the opening hand-off
+  (`handToAgent` and its note) is dropped and named as
+  `recentTrimmed.handToAgent: "dropped"`: its purpose is turn one, and past it
+  its setting surfaces through `lore` and its grants are in the state. The
+  newest month, the state, the scenes, the brief and the shape are never cut, so
+  a read whose state alone is larger stays over the ceiling. Delta reads carry
   no months and are never trimmed. Measured on the four live lives the default
   full read went from 34.9K / 34.1K / 32.1K / 14.4K characters to 27.6K / 16.3K /
-  23.9K / 13.0K; the one still over 26K is a two-month life whose brief and shape
-  alone are 9.5K. Pinned by `test_a_long_lifes_full_read_stays_under_the_ceiling`,
+  23.9K / 13.0K. The brief and shape now ride in every full read (largest live
+  world: 10.6K characters together); on the five live lives the largest full
+  read is 25.1K, the two-month life that was 27.8K before its hand-off was
+  dropped. Pinned by `test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit`,
+  `test_the_opening_read_keeps_its_hand_off`,
+  `test_a_read_under_the_ceiling_keeps_everything`, `test_a_long_lifes_full_read_stays_under_the_ceiling`,
   `test_the_newest_months_keep_their_whole_prose`,
   `test_a_re_read_month_leaves_out_the_choice_art`,
   `test_trimming_drops_the_oldest_summaries_first_and_says_so`,
@@ -179,18 +212,13 @@ turn 200 as at turn 1.
   re-sent.** On a delta read the world summary and the mounted scenes are left
   out when this conversation was given that exact body (tagged by
   `RunStore.content_tag` in the recall-sent record, so a full read or a rotation
-  makes them unsent again, and a changed body is a new tag). On a full read the
-  `brief` and `shape` are left out when the prompt of the SAME attempt carried
-  byte-identical text: `advance_turn()` records the tags in the briefed marker
-  (`mark_briefed(turn=, carried=)`) after dispatch, and `RunStore.prompt_carried`
-  trusts them only for the in-flight turn and only when the marker is no older
-  than that attempt's `askedAt`. An opening prompt carries neither, so its read
-  sends both. Pinned by `test_the_world_summary_rides_once_per_conversation`,
+  makes them unsent again, and a changed body is a new tag). The `brief`, the
+  `shape` and the `thisTurn` notes ride the same way; no user message carries
+  the brief or the shape. Pinned by
+  `test_the_world_summary_rides_once_per_conversation`,
   `test_a_rotation_makes_the_world_summary_unsent_again`,
-  `test_unchanged_scenes_are_held_and_a_changed_ledger_is_sent`,
-  `test_a_full_read_omits_the_brief_and_shape_its_own_prompt_carried`,
-  `test_a_retried_attempt_without_the_brief_in_its_prompt_gets_it_whole`, and
-  `test_an_opening_prompt_records_that_it_carried_neither`.
+  `test_unchanged_scenes_are_held_and_a_changed_ledger_is_sent`, and
+  `test_the_turns_notes_reach_the_read_once_and_again_when_they_change`.
 
 - **A turn is idempotent per `(runId, turn)`.** `advance_turn()` returns a landed
   turn without asking the narrator again, so a double-tap or a retry over a flaky
@@ -376,9 +404,9 @@ turn 200 as at turn 1.
   `POST /runs/{id}/turn` with `close: true` (a literal `true`; it drops any action
   words) is refused 409 on a life that has had no month yet; otherwise it runs
   the normal `advance_turn` with `close=True`. `store.mark_pending` writes
-  `close: true` into the in-flight record before dispatch, and `compose_prompt`
-  adds the app's own `turn.close` line asking for an epilogue (not the quoted
-  player-words block). At commit, `_advance_turn` reads the pending record for
+  `close: true` into the in-flight record before dispatch, together with the
+  app's own `turn.close` note asking for an epilogue (from `turn_notes`, never
+  the quoted player-words block), which the read returns in `thisTurn`. At commit, `_advance_turn` reads the pending record for
   THIS turn: when it carries `close`, the turn is terminal whatever the narrator
   sent — `retiredByPlayer` is set, choices are dropped, and the ended stamp above
   writes the narrator's ending id, else the fired world ending (the flagship's
@@ -388,7 +416,7 @@ turn 200 as at turn 1.
   `test_without_the_players_close_a_living_turn_stays_alive`,
   `test_the_close_rides_only_in_the_apps_pending_record`,
   `test_a_narrator_ending_id_is_kept_on_a_closing_turn`,
-  `test_the_close_prompt_is_the_apps_line_not_quoted_player_words`,
+  `test_the_close_note_is_the_apps_line_not_quoted_player_words`,
   `test_advance_turn_records_the_close_before_the_narrator_is_asked`, and
   `test_a_life_that_has_not_begun_cannot_be_closed`.
  `_clean_choices` salvages before it judges: a caption under a
@@ -406,10 +434,9 @@ turn 200 as at turn 1.
   so the wait and the idempotence live in one place and cannot drift apart. The
   opening prompt takes its language from the world it is quoting, not from a caller
   argument — `compose_opening_prompt()` has no `language` parameter — pinned by
-  `test_the_opening_prompt_takes_its_language_from_the_world_not_the_caller`. The
-  briefing state machine sends the rulebook and declaration shape only when the
-  slot is fresh or a different slot was last briefed, so turn 2 never re-pushes the
-  rulebook.
+  `test_the_opening_prompt_takes_its_language_from_the_world_not_the_caller`. No
+  prompt carries the rulebook or the declaration shape; the opening's first read
+  is full and carries both.
 
 - **A requested backdrop is part of the turn's publication boundary.** The narrator
   may commit state, prose, and chronicle before the illustrator finishes, but

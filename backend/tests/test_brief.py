@@ -1,22 +1,12 @@
-"""Guards on delivering the world's law once instead of every turn.
+"""Guards on where the world's law reaches the narrator: the read, never the message.
 
-Measured on a live run before this change, from the narrator's own session file:
-
-    dashboard_endless-run-9856fa….jsonl   643 KB, one conversation, every turn of it
-      user  15,306 chars   carries the rulebook
-      user  17,036 chars   carries the rulebook
-      user  19,149 chars   carries the rulebook
-      user  20,807 chars   carries the rulebook
-      user  21,734 chars   carries the rulebook
-
-One conversation per life, and the whole 15,000-character rulebook re-sent inside
-every message in it — 70% of the prompt by turn four, growing without bound while
-changing never. The narrator was already holding it from turn one.
-
-The risk of the fix is the opposite failure, and it is much worse than the waste: a
-life whose narrator never received its world narrates a different world. So these
-tests are mostly about the conditions under which the rulebook MUST be sent again,
-not about the saving.
+Measured on the live narrator sessions (dashboard_endless-run-*.jsonl, 28 lives):
+a re-brief user message carried the rulebook and the state shape, median 8.6 KB
+and up to 21 KB, in the player-visible transcript, while the read that followed
+named both as held. The rulebook now rides only in a full ``endless_read_runtime``
+(see test_context_dedupe), so no user message carries it, on any turn, in any
+conversation. These tests pin that the message stays a few lines whatever the
+slot's history, and that a replaced conversation still keeps the saved life.
 """
 
 from __future__ import annotations
@@ -98,91 +88,52 @@ def _advance(state_obj, store, run_id, dispatch):
             state_obj=state_obj,
             store=store,
             run_id=run_id,
-            rulebook=RULEBOOK,
             dispatch=dispatch,
             inline_wait_secs=0.3,
-            shape="declare state in this shape: status",
         )
     )
 
 
-# ── the saving ──────────────────────────────────────────────────────────────
+# ── no message carries the rulebook ─────────────────────────────────────────
 
 
-def test_the_first_turn_of_a_life_carries_the_rulebook(store, run):
-    sent: list[str] = []
-    _advance(FakeState(), store, run, _prompts(sent))
-
-    assert len(sent) == 1
-    assert RULEBOOK in sent[0], "a narrator's first turn must arrive with its world"
+def _commit(store, run, turn):
+    store.commit_state(run, {**store.read_state(run), "turn": turn})
+    store.append_turn(run, {"turn": turn, "prose": "the snow stopped"})
 
 
-def test_the_next_turn_does_not_repeat_it(store, run):
-    """The measured waste, removed. The conversation is the same one; the rulebook is
-    still in it."""
+def _assert_thin(prompt: str, run: str) -> None:
+    from content import Content
+
+    assert run in prompt, "the run id must be in every message"
+    assert Content("en")("turn.read") in prompt
+    assert RULEBOOK not in prompt
+    assert len(prompt.encode("utf-8")) < 400, f"a turn message grew to {len(prompt)} chars"
+
+
+def test_no_turn_message_carries_the_rulebook_in_a_fresh_or_kept_conversation(store, run):
+    """First turn on a new slot, the next turn on the same slot, and a turn on a
+    rebuilt slot: the message is the same few lines in all three."""
     state_obj = FakeState()
     sent: list[str] = []
     _advance(state_obj, store, run, _prompts(sent))
-
-    # The narrator commits turn 1, so the next call asks for turn 2 rather than
-    # attaching to the one in flight.
-    store.commit_state(run, {**store.read_state(run), "turn": 1})
-    store.append_turn(run, {"turn": 1, "prose": "the snow stopped"})
-
+    _commit(store, run, 1)
     _advance(state_obj, store, run, _prompts(sent))
+    _commit(store, run, 2)
+    _advance(FakeState(), store, run, _prompts(sent))  # gateway restart: new slot
 
-    assert len(sent) == 2
-    assert RULEBOOK not in sent[1], "the rulebook was sent twice to one conversation"
-    # And the turn is still fully specified without it: which life, which month, and
-    # an instruction to go and read the rest.
-    from content import Content
-
-    assert run in sent[1], "the run id must survive the trimming"
-    assert Content("en")("turn.ask", turn=2) in sent[1], (
-        "the narrator must still be told which month it is writing"
-    )
-    assert Content("en")("turn.pull") not in sent[1], (
-        "the pull instruction is in the system prompt (narrator.json), not repeated each turn"
-    )
+    assert len(sent) == 3
+    for prompt in sent:
+        _assert_thin(prompt, run)
 
 
-def test_omitting_the_rulebook_omits_its_heading_too(store, run):
-    """A label with nothing under it reads as a world with no rules — worse than
-    either sending the text or saying nothing."""
-    from content import Content
+def test_a_turn_message_has_no_channel_for_a_rulebook():
+    """The parameter itself is gone, so no caller can push one back in."""
+    import inspect
 
-    heading = Content("en")("turn.rulebook")
-    with_book = compose_prompt(
-        run_id="run-1", rulebook=RULEBOOK, state={}, chronicle=[], language="en"
-    )
-    without = compose_prompt(run_id="run-1", rulebook="", state={}, chronicle=[], language="en")
-    assert heading in with_book
-    assert heading not in without
-
-
-# ── when it must be sent again ──────────────────────────────────────────────
-
-
-def test_a_replaced_conversation_gets_the_rulebook_again(store, run):
-    """A slot created by this call has nothing behind it, whatever a marker says.
-
-    This is the gateway-restart case, and it is the one where being wrong is
-    expensive: a life narrated without its world is not a slow life, it is a
-    different world.
-    """
-    first = FakeState()
-    sent: list[str] = []
-    _advance(first, store, run, _prompts(sent))
-    store.commit_state(run, {**store.read_state(run), "turn": 1})
-    store.append_turn(run, {"turn": 1, "prose": "p"})
-
-    # A brand-new state object: the slot does not exist and has to be created.
-    _advance(FakeState(), store, run, _prompts(sent))
-
-    assert RULEBOOK in sent[1], (
-        "a narrator with a fresh conversation was asked to continue a life whose "
-        "rules it had never been told"
-    )
+    params = set(inspect.signature(compose_prompt).parameters)
+    assert not params & {"rulebook", "shape", "chronicle", "fresh"}, params
+    assert not {"rulebook", "shape"} & set(inspect.signature(advance_turn).parameters)
 
 
 def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monkeypatch):
@@ -210,46 +161,15 @@ def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monke
     assert new_slot is not old_slot, "the pre-update conversation was reused"
     assert purged == [run], "the pre-update persisted conversation was not purged"
     assert store.narrator_generation(run) == "updated-install"
-    assert RULEBOOK in sent[1], "the new conversation was not re-briefed"
+    _assert_thin(sent[1], run)
     assert store.read_state(run) == saved, "slot replacement changed the save"
     assert store.read_chronicle(run) == before_chronicle
 
 
-def test_a_marker_naming_another_slot_does_not_count(store, run):
-    """A rulebook read into a conversation that is not this one has not been
-    delivered to this one."""
-    store.mark_briefed(run, slot="endless-run-somebody-else")
-
-    sent: list[str] = []
-    _advance(FakeState(), store, run, _prompts(sent))
-    assert RULEBOOK in sent[0]
-
-
-def test_the_marker_is_written_after_the_prompt_that_carries_it(store, run):
-    """Order, and the direction of the failure.
-
-    Marking first and failing to dispatch would leave a life permanently convinced
-    its narrator had been briefed. Marking after costs one redundant re-send if the
-    process dies in between — which is the safe way to be wrong.
-    """
-    seen: dict[str, str] = {}
-
-    def dispatch(state, slot, prompt, **_kw):
-        seen["at_dispatch"] = store.briefed_slot(run)
-        return True
-
-    _advance(FakeState(), store, run, dispatch)
-
-    assert seen["at_dispatch"] == "", (
-        "the run was marked as briefed before the prompt carrying the rulebook was even handed over"
-    )
-    assert store.briefed_slot(run), "the marker was never written"
-
-
-def test_the_marker_names_the_conversation_it_was_read_to(store, run):
-    sent: list[str] = []
-    _advance(FakeState(), store, run, _prompts(sent))
-    assert run in store.briefed_slot(run)
+def test_the_turn_loop_writes_no_rulebook_marker(store, run):
+    """Nothing reads the old delivery marker any more, so nothing writes it."""
+    _advance(FakeState(), store, run, _prompts([]))
+    assert store.briefed_slot(run) == ""
 
 
 # ── the signal the decision rests on ────────────────────────────────────────

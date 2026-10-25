@@ -183,11 +183,15 @@ def test_the_opening_prompt_carries_no_setup_only_a_pull(tpl):
     assert "艾琳" not in prompt, "the player's answers are pulled from state, not pushed"
 
 
-def test_the_opening_prompt_tells_the_narrator_not_to_name_the_settings(tpl):
-    """R25 — the player is living in a world, not filling in a form. Carried in the
-    pull instruction now, not a separate line."""
-    prompt = compose_opening_prompt(template=tpl, run_id="run-1")
-    assert "不要提到任何设定项的名字" in prompt
+def test_the_opening_prompt_carries_no_rulebook_and_stays_short(tpl):
+    """How to write a first page is in the narrator's own prompt; the world's rules
+    are in the read. The message is the run id and a pull, nothing more."""
+    from chapters import brief
+
+    prompt = compose_opening_prompt(template=tpl, run_id="9856fa638614440fbc7171ba8fe896c5")
+    assert brief(tpl).strip()[:80] not in prompt
+    assert all(g.label not in prompt for g in tpl.opening if g.label)
+    assert len(prompt.encode("utf-8")) < 400, len(prompt.encode("utf-8"))
 
 
 def test_the_opening_prompt_names_the_run(tpl):
@@ -195,19 +199,6 @@ def test_the_opening_prompt_names_the_run(tpl):
     named the run and the narrator invented an id its commit was then refused for."""
     prompt = compose_opening_prompt(template=tpl, run_id="9856fa638614440fbc7171ba8fe896c5")
     assert "9856fa638614440fbc7171ba8fe896c5" in prompt
-
-
-def test_the_opening_prompt_nudges_the_first_backdrop_toward_a_scene(tpl):
-    """The first page is the slowest wait in the app: a hand-drawn LANE: motif is
-    two illustrator attempts of up to three minutes. The opening prompt biases the
-    FIRST backdrop toward a traced LANE: scene so the player opens on a real place
-    faster — while still leaving motif as the fallback for a non-photographable
-    opening. This lever lives only in the opening prompt, not the per-turn one."""
-    prompt = compose_opening_prompt(template=tpl, run_id="run-1")
-    assert "LANE: scene" in prompt
-    # The fallback must survive, or a purely fantastical opening is forced onto a
-    # blank procedural base instead of a hand-drawn motif.
-    assert "LANE: motif" in prompt
 
 
 # -- roles preset the opening and land grants -----------------------------

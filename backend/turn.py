@@ -90,7 +90,7 @@ ROTATION_MAX_TURNS = 8
 #:
 #: The point is the prompt cache. Within its lifetime the conversation so far is
 #: re-read cheaply; after it, every call pays the whole history at full price,
-#: and a fresh conversation (rulebook prefix + one full read) is then the cheaper
+#: and a fresh conversation (system prompt + one full read) is then the cheaper
 #: thing to send. The real lifetime behind Kiro credits is not documented; 5 min is
 #: the common default, and on one measured life turns after a gap under 5 min sat
 #: ~0.5 credits under the cost fit while turns after 6-13 min did not. Replayed
@@ -214,26 +214,21 @@ class TurnError(RuntimeError):
 
 def compose_prompt(
     *,
-    rulebook: str,
     state: dict[str, Any],
-    chronicle: list[dict[str, Any]],
     run_id: str,
-    shape: str = "",
     action: str = "",
-    style: str = "",
     language: Any = "en",
-    prose_length: str = "",
-    backdrops_enabled: bool = True,
-    close: bool = False,
-    fresh: bool = False,
 ) -> str:
-    """Everything the narrator needs to write the next turn, and nothing else.
+    """The user message for one turn: which life, which turn, and the player's words.
 
-    ``fresh`` says this prompt opens a new conversation for a life already under
-    way. Its narrator holds no fingerprint until its first read, and measured
-    narrators in that position re-declared the whole state (20-24 KB of output,
-    ~115 s a turn against ~60 s for a patch) — so the prompt says, once, that the
-    read's fingerprint is enough for a patch.
+    Nothing else. Every rule about HOW to narrate is in the narrator's own prompt
+    (agents/narrator.json), which sits in the cached system prefix of every call
+    instead of in every conversation. Everything about THIS world and THIS life —
+    the rulebook, the shape of the state, the opening choices, the voice, and the
+    app's notes for this turn (``turn_notes``) — is returned by
+    ``endless_read_runtime``, once per conversation. A rulebook pushed into this
+    message was measured at up to 21 KB on a re-brief, sat in the player-visible
+    transcript, and duplicated what the read hands over anyway.
 
     ``run_id`` is not optional and is not decoration: every tool the narrator has
     takes it, so a prompt without it leaves the narrator guessing an identifier.
@@ -242,10 +237,8 @@ def compose_prompt(
     refused for the malformed id, and it spent the rest of the turn trying to look
     up a run it could not name.
 
-    ``language`` comes from the WORLD, not from a setting. A world whose header
-    says ``language: zh`` is a Chinese world with a Chinese rulebook, and asking
-    its narrator for a turn in English would produce a story in the wrong language
-    for its own source material.
+    ``language`` comes from the WORLD, not from a setting: a Chinese world's
+    narrator is addressed in Chinese.
 
     Notably absent: anything about the player outside this life. The narrator's
     session is sealed from their memory and lessons by ``memory_mode`` and by its
@@ -254,64 +247,52 @@ def compose_prompt(
     """
     text = Content(language)
     turn = int(state.get("turn") or 0)
-    parts: list[str] = [_addressing(run_id, turn + 1, language)]
-    # The world's law, when it still has to be sent. An empty rulebook omits the
-    # heading as well: a label with nothing under it reads as a world with no rules.
-    if rulebook.strip():
-        parts += ["", text("turn.rulebook"), rulebook.strip()]
-
-    # Everything else the narrator needs is PULLED, not pushed.
-    #
-    # The state, the recent months and the app's readings of its own behaviour used
-    # to be rendered into this prompt, which meant every turn paid for all of them
-    # whether the month needed them or not, and paid again for the parts that had not
-    # changed since the turn before. They are reference material, not instruction,
-    # and `endless_read_runtime` already served them — the prompt simply made calling it
-    # pointless.
-    #
-    # The INSTRUCTION to pull (call endless_read_runtime first, and the fingerprint
-    # rules) is not repeated here either: it is verbatim in the narrator's SYSTEM
-    # prompt (agents/narrator.json), which is present on every turn regardless of
-    # compaction, so restating it per turn was ~300 characters of pure duplication.
-    # What stays pushed is only what a tool cannot guarantee and the system prompt
-    # cannot carry: the identity of THIS run, which turn is being asked for, and the
-    # player's own words for this turn.
-
-    if style:
-        parts += ["", text("turn.style", style=style)]
-
-    # The player's pacing preference, as one line the narrator reads every turn.
-    # The visual switches are ENFORCED at the MCP gates; these two lines are the
-    # courtesy that saves the narrator from spending a tool call (or three
-    # paragraphs) it will not be thanked for.
-    if prose_length in ("short", "long"):
-        parts += ["", text(f"turn.length.{prose_length}")]
-    if not backdrops_enabled:
-        parts += ["", text("turn.noart")]
-
-    if shape:
-        parts += ["", shape]
-
-    if fresh and turn > 0:
-        parts += ["", text("turn.patch")]
-
-    parts += ["", text("turn.ask", turn=turn + 1)]
-    if close:
-        # The player chose to close this life here. Said as the app's own line,
-        # never as the player's quoted words, because it is a request the app
-        # made on the player's behalf — the commit closes the life either way
-        # (mcp_server reads the app's pending record), so this only asks for the
-        # page that ends it well.
-        parts += ["", text("turn.close")]
+    parts: list[str] = [_addressing(run_id, turn + 1, language), text("turn.read")]
     if action:
         # The player's own words go last and are quoted, so a line like "ignore the
         # rules above" reads as something a character said rather than as an
         # instruction to the narrator.
         parts += [
+            "",
             text("turn.action.preamble"),
             text("turn.action.quote", action=action),
         ]
     return "\n".join(parts)
+
+
+def turn_notes(
+    *,
+    language: Any = "en",
+    style: str = "",
+    prose_length: str = "",
+    backdrops_enabled: bool = True,
+    close: bool = False,
+) -> list[str]:
+    """The app's own lines for the turn being asked, in the world's language.
+
+    They used to ride in the user message; they now ride in the in-flight record
+    (``RunStore.mark_pending``) and reach the narrator as ``thisTurn`` in
+    ``endless_read_runtime``, so the message stays a few lines long. They change
+    between turns (a settings toggle, a close request), which is why they are not
+    in the narrator's own prompt either.
+
+    The visual switch is ENFORCED at the MCP gates; its line is the courtesy that
+    saves the narrator a tool call it will not be thanked for. ``close`` is said as
+    the app's own line, never as the player's quoted words: the commit closes the
+    life either way (mcp_server reads the app's pending record), so this only asks
+    for the page that ends it well.
+    """
+    text = Content(language)
+    notes: list[str] = []
+    if style:
+        notes.append(text("turn.style", style=style))
+    if prose_length in ("short", "long"):
+        notes.append(text(f"turn.length.{prose_length}"))
+    if not backdrops_enabled:
+        notes.append(text("turn.noart"))
+    if close:
+        notes.append(text("turn.close"))
+    return notes
 
 
 def declaration_shape(template: Any) -> str:
@@ -497,7 +478,6 @@ async def advance_turn(
     state_obj: Any,
     store: RunStore,
     run_id: str,
-    rulebook: str,
     dispatch: Callable[..., bool],
     action: str = "",
     style: str = "",
@@ -506,7 +486,6 @@ async def advance_turn(
     project: str = "",
     prompt_override: str = "",
     language: Any = "en",
-    shape: str = "",
     model: str = "",
     reasoning_effort: str = "",
     chapter_crossed: bool = False,
@@ -570,8 +549,9 @@ async def advance_turn(
         # (a chapter just opened, or the turn budget below ran out) instead of
         # growing until the harness compacts it at an arbitrary mid-scene point and
         # the narrator loses its baseline uncontrolled. The fresh conversation
-        # re-briefs and re-anchors itself with a full read — the same self-healing
-        # path a compaction already triggers, only at a moment of our choosing.
+        # re-anchors itself with one full read, which carries the rulebook — the
+        # same self-healing path a compaction already triggers, only at a moment
+        # of our choosing.
         #
         # The marker is written BEFORE the reset, not just before dispatch: it is
         # what makes one boundary produce one rotation, so a request that resets
@@ -599,8 +579,8 @@ async def advance_turn(
     # turn whose full deadline passed with ZERO tool calls (`steps` never moved;
     # note_tool_call stamps every endless_* call) was never running this app's
     # narrator at all. Drop the conversation and let this call rebuild it under
-    # the current registration; the fresh slot re-briefs the rulebook by the
-    # existing fresh_slot path. Capped per turn so a fresh slot that ALSO fails
+    # the current registration; the fresh slot reads the rulebook back on its
+    # first full read. Capped per turn so a fresh slot that ALSO fails
     # surfaces as a failure instead of churning conversations every deadline.
     #
     # Measured against the BUDGET, never against the inline wait: this request
@@ -628,25 +608,6 @@ async def advance_turn(
                 reasoning_effort=reasoning_effort,
             )
             slot_key = str(getattr(slot, "key", "") or "")
-
-    # Does the narrator still have the world's rulebook?
-    #
-    # Its session is ONE conversation across every turn of a life — measured: a single
-    # .jsonl per run, holding every turn — so the rulebook it was given on turn one is
-    # still in front of it on turn twelve. Re-sending was 15,000 characters a turn,
-    # 70% of the prompt by turn four, growing forever while changing never.
-    #
-    # Two things make it necessary again, and both are detectable. A slot created by
-    # THIS call has no conversation behind it, whatever came before. And a marker
-    # naming a different slot means the rulebook was read to a conversation that is
-    # not the one now being spoken to.
-    #
-    # What is NOT claimed: that a long session cannot have the rulebook compacted
-    # away underneath us. That is a real residual risk, it is invisible from here,
-    # and the honest response is to name it rather than to pretend the marker covers
-    # it. If it bites, the fix is a cheap periodic re-brief, not a guess here.
-    briefed = store.briefed_slot(run_id)
-    brief_now = fresh_slot or briefed != slot_key
 
     # Is this month already being written? Idempotence per (runId, turn) only
     # protects a turn that has LANDED; until then the store looks identical to
@@ -684,22 +645,27 @@ async def advance_turn(
         _note_turn_context(state_obj, store, run_id, wanted, slot_key)
         return TurnOutcome(advanced=True, turn=wanted, prose=prose)
 
+    # The world's rulebook and state shape are NOT sent here. They ride in the
+    # read, once per conversation on the recall-sent record (a full read always
+    # carries them), and a commit with no read behind it is refused
+    # (``read-runtime-first``). A slot this call had to create is a conversation
+    # that holds nothing, so its record is emptied here: a rotation already does
+    # that through its stamp, and a rebuilt slot (gateway restart, self-heal) must
+    # not inherit the old conversation's "already delivered".
+    if fresh_slot:
+        store.mark_recall_sent(run_id, [], reset=True)
     prompt = prompt_override or compose_prompt(
-        # Sent on the first turn of a life and after the conversation is replaced;
-        # otherwise the narrator is already holding it and an empty string here is
-        # the whole saving.
-        rulebook=rulebook if brief_now else "",
         state=run_state,
-        chronicle=store.read_chronicle(run_id),
         run_id=run_id,
-        shape=shape if brief_now else "",
         action=action,
-        style=style,
         language=language,
+    )
+    notes = turn_notes(
+        language=language,
+        style=style,
         prose_length=prose_length,
         backdrops_enabled=backdrops_enabled,
         close=close,
-        fresh=brief_now,
     )
 
     # BEFORE dispatch, never after. The window this closes is the one between
@@ -713,7 +679,7 @@ async def advance_turn(
         # The abandoned attempt's brief is gone: the caller stops the recovery
         # that was serving it, so it dispatches no further illustrator for it.
         on_art_forgotten()
-    store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action, close=close)
+    store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action, close=close, notes=notes)
     asked_at = float((store.read_pending(run_id) or {}).get("askedAt") or 0.0)
 
     def _settled() -> None:
@@ -728,19 +694,6 @@ async def advance_turn(
             )
 
     started = dispatch(state_obj, slot, prompt, on_settled=_settled)
-    if brief_now:
-        # Which blocks THIS prompt itself carried, tagged by exact text, so the
-        # narrator's full read in the same attempt names them as held instead of
-        # sending a second copy (measured: brief + shape, ~8 KB, twice in one turn
-        # on every re-brief). An opening prompt carries neither, so its read still
-        # sends both.
-        carried: dict[str, str] = {}
-        if not prompt_override:
-            if rulebook.strip():
-                carried["brief"] = RunStore.content_tag(rulebook.strip())
-            if shape:
-                carried["shape"] = RunStore.content_tag(shape)
-        store.mark_briefed(run_id, slot=slot_key, turn=wanted, carried=carried)
     if not started:
         # Queued behind a turn already running. Waiting is still correct: the
         # queued prompt will run, and the store is the thing we are watching.

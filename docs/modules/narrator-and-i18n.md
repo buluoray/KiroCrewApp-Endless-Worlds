@@ -60,12 +60,12 @@ argument.
 - **One slot per life, but not one conversation.** The slot persists for the
   life; its conversation is replaced after a pause past `IDLE_ROTATION_SECS` (5 min),
   every `ROTATION_MAX_TURNS` (8) turns, on a chapter boundary, and on an install
-  change, always through `reset_narrator_conversation` (briefed marker cleared,
-  transcript replay suppressed). The fresh conversation's prompt carries the
-  rulebook and `turn.patch`; its first read is full and carries `commitWith`
-  (`read.patch`, naming the read's fingerprint), so it commits a `statePatch`
-  rather than re-declaring the state. Both lines exist in every content table
-  in the life's own language. Contract and tests in [turn-loop](turn-loop.md).
+  change, always through `reset_narrator_conversation` (legacy briefed marker
+  cleared, transcript replay suppressed). The fresh conversation's prompt is the
+  same few lines as any turn's; its first read is full, carries the `brief` and
+  `shape`, and carries `commitWith` (`read.patch`, naming the read's
+  fingerprint), so it commits a `statePatch` rather than re-declaring the state.
+  `read.patch` exists in every content table in the life's own language. Contract and tests in [turn-loop](turn-loop.md).
 
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
@@ -134,11 +134,8 @@ argument.
   conversation, and create the replacement before composing the prompt. Content
   detects an update even when timestamps are preserved, while inode/ctime identity
   detects a same-content reinstall. An unchanged install keeps its slot. The
-  replacement is fresh, so the turn loop sends the world rulebook again (and
-  records which exact brief and shape that prompt carried, so the full read the
-  fresh narrator makes next names them in `held` instead of sending them a second
-  time — `test_a_full_read_omits_the_brief_and_shape_its_own_prompt_carried`) and treats
-  any old pending writer as gone. Generation is separate bookkeeping, not world
+  replacement is fresh, so its first read is full and carries the world's
+  rulebook again, and the turn loop treats any old pending writer as gone. Generation is separate bookkeeping, not world
   state: state, rollback, chronicle, worlds, and shelf rows are untouched. Pinned by
   `test_install_generation_changes_on_update_and_same_content_reinstall`,
   `test_stale_install_release_keeps_foreign_or_unsealed_slots`, and

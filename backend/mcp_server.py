@@ -2068,14 +2068,15 @@ def _result_chars(out: dict[str, Any]) -> int:
 def _fit_recent(out: dict[str, Any], lived: list[dict[str, Any]]) -> None:
     """Hold a full read under `READ_CEILING` by giving up the oldest months first.
 
-    Only the re-read months are ever cut, never the state, the scenes or anything
-    else in the read: those describe the month being written now. The oldest
+    The re-read months are cut first, never the state, the scenes, the brief or
+    the shape: those describe the month being written now. The oldest
     summary goes first. Once none is left, the oldest whole month is shortened to a
     summary in its place; a shortened month is kept, because at a few hundred
     characters it costs little and is still the only reach back to that month. The
     newest month always stays whole. What was cut is named in ``recentTrimmed`` so
     the narrator knows the window is shorter than it looks, and how to reach the
-    rest.
+    rest. The one exception comes after every month is cut: a begun life's
+    opening hand-off (``handToAgent``) is dropped and named the same way.
     """
     months: list[dict[str, Any]] = out.get("recentTurns") or []
     if _result_chars(out) <= READ_CEILING:
@@ -2107,7 +2108,19 @@ def _fit_recent(out: dict[str, Any], lived: list[dict[str, Any]]) -> None:
         months[whole[0]] = _month_summary(by_turn[turn])
         shortened.append(turn)
         report()
-    if not dropped and not shortened:
+    # Last resort, and only for a life already under way: what the world hands the
+    # narrator to OPEN with. Its own purpose is turn one, where no prose exists yet
+    # for lore to match; past that, its setting surfaces through `lore` and its
+    # role grants are already in the state. Measured: a turn-2 full read of a
+    # world with a large hand-off was 27.8K characters after every month was cut.
+    handoff = False
+    if _result_chars(out) > READ_CEILING and int(out.get("turn") or 0) >= 1:
+        handoff = out.pop("handToAgent", None) is not None
+        out.pop("handToAgentNote", None)
+        report()
+        if handoff:
+            out["recentTrimmed"]["handToAgent"] = "dropped"
+    if not dropped and not shortened and not handoff:
         out.pop("recentTrimmed", None)
 
 
@@ -2325,6 +2338,21 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     out["voice"] = voice
     out["voiceRule"] = Content(lang if isinstance(lang, str) else "en")(f"voice.{voice}")
 
+    # The app's own lines for the month being asked — the player's style, page
+    # length, art switch, a close request — recorded in the in-flight record by the
+    # turn loop (``turn.turn_notes``) instead of being written into the user
+    # message. Only the record for the NEXT month counts: a stale one from an
+    # older attempt says nothing about this one. Sent once per conversation while
+    # unchanged; a changed setting is a new tag and goes out again.
+    asked = store.read_pending(run_id) or {}
+    notes = asked.get("notes")
+    if (
+        int(asked.get("turn") or 0) == int(state.get("turn") or 0) + 1
+        and isinstance(notes, list)
+        and notes
+    ):
+        once("thisTurn", [str(n) for n in notes])
+
     wanted_events = args.get("memoryEvents") or []
     if wanted_events:
         out["memoryEvents"] = memory_graph.event_neighbourhood(
@@ -2464,6 +2492,16 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                     restraint["note"] = compose_restraint(
                         lived, state.get("language") or "en", gain_fields=counted
                     )
+            # The brief and the shape: this is the ONLY place they reach the
+            # narrator, since no user message carries them. Once per conversation,
+            # on the recall-sent record: a full read resets that record, so it
+            # always carries both; a delta read names them in `held` when this
+            # conversation already has them. A delta read in a conversation that
+            # never got them (a rotation stamp or a rebuilt slot emptied the
+            # record, but a replayed transcript left the narrator a fingerprint)
+            # still gets them, so no conversation writes before its rules arrive.
+            once("brief", brief(pack.template))
+            once("shape", declaration_shape(pack.template))
             # The table of contents, but not on every turn.
             #
             # A narrator cannot ask for a chapter it was never told exists, so the
@@ -2482,24 +2520,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 # pushed into the opening prompt, so that prompt can be just the run
                 # id: the world's always-open rules, how to record state, and the
                 # opening groups — including which the world settles rather than the
-                # player, the anti-halo signal that must not be lost (R7).
+                # player, the anti-halo signal that must not be lost (R7). The brief
+                # and the shape ride just above, once per conversation.
                 #
-                # Except what the prompt of THIS attempt already carried, byte for
-                # byte: a re-briefed turn puts the brief and the shape in the prompt
-                # and its narrator then makes exactly this full read, so both used
-                # to arrive twice in one turn. Matched by content tag, never by
-                # flag, so a different text (another language variant, an edited
-                # pack) is sent whole.
-                carried = store.prompt_carried(run_id, int(state.get("turn") or 0) + 1)
-                for key, body in (
-                    ("brief", brief(pack.template)),
-                    ("shape", declaration_shape(pack.template)),
-                ):
-                    tagged = body.strip() if key == "brief" else body
-                    if carried.get(key) == RunStore.content_tag(tagged):
-                        held_blocks.append(key)
-                    else:
-                        out[key] = body
                 # The opening groups AND the player's own answer to each — the
                 # value is what the narrator must honour (the chosen sex, race,
                 # name…). Listing only the questions here, with the answers buried

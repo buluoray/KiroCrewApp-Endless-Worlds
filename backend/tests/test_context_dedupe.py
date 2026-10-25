@@ -2,9 +2,8 @@
 
 Measured on four real lives: a full read at the default depth was 34-261 KB, and
 most of it was the page snapshots (``panels``/``digest``) riding on every
-recent month; a re-briefed turn received the brief and the shape twice, once in
-its prompt and once in the read it makes right after; and every delta read
-re-sent the same world summary. Each omission below keeps a baseline the narrator
+recent month; and every delta read re-sent the same world summary. The brief and
+the shape are in no user message at all: only a full read carries them. Each omission below keeps a baseline the narrator
 really holds, and each resets the same way the recall bodies do.
 """
 
@@ -22,7 +21,6 @@ sys.path.insert(0, str(_BACKEND))
 
 import mcp_server as srv  # noqa: E402
 from chapters import brief  # noqa: E402
-from store import RunStore  # noqa: E402
 from turn import advance_turn, declaration_shape  # noqa: E402
 from world import read_world  # noqa: E402
 
@@ -300,66 +298,44 @@ def test_no_scenes_is_still_said_on_every_read(app):
     assert full["scenes"] == [] and delta["scenes"] == []
 
 
-# -- the brief and shape this attempt's prompt already carried ---------------
+# -- the brief and shape ride only in a full read ---------------------------
 
 
-def _carried(store, run, turn, *, brief_text=None, shape_text=None):
-    pack = _pack()
-    b = brief(pack.template).strip() if brief_text is None else brief_text
-    s = declaration_shape(pack.template) if shape_text is None else shape_text
-    store.mark_briefed(
-        run,
-        slot="endless-run-" + run,
-        turn=turn,
-        carried={"brief": RunStore.content_tag(b), "shape": RunStore.content_tag(s)},
-    )
-
-
-def test_a_full_read_omits_the_brief_and_shape_its_own_prompt_carried(app):
+def test_a_full_read_carries_the_brief_and_shape_and_a_delta_read_does_not(app):
     store, run = _life()
-    store.mark_pending(run, turn=2, slot="endless-run-" + run)
-    _carried(store, run, 2)
+    full = call("endless_read_runtime", runId=run)
+    assert full["brief"] == brief(_pack().template)
+    assert full["shape"] == declaration_shape(_pack().template)
 
-    read = call("endless_read_runtime", runId=run)
-    assert "brief" not in read and "shape" not in read
-    assert {"brief", "shape"} <= set(read["held"])
-    assert "state" in read, "the rest of a full read is unchanged"
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert "brief" not in delta and "shape" not in delta
 
 
-def test_a_different_text_in_the_prompt_does_not_hold_the_reads_copy(app):
+def test_a_delta_read_in_a_rotated_conversation_still_gets_them(app):
+    """A rotation empties the record by its stamp. A narrator that still names a
+    fingerprint there (a replayed transcript) is given the rules anyway."""
     store, run = _life()
-    store.mark_pending(run, turn=2, slot="endless-run-" + run)
-    _carried(store, run, 2, brief_text="another variant", shape_text="another shape")
+    full = call("endless_read_runtime", runId=run)
+    store.mark_rotation(run, turn=1)
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert delta["brief"] == brief(_pack().template) and "shape" in delta
+    again = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert "brief" not in again and {"brief", "shape"} <= set(again["held"])
 
-    read = call("endless_read_runtime", runId=run)
-    assert read["brief"] == brief(_pack().template)
-    assert read["shape"] == declaration_shape(_pack().template)
 
-
-def test_a_retried_attempt_without_the_brief_in_its_prompt_gets_it_whole(app):
+def test_a_fresh_conversation_gets_them_again(app):
+    """A fresh conversation holds no fingerprint, so its read is full, and a full
+    read resets what this conversation is held to have."""
     store, run = _life()
-    store.mark_pending(run, turn=2, slot="endless-run-" + run)
-    _carried(store, run, 2)
-    # A newer ask for the same month, whose prompt did not re-brief: its pending
-    # record is newer than the marker, so the marker describes another attempt.
-    pending = store.read_pending(run)
-    pending["askedAt"] = float(pending["askedAt"]) + 10
-    store._kv.set(f"pending-{run}", pending)
-
-    read = call("endless_read_runtime", runId=run)
-    assert "brief" in read and "shape" in read
+    first = call("endless_read_runtime", runId=run)
+    call("endless_read_runtime", runId=run, since=first["fingerprint"])
+    again = call("endless_read_runtime", runId=run)
+    assert again["brief"] == brief(_pack().template)
+    assert "shape" in again and "world" in again
+    assert "held" not in again
 
 
-def test_a_marker_for_another_turn_holds_nothing(app):
-    store, run = _life(turns=2)
-    _carried(store, run, 2)  # the marker of the attempt that wrote month 2
-    store.mark_pending(run, turn=3, slot="endless-run-" + run)
-
-    read = call("endless_read_runtime", runId=run)
-    assert "brief" in read and "shape" in read
-
-
-# -- the turn loop records what its prompt carried ---------------------------
+# -- the turn loop sends no rulebook, and its notes reach the read -----------
 
 
 class _Slot:
@@ -406,33 +382,124 @@ def _ask(store, run, **kw):
     )
 
 
-def test_a_rebriefed_prompt_records_the_exact_blocks_it_carried(app, monkeypatch):
+def test_a_fresh_slots_message_has_no_brief_and_its_first_read_does(app, monkeypatch):
+    import narrator
+    from content import Content
+
+    monkeypatch.setattr(narrator, "app_install_generation", lambda: "g")
+    store, run = _life()
+    state = _State()
+    _ask(store, run, state=state, action="I go north")
+    prompt = state.prompts[0]
+    rules = brief(_pack().template)
+    assert rules.strip() not in prompt
+    assert declaration_shape(_pack().template) not in prompt
+    assert prompt.rstrip().endswith(Content("en")("turn.action.quote", action="I go north"))
+
+    read = call("endless_read_runtime", runId=run)
+    assert read["brief"] == rules and "shape" in read
+
+
+def test_a_rebuilt_slot_forgets_what_the_old_conversation_was_sent(app, monkeypatch):
+    import narrator
+
+    monkeypatch.setattr(narrator, "app_install_generation", lambda: "g")
+    store, run = _life()
+    old = _State()
+    _ask(store, run, state=old)
+    full = call("endless_read_runtime", runId=run)
+    assert any(t.startswith("brief:") for t in store.recall_sent(run))
+
+    store.clear_pending(run)
+    _ask(store, run, state=_State())  # gateway restart: the slot is created again
+    assert store.recall_sent(run) == set()
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert "brief" in delta and "shape" in delta
+
+
+def test_a_kept_slot_keeps_the_record(app, monkeypatch):
     import narrator
 
     monkeypatch.setattr(narrator, "app_install_generation", lambda: "g")
     store, run = _life()
     state = _State()
-    _ask(store, run, state=state, rulebook="  THE LAW  ", shape="THE SHAPE")
-    assert "THE LAW" in state.prompts[0]
-    assert store.prompt_carried(run, 2) == {
-        "brief": RunStore.content_tag("THE LAW"),
-        "shape": RunStore.content_tag("THE SHAPE"),
+    _ask(store, run, state=state)
+    call("endless_read_runtime", runId=run)
+    store.clear_pending(run)
+    _ask(store, run, state=state)
+    assert any(t.startswith("brief:") for t in store.recall_sent(run))
+
+
+def test_the_turns_notes_reach_the_read_once_and_again_when_they_change(app, monkeypatch):
+    import narrator
+    from content import Content
+
+    monkeypatch.setattr(narrator, "app_install_generation", lambda: "g")
+    store, run = _life()
+    state = _State()
+    _ask(store, run, state=state, prose_length="short", backdrops_enabled=False)
+    for line in (Content("en")("turn.length.short"), Content("en")("turn.noart")):
+        assert line not in state.prompts[0]
+
+    full = call("endless_read_runtime", runId=run)
+    assert full["thisTurn"] == [Content("en")("turn.length.short"), Content("en")("turn.noart")]
+    delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert "thisTurn" not in delta and "thisTurn" in delta["held"]
+
+    store.clear_pending(run)
+    _ask(store, run, state=state, prose_length="long")
+    changed = call("endless_read_runtime", runId=run, since=full["fingerprint"])
+    assert changed["thisTurn"] == [Content("en")("turn.length.long")]
+
+
+def test_a_record_for_another_month_gives_no_notes(app):
+    store, run = _life(turns=2)
+    store.mark_pending(run, turn=2, slot="s", notes=["an old attempt's note"])
+    read = call("endless_read_runtime", runId=run)
+    assert "thisTurn" not in read
+
+
+def test_an_opening_prompt_goes_out_as_given(app, monkeypatch):
+    import narrator
+
+    monkeypatch.setattr(narrator, "app_install_generation", lambda: "g")
+    store, run = _life()
+    state = _State()
+    _ask(store, run, state=state, prompt_override="just the run id")
+    assert state.prompts == ["just the run id"]
+
+
+# -- the 26K ceiling still holds with the brief in the read -------------------
+
+
+def _bulky(turn):
+    return {
+        "turn": turn,
+        "state": {"x": "s" * 9_000},
+        "brief": "b" * 8_000,
+        "shape": "h" * 6_000,
+        "handToAgent": {"lore": "l" * 4_000},
+        "handToAgentNote": "note",
+        "recentTurns": [{"turn": turn, "prose": "p" * 500}],
     }
 
 
-def test_an_opening_prompt_records_that_it_carried_neither(app, monkeypatch):
-    import narrator
+def test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit(app):
+    out = _bulky(2)
+    srv._fit_recent(out, [{"turn": 2, "prose": "p" * 500}])
+    assert srv._result_chars(out) <= srv.READ_CEILING
+    assert "handToAgent" not in out and "handToAgentNote" not in out
+    assert out["recentTrimmed"]["handToAgent"] == "dropped"
+    assert "brief" in out and "shape" in out and "state" in out
 
-    monkeypatch.setattr(narrator, "app_install_generation", lambda: "g")
-    store, run = _life()
-    state = _State()
-    _ask(
-        store,
-        run,
-        state=state,
-        rulebook="THE LAW",
-        shape="THE SHAPE",
-        prompt_override="just the run id",
-    )
-    assert state.prompts == ["just the run id"]
-    assert store.prompt_carried(run, 2) == {}
+
+def test_the_opening_read_keeps_its_hand_off(app):
+    out = _bulky(0)
+    srv._fit_recent(out, [])
+    assert "handToAgent" in out
+
+
+def test_a_read_under_the_ceiling_keeps_everything(app):
+    out = {**_bulky(2), "state": {}}
+    srv._fit_recent(out, [{"turn": 2, "prose": "p" * 500}])
+    assert "handToAgent" in out and "recentTrimmed" not in out

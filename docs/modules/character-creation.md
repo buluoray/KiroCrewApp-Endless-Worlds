@@ -69,16 +69,18 @@ player's own choices.
 
 - **The opening prompt names the run and carries a pull instruction only.**
   `compose_opening_prompt` pushes the run id plus an instruction to call
-  `endless_read_runtime`; the world's rules and the player's own answers are pulled,
-  not pushed, so the player-visible transcript is not a wall of setup, and the
-  prompt tells the narrator not to name the settings back to the player. The run id
+  `endless_read_runtime` (`opening.new`); the world's rules and the player's own
+  answers are pulled, not pushed, so the player-visible transcript is not a wall of
+  setup. How to write a first page (never naming the settings back to the player,
+  a traced scene for its backdrop where a real place could be photographed) is in
+  the narrator's own prompt. The run id
   must be stated explicitly — the narrator cannot infer the id its every tool call
   must match. Load-bearing because an opening turn whose id the narrator guesses is
   rejected at commit, and a setup dump breaks the narrative surface. Enforced by
   `opening.compose_opening_prompt`; pinned by
   `test_opening.test_the_opening_prompt_carries_no_setup_only_a_pull`,
   `test_opening.test_the_opening_prompt_names_the_run`, and
-  `test_opening.test_the_opening_prompt_tells_the_narrator_not_to_name_the_settings`.
+  `test_opening.test_the_opening_prompt_carries_no_rulebook_and_stays_short`.
 
 - **The voice is the player's pick at birth, and it never changes.** The last
   opening page offers who tells the life — second person ("you"), first person

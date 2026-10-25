@@ -151,7 +151,6 @@ from backdrop import (  # noqa: E402
     compile_backdrop,
 )
 from backdrop_timing import BackdropTimeline  # noqa: E402
-from chapters import brief as world_brief  # noqa: E402
 from chapters import opened_since  # noqa: E402
 from drafts import DraftError, DraftStore, worldsmith_prompt  # noqa: E402
 from library import LibraryError, WorldLibrary  # noqa: E402
@@ -183,7 +182,6 @@ from turn import (  # noqa: E402
     advance_turn,
     already_committed,
     brief_in_flight,
-    declaration_shape,
     generating,
     make_dispatcher,
     unanswered,
@@ -582,14 +580,12 @@ async def _recover_backdrop(
                 model=narrator_model,
                 reasoning_effort=reasoning_effort,
             )
+            # Only which page, and that the illustrators failed. How to recover
+            # (no narrating, a simpler brief or the direct fallback, no reply) is
+            # standing instruction in the narrator's own prompt.
             prompt = (
-                f"Internal page-art recovery for runId {run_id}, turn {turn}. "
-                "The prose/state are already committed; do NOT narrate or call "
-                "endless_advance_turn. Two illustrators ended without committing art. "
-                "Recover invisibly: either call endless_paint_backdrop with a NEW, "
-                "simpler brief, or draw one safe SVG yourself and call "
-                "endless_commit_fallback_backdrop with this exact runId and turn. "
-                "Do not explain the failure and do not write an ordinary reply."
+                f"Internal page-art recovery for runId {run_id}, turn {turn}: "
+                "the illustrators ended without committing art."
             )
             make_dispatcher(_narrator_runner())(state_obj, slot, prompt)
 
@@ -1644,11 +1640,9 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         state_obj=state_obj,
         store=store,
         run_id=run_id,
-        rulebook=world_brief(pack.template),
         dispatch=make_dispatcher(_run_chat),
         action=action,
         style=style,
-        shape=declaration_shape(pack.template),
         language=pack.template.language,
         project=str(ctx.data_dir / "runs" / run_id),
         model=_cfg["model"],
@@ -1911,13 +1905,15 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         state_obj=state_obj,
         store=store,
         run_id=run_id,
-        rulebook=world_brief(pack.template),
         dispatch=make_dispatcher(_run_chat),
         style=str(run_state.get("style") or ""),
         project=str(ctx.data_dir / "runs" / run_id),
         prompt_override=prompt,
+        language=pack.template.language,
         model=_cfg["model"],
         reasoning_effort=_cfg["reasoningEffort"],
+        prose_length=_cfg["proseLength"],
+        backdrops_enabled=bool(_cfg["backdrops"]),
         budget_secs=OPENING_DEADLINE_SECS,
         on_poll=lambda: _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg),
         on_art_forgotten=_art_forgotten(store, run_id),
