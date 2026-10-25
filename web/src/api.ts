@@ -906,7 +906,7 @@ export const api = {
 
   openRun: (id: string) => post<TurnAck>(`/runs/${encodeURIComponent(id)}/open`, {}),
 
-  takeTurn: (id: string, body: { turn?: number; action?: string }) =>
+  takeTurn: (id: string, body: { turn?: number; action?: string; close?: boolean }) =>
     post<TurnAck>(`/runs/${encodeURIComponent(id)}/turn`, body),
 
   scene: async (runId: string, sceneId: string): Promise<string> => {

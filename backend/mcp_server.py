@@ -1637,6 +1637,17 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass  # an achievement is a reward, never a reason to block a committed turn
 
+    # The player closed this life with this turn. Read from the app's own
+    # in-flight record (written by turn.advance_turn before the narrator was
+    # asked), never from anything the narrator sent — so a narrator can neither
+    # close a life the player is still living nor keep open one the player ended.
+    # `retiredByPlayer` is the flagship's declared ending condition; a world that
+    # declares no such ending still closes, under the `retired` id below.
+    _asked = store.read_pending(run_id) or {}
+    closing = _asked.get("close") is True and int(_asked.get("turn") or 0) == turn
+    if closing:
+        state["retiredByPlayer"] = True
+
     # Load the world pack once (reused for the choices gate and the panel warnings).
     pack = None
     _wid = state.get("worldId")
@@ -1663,7 +1674,11 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         _earlier = []  # an unreadable history only loses the spacing, never the turn
     choices, fateful_drops = _space_fateful(choices, _earlier)
-    if not choices and pack is not None:
+    if closing:
+        # A closed life's last page offers nothing to press: the ending page
+        # (inheritance, live again, back to the shelf) is what comes next.
+        choices = []
+    if not choices and pack is not None and not closing:
         fired = any(e.when is not None and e.when.evaluate(state) for e in pack.template.endings)
         if args.get("ending") is not True and not fired:
             sent = args.get("choices")
@@ -1709,9 +1724,10 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     fired_id = ""
     if pack is not None:
         fired_id = resolve_ending(pack.template, state)
-    if args.get("ending") is True or fired_id:
+    if args.get("ending") is True or fired_id or closing:
         flag = state.get("ended")
-        state["ended"] = flag if isinstance(flag, str) and flag else (fired_id or True)
+        default: str | bool = fired_id or ("retired" if closing else True)
+        state["ended"] = flag if isinstance(flag, str) and flag else default
     store.commit_state(run_id, state)
     # Provenance rides with the commit: leaves where the final state differs from
     # the narrator's declaration were backend-written (reserved-key carry,

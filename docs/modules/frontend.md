@@ -268,7 +268,10 @@ guarantee.
   root prevents focus theft. Ending prose uses the same component.
   `PlayPage` visibly labels free actions and describes Ctrl/Cmd+Enter (direct
   submission); composition events never submit unfinished IME text. Escape and
-  Think again restore focus to the armed choice or free-action box. Scroll-hidden
+  Think again restore focus to the armed choice, the free-action box, or the
+  close-this-life button. Closing a life (`play.closeLife`) takes the same second
+  step as an action and sends only `{close: true}` from the confirm button; the
+  view's backend-computed `growth` rows render beside the milestone marker. Scroll-hidden
   navigation becomes visible on keyboard focus. Phone actions stack, pager labels
   can shrink, and pager/confirmation targets remain at least 44px.
   The shelf explains how to start a first life, the first page explains the
@@ -277,7 +280,8 @@ guarantee.
   `test_cancel_returns_to_the_control_that_armed_the_action`,
   `test_a_landed_page_is_named_announced_and_focused_without_stealing_focus`,
   `test_phone_navigation_does_not_hide_the_keyboard_focus`,
-  `test_first_life_help_is_visible_on_both_widths`, and
+  `test_first_life_help_is_visible_on_both_widths`,
+  `test_closing_a_life_takes_a_confirm_step_and_sends_only_the_close_flag`, and
   `test_first_run_and_keyboard_copy_exists_in_both_languages` in
   `test_play_accessibility.py`. `devtools/play-ux.test.mjs` walks keyboard choice,
   Escape, free text, IME, turn arrival, history, and first-run screens in a seeded

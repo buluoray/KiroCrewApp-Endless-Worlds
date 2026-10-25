@@ -92,7 +92,6 @@ def _event_only_thread(index: dict[str, Any], tid: str) -> dict[str, Any] | None
     }
 
 
-
 def candidates(index: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """The inheritable things of a finished life, grouped the way §9 names them.
 

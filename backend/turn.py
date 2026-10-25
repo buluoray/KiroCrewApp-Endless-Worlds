@@ -190,6 +190,7 @@ def compose_prompt(
     language: Any = "en",
     prose_length: str = "",
     backdrops_enabled: bool = True,
+    close: bool = False,
 ) -> str:
     """Everything the narrator needs to write the next turn, and nothing else.
 
@@ -251,6 +252,13 @@ def compose_prompt(
         parts += ["", shape]
 
     parts += ["", text("turn.ask", turn=turn + 1)]
+    if close:
+        # The player chose to close this life here. Said as the app's own line,
+        # never as the player's quoted words, because it is a request the app
+        # made on the player's behalf — the commit closes the life either way
+        # (mcp_server reads the app's pending record), so this only asks for the
+        # page that ends it well.
+        parts += ["", text("turn.close")]
     if action:
         # The player's own words go last and are quoted, so a line like "ignore the
         # rules above" reads as something a character said rather than as an
@@ -461,6 +469,7 @@ async def advance_turn(
     prose_length: str = "",
     backdrops_enabled: bool = True,
     on_poll: Callable[[], None] | None = None,
+    close: bool = False,
 ) -> TurnOutcome:
     """Ask for one turn and wait, briefly, for the narrator to commit it.
 
@@ -644,6 +653,7 @@ async def advance_turn(
         language=language,
         prose_length=prose_length,
         backdrops_enabled=backdrops_enabled,
+        close=close,
     )
 
     # BEFORE dispatch, never after. The window this closes is the one between
@@ -653,7 +663,7 @@ async def advance_turn(
     # about. A test asserts this ordering, because reversing the two lines leaves
     # every symptom intact and reintroduces the whole bug.
     forget_unpublished_art(store, run_id, wanted)
-    store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action)
+    store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action, close=close)
     asked_at = float((store.read_pending(run_id) or {}).get("askedAt") or 0.0)
 
     def _settled() -> None:
