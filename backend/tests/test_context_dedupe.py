@@ -87,6 +87,150 @@ def test_a_full_read_re_reads_months_without_their_page_snapshots(app):
     assert all("choices" in m for m in months)
 
 
+# -- a full read fits the harness's tool-result limit -----------------------
+#
+# Measured on four real lives, a default full read was 32-35K characters on three
+# of them, just over the 30,000 the harness shows before it spills a result to a
+# file. The newest months now come whole and the older ones as short rows; what
+# still does not fit is cut from the oldest months, never from the state.
+
+_LONG = "The river rose and the bridge held, barely. " * 70  # ~3,100 chars
+
+
+def _long_life(turns, prose=_LONG, state=None):
+    store = srv._store()
+    run = store.create_run({"turn": 0, "worldId": "w"}, {"runId": "r1"})
+    for n in range(1, turns + 1):
+        # What the player asked for is the app's record, written before it asks.
+        store.mark_pending(run, turn=n, slot="s", action=f"I go to the bridge in month {n}")
+        call("endless_read_runtime", runId=run)
+        out = call(
+            "endless_advance_turn",
+            runId=run,
+            turn=n,
+            prose=f"Month {n} opens on the flood.\n\n{prose}",
+            choices=[{"id": "go", "label": "go"}, {"id": "stay", "label": "stay"}],
+            events=[f"The bridge cracked in month {n}."],
+            memory={
+                "events": [
+                    {
+                        "key": f"crack-{n}",
+                        "title": f"Crack {n}",
+                        "summary": "A long retelling. " * 14,
+                        "disclosure": "known",
+                    }
+                ]
+            },
+            state=state or {"status": {"age": n}},
+        )
+        assert out.get("committed") is True, out
+    return store, run
+
+
+def test_a_long_lifes_full_read_stays_under_the_ceiling(app):
+    _store, run = _long_life(turns=14)
+    raw = srv.call_tool("endless_read_runtime", {"runId": run})
+    assert len(raw) <= srv.READ_CEILING < 30_000
+    # It fit by summarising, not by cutting: a year is still within reach.
+    months = json.loads(raw)["recentTurns"]
+    assert [m["turn"] for m in months] == list(range(3, 15))
+    assert "recentTrimmed" not in json.loads(raw)
+
+
+def test_the_newest_months_keep_their_whole_prose(app):
+    _store, run = _long_life(turns=14)
+    months = call("endless_read_runtime", runId=run)["recentTurns"]
+    whole, short = months[-srv.FULL_MONTHS :], months[: -srv.FULL_MONTHS]
+    assert [m["turn"] for m in whole] == [11, 12, 13, 14]
+    for m in whole:
+        assert m["prose"].endswith(_LONG) and "short" not in m
+        assert [c["id"] for c in m["choices"]] == ["go", "stay"]
+        # The memory a month declared is named, not retold beside its own prose.
+        assert m["memory"] == {
+            "events": [
+                {"id": f"event-{m['turn']}-crack-{m['turn']}", "title": f"Crack {m['turn']}"}
+            ]
+        }
+    for m in short:
+        n = m["turn"]
+        assert m == {
+            "turn": n,
+            "short": True,
+            "action": f"I go to the bridge in month {n}",
+            "events": [f"The bridge cracked in month {n}."],
+            "line": f"Month {n} opens on the flood.",
+            "eventIds": [f"event-{n}-crack-{n}"],
+        }
+
+
+def test_a_re_read_month_leaves_out_the_choice_art():
+    # The drawing on a weighty choice is the page's, not the narrator's.
+    entry = {
+        "turn": 3,
+        "prose": "p",
+        "choices": [{"id": "stay", "label": "stay", "fateful": True, "art": "<svg/>"}],
+    }
+    assert srv._narrator_month(entry)["choices"] == [
+        {"id": "stay", "label": "stay", "fateful": True}
+    ]
+    assert entry["choices"][0]["art"] == "<svg/>"  # the stored month is untouched
+
+
+def test_trimming_drops_the_oldest_summaries_first_and_says_so(app, monkeypatch):
+    _store, run = _long_life(turns=14)
+    monkeypatch.setattr(srv, "READ_CEILING", 10**9)
+    size = len(srv.call_tool("endless_read_runtime", {"runId": run}))
+    # Just under what it needs: the oldest summaries go, nothing else.
+    monkeypatch.setattr(srv, "READ_CEILING", size - 300)
+    raw = srv.call_tool("endless_read_runtime", {"runId": run})
+    out = json.loads(raw)
+    assert len(raw) <= size - 300
+    turns = [m["turn"] for m in out["recentTurns"]]
+    dropped = out["recentTrimmed"]["dropped"]
+    assert dropped and dropped == list(range(3, 3 + len(dropped)))
+    assert turns == list(range(3 + len(dropped), 15))
+    assert out["recentTrimmed"]["shortened"] == []
+    assert "memoryEvents" in out["recentTrimmed"]["note"]
+    # Every whole month survived.
+    assert sum(1 for m in out["recentTurns"] if not m.get("short")) == srv.FULL_MONTHS
+
+
+def test_once_no_summary_is_left_the_oldest_whole_months_are_shortened(app, monkeypatch):
+    _store, run = _long_life(turns=14)
+    monkeypatch.setattr(srv, "READ_CEILING", 1)  # nothing can fit
+    out = call("endless_read_runtime", runId=run)
+    assert out["recentTrimmed"]["dropped"] == list(range(3, 11))
+    assert out["recentTrimmed"]["shortened"] == [11, 12, 13]
+    months = out["recentTurns"]
+    # A shortened month is kept as a summary, and the newest stays whole.
+    assert [m["turn"] for m in months] == [11, 12, 13, 14]
+    assert [bool(m.get("short")) for m in months] == [True, True, True, False]
+    assert months[-1]["prose"].endswith(_LONG)
+
+
+def test_state_and_scenes_are_never_trimmed(app, monkeypatch):
+    big = {"status": {"age": 1, "notes": "x" * 40_000}}
+    store, run = _long_life(turns=6, state=big)
+    assert call("endless_mount_scene", runId=run, sceneId="map", spec={"kind": "map"})["ok"]
+    out = call("endless_read_runtime", runId=run)
+    # The read is over the ceiling and stays so: what is left over is the state.
+    assert out["recentTrimmed"]["dropped"] == [1, 2]
+    assert out["state"] == store.read_state(run)
+    assert out["state"]["status"]["notes"] == "x" * 40_000
+    assert [s["sceneId"] for s in out["scenes"]] == ["map"]
+    assert out["recentTurns"][-1]["prose"].endswith(_LONG)
+
+
+def test_a_delta_read_is_never_trimmed_or_summarised(app, monkeypatch):
+    _store, run = _long_life(turns=14)
+    fp = call("endless_read_runtime", runId=run)["fingerprint"]
+    monkeypatch.setattr(srv, "READ_CEILING", 1)
+    delta = call("endless_read_runtime", runId=run, since=fp)
+    assert delta["recentTurns"] == []
+    assert "recentTrimmed" not in delta
+    assert delta["basedOn"] == fp and "state" not in delta
+
+
 # -- the world summary: once per conversation -------------------------------
 
 

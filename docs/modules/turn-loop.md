@@ -112,6 +112,30 @@ turn 200 as at turn 1.
   `mcp_server._narrator_month`; pinned by
   `test_a_full_read_re_reads_months_without_their_page_snapshots`.
 
+- **A full read fits under the harness's 30,000-character tool-result limit.**
+  Over that limit the harness spills the result to a file and the narrator sees
+  only a preview. Of the 12-month window (`RECENT_TURNS`), only the newest
+  `FULL_MONTHS` (4) come whole; each older month is a `short: true` row the app
+  builds from the commit (`turn`, `action`, the month's `events`, the first `line`
+  of its prose, and `eventIds` to ask `memoryEvents` with). A whole month also
+  leaves out each choice's `art` and keeps only the ids and names in its
+  `memory`, because the summaries there retell the prose beside them and the
+  graph still holds them. If the read is still over `READ_CEILING` (26,000),
+  `_fit_recent` drops the oldest short rows first, then shortens the oldest whole
+  months to short rows (kept, never dropped), and names both in `recentTrimmed`.
+  The newest month, the state, the scenes and every other block are never cut,
+  so a read whose state alone is larger stays over the ceiling. Delta reads carry
+  no months and are never trimmed. Measured on the four live lives the default
+  full read went from 34.9K / 34.1K / 32.1K / 14.4K characters to 27.6K / 16.3K /
+  23.9K / 13.0K; the one still over 26K is a two-month life whose brief and shape
+  alone are 9.5K. Pinned by `test_a_long_lifes_full_read_stays_under_the_ceiling`,
+  `test_the_newest_months_keep_their_whole_prose`,
+  `test_a_re_read_month_leaves_out_the_choice_art`,
+  `test_trimming_drops_the_oldest_summaries_first_and_says_so`,
+  `test_once_no_summary_is_left_the_oldest_whole_months_are_shortened`,
+  `test_state_and_scenes_are_never_trimmed`, and
+  `test_a_delta_read_is_never_trimmed_or_summarised`.
+
 - **A whole block the conversation already holds is named in `held`, not
   re-sent.** On a delta read the world summary and the mounted scenes are left
   out when this conversation was given that exact body (tagged by
