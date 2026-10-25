@@ -1076,6 +1076,63 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   color: var(--text, #e2e8f0); font: inherit; font-size: 13px; white-space: nowrap;
 }
 @media (hover: hover) { .ew-pager-recap:hover { border-color: var(--accent, #7c3aed); } }
+/* The page indicator is the month picker's button: same small muted type as the
+   label it replaced, with a 44px target and a frame only on hover/focus. */
+.ew-pager-pick { position: relative; min-width: 0; display: flex; }
+button.ew-pager-turn {
+  min-height: 44px; padding: 0 8px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; font: inherit;
+  font-size: 13px; color: var(--muted, #6b7280); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+@media (hover: hover) { button.ew-pager-turn:hover { border-color: var(--border, #2d2f3d); } }
+.ew-pager-short { display: none; }
+button.ew-pager-turn[aria-expanded="true"] { border-color: var(--accent, #7c3aed); color: var(--text, #e2e8f0); }
+/* The picker floats under the pager, right-aligned to it so it never runs off the
+   right edge of a 375px screen. Rows are a fixed height and absolutely placed, so a
+   life of hundreds of months draws only the dozen rows on screen. */
+.ew-pick {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 5;
+  width: min(320px, calc(100vw - 24px));
+  background: var(--bg-elevated, #21222e); color: var(--text, #e2e8f0);
+  border: 1px solid var(--border, #2d2f3d); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  padding: 10px;
+}
+.ew-pick-go { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ew-pick-label { font-size: 12px; color: var(--muted, #6b7280); white-space: nowrap; }
+.ew-pick-input {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 10px; border-radius: 8px;
+  background: var(--bg, #1a1b26); color: var(--text, #e2e8f0);
+  border: 1px solid var(--border, #2d2f3d); font: inherit; font-size: 15px;
+}
+.ew-pick-input[aria-invalid="true"] { border-color: var(--danger, #f87171); }
+.ew-pick-btn {
+  min-height: 44px; padding: 0 14px; border-radius: 8px; cursor: pointer;
+  background: var(--accent, #7c3aed); color: #fff; border: 0; font: inherit; font-size: 13px;
+}
+.ew-pick-btn:disabled { opacity: .4; cursor: default; }
+.ew-pick-list { position: relative; overflow-y: auto; overscroll-behavior: contain; }
+.ew-pick-track { position: relative; }
+.ew-pick-row {
+  position: absolute; left: 0; right: 0; height: 44px;
+  display: flex; align-items: center; gap: 10px; padding: 0 8px;
+  background: transparent; border: 0; border-radius: 6px; cursor: pointer;
+  color: var(--text, #e2e8f0); font: inherit; font-size: 13px; text-align: left;
+}
+@media (hover: hover) { .ew-pick-row:hover { background: var(--surface-2, rgba(255, 255, 255, .05)); } }
+.ew-pick-row-typed { background: var(--surface-2, rgba(255, 255, 255, .05)); }
+.ew-pick-row-on { box-shadow: inset 2px 0 0 var(--accent, #7c3aed); }
+.ew-pick-row-on .ew-pick-n { color: var(--ew-accent-ink, #c4b5fd); }
+.ew-pick-row:focus-visible, .ew-pick-input:focus-visible, .ew-pick-btn:focus-visible,
+button.ew-pager-turn:focus-visible {
+  outline: 2px solid var(--ew-accent-ink, #c4b5fd); outline-offset: 1px;
+}
+.ew-pick-n {
+  flex: 0 0 auto; min-width: 2.5em; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--muted, #6b7280);
+}
+.ew-pick-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The standing summary above the prose. It had no surface at all — 13px muted rows
    sitting directly on the page's backdrop art, which is where it became hard to
@@ -1954,7 +2011,17 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 @media (max-width: 480px) {
   .ew-topbar { gap: 8px; }
   .ew-topbar .ew-back { min-width: 0; flex: 1; white-space: normal; }
-  .ew-pager { flex: 0 0 auto; gap: 6px; }
+  .ew-pager { flex: 0 1 auto; min-width: 0; gap: 4px; }
+  /* Five 44px targets and the indicator must fit beside the back button at 375px:
+     the indicator drops its "of N" rather than any target shrinking. */
+  button.ew-pager-turn { padding: 0 4px; }
+  /* The indicator sits mid-row here, so a picker anchored to it runs off the left
+     edge. Anchor it to the whole top bar instead, inset from both sides. */
+  .ew-topbar:not(.ew-topbar-fixed) { position: relative; }
+  .ew-pager-pick { position: static; }
+  .ew-pick { left: 8px; right: 8px; width: auto; }
+  .ew-pager-long { display: none; }
+  .ew-pager-short { display: inline; }
   .ew-act { flex-direction: column; }
   .ew-act > .ew-btn { min-height: 44px; }
   .ew-confirm .ew-btn { min-height: 44px; }

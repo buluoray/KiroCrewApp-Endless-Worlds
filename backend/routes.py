@@ -2415,14 +2415,7 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
     except Exception:  # noqa: BLE001
         return web.json_response({"error": "no such life"}, status=404)
 
-    entries = store.read_chronicle(run_id)
-    if _backdrop_is_pending(ctx, store, run_id):
-        visible_turn = max(0, int(store.read_state(run_id).get("turn") or 0) - 1)
-        entries = [e for e in entries if int(e.get("turn") or 0) <= visible_turn]
-    # Turn 0 is the app's own record (the legacy bridge, design §9), not a page
-    # of the story: it has no prose and nobody lived it. The star map still
-    # shows the inheritance — through the graph, where it belongs.
-    entries = [e for e in entries if int(e.get("turn") or 0) >= 1]
+    entries = _lived_entries(ctx, store, run_id)
 
     # Full-text filter across the whole life, applied before paging so "when did I
     # meet the smith" pages through matches rather than raw months. Case-insensitive
@@ -2523,6 +2516,73 @@ async def get_chronicle(request: web.Request, ctx: AppContext) -> web.Response:
 #: How many months one read of the chronicle returns. Enough to re-read the recent
 #: past in one go, small enough that opening the history is not a download.
 CHRONICLE_PAGE = 12
+
+
+def _lived_entries(ctx: AppContext, store: Any, run_id: str) -> list[dict[str, Any]]:
+    """The chronicle as a reader may see it: oldest first, pages only.
+
+    A month whose backdrop is still being painted is held back (its page is not
+    ready), and turn 0 is the app's own record (the legacy bridge, design §9), not
+    a page of the story: it has no prose and nobody lived it. The star map still
+    shows the inheritance — through the graph, where it belongs. Shared by the
+    chronicle and its index so the two can never disagree on which months exist.
+    """
+    entries = store.read_chronicle(run_id)
+    if _backdrop_is_pending(ctx, store, run_id):
+        visible_turn = max(0, int(store.read_state(run_id).get("turn") or 0) - 1)
+        entries = [e for e in entries if int(e.get("turn") or 0) <= visible_turn]
+    return [e for e in entries if int(e.get("turn") or 0) >= 1]
+
+
+#: How long one month's hint in the page index may run. A few words to find a page
+#: by memory, not a summary: a hundred-month life must stay a small download.
+INDEX_HINT_CHARS = 48
+
+
+def _index_hint(entry: dict[str, Any]) -> str:
+    """The few words that let a player find a month: what they did, else how the
+    page began. Markdown marks and runs of whitespace are dropped."""
+    text = str(entry.get("action") or "").strip()
+    if not text:
+        for line in str(entry.get("prose") or "").splitlines():
+            line = line.strip().lstrip("#>*-_ ").strip()
+            if line:
+                text = line
+                break
+    text = " ".join(text.replace("*", "").replace("_", " ").split())
+    if len(text) > INDEX_HINT_CHARS:
+        text = text[: INDEX_HINT_CHARS - 1].rstrip() + "…"
+    return text
+
+
+async def get_chronicle_index(request: web.Request, ctx: AppContext) -> web.Response:
+    """``GET /runs/{run_id}/chronicle/index`` — every lived month as a number and a
+    hint, for the play page's month picker.
+
+    The chronicle itself pages twelve months of prose at a time, so building a
+    "jump to month" list from it would cost one request per window — a burst on a
+    long life. This answers the whole list in one small read (a few dozen bytes a
+    month); the page the player then picks is fetched on its own.
+    """
+    if request.get("user") is None:
+        return _unauthorized()
+
+    run_id = request.match_info.get("run_id", "")
+    store = _store(ctx)
+    try:
+        store.read_state(run_id)
+    except Exception:  # noqa: BLE001
+        return web.json_response({"error": "no such life"}, status=404)
+
+    return web.json_response(
+        {
+            "runId": run_id,
+            "rows": [
+                {"turn": int(e.get("turn") or 0), "hint": _index_hint(e)}
+                for e in _lived_entries(ctx, store, run_id)
+            ],
+        }
+    )
 
 
 def _int_param(request: web.Request, name: str, *, default: int) -> int:
@@ -2894,6 +2954,7 @@ def register_routes(ctx: AppContext) -> list[AppRoute]:
         ),
         AppRoute(method="POST", path="/runs/{run_id}/open", handler=open_run),
         AppRoute(method="GET", path="/runs/{run_id}/chronicle", handler=get_chronicle),
+        AppRoute(method="GET", path="/runs/{run_id}/chronicle/index", handler=get_chronicle_index),
         AppRoute(method="POST", path="/runs/{run_id}/turn", handler=advance_run_turn),
         # World drafts: paste raw text → background worldsmith cleans+compiles →
         # review → install. Mirrors the life-creation job (create, then a separate
