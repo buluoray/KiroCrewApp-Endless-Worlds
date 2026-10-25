@@ -67,7 +67,10 @@ turn 200 as at turn 1.
   from that commit's provenance record and trusted only for the committed turn)
   exceeds `IDLE_ROTATION_SECS` (300, reason `idle`), at `ROTATION_MAX_TURNS` (8,
   reason `budget`), or on a chapter boundary (`chapter`); an install change
-  (`install`) is checked first. Idle never fires while a live in-flight record
+  (`install`) is checked first. The chapter a life's first commit opens does not
+  count (`baseline > 1`): birth sets the flags the first chapter waits on, so
+  every life used to rotate on its second page and pay a second full read
+  (pinned by `test_the_chapter_the_opening_opened_does_not_rotate`). Idle never fires while a live in-flight record
   exists for the next month, because a second ask five minutes after a first one
   that did not rotate would otherwise discard the narrator still writing it; an
   unknown commit time never rotates. Every reason goes through the same seam:
@@ -103,7 +106,18 @@ turn 200 as at turn 1.
   the ownership check (`permissions.api` declares `/api/chat` and
   `/api/sessions`). The one piece with no public route, forgetting a still-mapped
   resume pointer and unlinking kiro-cli's own session files, is
-  `_forget_provider_session`, the only private call. A 404 counts as removed (core
+  `_forget_provider_session`, the only private call. It removes the provider
+  session in both layouts for that one id: core's `_unlink_layer_b_files` for
+  `<kiro home>/sessions/cli/<sid>.json(l)`, and `_unlink_kas_session` for KAS's
+  `<kiro home>/sessions/<workspace hash>/<sid>/` (only its `messages.jsonl` and
+  `session.json`, then the directory if that emptied it, then KAS's own
+  `remove` line in `session-index/<hash>.jsonl`; an id that is not a plain token,
+  a symlink, or any other session is never touched). A conversation whose slot is
+  still `running` (its month committed, its last words not yet saved) is not
+  closed: closing it made core refuse that turn's last history write and the
+  turn lost its usage row. `_retire_when_idle` retires it once the turn ends
+  (one waiter per life, up to `_RETIRE_WAIT_SECS`); the slot heal and a deleted
+  life close it regardless (`force`). Pinned by `test_retire_cleanup.py`. A 404 counts as removed (core
   answers it for "missing" and "not yours" alike); any other answer, or no app
   secret, leaves the number on the `stale` list to be retried at the
   start of the next turn. Every rotation reason, the reset control, a dismissed
@@ -207,7 +221,7 @@ turn 200 as at turn 1.
   `mcp_server._narrator_month`; pinned by
   `test_a_full_read_re_reads_months_without_their_page_snapshots`.
 
-- **A full read fits under the harness's 30,000-character tool-result limit.**
+- **The whole read fits under the harness's 30,000-character tool-result limit.**
   Over that limit the harness spills the result to a file and the narrator sees
   only a preview. Of the 12-month window (`RECENT_TURNS`), only the newest
   `FULL_MONTHS` (4) come whole; each older month is a `short: true` row the app
@@ -215,29 +229,37 @@ turn 200 as at turn 1.
   of its prose, and `eventIds` to ask `memoryEvents` with). A whole month also
   leaves out each choice's `art` and keeps only the ids and names in its
   `memory`, because the summaries there retell the prose beside them and the
-  graph still holds them. If the read is still over `READ_CEILING` (26,000),
-  `_fit_recent` drops the oldest short rows first, then shortens the oldest whole
-  months to short rows (kept, never dropped), and names both in `recentTrimmed`.
-  After that, and only for a life past its opening, the opening hand-off
-  (`handToAgent` and its note) is dropped and named as
-  `recentTrimmed.handToAgent: "dropped"`: its purpose is turn one, and past it
-  its setting surfaces through `lore` and its grants are in the state. The
-  newest month, the state, the scenes, the brief and the shape are never cut, so
-  a read whose state alone is larger stays over the ceiling. Delta reads carry
-  no months and are never trimmed. Measured on the four live lives the default
-  full read went from 34.9K / 34.1K / 32.1K / 14.4K characters to 27.6K / 16.3K /
-  23.9K / 13.0K. The brief and shape now ride in every full read (largest live
-  world: 10.6K characters together); on the five live lives the largest full
-  read is 25.1K, the two-month life that was 27.8K before its hand-off was
-  dropped. Pinned by `test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit`,
+  graph still holds them. `_fit_read` then measures the WHOLE reply through the
+  same encoder `call_tool` uses, on every read (a delta read carries no months
+  but can carry a rulebook and recall bodies), and while it is over
+  `READ_CEILING` (26,000) cuts in this order: the `rulebook` an `includeProse`
+  asked for (the whole book never fits beside a read; chapters are asked for by
+  id); the oldest short rows; the older whole months, shortened to short rows;
+  past the opening, `handToAgent` (with its note) and `opening` (the answers live
+  in the state); the lowest-ranked `lore` bodies (the entry stays, `trimmed:
+  true`), `memoryCandidates` and `people` cards, each taken off the recall-sent
+  record so a later read sends it again; and last the newest month, its prose
+  kept from its end (`proseClipped`, `_NEWEST_TAIL_CHARS`) and then as a short
+  row. Every cut is named in `recentTrimmed`. The state, the brief, the shape,
+  the scenes, the voice and the chapter list are never cut, so only a read whose
+  never-cut blocks alone are larger stays over. Measured on a real pod before
+  this: full reads of 28.2-29.9K characters on lives of 10-16 turns once every
+  month was cut, and 33.2K / 45.2K with `recentTurns: 2` / `includeProse`, both
+  cut by the host; the 29.2K one fits at 25.9K. Pinned by
+  `test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit`,
   `test_the_opening_read_keeps_its_hand_off`,
   `test_a_read_under_the_ceiling_keeps_everything`, `test_a_long_lifes_full_read_stays_under_the_ceiling`,
+  `test_a_long_lifes_whole_read_fits_under_the_ceiling`,
+  `test_an_include_prose_read_drops_the_book_before_anything_else`,
+  `test_a_cut_recall_body_is_not_recorded_as_held`,
+  `test_lore_bodies_go_before_the_newest_month`,
   `test_the_newest_months_keep_their_whole_prose`,
   `test_a_re_read_month_leaves_out_the_choice_art`,
   `test_trimming_drops_the_oldest_summaries_first_and_says_so`,
   `test_once_no_summary_is_left_the_oldest_whole_months_are_shortened`,
+  `test_the_newest_month_stays_whole_while_the_older_ones_make_room`,
   `test_state_and_scenes_are_never_trimmed`, and
-  `test_a_delta_read_is_never_trimmed_or_summarised`.
+  `test_a_delta_read_never_gains_months_by_being_fit`.
 
 - **A whole block the conversation already holds is named in `held`, not
   re-sent.** On a delta read the world summary and the mounted scenes are left

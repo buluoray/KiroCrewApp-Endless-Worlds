@@ -37,6 +37,7 @@ from perf import TurnPerf
 from phototrace import CandidateStore, TraceStore
 from store import RunStore
 from systems import gain_fields
+from view import people_example
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,11 @@ def _should_rotate(
     done = store.rotation_turn(run_id)
     if done >= baseline:
         return ""
-    if chapter_crossed:
+    # Not the opening's chapter. A life's first commit usually opens a chapter
+    # (birth sets the flags its first chapter waits on), so "crossed" at baseline
+    # 1 says only that the conversation that wrote the opening is one page old.
+    # Rotating there cost every life a second full read on its second page.
+    if chapter_crossed and baseline > 1:
         return "chapter"
     if (baseline - done) >= ROTATION_MAX_TURNS:
         return "budget"
@@ -344,6 +349,12 @@ def declaration_shape(template: Any) -> str:
         # have the app overrule the world's own rule about when a panel applies.
         if panel.when is not None:
             lines.append(text("shape.panel.gate", condition=panel.when.source))
+        # A people field's shape, spelled out. "holds figures (Key Figures)" was
+        # all a narrator saw, and it wrote the whole cast as one string: the page
+        # showed one "person" with a 938-character name.
+        for f in panel.fields:
+            if getattr(f, "primitive", "") == "people":
+                lines.append(text("shape.people", id=f.id, example=people_example(f.options)))
     if template.digest_categories:
         lines.append(
             text("shape.digest", categories=text("list.join").join(template.digest_categories))
@@ -632,7 +643,9 @@ async def advance_turn(
                 run_id,
                 wanted,
             )
-            await narrator.retire_stale_conversations(state_obj, store, run_id)
+            # Forced: this conversation is replaced because its turn never touched
+            # the world, so waiting for that turn to end would wait on the fault.
+            await narrator.retire_stale_conversations(state_obj, store, run_id, force=True)
             slot, fresh_slot = ensure_narrator_slot_ex(
                 state_obj,
                 run_id,

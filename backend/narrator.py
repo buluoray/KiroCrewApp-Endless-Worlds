@@ -33,10 +33,13 @@ hoped for:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -326,6 +329,12 @@ def _forget_provider_session(state: Any, history_key: str, sid: str) -> None:
     that is still mapped, through the running session manager, and unlinks the
     provider files of the id read before the public calls. Best-effort: a
     leftover file is never read again, because the key is never reused.
+
+    Two layouts, both removed for this one id and nothing else: the classic one
+    (``<kiro home>/sessions/cli/<sid>.json(l)``, core's own helper) and the KAS
+    one (``<kiro home>/sessions/<workspace hash>/<sid>/``,
+    :func:`_unlink_kas_session`). A real pod test found the second left behind
+    on every retirement whose runtime was not shut down by KAS itself.
     """
     sessions = getattr(state, "sessions", None)
     if sessions is not None:
@@ -343,6 +352,93 @@ def _forget_provider_session(state: Any, history_key: str, sid: str) -> None:
         _unlink_layer_b_files(sid)
     except Exception:  # noqa: BLE001
         logger.debug("kiro-cli session files for %s not removed", history_key, exc_info=True)
+    try:
+        root = _kas_sessions_root()
+        if root is not None:
+            _unlink_kas_session(root, sid)
+    except Exception:  # noqa: BLE001
+        logger.debug("KAS session files for %s not removed", history_key, exc_info=True)
+
+
+#: A provider session id as it may name a directory. Anything else (a separator,
+#: a dot segment, an empty string) is refused before it reaches a path.
+_PROVIDER_SID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$")
+
+#: The files KAS writes inside one session directory. Only these are removed, so
+#: a directory holding anything else is left in place rather than emptied blind.
+_KAS_SESSION_FILES = ("messages.jsonl", "session.json")
+
+
+def _kas_sessions_root() -> Path | None:
+    """``<kiro home>/sessions``: the parent of core's classic ``sessions/cli``.
+
+    Read through core's resolver so ``KIRO_HOME`` and its override are honoured
+    the same way the classic layout is.
+    """
+    try:
+        from kiro_crew.config.paths import kiro_sessions_dir  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — no core (unit tests)
+        return None
+    return Path(kiro_sessions_dir()).parent
+
+
+def _unlink_kas_session(root: Path, sid: str) -> list[Path]:
+    """Remove KAS's directory for exactly ``sid``; returns what was removed.
+
+    KAS keeps one directory per session, named by the session id, under one
+    directory per workspace (``<root>/<hash>/<sid>/``), and an append-only index
+    per workspace (``<kiro home>/session-index/<hash>.jsonl``) whose ``remove``
+    op is how KAS itself records a deleted session. So for each workspace that
+    holds ``<sid>``: the known files go, then the directory if that left it
+    empty, then one ``remove`` line for that path when the index has an ``add``
+    for it. Nothing else is touched: no other session id, no recursive delete,
+    no symlink followed.
+    """
+    removed: list[Path] = []
+    if not isinstance(sid, str) or not _PROVIDER_SID_RE.match(sid):
+        return removed
+    if not root.is_dir():
+        return removed
+    index_dir = root.parent / "session-index"
+    for workspace in sorted(root.iterdir()):
+        if workspace.name == "cli" or workspace.is_symlink() or not workspace.is_dir():
+            continue
+        target = workspace / sid
+        if target.is_symlink() or not target.is_dir():
+            continue
+        for name in _KAS_SESSION_FILES:
+            path = target / name
+            if path.is_symlink() or path.is_file():
+                path.unlink(missing_ok=True)
+                removed.append(path)
+        try:
+            target.rmdir()
+            removed.append(target)
+        except OSError:
+            continue  # something else lives there; leave the directory
+        _note_kas_removal(index_dir / f"{workspace.name}.jsonl", f"{workspace.name}/{sid}")
+    return removed
+
+
+def _note_kas_removal(index: Path, session_path: str) -> None:
+    """Append KAS's own ``remove`` op for ``session_path`` if the index adds it."""
+    if index.is_symlink() or not index.is_file():
+        return
+    text = index.read_text(encoding="utf-8")
+    added = False
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("sessionPath") == session_path:
+            added = row.get("op") == "add"
+    if not added:
+        return
+    entry = {"op": "remove", "sessionPath": session_path, "at": int(time.time() * 1000)}
+    with index.open("a", encoding="utf-8") as fh:
+        lead = "" if not text or text.endswith("\n") else "\n"
+        fh.write(lead + json.dumps(entry, separators=(",", ":")) + "\n")
 
 
 def _mapped_sid(state: Any, history_key: str) -> str:
@@ -359,7 +455,67 @@ def _mapped_sid(state: Any, history_key: str) -> str:
 _DELETE_DONE = frozenset({200, 204, 404})
 
 
-async def retire_narrator_conversation(state: Any, run_id: str, conversation: int) -> bool:
+def _slot_is_busy(state: Any, slot_key: str) -> bool:
+    """Whether ``slot_key`` has a live slot whose turn has not ended yet."""
+    getter = getattr(state, "get_slot", None)
+    try:
+        slot = getter(slot_key) if callable(getter) else None
+    except Exception:  # noqa: BLE001
+        return False
+    return slot is not None and getattr(slot, "running", False) is True
+
+
+#: How often a deferred retirement checks whether the old turn has ended, and how
+#: long it waits at most. The ceiling matches ``turn.PENDING_STALE_SECS``: no turn
+#: is believed to run longer. Past it the next turn's own retirement takes over.
+_RETIRE_POLL_SECS = 1.0
+_RETIRE_WAIT_SECS = 900.0
+
+#: One waiter per life, so repeated requests do not stack pollers.
+_RETIRE_WAITERS: dict[str, asyncio.Task[Any]] = {}
+
+
+async def _retire_when_idle(state: Any, store: Any, run_id: str) -> None:
+    """Retire this life's stale conversations once none of them is mid-turn."""
+    deadline = time.monotonic() + _RETIRE_WAIT_SECS
+    try:
+        while time.monotonic() < deadline:
+            try:
+                stale = list(store.stale_conversations(run_id))
+            except Exception:  # noqa: BLE001
+                return
+            if not stale:
+                return
+            busy = [n for n in stale if _slot_is_busy(state, _safe_slot_key(run_id, n))]
+            if not busy:
+                await retire_stale_conversations(state, store, run_id, defer=False)
+                return
+            await asyncio.sleep(_RETIRE_POLL_SECS)
+    finally:
+        _RETIRE_WAITERS.pop(run_id, None)
+
+
+def _safe_slot_key(run_id: str, conversation: int) -> str:
+    try:
+        return narrator_slot_key(run_id, conversation)
+    except BadRunId:
+        return ""
+
+
+def _defer_retirement(state: Any, store: Any, run_id: str) -> None:
+    """Start (once per life) the waiter that retires a busy conversation later."""
+    if run_id in _RETIRE_WAITERS:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no loop: the next turn's own retirement covers it
+    _RETIRE_WAITERS[run_id] = loop.create_task(_retire_when_idle(state, store, run_id))
+
+
+async def retire_narrator_conversation(
+    state: Any, run_id: str, conversation: int, *, force: bool = False
+) -> bool:
     """Remove one earlier conversation of a life: its slot, transcript and session.
 
     Through the App Kit's public API, in this order: ``DELETE
@@ -379,6 +535,12 @@ async def retire_narrator_conversation(state: Any, run_id: str, conversation: in
         slot_key = narrator_slot_key(run_id, conversation)
     except BadRunId:
         return False
+    if not force and _slot_is_busy(state, slot_key):
+        # Its turn is still finishing: the month is on disk, but the narrator is
+        # still writing its last words and core is about to save them. Closing it
+        # now refused that save ("the conversation is being closed") and lost the
+        # turn's usage row. It is retired once the turn ends (_retire_when_idle).
+        return False
     api = _gateway_api(state)
     if api is None:
         return False
@@ -394,17 +556,27 @@ async def retire_narrator_conversation(state: Any, run_id: str, conversation: in
     return True
 
 
-async def retire_stale_conversations(state: Any, store: Any, run_id: str) -> list[str]:
+async def retire_stale_conversations(
+    state: Any, store: Any, run_id: str, *, defer: bool = True, force: bool = False
+) -> list[str]:
     """Remove every earlier conversation of a life still on record. Returns the keys
-    removed. Best-effort: a failure leaves the number on record for the next turn."""
+    removed. Best-effort: a failure leaves the number on record for the next turn.
+
+    A conversation whose turn is still running is skipped, and (with ``defer``)
+    a waiter retires it as soon as that turn ends rather than at the next turn.
+    ``force`` closes it anyway: for a slot that is being replaced BECAUSE its turn
+    never did anything (the slot heal), waiting on it would wait on the fault.
+    """
     removed: list[str] = []
     try:
         stale = list(store.stale_conversations(run_id))
     except Exception:  # noqa: BLE001
         return removed
+    if defer and not force and any(_slot_is_busy(state, _safe_slot_key(run_id, n)) for n in stale):
+        _defer_retirement(state, store, run_id)
     for n in stale:
         try:
-            done = await retire_narrator_conversation(state, run_id, n)
+            done = await retire_narrator_conversation(state, run_id, n, force=force)
         except Exception:  # noqa: BLE001
             logger.warning("retiring conversation %s of %s failed", n, run_id, exc_info=True)
             continue
@@ -425,7 +597,8 @@ async def retire_all_conversations(state: Any, run_id: str, conversations: list[
     """
     for n in conversations:
         try:
-            await retire_narrator_conversation(state, run_id, n)
+            # Forced: the life is being deleted, so nothing it writes is kept.
+            await retire_narrator_conversation(state, run_id, n, force=True)
         except Exception:  # noqa: BLE001 — a deletion never fails on cleanup
             logger.warning("retiring conversation %s of %s failed", n, run_id, exc_info=True)
 

@@ -50,6 +50,14 @@ def test_a_new_life_never_rotates(store, run):
     assert not _should_rotate(store, run, 0, chapter_crossed=True)
 
 
+def test_the_chapter_the_opening_opened_does_not_rotate(store, run):
+    """Birth opens a chapter, so turn 2 always saw one "crossed"; rotating there
+    gave every life a second full read one page after its first."""
+    assert _should_rotate(store, run, 1, chapter_crossed=True) == ""
+    # The budget and later chapters are untouched.
+    assert _should_rotate(store, run, 2, chapter_crossed=True) == "chapter"
+
+
 def test_a_chapter_boundary_rotates_exactly_once(store, run):
     assert _should_rotate(store, run, 5, chapter_crossed=True)
     store.mark_rotation(run, turn=5)
