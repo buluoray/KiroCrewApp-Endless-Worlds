@@ -355,7 +355,9 @@ guarantee.
   1-, 2- and 3-digit page (same `EW_POD_URL` / `EW_POD_SESSION` contract). It also
   checks the mark is hidden and unfocusable on the latest page, back mid-flip, shown
   and focusable one page back, and that the link, the centre number and the mark's
-  slot stay within 1px between the two. Pinned by
+  slot stay within 1px between the two. It never waits a fixed delay: each
+  measurement waits for fonts, the wheel at rest on the page, and the row's boxes
+  still for 5 frames. Pinned by
   `test_page_wheel.py` and `test_theme_contrast.py`; the swipe, coast, snap, one read,
   no pager buttons, the one-line back link, the picker and the way back run in
   `devtools/scrub.test.mjs` at 375px.
