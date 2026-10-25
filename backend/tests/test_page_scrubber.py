@@ -45,8 +45,11 @@ def test_the_scrubber_sits_in_the_top_bar_for_a_life_with_pages():
     play = module("play.tsx")
     assert "import { HoldArrow, PageScrubber } from './page-scrubber'" in play
     pager = _pager()
-    assert "latest >= 2 ? (\n      <PageScrubber" in pager
-    assert "onCommit={goPage}" in pager
+    assert "latest >= 2 ? (\n      phone ? (\n        <PageWheel" in pager
+    assert pager.index("<PageWheel") < pager.index("<PageScrubber"), "the wheel on a phone"
+    assert pager.count("onCommit={leafTo}") == 4, "both scrubbers and both held arrows"
+    assert "onCommit={leafTo}" in pager
+    assert "goPage(n)" in pager[pager.index("const leafTo =") :]
     # The newest page is the LIVE page, like Latest.
     assert "const goPage = (n: number) => setViewTurn(n >= latest ? null : Math.max(1, n))" in pager
     start = play.index("'ew-topbar' +")
@@ -225,6 +228,78 @@ def test_the_page_is_announced_once_on_settle_and_the_slider_keeps_focus():
     s = module("page-scrubber.tsx")
     assert "aria-live" not in s
     assert 'aria-hidden="true"' in s[s.index('className="ew-scrub-tip"') - 200 :]
+
+
+# ── the book: fore-edge, ribbon, folio, leafing ──────────────────────────────
+
+
+def test_the_ribbon_thumb_is_drawing_only_and_the_track_keeps_the_slider():
+    """The ribbon replaced the round knob, inside the track, never as the slider."""
+    s = _scrubber()
+    thumb = s[s.index('className="ew-scrub-thumb"') - 40 : s.index("</div>\n      </div>")]
+    assert 'aria-hidden="true"' in thumb and "style={{ left: at }}" in thumb
+    assert '<span className="ew-scrub-ribbon" />' in thumb
+    assert "role=" not in thumb and "tabIndex" not in thumb, "the ribbon is not a second control"
+    # The slider attributes sit on the track, which still wraps the ribbon.
+    track = s[s.index("className={'ew-scrub-track'") : s.index('className="ew-scrub-thumb"')]
+    assert 'role="slider"' in track and "aria-valuenow={value}" in track
+    css = styles()
+    assert re.search(r"\.ew-scrub-ribbon \{[^}]*clip-path: polygon\([^)]*50% 80%", css), (
+        "the ribbon's notched tail"
+    )
+    assert re.search(r"\.ew-scrub-thumb \{[^}]*pointer-events: none;", css)
+    # No round knob left.
+    thumb_css = re.search(r"\.ew-scrub-thumb \{([^}]*)\}", css).group(1)
+    assert "border-radius: 50%" not in thumb_css
+
+
+def test_the_rail_is_a_fore_edge_denser_for_a_longer_life():
+    src = code_only(module("page-scrubber.tsx"))
+    gap = src[src.index("export function edgeGap(") : src.index("function railFrac(")]
+    pitches = [int(n) for n in re.findall(r"return (\d+)", gap)]
+    assert pitches == sorted(pitches, reverse=True) and pitches[-1] >= 2, pitches
+    assert "'--ew-edge-gap': `${edgeGap(latest)}px`" in _scrubber()
+    css = styles()
+    for sel, line in (
+        (r"\.ew-scrub-rail", "--ew-edge-line"),
+        (r"\.ew-scrub-fill", "--ew-edge-read-line"),
+    ):
+        body = re.search(sel + r" \{([^}]*)\}", css).group(1)
+        assert "repeating-linear-gradient(" in body and line in body, sel
+        assert "var(--ew-edge-gap" in body, sel
+    # Drawn with CSS only: no image asset behind the book.
+    assert "url(" not in re.search(r"\.ew-scrub-rail \{([^}]*)\}", css).group(1)
+
+
+def test_the_folio_is_set_in_a_reading_face_on_its_own_paper():
+    css = styles()
+    tip = re.search(r"\.ew-scrub-tip \{([^}]*)\}", css).group(1)
+    assert "serif;" in tip and "font-family:" in tip
+    n = re.search(r"\.ew-scrub-tip-n \{([^}]*)\}", css).group(1)
+    assert "small-caps" in n and "oldstyle-nums" in n
+    hint = re.search(r"\.ew-scrub-tip-hint \{([^}]*)\}", css).group(1)
+    assert "font-style: italic;" in hint
+
+
+def test_a_long_jump_leafs_the_page_once_and_reduced_motion_draws_none():
+    pager = _pager()
+    leaf = pager[pager.index("const leafTo =") : pager.index("const scrubber =")]
+    assert "Math.abs(to - shownTurn) > 1" in leaf, "one click is a plain page turn"
+    play = module("play.tsx")
+    assert "{leaf?.turn === shownTurn ? (" in play
+    assert "onAnimationEnd={() => setLeaf(null)}" in play, "it plays once, not on every revisit"
+    body = play[play.index("{leaf?.turn === shownTurn ? (") :][:300]
+    assert 'aria-hidden="true"' in body
+    css = styles()
+    assert re.search(r"\.ew-leaf \{[^}]*animation: ew-leaf [.\d]+s", css)
+    reduced = [
+        m.group(1)
+        for m in re.finditer(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}", css, re.S)
+    ]
+    assert any(re.search(r"\.ew-leaf \{[^}]*display: none;", r) for r in reduced)
+    assert any(re.search(r"\.ew-scrub-ribbon \{[^}]*transition: none;", r) for r in reduced) or (
+        "@media (prefers-reduced-motion: reduce) { .ew-scrub-ribbon { transition: none; } }" in css
+    )
 
 
 # ── copy and docs ────────────────────────────────────────────────────────────

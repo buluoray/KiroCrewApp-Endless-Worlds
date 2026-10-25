@@ -69,7 +69,8 @@ for (const width of [1280, 375]) {
       await page.locator('button:visible').filter({ hasText: life.label }).first().click()
       const region = page.locator('.ew-play-root [role="region"]').first()
       await region.waitFor()
-      const track = page.locator('.ew-scrub-track')
+      // The fore-edge slider on a wide screen, the page wheel on a phone: both a slider.
+      const track = page.locator('.ew-topbar [role="slider"]')
       await track.waitFor()
       assert.equal(await track.getAttribute('role'), 'slider')
       assert.equal(await track.getAttribute('aria-valuemax'), String(PAGES))
@@ -100,24 +101,50 @@ for (const width of [1280, 375]) {
       // ── drag across many pages: the label follows, nothing is read until release
       reads.length = 0
       if (width < 500) {
-        // A finger, through the touch pipeline, so pointer capture and touch-action
-        // are what keep the page still.
+        // The phone's page wheel, swiped with a finger through the touch pipeline, so
+        // pointer capture and touch-action are what keep the page still.
+        assert.equal(await page.locator('.ew-wheel-track').count(), 1, 'a phone gets the wheel')
+        assert.equal(await page.locator('.ew-scrub-track').count(), 0, 'and not the slider')
+        // Only the numbers on screen are drawn, not one per page.
+        const drawn = await page.locator('.ew-wheel-n').count()
+        assert.ok(drawn > 3 && drawn <= 14, `${drawn} numbers drawn for ${PAGES} pages`)
         const cdp = await context.newCDPSession(page)
         const touch = (type, x) =>
           cdp.send('Input.dispatchTouchEvent', {
             type,
             touchPoints: type === 'touchEnd' ? [] : [{ x, y }],
           })
-        await touch('touchStart', xOf(110))
-        for (let i = 1; i <= 25; i++) await touch('touchMove', xOf(110 - i * 4))
-        await page.waitForFunction(() => document.querySelector('.ew-scrub-tip')?.textContent?.includes('page 10'))
-        assert.equal(await barY(), scrollBefore, 'a finger on the scrubber does not scroll the page')
-        assert.equal(reads.length, 0, 'no page read while dragging')
-        assert.ok(await page.locator('.ew-scrub-tip').isVisible(), 'the label shows mid-drag')
-                assert.match(await page.locator('.ew-scrub-tip').innerText(), /Action of page 10/)
-        assert.match(await indicator.innerText(), /\b10\b/, 'the indicator follows')
+        const cx = box.x + box.width / 2
+        // A slow drag right by ~5 items: the numbers follow the finger.
+        await touch('touchStart', cx - 110)
+        for (let i = 1; i <= 22; i++) await touch('touchMove', cx - 110 + i * 10)
+        await page.waitForTimeout(150)
+        const mid = await now()
+        assert.ok(mid >= PAGES - 6 && mid <= PAGES - 4, `the wheel follows the finger: ${mid}`)
+        assert.equal(await barY(), scrollBefore, 'a finger on the wheel does not scroll the page')
+        assert.equal(reads.length, 0, 'no page read while swiping')
+        assert.match(await page.locator('.ew-wheel-hint').innerText(), new RegExp(`Action of page ${mid}\\b`))
+        assert.match(await indicator.innerText(), new RegExp(`\\b${mid}\\b`), 'the indicator follows')
         if (shots) await page.screenshot({ path: `${shots}/scrub-mid-drag-${width}.png`, clip: await shotClip() })
-        await touch('touchEnd', xOf(10))
+        // Then a flick: the drum coasts past where the finger left it, still no read.
+        for (let i = 1; i <= 4; i++) await touch('touchMove', cx + 110 + i * 30)
+        await touch('touchEnd', 0)
+        await page.waitForTimeout(60)
+        assert.equal(reads.length, 0, 'no page read while the wheel coasts')
+        await page.waitForTimeout(1200)
+        const rest = await now()
+        assert.ok(Number.isInteger(rest) && rest < mid - 4, `a flick coasts and snaps to a page: ${rest}`)
+        const drum = await page.locator('.ew-wheel-c').innerText()
+        assert.equal(drum, String(rest), 'the snapped page is the centred number')
+        await landed(rest)
+        assert.deepEqual(reads, [rest], 'the wheel reads exactly the one page it rests on')
+        // From here the rest of the run is the same for both widths; aim it at 10.
+        await track.focus()
+        for (let i = 0; i < Math.floor((rest - 10) / 10); i++) await page.keyboard.press('PageDown')
+        while ((await now()) > 10) await page.keyboard.press('ArrowLeft')
+        reads.length = 0
+        await page.keyboard.press('ArrowRight')
+        await page.keyboard.press('ArrowLeft')
       } else {
         await page.mouse.move(xOf(110), y)
         await page.mouse.down()

@@ -19,6 +19,7 @@ guarantee.
 | `play.tsx` | the live reading view — server-driven generating state + poll, tool-call turn progress, retry, turn-number pager |
 | `page-picker.tsx` | the pager's page indicator and its jump-to-month picker (number field + windowed list of every month with a hint) |
 | `page-scrubber.tsx` | the press-and-drag page scrubber, hold-to-repeat Prev/Next, wheel and slider keys |
+| `page-wheel.tsx` | the phone's sideways page wheel that replaces the scrubber under 600px |
 | `scrub-store.ts` | the page being flipped to, outside React state so a step re-renders only what shows it |
 | `scene.tsx` | `SceneSlot` — the single scene iframe, created once and never moved |
 | `opening.tsx` | the opening form — sealed world-decided groups, 30-day draft TTL |
@@ -295,6 +296,37 @@ guarantee.
   `StoryPage` announces the landed page once and leaves focus on the slider. The
   newest page lands on the live page, like Latest. Pinned by `test_page_scrubber.py`;
   the pointer paths run for real in `devtools/scrub.test.mjs`.
+
+- **The scrubber is drawn as a book.** On a wide screen the track is a book's
+  fore-edge: fine page lines (`repeating-linear-gradient`, CSS only) whose pitch
+  tightens for a longer life (`edgeGap`), the pages already read a warmer, thumbed
+  paper. The thumb is a cloth ribbon bookmark with a notched tail
+  (`.ew-scrub-ribbon`, `clip-path`), drawing only — the slider role, values and
+  focus stay on the track. The drag label is a folio slip: opaque paper with its own
+  ink in both dashboard themes, the page number in a serif reading face in small caps
+  with old-style figures, the action in italic under a hairline. The page indicator
+  uses the same face; the First/Prev/Next/Latest buttons are quiet hairline frames.
+  A jump of more than one page by the scrubber, the wheel or a held arrow (`leafTo`)
+  draws one short fold of shadow over the landed page (`.ew-leaf`), cleared on
+  `animationend`; `prefers-reduced-motion` draws none. Chapter tabs and fateful marks
+  are not drawn: the page index carries neither. Pinned by `test_page_scrubber.py`;
+  the folio's contrast by `test_theme_contrast.py`.
+
+- **On a phone the scrubber is a sideways page wheel.** Under `PHONE_QUERY`
+  (`max-width: 600px`) `page-wheel.tsx` replaces the slider: a row of page numbers
+  on the same folio paper, the centre one full size and full ink, its neighbours
+  turning away on a drum (inline `rotateY`/`scale`/`opacity` from `wheelLook`) and
+  fading under a mask, the ribbon as a tab over the centre, and the centred page's
+  action in italic under it (the shared index read, made on mount here because the
+  line is always shown). A swipe follows the finger; on release the drum coasts to
+  where a decaying throw would stop (`flickVelocity`, `wheelTarget`,
+  `WHEEL_TAU_MS`) and snaps to that page, ticking the centre number as each page
+  crosses; a tap on a neighbour turns to it. Only the numbers on screen are drawn
+  (`visiblePages`). The page number lives in the scrub store while it turns and the
+  ONE page loads when it rests. Same `role="slider"` values, keys and settle rule as
+  the desktop track; reduced motion snaps without the glide or the tick. Pinned by
+  `test_page_wheel.py`; the swipe, coast, snap and one read run in
+  `devtools/scrub.test.mjs` at 375px.
 
 - **Opening groups the world decided are sealed, not offered; drafts expire in 30
   days.** `opening.tsx` renders a `worldDecides` group as a sealed note rather than
