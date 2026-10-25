@@ -430,7 +430,10 @@ _TOOLS: list[dict[str, Any]] = [
             "this conversation comes back marked `held: true` with the body left "
             "out. A held entry is still being surfaced BECAUSE it bears on this "
             "month — read it from where it was first given rather than asking "
-            "again. Lose your baseline (a compaction) and everything arrives whole."
+            "again. Whole blocks you already hold unchanged (`world`, `scenes`, or "
+            "the `brief` and `shape` this turn's prompt itself carried) are left "
+            "out and named in `held`: use the copy you were given. Lose your "
+            "baseline (a compaction) and everything arrives whole."
         ),
         "inputSchema": {
             "type": "object",
@@ -1952,6 +1955,18 @@ def _pluck_paths(state: dict[str, Any], paths: list[str]) -> dict[str, Any]:
 #: Sentinel for a path that stopped resolving mid-walk (never a real state value).
 _PLUCK_MISS = object()
 
+#: Chronicle fields that exist for the PAGE, not for the narrator: the panels and
+#: digest a past month ended on, snapshotted so re-reading it shows that month's
+#: situation. Both are rendered from the state the same full read carries whole,
+#: and measured on real lives they were most of a full read (185 KB of 226 KB at
+#: the default depth), which pushed it past the harness's tool-output limit.
+_PAGE_ONLY_FIELDS = ("panels", "digest")
+
+
+def _narrator_month(entry: dict[str, Any]) -> dict[str, Any]:
+    """A chronicle entry as the narrator re-reads it: the page snapshots left out."""
+    return {k: v for k, v in entry.items() if k not in _PAGE_ONLY_FIELDS}
+
 
 def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     """What the narrator needs to know, pulled rather than pushed.
@@ -1995,14 +2010,39 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     held = set() if full_read else store.recall_sent(run_id)
     # Bodies actually delivered by THIS read, recorded once at the end.
     delivered: list[str] = []
+    # Whole blocks left out because this conversation already holds them, named
+    # so the narrator reads "as you were given it" rather than "absent".
+    held_blocks: list[str] = []
 
     out: dict[str, Any] = {
         "runId": run_id,
         "turn": int(state.get("turn") or 0),
         # Hand this back as `since` next turn and only the changes come with it.
         "fingerprint": fingerprint,
-        "scenes": _scene_ledger(run_id).mounted(),
     }
+
+    def once(key: str, value: Any) -> None:
+        """Send ``value`` under ``key`` unless this conversation holds that exact body.
+
+        Rides the recall-sent record, so it inherits its two resets: a full read
+        replaces the record (the narrator proved it holds nothing) and a rotation
+        stamp invalidates it. The tag is the body's own content tag, so a block
+        that CHANGED is a new tag and goes out whole.
+        """
+        tag = f"{key}:{RunStore.content_tag(value)}"
+        if tag in held:
+            held_blocks.append(key)
+            return
+        out[key] = value
+        delivered.append(tag)
+
+    # The scenes the narrator mounted, re-sent only when they changed (a player
+    # answer, a mount, a dismissal) since this conversation last saw them.
+    mounted = _scene_ledger(run_id).mounted()
+    if mounted:
+        once("scenes", mounted)
+    else:
+        out["scenes"] = mounted
 
     # Lorebook — keyword-triggered setting, complementing the state-gated chapters.
     # The world's reserve of background, surfaced only when a name/place/force it
@@ -2148,11 +2188,6 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             graph, [str(e) for e in wanted_events]
         )
 
-    # Written AFTER both recall blocks, so it records what this read actually put in
-    # front of the narrator rather than what was merely selected. A full read replaces
-    # the set: the narrator has just proved it is holding nothing.
-    store.mark_recall_sent(run_id, delivered, reset=full_read)
-
     if baseline is not None:
         delta = store.diff(baseline, state)
         prov_turn, prov_paths = store.provenance(run_id)
@@ -2206,7 +2241,7 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # specific old month already has its own door in ``memoryEvents``, which asks by
     # id instead of by depth.
     if full_read:
-        out["recentTurns"] = lived[-recent:] if recent else []
+        out["recentTurns"] = [_narrator_month(e) for e in lived[-recent:]] if recent else []
     else:
         out["recentTurns"] = []
     # The app's own readings of its recent behaviour (R7). A measurement, not an
@@ -2253,7 +2288,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 path = variant
         if path.is_file():
             pack = read_world(path.read_text(encoding="utf-8"))
-            out["world"] = summarize(pack)
+            # Static per pack, so once per conversation: a delta read names it as
+            # held. A pack edited mid-life is a new tag and goes out again.
+            once("world", summarize(pack))
             # The growth reading needs the world's own gain names, which only
             # the pack knows — so the restraint note is completed here, once the
             # pack is read, on the same full reads that carry it.
@@ -2284,8 +2321,23 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 # id: the world's always-open rules, how to record state, and the
                 # opening groups — including which the world settles rather than the
                 # player, the anti-halo signal that must not be lost (R7).
-                out["brief"] = brief(pack.template)
-                out["shape"] = declaration_shape(pack.template)
+                #
+                # Except what the prompt of THIS attempt already carried, byte for
+                # byte: a re-briefed turn puts the brief and the shape in the prompt
+                # and its narrator then makes exactly this full read, so both used
+                # to arrive twice in one turn. Matched by content tag, never by
+                # flag, so a different text (another language variant, an edited
+                # pack) is sent whole.
+                carried = store.prompt_carried(run_id, int(state.get("turn") or 0) + 1)
+                for key, body in (
+                    ("brief", brief(pack.template)),
+                    ("shape", declaration_shape(pack.template)),
+                ):
+                    tagged = body.strip() if key == "brief" else body
+                    if carried.get(key) == RunStore.content_tag(tagged):
+                        held_blocks.append(key)
+                    else:
+                        out[key] = body
                 # The opening groups AND the player's own answer to each — the
                 # value is what the narrator must honour (the chosen sex, race,
                 # name…). Listing only the questions here, with the answers buried
@@ -2349,6 +2401,14 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # narrated. Not enforced yet, on purpose: refusing a commit from a narrator that
     # skipped this would be a hard stop on a live life, and the honest order is to
     # measure the behaviour first and enforce once it is known.
+    if held_blocks:
+        out["held"] = held_blocks
+    # Written LAST, so it records what this read actually put in front of the
+    # narrator (recall bodies and whole blocks alike) rather than what was merely
+    # selected. A full read replaces the set: the narrator has just proved it is
+    # holding nothing.
+    store.mark_recall_sent(run_id, delivered, reset=full_read)
+
     store.note_runtime_read(run_id, turn=int(state.get("turn") or 0) + 1)
     return out
 

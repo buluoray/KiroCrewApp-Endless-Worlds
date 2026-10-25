@@ -114,7 +114,10 @@ argument.
   conversation, and create the replacement before composing the prompt. Content
   detects an update even when timestamps are preserved, while inode/ctime identity
   detects a same-content reinstall. An unchanged install keeps its slot. The
-  replacement is fresh, so the turn loop sends the world rulebook again and treats
+  replacement is fresh, so the turn loop sends the world rulebook again (and
+  records which exact brief and shape that prompt carried, so the full read the
+  fresh narrator makes next names them in `held` instead of sending them a second
+  time — `test_a_full_read_omits_the_brief_and_shape_its_own_prompt_carried`) and treats
   any old pending writer as gone. Generation is separate bookkeeping, not world
   state: state, rollback, chronicle, worlds, and shelf rows are untouched. Pinned by
   `test_install_generation_changes_on_update_and_same_content_reinstall`,
