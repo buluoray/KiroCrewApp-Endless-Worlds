@@ -94,17 +94,38 @@ function TurnProgress({ g, label }: { g?: PlayView['generating']; label: string 
         : g?.stage === 'painting'
           ? t('play.stage.painting')
           : ''
+  // Only the label and stage sit in the live region: the clock beside them ticks
+  // every second, and a screen reader inside a polite region would read each tick.
+  // It is plain text that changes (no animation), so reduced motion needs no
+  // separate answer for it.
   return (
-    <div className="ew-progress" role="status" aria-live="polite">
+    <div className="ew-progress">
       <div className="ew-progress-track">
         <div className="ew-progress-fill" style={{ width: `${pct}%` }} />
       </div>
       <div className="ew-progress-steps">
-        <span className="ew-progress-label">{label}</span>
-        {stage ? <span className="ew-progress-count">{stage}</span> : null}
+        <span className="ew-progress-label" role="status" aria-live="polite">
+          {label}
+        </span>
+        {stage || askedAt ? (
+          <span className="ew-progress-count">
+            {stage ? <span role="status">{stage}</span> : null}
+            {askedAt ? <span className="ew-progress-elapsed">{formatElapsed(elapsed)}</span> : null}
+          </span>
+        ) : null}
       </div>
     </div>
   )
+}
+
+/** Whole seconds since the ask as `m:ss` (or `h:mm:ss`), never negative — a
+ *  client clock a little behind the server's must not show "-0:02". */
+function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  const two = (n: number) => String(n).padStart(2, '0')
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return h ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`
 }
 
 /**
@@ -152,7 +173,12 @@ function EchoMark({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        {t('play.echoLine', { turn: e.sourceTurn })}
+        {/* Each echo names its own event: two echoes of one page used to read as
+            the same line twice. Same title the keepsake takes (the answering
+            event, else the source it echoes). */}
+        {e.title || e.sourceTitle
+          ? t('play.echoLineTitled', { title: e.title || e.sourceTitle, turn: e.sourceTurn })
+          : t('play.echoLine', { turn: e.sourceTurn })}
       </button>
       {open ? (
         <div className="ew-echo-body">
@@ -337,6 +363,22 @@ export function PlayPage({
   /** The turn the recap was opened for; a newer month closes it. */
   const recapTurn = useRef(0)
   const [recapOpen, setRecapOpen] = useState(false)
+  /** The reader hid the entry recap themselves, so the pager offers it back. A
+   *  newer month clears this with the recap: it would no longer be where the
+   *  life left off when they came in. */
+  const [recapHidden, setRecapHidden] = useState(false)
+  // Each recap button unmounts the control that was pressed, so the keyboard
+  // focus would fall to <body>. Hand it to the counterpart instead: Hide moves
+  // it to the pager's Recap, Recap moves it to the recap's Hide.
+  const recapCloseRef = useRef<HTMLButtonElement>(null)
+  const recapReopenRef = useRef<HTMLButtonElement>(null)
+  const recapFocus = useRef<'close' | 'reopen' | null>(null)
+  useEffect(() => {
+    const want = recapFocus.current
+    recapFocus.current = null
+    if (want === 'close') recapCloseRef.current?.focus({ preventScroll: true })
+    else if (want === 'reopen') recapReopenRef.current?.focus({ preventScroll: true })
+  }, [recapOpen, recapHidden])
   // The same scroll signal the phone tab bar rides, so the two move together —
   // including the 70px pin, without which the bar flickers on small swipes near
   // the top of a page (the exact bug READER_BAR_PIN_PX was written to prevent).
@@ -421,6 +463,7 @@ export function PlayPage({
         // and push that very page down below it.
         recapTurn.current = next.turn
         setRecapOpen(false)
+        setRecapHidden(false)
       }
       if (loadedRun.current !== runId) {
         loadedRun.current = runId
@@ -429,6 +472,7 @@ export function PlayPage({
         // choices are no longer shown here (they duplicate the bottom choice list),
         // so they no longer justify opening the recap on their own.
         setRecapOpen(next.turn > 1 && !!(recap.lastAction || recap.events.length))
+        setRecapHidden(false)
       }
     } catch (e) {
       setError((e as Error).message)
@@ -882,6 +926,23 @@ export function PlayPage({
         >
           <Chevron dir="r" />
         </button>
+        {/* Lit only once the reader has hidden the entry recap: on a long life
+            it is the one place that says where they came back in. Live page
+            only, where the recap renders. */}
+        {isLive && recapHidden && !recapOpen ? (
+          <button
+            ref={recapReopenRef}
+            className="ew-pager-recap"
+            type="button"
+            onClick={() => {
+              recapFocus.current = 'close'
+              setRecapOpen(true)
+              setRecapHidden(false)
+            }}
+          >
+            {t('play.recapReopen')}
+          </button>
+        ) : null}
       </div>
     ) : null
 
@@ -892,9 +953,14 @@ export function PlayPage({
           <div className="ew-story-moment-head">
             <div className="ew-story-moment-title">{t('play.recapTitle')}</div>
             <button
+              ref={recapCloseRef}
               className="ew-story-moment-close"
               type="button"
-              onClick={() => setRecapOpen(false)}
+              onClick={() => {
+                recapFocus.current = 'reopen'
+                setRecapOpen(false)
+                setRecapHidden(true)
+              }}
             >
               {t('play.recapDismiss')}
             </button>
