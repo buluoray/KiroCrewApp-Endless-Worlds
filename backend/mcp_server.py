@@ -140,7 +140,14 @@ from store import (  # noqa: E402
 from systems import apply_systems, gain_fields  # noqa: E402
 from turn import _in_flight as turn_in_flight  # noqa: E402
 from turn import declaration_shape  # noqa: E402
-from view import always_panels_empty, resolve_ending, shape_panels  # noqa: E402
+from view import (  # noqa: E402
+    PERSON_NAME_MAX,
+    always_panels_empty,
+    people_example,
+    resolve_ending,
+    shape_panels,
+    split_people,
+)
 from widget import scene_warnings  # noqa: E402
 from world import WorldError, read_world, serialize_world, summarize  # noqa: E402
 
@@ -1456,6 +1463,61 @@ def _picked_choice(action: str, earlier: list[dict[str, Any]]) -> dict[str, Any]
     return None
 
 
+def _people_holders(panel: Any, field: Any, state: dict[str, Any]) -> list[tuple[dict, str]]:
+    """Every ``(dict, key)`` in ``state`` that holds this people field's value.
+
+    The same spellings the play view accepts (``view._panel_data``/``_lookup``):
+    nested under the panel or flat, by id or by label.
+    """
+    out: list[tuple[dict, str]] = []
+    nested = state.get(panel.id)
+    for holder in (nested if isinstance(nested, dict) else None, state):
+        if holder is None:
+            continue
+        for key in (field.id, field.label):
+            if key and key in holder:
+                out.append((holder, key))
+                break
+    return out
+
+
+def _normalize_people(template: Any, state: dict[str, Any], current: dict[str, Any]) -> str:
+    """Turn a roster written as one string into a list of people, in place.
+
+    Returns ``""`` when the state is fine (or was fixed), else the refusal's
+    detail. A string that splits into named people is repaired, which costs the
+    narrator nothing; one that names nobody is refused with the exact shape,
+    because committing it puts a paragraph on the player's page as one "person".
+    A string the life already held from before this rule (carried forward, not
+    declared this turn) is never a reason to refuse: the view still splits it.
+    """
+    for panel in template.panels:
+        for field in panel.fields:
+            if field.primitive != "people":
+                continue
+            for holder, key in _people_holders(panel, field, state):
+                raw = holder.get(key)
+                if not isinstance(raw, str):
+                    continue
+                if not raw.strip():
+                    holder[key] = []
+                    continue
+                people = split_people(raw)
+                if people and all(len(p["name"]) <= PERSON_NAME_MAX for p in people):
+                    holder[key] = people
+                    continue
+                prior = [h.get(k) for h, k in _people_holders(panel, field, current)]
+                if raw in prior:
+                    continue
+                return (
+                    f"`{panel.id}.{field.id}` is a list of people, one object per "
+                    f"person, never one string: {people_example(field.options)}. "
+                    "Give each person a short `name` and put who they are to this "
+                    "life in `note`. Resend the WHOLE call with that list."
+                )
+    return ""
+
+
 def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     run_id = args["runId"]
     turn = args["turn"]
@@ -1646,6 +1708,18 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
                 pack = read_world(_path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             pack = None
+
+    # A people field is a list of people. A roster sent as one string is split
+    # here when it names people; one that names nobody is refused BEFORE commit.
+    if pack is not None:
+        people_detail = _normalize_people(pack.template, state, current)
+        if people_detail:
+            return {
+                "committed": False,
+                "turn": committed,
+                "reason": "people-list-required",
+                "detail": people_detail,
+            }
 
     # A living turn MUST offer choices; only a terminal turn may omit them. Refuse a
     # choiceless non-ending turn BEFORE anything commits, so the player is never handed
@@ -2029,61 +2103,127 @@ def _result_chars(out: dict[str, Any]) -> int:
     return len(_encode({"ok": True, **out}))
 
 
-def _fit_recent(out: dict[str, Any], lived: list[dict[str, Any]]) -> None:
-    """Hold a full read under `READ_CEILING` by giving up the oldest months first.
+#: How much of the newest month's prose a read over the ceiling keeps, from its
+#: END: where the month left off is what the next month continues from.
+_NEWEST_TAIL_CHARS = 2_000
 
-    The re-read months are cut first, never the state, the scenes, the brief or
-    the shape: those describe the month being written now. The oldest
-    summary goes first. Once none is left, the oldest whole month is shortened to a
-    summary in its place; a shortened month is kept, because at a few hundred
-    characters it costs little and is still the only reach back to that month. The
-    newest month always stays whole. What was cut is named in ``recentTrimmed`` so
-    the narrator knows the window is shorter than it looks, and how to reach the
-    rest. The one exception comes after every month is cut: a begun life's
-    opening hand-off (``handToAgent``) is dropped and named the same way.
+
+def _person_mark(card: dict[str, Any]) -> str:
+    """A people card's tag on the recall-sent record: its id and a body digest."""
+    body = json.dumps(card, sort_keys=True, ensure_ascii=False)
+    return f"person:{card['id']}:{hashlib.sha1(body.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _fit_read(
+    out: dict[str, Any], lived: list[dict[str, Any]], delivered: list[str] | None = None
+) -> None:
+    """Hold the WHOLE read under `READ_CEILING`, cutting the least needed first.
+
+    Measured on a real pod: cutting only the re-read months left full reads at
+    28-30K characters on long lives, and an explicit ``includeProse`` or a small
+    ``recentTurns`` pushed them to 33-45K, past the harness's 30,000-character
+    cut. So every block counts, and the cuts run in this order, each only while
+    the read is still over:
+
+    1. ``rulebook`` (``includeProse``): the whole book never fits beside a read;
+       chapters are asked for by id instead.
+    2. The oldest re-read summaries, then the older whole months shortened to
+       summaries (the newest stays whole for now).
+    3. Past the opening: ``handToAgent`` and ``opening`` (their answers already
+       live in the state).
+    4. The lowest-ranked ``lore`` bodies (the entry stays, named, ``trimmed``),
+       then the lowest-ranked ``memoryCandidates`` and ``people`` cards.
+    5. The newest month's prose, kept from its end, then that month as a summary.
+
+    Never cut: the state, the brief, the shape, the scenes, the voice, the
+    fingerprint and the chapter list — what the month being written stands on.
+    Everything cut is named in ``recentTrimmed``. A recall body cut here is taken
+    off ``delivered`` so the conversation is not recorded as holding it.
     """
-    months: list[dict[str, Any]] = out.get("recentTurns") or []
     if _result_chars(out) <= READ_CEILING:
         return
+    sent = delivered if delivered is not None else []
+    months: list[dict[str, Any]] = out.get("recentTurns") or []
     by_turn = {int(e.get("turn") or 0): e for e in lived}
-    dropped: list[int] = []
-    shortened: list[int] = []
+    cut: dict[str, Any] = {}
 
     def report() -> None:
         out["recentTrimmed"] = {
-            "dropped": list(dropped),
-            "shortened": list(shortened),
+            **cut,
             "note": (
-                "Cut to fit: `dropped` months are left out, `shortened` ones come as "
-                "summaries. Ask for their events by id with `memoryEvents`."
+                "Cut to fit the read: what is named here was left out or shortened. "
+                "Ask for an event by id with `memoryEvents`, a chapter by id with "
+                "`chapters`."
             ),
         }
 
+    def over() -> bool:
+        return _result_chars(out) > READ_CEILING
+
+    def unsend(tag: str) -> None:
+        while tag in sent:
+            sent.remove(tag)
+
     report()  # counted while trimming, so the report itself fits too
-    while months and months[0].get("short") and _result_chars(out) > READ_CEILING:
-        dropped.append(int(months.pop(0).get("turn") or 0))
+    if "rulebook" in out:
+        out.pop("rulebook")
+        cut["rulebook"] = "dropped"
         report()
-    while _result_chars(out) > READ_CEILING:
+    while months and months[0].get("short") and over():
+        cut.setdefault("dropped", []).append(int(months.pop(0).get("turn") or 0))
+        report()
+    while over():
         whole = [i for i, m in enumerate(months) if not m.get("short")]
         if len(whole) <= 1:
             break
         turn = int(months[whole[0]].get("turn") or 0)
         months[whole[0]] = _month_summary(by_turn[turn])
-        shortened.append(turn)
+        cut.setdefault("shortened", []).append(turn)
         report()
-    # Last resort, and only for a life already under way: what the world hands the
-    # narrator to OPEN with. Its own purpose is turn one, where no prose exists yet
-    # for lore to match; past that, its setting surfaces through `lore` and its
-    # role grants are already in the state. Measured: a turn-2 full read of a
-    # world with a large hand-off was 27.8K characters after every month was cut.
-    handoff = False
-    if _result_chars(out) > READ_CEILING and int(out.get("turn") or 0) >= 1:
-        handoff = out.pop("handToAgent", None) is not None
-        out.pop("handToAgentNote", None)
-        report()
-        if handoff:
-            out["recentTrimmed"]["handToAgent"] = "dropped"
-    if not dropped and not shortened and not handoff:
+    # Past the opening, what the world hands the narrator to OPEN with is spent:
+    # its setting surfaces through `lore`, its grants and the player's answers are
+    # in the state. Measured: a turn-2 read was 27.8K after every month was cut.
+    if int(out.get("turn") or 0) >= 1:
+        for key in ("handToAgent", "opening"):
+            if over() and out.pop(key, None) is not None:
+                if key == "handToAgent":
+                    out.pop("handToAgentNote", None)
+                cut[key] = "dropped"
+                report()
+    for row in reversed(out.get("lore") or []):
+        if not over():
+            break
+        if "text" in row:
+            row.pop("text")
+            row["trimmed"] = True
+            unsend(str(row.get("id") or ""))
+            cut.setdefault("lore", []).append(row.get("id"))
+            report()
+    for key in ("memoryCandidates", "people"):
+        rows = out.get(key) or []
+        while rows and over():
+            row = rows.pop()
+            unsend(str(row.get("id") or "") if key == "memoryCandidates" else "")
+            if key == "people" and not row.get("held") and row.get("id"):
+                unsend(_person_mark(row))
+            cut.setdefault(key, []).append(row.get("id"))
+            report()
+        if key in out and not rows:
+            out.pop(key)
+    newest = months[-1] if months else None
+    if newest is not None and not newest.get("short") and over():
+        prose = str(newest.get("prose") or "")
+        if len(prose) > _NEWEST_TAIL_CHARS:
+            newest["prose"] = "…" + prose[-_NEWEST_TAIL_CHARS:].lstrip()
+            newest["proseClipped"] = True
+            cut["newest"] = "clipped"
+            report()
+        if over():
+            turn = int(newest.get("turn") or 0)
+            months[-1] = _month_summary(by_turn.get(turn, newest))
+            cut["newest"] = "shortened"
+            report()
+    if not cut:
         out.pop("recentTrimmed", None)
 
 
@@ -2279,8 +2419,7 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
         )
         rows = []
         for card in cards:
-            body = json.dumps(card, sort_keys=True, ensure_ascii=False)
-            mark = f"person:{card['id']}:{hashlib.sha1(body.encode('utf-8')).hexdigest()[:12]}"
+            mark = _person_mark(card)
             if mark in held:
                 row = {"id": card["id"], "name": card["name"], "held": True}
                 if card.get("offstage"):
@@ -2387,7 +2526,7 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     #
     # Only the newest `FULL_MONTHS` come back whole. The older months of the window
     # come as app-built summaries, so a full read still reaches a year back at a
-    # fraction of the size; `_fit_recent` cuts the window further, oldest first,
+    # fraction of the size; `_fit_read` cuts the window further, oldest first,
     # if the read would still not fit under the harness's tool-result limit.
     if full_read:
         window = lived[-recent:] if recent else []
@@ -2552,8 +2691,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     # measure the behaviour first and enforce once it is known.
     if held_blocks:
         out["held"] = held_blocks
-    if full_read:
-        _fit_recent(out, lived)
+    # Every read, delta included: a delta read carries no months, but it can carry
+    # a whole rulebook, chapter bodies and recall bodies.
+    _fit_read(out, lived, delivered)
     # Written LAST, so it records what this read actually put in front of the
     # narrator (recall bodies and whole blocks alike) rather than what was merely
     # selected. A full read replaces the set: the narrator has just proved it is
@@ -3754,6 +3894,27 @@ def _encode(payload: dict[str, Any]) -> str:
     return json.dumps(_lean(payload), ensure_ascii=False, separators=(",", ":"))
 
 
+#: Said with every schema refusal, because what a narrator did after one was not
+#: always a fix. Measured on a pod: after the host refused five commits whose
+#: `arguments` had been sent as a JSON string, the narrator probed this server
+#: with seven calls under a made-up run id ("x") to bisect the payload. Each was
+#: refused on the run id before anything else was looked at, so they taught it
+#: nothing and cost a page 6.37 credits.
+_RETRY_SAME_CALL = (
+    "Fix only that and resend the SAME call, whole, with `arguments` as a JSON "
+    "object (never a string holding JSON)."
+)
+_RETRY_RUN_ID = (
+    "The run id is checked before anything else, so a call under a made-up id "
+    "tests nothing. Use the 32-character run id your message gives, unchanged. " + _RETRY_SAME_CALL
+)
+
+
+def _retry_hint(field: str) -> str:
+    """How to retry after a schema refusal of ``field``."""
+    return _RETRY_RUN_ID if field.rsplit(".", 1)[-1] == "runId" else _RETRY_SAME_CALL
+
+
 def call_tool(name: str, args: dict[str, Any]) -> str:
     """Validate, dispatch, and answer as JSON text.
 
@@ -3815,7 +3976,13 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
         _validate(name, args)
     except ToolInputError as exc:
         return _encode(
-            {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False}
+            {
+                "ok": False,
+                "field": exc.field,
+                "expected": exc.expected,
+                "applied": False,
+                "retry": _retry_hint(exc.field),
+            }
         )
 
     handler = _HANDLERS.get(name)

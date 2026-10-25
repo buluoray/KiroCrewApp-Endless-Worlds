@@ -175,15 +175,118 @@ def _columns(options: Any) -> list[str]:
     return []
 
 
+#: The longest name a person card carries. A "name" past this is a paragraph that
+#: was never split into people, which is what a commit refuses
+#: (``mcp_server._normalize_people``) and what an old life's view clips.
+PERSON_NAME_MAX = 60
+
+#: Where one person's clause ends in a single-string roster: ASCII and fullwidth
+#: semicolons, a line break, and an ideographic full stop. A Latin full stop ends
+#: a clause only when whitespace follows it ("St. Ives" stays whole only if
+#: written "St.Ives", an accepted miss). Never inside brackets, so
+#: "Pell (north; we are square)" stays one person.
+_CLAUSE_ENDS = frozenset(";\n\uff1b\u3002")
+_OPEN_BRACKETS = frozenset("(\uff08[")
+_CLOSE_BRACKETS = frozenset(")\uff09]")
+
+#: "Name: what they are to you" — a short head before a colon starts a person.
+_PERSON_HEAD = re.compile(r"^\s*([^:\uff1a()\uff08\uff09]{1,48}?)\s*[:\uff1a]\s*(.*)$", re.S)
+#: "Name (what they are to you)".
+_PERSON_PAREN = re.compile(r"^\s*([^()\uff08\uff09]{1,48}?)\s*[(\uff08](.*)[)\uff09]\s*$", re.S)
+
+_CLAUSE_TRIM = " \t\n;,.\uff1b\uff0c\u3002\u3001"
+
+
+def _clauses(text: str) -> list[str]:
+    """``text`` cut at clause ends outside brackets, each piece kept raw."""
+    out: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch in _OPEN_BRACKETS:
+            depth += 1
+        elif ch in _CLOSE_BRACKETS:
+            depth = max(0, depth - 1)
+        elif depth == 0 and (
+            ch in _CLAUSE_ENDS or (ch == "." and i + 1 < len(text) and text[i + 1].isspace())
+        ):
+            out.append(text[start : i + 1])
+            start = i + 1
+    out.append(text[start:])
+    return [c for c in out if c.strip(_CLAUSE_TRIM)]
+
+
+def _person(clause: str) -> dict[str, str]:
+    """One clause as ``{name, note}``: a colon head or a bracketed note, else the name."""
+    text = clause.strip(_CLAUSE_TRIM)
+    head = _PERSON_HEAD.match(text)
+    if head:
+        return {"name": head.group(1).strip(), "note": head.group(2).strip(_CLAUSE_TRIM)}
+    paren = _PERSON_PAREN.match(text)
+    if paren:
+        return {"name": paren.group(1).strip(), "note": paren.group(2).strip(_CLAUSE_TRIM)}
+    return {"name": text, "note": ""}
+
+
+def split_people(text: str) -> list[dict[str, str]]:
+    """A roster written as ONE string, split into one ``{name, note}`` per person.
+
+    A narrator handed a ``people`` field and no shape wrote the whole cast into a
+    single string (measured: one 938-character "person"). Two layouts recur:
+    clauses that each name someone ("Father Osric (gave his blessing); brother
+    Tam"), and people introduced by a colon head whose own notes run on across
+    clauses ("Osric Hollis: father; gave me his knife. Tam Hollis: brother").
+    When any clause has a head, a clause without one belongs to the person
+    before it; otherwise every clause is a person. A name may still come out long
+    when the text names nobody in either way; callers judge that against
+    ``PERSON_NAME_MAX``.
+    """
+    clauses = _clauses(text)
+    heads = [_PERSON_HEAD.match(c.strip(_CLAUSE_TRIM)) for c in clauses]
+    if not any(heads):
+        return [_person(c) for c in clauses]
+    people: list[dict[str, str]] = []
+    for clause, head in zip(clauses, heads, strict=True):
+        if head or not people:
+            people.append(_person(clause))
+            continue
+        extra = clause.strip(_CLAUSE_TRIM)
+        note = people[-1]["note"]
+        people[-1]["note"] = f"{note}; {extra}" if note else extra
+    return people
+
+
+def people_example(options: Any) -> str:
+    """The exact JSON shape one ``people`` field takes, as the narrator is shown it.
+
+    ``name`` and ``note`` always, then each column the world declared (a column
+    called "Name" is the name itself, so it is not repeated). Shared by the shape
+    line and the commit's refusal, so the two can never describe different shapes.
+    """
+    keys = ["name", "note"] + [c for c in _columns(options) if c.strip().lower() != "name"]
+    body = ", ".join(f'"{k}": "..."' for k in keys)
+    return f"[{{{body}}}, ...]"
+
+
 def _people(raw: Any, columns: list[str]) -> list[dict[str, Any]]:
     """People as name + note, plus any declared attribute columns per person.
 
     With no declared columns this is exactly the old name/note shape, so a world
     that named none is untouched. With them, each person also carries the values
     the prose lists under those columns — previously shaped away and lost.
+
+    A single string (what lives committed before the shape said "a list") is
+    split into people; a piece that still names nobody shows a clipped name with
+    the whole text as its note, rather than one card with a paragraph for a name.
     """
     if isinstance(raw, str):
-        return [{"name": raw, "note": ""}]
+        out_str: list[dict[str, Any]] = []
+        for person in split_people(raw):
+            name, note = person["name"], person["note"]
+            if len(name) > PERSON_NAME_MAX:
+                name, note = name[: PERSON_NAME_MAX - 1].rstrip() + "\u2026", person["name"]
+            out_str.append({"name": name, "note": note})
+        return out_str
     if not isinstance(raw, list):
         return []
     out: list[dict[str, Any]] = []

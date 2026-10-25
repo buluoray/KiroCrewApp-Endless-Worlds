@@ -66,6 +66,20 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   `test_a_null_sub_value_retires_a_merged_entry`, and
   `test_omitting_a_merge_key_carries_the_whole_block_forward`.
 
+- **A `people` field is stored as a list of people, one object per person.**
+  Each is `{name, note, <declared columns>}`. A roster the narrator sends as one
+  string is split at commit (`mcp_server._normalize_people`, using
+  `view.split_people`: clauses at `;`, a line break or a sentence end outside
+  brackets, a short `Name:` head starting a person, `Name (note)` read as name
+  and note) and stored as that list. A string that splits into no name of at most
+  `PERSON_NAME_MAX` (60) characters is refused before anything commits, as
+  `people-list-required`, with the exact list shape for that field
+  (`view.people_example`). A string a life already held and the narrator did not
+  resend is never refused; the view splits it the same way, and a piece that
+  still names nobody shows a clipped name with the whole text as its note. Found
+  on a real life: one "person" whose name was 938 characters. Pinned by
+  `test_people_shape.py`.
+
 - **Systems compute derived state at commit, and read their base from the PRIOR
   committed state — so the number is the app's, not the narrator's.** After the
   reserved-key carry-forward, and before the milestone rebuild, `_advance_turn` runs the

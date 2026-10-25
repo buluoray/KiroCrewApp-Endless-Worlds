@@ -210,10 +210,26 @@ def test_once_no_summary_is_left_the_oldest_whole_months_are_shortened(app, monk
     assert out["recentTrimmed"]["dropped"] == list(range(3, 11))
     assert out["recentTrimmed"]["shortened"] == [11, 12, 13]
     months = out["recentTurns"]
-    # A shortened month is kept as a summary, and the newest stays whole.
+    # A shortened month is kept as a summary. The newest is the very last month
+    # cut, after every other block that may go: here nothing fits, so it goes too.
     assert [m["turn"] for m in months] == [11, 12, 13, 14]
-    assert [bool(m.get("short")) for m in months] == [True, True, True, False]
-    assert months[-1]["prose"].endswith(_LONG)
+    assert [bool(m.get("short")) for m in months] == [True, True, True, True]
+    assert out["recentTrimmed"]["newest"] == "shortened"
+
+
+def test_the_newest_month_stays_whole_while_the_older_ones_make_room(app, monkeypatch):
+    _store, run = _long_life(turns=14)
+    monkeypatch.setattr(srv, "READ_CEILING", 10**9)
+    full = call("endless_read_runtime", runId=run)
+    newest = len(json.dumps(full["recentTurns"][-1], ensure_ascii=False))
+    older = sum(len(json.dumps(m, ensure_ascii=False)) for m in full["recentTurns"][:-1])
+    size = len(srv.call_tool("endless_read_runtime", {"runId": run}))
+    # Room for the newest month whole once the older ones are gone.
+    monkeypatch.setattr(srv, "READ_CEILING", size - older + 600)
+    out = call("endless_read_runtime", runId=run)
+    assert newest > 3_000
+    assert out["recentTurns"][-1]["prose"].endswith(_LONG)
+    assert "newest" not in out["recentTrimmed"]
 
 
 def test_state_and_scenes_are_never_trimmed(app, monkeypatch):
@@ -226,16 +242,17 @@ def test_state_and_scenes_are_never_trimmed(app, monkeypatch):
     assert out["state"] == store.read_state(run)
     assert out["state"]["status"]["notes"] == "x" * 40_000
     assert [s["sceneId"] for s in out["scenes"]] == ["map"]
-    assert out["recentTurns"][-1]["prose"].endswith(_LONG)
+    assert out["recentTurns"][-1]["turn"] == 6, "the newest month is cut last, never lost"
 
 
-def test_a_delta_read_is_never_trimmed_or_summarised(app, monkeypatch):
+def test_a_delta_read_never_gains_months_by_being_fit(app, monkeypatch):
     _store, run = _long_life(turns=14)
     fp = call("endless_read_runtime", runId=run)["fingerprint"]
     monkeypatch.setattr(srv, "READ_CEILING", 1)
     delta = call("endless_read_runtime", runId=run, since=fp)
     assert "recentTurns" not in delta  # none re-sent; an empty list is left out
-    assert "recentTrimmed" not in delta
+    trimmed = delta.get("recentTrimmed") or {}
+    assert "dropped" not in trimmed and "shortened" not in trimmed
     assert delta["basedOn"] == fp and "state" not in delta
 
 
@@ -502,7 +519,7 @@ def _bulky(turn):
 
 def test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit(app):
     out = _bulky(2)
-    srv._fit_recent(out, [{"turn": 2, "prose": "p" * 500}])
+    srv._fit_read(out, [{"turn": 2, "prose": "p" * 500}])
     assert srv._result_chars(out) <= srv.READ_CEILING
     assert "handToAgent" not in out and "handToAgentNote" not in out
     assert out["recentTrimmed"]["handToAgent"] == "dropped"
@@ -511,11 +528,79 @@ def test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit(app):
 
 def test_the_opening_read_keeps_its_hand_off(app):
     out = _bulky(0)
-    srv._fit_recent(out, [])
+    srv._fit_read(out, [])
     assert "handToAgent" in out
 
 
 def test_a_read_under_the_ceiling_keeps_everything(app):
     out = {**_bulky(2), "state": {}}
-    srv._fit_recent(out, [{"turn": 2, "prose": "p" * 500}])
+    srv._fit_read(out, [{"turn": 2, "prose": "p" * 500}])
     assert "handToAgent" in out and "recentTrimmed" not in out
+
+
+# -- the WHOLE read fits, not only its months ------------------------------------
+
+
+def _measured_read(turn=10):
+    """A full read with the block sizes a real pod measured at 29.2K characters
+    after every month had been cut: the months were no longer what was over."""
+    return {
+        "runId": "r" * 32,
+        "turn": turn,
+        "fingerprint": "f" * 16,
+        "lore": [{"id": f"lore-{i}", "name": f"Lore {i}", "text": "l" * 560} for i in range(4)],
+        "memoryCandidates": [
+            {"id": f"event-{i}-k", "turn": i, "title": "t", "summary": "m" * 380} for i in range(5)
+        ],
+        "people": [{"id": f"p{i}", "name": f"P{i}", "stance": "s" * 230} for i in range(4)],
+        "voice": "second",
+        "voiceRule": "v" * 190,
+        "state": {"status": {"notes": "s" * 4_000}},
+        "recentTurns": [
+            {"turn": turn - 1, "short": True, "line": "x" * 800},
+            {"turn": turn, "prose": "p" * 6_200},
+        ],
+        "restraint": {"note": "r" * 580},
+        "world": {"worldId": "w", "title": "w" * 200},
+        "brief": "b" * 4_500,
+        "shape": "h" * 4_700,
+        "chapters": [{"id": f"c{i}", "title": "c" * 100} for i in range(9)],
+        "opening": [{"id": f"o{i}", "label": "o" * 80} for i in range(9)],
+    }
+
+
+def test_a_long_lifes_whole_read_fits_under_the_ceiling(app):
+    out = _measured_read()
+    assert srv._result_chars(out) > 29_000, "the fixture must be the over-size read"
+    srv._fit_read(out, [{"turn": 9, "prose": "x"}, {"turn": 10, "prose": "p" * 5_900}])
+    assert srv._result_chars(out) <= srv.READ_CEILING
+    # What the month being written stands on is never cut.
+    assert out["brief"] == "b" * 4_500 and out["shape"] == "h" * 4_700
+    assert out["state"] == {"status": {"notes": "s" * 4_000}}
+    assert len(out["chapters"]) == 9
+    assert out["recentTrimmed"]["opening"] == "dropped"
+
+
+def test_an_include_prose_read_drops_the_book_before_anything_else(app, monkeypatch):
+    _store, run = _long_life(turns=6)
+    monkeypatch.setattr(srv, "READ_CEILING", 10**9)
+    plain = len(srv.call_tool("endless_read_runtime", {"runId": run, "recentTurns": 2}))
+    monkeypatch.setattr(srv, "READ_CEILING", plain + 10)
+    raw = srv.call_tool(
+        "endless_read_runtime", {"runId": run, "includeProse": True, "recentTurns": 2}
+    )
+    out = json.loads(raw)
+    assert len(raw) <= plain + 10
+    assert "rulebook" not in out
+    assert out["recentTrimmed"]["rulebook"] == "dropped"
+
+
+def test_a_cut_recall_body_is_not_recorded_as_held(app):
+    out = _measured_read()
+    delivered = ["lore-0", "lore-1", "lore-2", "lore-3", "event-4-k", "event-3-k"]
+    srv._fit_read(out, [{"turn": 10, "prose": "p"}], delivered)
+    for row in out.get("lore") or []:
+        if row.get("trimmed"):
+            assert row["id"] not in delivered, "a body never sent must be sent next time"
+    for eid in out["recentTrimmed"].get("memoryCandidates") or []:
+        assert eid not in delivered

@@ -243,7 +243,12 @@ processes self-locate the same data dir so routes and tools see one set of files
   turn applies *nothing* (prose included) — pinned by
   `test_a_malformed_turn_applies_nothing`; an unknown tool refused by name by
   `test_an_unknown_tool_is_refused_by_name`; every bad field named by
-  `test_every_bad_field_is_named`.
+  `test_every_bad_field_is_named`. A schema refusal also carries `retry`
+  (`_retry_hint`): fix that one field and resend the same whole call with
+  `arguments` as a JSON object; for a run-id refusal it adds that the run id is
+  checked first, so a probe under a made-up id tests nothing. Measured on a pod: a
+  narrator probed with seven `runId: "x"` calls after the host refused its
+  stringified commits. Pinned by `test_retry_hint.py`.
 
 - **Every reply is lean, because every byte is paid on every later call.** A turn
   makes several model calls and each resends the whole conversation, so a tool
@@ -256,7 +261,7 @@ processes self-locate the same data dir so routes and tools see one set of files
   says what an omitted field means (a missing list is empty, a missing text
   blank, a missing flag false). The `world` block is the Library row cut to
   `_NARRATOR_WORLD_FIELDS`; `opening[].worldDecides` and `chapters[].brief` are
-  sent only when true. `_fit_recent` measures the read through the same encoder.
+  sent only when true. `_fit_read` measures the whole read through the same encoder.
   Pinned by `test_mcp_bytes.test_replies_carry_no_padding_whitespace`,
   `test_no_empty_field_is_sent_outside_the_state` and
   `test_the_world_block_carries_only_what_narrating_needs`.
@@ -303,7 +308,7 @@ processes self-locate the same data dir so routes and tools see one set of files
   | Tool | Facing | Purpose |
   |---|---|---|
   | `endless_advance_turn` | narrator | the one writer — commit prose + full state + choices (+ optional memory/events) |
-  | `endless_read_runtime` | narrator | read-only pull of rulebook (`brief`) + `shape` on a full read, state, recent turns (4 whole, older ones as short rows, cut oldest-first under 26,000 chars and named in `recentTrimmed`; past the opening, `handToAgent` is dropped last) and the app's `thisTurn` notes from the in-flight record — the only place the narrator gets the rulebook, since no user message carries it; with a `since`-fingerprint delta; blocks the conversation already holds unchanged are named in `held`; a full read past the opening carries `commitWith`, telling a fresh conversation to commit a `statePatch` on this read's fingerprint (see turn-loop.md) |
+  | `endless_read_runtime` | narrator | read-only pull of rulebook (`brief`) + `shape` on a full read, state, recent turns (4 whole, older ones as short rows); the WHOLE read is held under 26,000 chars by `_fit_read`, which cuts the `includeProse` book, old months, the opening hand-off, low-ranked recall bodies and finally the newest month's prose, naming each in `recentTrimmed` and the app's `thisTurn` notes from the in-flight record — the only place the narrator gets the rulebook, since no user message carries it; with a `since`-fingerprint delta; blocks the conversation already holds unchanged are named in `held`; a full read past the opening carries `commitWith`, telling a fresh conversation to commit a `statePatch` on this read's fingerprint (see turn-loop.md) |
   | `endless_mount_scene` | narrator | mount a structured scene (map/tree/links/ledger/choice) from a spec; the app draws it |
   | `endless_update_scene` | narrator | change a mounted scene without remounting (a remount reloads its iframe) |
   | `endless_await_scene` | narrator | return the player's scene answer if present; never blocks |

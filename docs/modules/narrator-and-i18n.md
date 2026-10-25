@@ -51,8 +51,9 @@ argument.
   narrator re-reads the newest four months as it wrote them and the older eight
   as app-built `short: true` rows, so a full read stays under the harness's
   30,000-character tool-result limit instead of spilling to a file the narrator
-  only sees a preview of. What a full read had to cut to fit is named in
-  `recentTrimmed`, never cut silently, and the state is never cut. The short rows
+  only sees a preview of. The whole read is counted, not only its months, and
+  what it had to cut to fit is named in `recentTrimmed`, never cut silently; the
+  state, the brief and the shape are never cut (order in [turn-loop](turn-loop.md)). The short rows
   are built from what was committed, in the life's own language; they add no
   words of the app's own except the `recentTrimmed.note`, which is English like
   the read's other notes. A re-read month's `choices` keep only what was offered
@@ -64,7 +65,8 @@ argument.
 
 - **One slot per conversation, many conversations per life.** A life's
   conversation is replaced after a pause past `IDLE_ROTATION_SECS` (5 min), every
-  `ROTATION_MAX_TURNS` (8) turns, on a chapter boundary, on an install change, on
+  `ROTATION_MAX_TURNS` (8) turns, on a chapter boundary (not the one the opening
+  itself opens), on an install change, on
   the reset control and on a dismissed tab. Each replacement moves the life to a
   new conversation number and so a new slot key (`endless-run-<runId>-c<n>`; the
   bare `endless-run-<runId>` is conversation 0), because core finds an old
@@ -73,12 +75,34 @@ argument.
   token (`DELETE /api/chat/slots/{slot}`, then `DELETE /api/sessions/{key}`; the
   gateway does the ownership check), plus one private step with no public route:
   forgetting a still-mapped resume pointer and unlinking kiro-cli's session files
-  (`_forget_provider_session`). The fresh
+  in both layouts, the classic `sessions/cli/<sid>.json(l)` and KAS's
+  `sessions/<hash>/<sid>/`, for that one id only (`_forget_provider_session`,
+  `_unlink_kas_session`). A conversation whose turn is still finishing is retired
+  after that turn ends, never under it (`_retire_when_idle`). The fresh
   conversation's prompt is the same few lines as any turn's; its first read is
   full, carries the `brief` and `shape`, and carries `commitWith` (`read.patch`,
   naming the read's fingerprint), so it commits a `statePatch` rather than
   re-declaring the state. `read.patch` exists in every content table in the
   life's own language. Contract and tests in [turn-loop](turn-loop.md).
+
+- **A `people` field's shape is spelled out.** `declaration_shape` adds one
+  `shape.people` line per `people` field, with the exact list it takes from
+  `view.people_example` (`name`, `note`, then the world's declared columns). The
+  shape used to say only "holds figures (Key Figures)", and a narrator wrote the
+  whole cast as one string. `shape.people` exists in every content table. Pinned
+  by `test_people_shape.test_the_shape_says_a_people_field_is_a_list_and_shows_it`;
+  the commit side is in [data-model](data-model.md).
+
+- **A host refusal of a stringified call is retried as the same call.** The
+  narrator reaches this app's tools through the host's deferred `tool_call`,
+  which refuses `arguments` sent as a JSON string ("arguments: expected object,
+  received string") before the call reaches this app, and does not coerce it.
+  That is the host's; the app's part is the narrator prompt's closing paragraph
+  (resend the identical call with `arguments` as an object, never probe with a
+  made-up run id or a cut-down payload) and the `retry` line on every schema
+  refusal ([surface](surface.md)). Measured on a pod: 12 of 125 commits were
+  refused this way, 5 of the 17 over 13 KB of arguments, and one page spent 6.37
+  credits on 5 refusals and 7 probes under the run id "x".
 
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
