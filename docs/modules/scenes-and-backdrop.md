@@ -634,6 +634,7 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_a_late_commit_after_the_life_was_deleted_is_refused_and_recreates_nothing`,
   `test_every_illustrator_tool_is_refused_for_a_deleted_life`,
   `test_a_life_deleted_while_the_trace_searches_gets_nothing_written`,
+  `test_a_life_deleted_while_the_commit_composes_gets_no_art_written`,
   `test_an_abandoned_pages_illustrator_can_draw_nothing_more`,
   `test_a_stale_illustrator_cannot_trace_or_select_for_the_retrys_brief` and
   `test_the_live_pages_illustrator_and_a_committed_pages_repair_are_still_served`

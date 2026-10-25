@@ -850,6 +850,33 @@ def test_a_life_deleted_while_the_trace_searches_gets_nothing_written(data, monk
     assert _leftovers(data, run_id) == []
 
 
+def test_a_life_deleted_while_the_commit_composes_gets_no_art_written(data, monkeypatch):
+    """The commit passed its entry checks, then the life was erased while the
+    underlay was being spliced in. The final write must not recreate the life."""
+    store, run_id, _brief, draft_id = _painting(data)
+    real = srv._apply_underlay
+
+    def splice(rid, turn, markup, view):
+        out = real(rid, turn, markup, view)
+        if view == "mobile":
+            store.delete_run(rid)
+        return out
+
+    monkeypatch.setattr(srv, "_apply_underlay", splice)
+
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft_id,
+        markup=_svg("#123"),
+        mobile=_svg("#123"),
+    )
+
+    assert out["ok"] is False and "deleted" in out["error"]
+    assert _leftovers(data, run_id) == []
+
+
 def test_an_abandoned_pages_illustrator_can_draw_nothing_more(data):
     """The narrator writing page 2 ended without a month while its early
     illustrator kept drawing. Its brief is still on file, but the page has no words
