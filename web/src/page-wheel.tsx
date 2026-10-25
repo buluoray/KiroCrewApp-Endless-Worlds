@@ -353,7 +353,6 @@ export function PageWheel({
         onLostPointerCapture={onPointerEnd}
         onKeyDown={onKeyDown}
       >
-        <span className="ew-wheel-ribbon" aria-hidden="true" />
         <div className="ew-wheel-drum" aria-hidden="true">
           {nums}
         </div>

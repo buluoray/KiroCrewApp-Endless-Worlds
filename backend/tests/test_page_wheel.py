@@ -126,7 +126,7 @@ def test_the_wheel_is_a_labelled_slider_with_the_slider_keys():
         assert attr in w, attr
     assert "scrubKey(e.key, store.get() ?? shown, latest)" in w
     assert "aria-live" not in module("page-wheel.tsx"), "StoryPage announces once, on landing"
-    for cls in ("ew-wheel-drum", "ew-wheel-ribbon"):
+    for cls in ("ew-wheel-drum",):
         at = w.index(f'className="{cls}"')
         assert 'aria-hidden="true"' in w[at : at + 60], cls
 
@@ -200,9 +200,17 @@ def test_the_wheel_has_no_background_panel():
         assert "box-shadow:" not in body and "border:" not in body, sel
     assert re.search(r"\.ew-wheel-c \{[^}]*color: var\(--text,", css), "the centre in canvas ink"
     assert re.search(r"\.ew-wheel-n \{[^}]*color: var\(--muted,", css)
-    # The ribbon still marks the centre.
-    w = _wheel()
-    assert '<span className="ew-wheel-ribbon" aria-hidden="true" />' in w
+
+
+def test_the_phone_wheel_draws_no_bookmark():
+    """The centre number alone marks the page: no ribbon, bookmark or underline."""
+    w = module("page-wheel.tsx")
+    assert not re.search(r"ribbon|bookmark", w, re.I), "no bookmark element in the wheel"
+    css = styles()
+    assert ".ew-wheel-ribbon" not in css
+    assert not re.search(r"\.ew-wheel-c \{[^}]*(?:border-bottom|text-decoration):", css)
+    # The desktop slider keeps its ribbon thumb as the drag handle.
+    assert '<span className="ew-scrub-ribbon" />' in module("page-scrubber.tsx")
 
 
 def test_the_mark_at_the_wheels_end_goes_back_to_the_live_page():

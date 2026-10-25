@@ -1241,8 +1241,9 @@ button.ew-pager-turn:focus-visible {
 /* The phone's page wheel: the iOS time wheel laid on its side, in the top row beside
    the back link. No card: the numbers are printed straight on the reading row in the
    canvas ink (--text for the centre, --muted fading out for the rest; measured in
-   test_theme_contrast.py), with the slider's ribbon over the centre number. The row
-   is the same 44px as the back link, so the fixed bar's slot is its plain height.
+   test_theme_contrast.py); the centre number alone, larger and in full ink, marks the
+   page, with no ribbon or underline. The row is the same 44px as the back link, so
+   the fixed bar's slot is its plain height.
    The back link never wraps or shrinks; the wheel takes the width it leaves. Numbers
    turn on a drum (perspective + rotateY per number, set inline from wheelLook()),
    fade out under a mask toward both ends, and the centre one ticks — a quick settle
@@ -1284,15 +1285,6 @@ button.ew-pager-turn:focus-visible {
 .ew-wheel-face { display: block; }
 .ew-wheel-on .ew-wheel-c .ew-wheel-face { animation: ew-wheel-tick .14s ease-out; }
 @keyframes ew-wheel-tick { from { transform: scale(1.16); } to { transform: none; } }
-/* The ribbon over the centre: the desktop bookmark, shortened to a tab. */
-.ew-wheel-ribbon {
-  position: absolute; left: 50%; top: 0; z-index: 1; width: 8px; height: 10px; margin-left: -4px;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%);
-  background:
-    linear-gradient(90deg, rgba(0, 0, 0, .3), transparent 30% 70%, rgba(0, 0, 0, .3)),
-    color-mix(in srgb, var(--accent, #7c3aed) 70%, #4a0f1c);
-  pointer-events: none;
-}
 /* The picker's button, laid unseen over the centre number: a finger passes through
    it to the wheel (whose centre tap opens the picker), a keyboard or screen reader
    lands on it, and its focus ring circles the centre number. The panel is anchored
