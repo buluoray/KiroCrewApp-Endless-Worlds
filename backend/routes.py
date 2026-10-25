@@ -408,10 +408,10 @@ async def _recover_backdrop(
     simpler brief (starting a fresh illustrator cycle) or draw through the
     server-gated direct fallback. The ordinary generation state stays on screen.
 
-    ``art_quality`` is the player's speed/polish trade: ``fast`` caps the
-    illustrators at ONE attempt and instructs that attempt to publish its first
-    competent draft (the draft tool's answer carries the same instruction), so a
-    failed fast attempt falls through to the narrator/server fallbacks sooner.
+    ``art_quality`` is the player's speed/polish trade. ``standard`` (the default)
+    tells each attempt to publish its first competent draft, reading the previews
+    only to catch a broken render; ``polished`` allows ONE revision pass. The draft
+    tool's answer carries the same instruction, so the two can never disagree.
     """
     try:
         # The model's whole-recovery budget. When it elapses, the server publishes
@@ -447,8 +447,7 @@ async def _recover_backdrop(
             attempts = int(request.get("attempts") or 0)
             spawn = getattr(ctx, "spawn", None)
             within_budget = loop.time() < recovery_deadline
-            attempt_cap = 1 if art_quality == "fast" else _BACKDROP_ILLUSTRATOR_ATTEMPTS
-            if attempts < attempt_cap and spawn is not None and within_budget:
+            if attempts < _BACKDROP_ILLUSTRATOR_ATTEMPTS and spawn is not None and within_budget:
                 attempt = attempts + 1
                 store.update_backdrop_request(run_id, attempts=attempt)
                 BackdropTimeline(ctx.data_dir, run_id).mark(
@@ -456,18 +455,21 @@ async def _recover_backdrop(
                 )
                 review_clause = (
                     (
-                        "with EXACTLY this runId and turn, glance at the returned "
-                        "preview PNGs only to confirm nothing is structurally broken "
-                        "(blank frame, unreadable composition), and publish that "
-                        "first draft with endless_commit_backdrop using the returned "
-                        "draftId — fast art mode: no revision pass. "
-                    )
-                    if art_quality == "fast"
-                    else (
                         "with EXACTLY this runId and turn, read every returned preview "
-                        "PNG together as images, revise at most once, and publish the "
-                        "final pair with endless_commit_backdrop using the returned "
-                        "draftId. "
+                        "PNG together as images, revise at most once (as a new draft), "
+                        "and publish with endless_commit_backdrop passing only runId, "
+                        "turn and the latest reviewed draftId — never the markup. "
+                        "Polished art mode: the one revision pass is wanted. "
+                    )
+                    if art_quality == "polished"
+                    else (
+                        "with EXACTLY this runId and turn, read the returned preview "
+                        "PNGs together only to confirm nothing is structurally broken "
+                        "(blank frame, clipped subject, unreadable composition) — "
+                        "only a broken render earns a corrected second draft — and "
+                        "publish with endless_commit_backdrop passing only runId, "
+                        "turn and the latest draftId (never the markup). Standard art "
+                        "mode: no revision pass for polish. "
                     )
                 )
                 task = (

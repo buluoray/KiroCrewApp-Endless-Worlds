@@ -48,7 +48,7 @@ def test_round_trip(tmp_path: Path) -> None:
         choice_effects=False,
         prose_length="short",
         reduced_motion=True,
-        art_quality="fast",
+        art_quality="polished",
     )
     assert read_settings(tmp_path) == {
         "model": "some-model",
@@ -61,7 +61,7 @@ def test_round_trip(tmp_path: Path) -> None:
         "choiceEffects": False,
         "proseLength": "short",
         "reducedMotion": True,
-        "artQuality": "fast",
+        "artQuality": "polished",
     }
 
 
@@ -120,9 +120,11 @@ def test_unknown_enum_values_coerce_to_defaults(tmp_path: Path) -> None:
 
 
 def test_reduced_motion_and_art_quality_round_trip(tmp_path: Path) -> None:
-    write_settings(tmp_path, model="", reasoning_effort="", reduced_motion=True, art_quality="fast")
+    write_settings(
+        tmp_path, model="", reasoning_effort="", reduced_motion=True, art_quality="polished"
+    )
     got = read_settings(tmp_path)
-    assert got["reducedMotion"] is True and got["artQuality"] == "fast"
+    assert got["reducedMotion"] is True and got["artQuality"] == "polished"
     # And a pre-upgrade file reads as motion on, standard quality.
     (tmp_path / "settings.json").write_text('{"model": ""}', encoding="utf-8")
     got = read_settings(tmp_path)
@@ -171,3 +173,13 @@ def test_a_styleless_motif_is_never_touched() -> None:
     # Motifs are hand-drawn and never reach the photo pipeline.
     brief = "LANE: motif\nTHESIS: grief arriving before the news does"
     assert rewrite_brief_style(brief, ["watercolor"], "watercolor") == brief
+
+
+def test_the_retired_fast_value_reads_as_the_standard_default(tmp_path: Path) -> None:
+    """`fast` was the opt-in "first draft ships" tier, which is now the default.
+    A file an older build wrote keeps meaning what the player chose, and is never
+    read as the slower polished tier."""
+    (tmp_path / "settings.json").write_text('{"artQuality": "fast"}', encoding="utf-8")
+    assert read_settings(tmp_path)["artQuality"] == "standard"
+    saved = write_settings(tmp_path, model="", reasoning_effort="", art_quality="fast")
+    assert saved["artQuality"] == "standard"

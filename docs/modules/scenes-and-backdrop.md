@@ -351,6 +351,50 @@ sees is produced locally from a closed, code-owned vocabulary.
   a process rule, not a measurement. Pinned by
   `test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe`.
 
+- **The default tier ships the first draft; the revision pass is opt-in.** "Earned,
+  not owed" did not hold in practice: in a pod run of 8 real briefs (3 motif, 5 scene;
+  watercolor, oil, minimal, photo) the illustrator revised 7 of 8 pages, and the
+  page took a median 141 s with 6 of 8 over 120 s. Where the time went: server work
+  is small (trace 5-8 s, each preview render under 0.7 s, spawn ~10 s); the rest is
+  the model writing SVG at ~200 bytes/s — a first draft ~60 s, a revision ~40 s.
+  So the player's `artQuality` setting now reads `standard` (the default: preview
+  read only to catch a structurally broken render — blank frame, clipped subject,
+  unreadable composition — which alone earns one corrected draft) or `polished`
+  (the lane's one-revision contract, labelled slower in the settings). The tier
+  reaches the illustrator twice, in the recovery task (`_recover_backdrop`) and in
+  the draft tool's `next` (`_draft_next`), so the two cannot disagree. Both tiers
+  keep two illustrator attempts and the same 180 s budget. A settings file written
+  before this change that says `fast` (the old opt-in first-draft tier) reads as
+  `standard`. Measured on the same 8 briefs: median 62 s, p90 100 s, max 105 s, 0 of
+  8 over 120 s, credits ~2.36 -> ~1.00 per page, quality judged page by page equal
+  on motif and photo pages, with dense painterly scenes a little less detailed.
+  A ~5 KB per-SVG size cap and claude-haiku-5.5 as the painter were measured too
+  and rejected: both cost visible quality on scenes. Pinned by
+  `test_standard_art_quality_skips_the_revision_pass`,
+  `test_polished_art_quality_still_allows_its_one_revision`,
+  `test_the_draft_answer_skips_the_revision_by_default_and_keeps_it_when_polished`
+  and `test_the_retired_fast_value_reads_as_the_standard_default`.
+
+- **The commit publishes the reviewed draft by its id; the model never re-types
+  it.** `endless_commit_backdrop` used to require `markup` and `mobile` again, so
+  the illustrator re-emitted the exact SVGs it had just drafted — a median 31 s of
+  output on every page, for bytes the server already held. The draft record
+  (`backdrop-draft.json`, private, never served) now keeps the illustrator's own
+  pre-splice SVGs (`source`), and the commit takes only `runId`, `turn` and
+  `draftId`, re-validates that source through the same splice and store path, and
+  publishes it. Markup a commit still sends must be byte-identical to the draft or
+  the commit is refused, so a commit can never carry an unreviewed edit; to change
+  anything the illustrator submits and reviews a new draft. A draft written before
+  drafts kept their source (a restart across the upgrade) has nothing to publish by
+  id, so an id-only commit for it is refused with "resubmit" and the explicit pair
+  still works. The source never appears in the draft tool's answer. Draft-to-commit
+  fell from a median 31 s to 7 s. Pinned by
+  `test_draft_then_final_backdrop_stores_and_versions`,
+  `test_commit_refuses_markup_that_differs_from_the_reviewed_draft`,
+  `test_commit_by_id_publishes_the_drafts_buttons_motif`,
+  `test_a_draft_recorded_without_its_source_still_needs_the_markup` and
+  `test_the_draft_source_never_reaches_the_submit_answer`.
+
 - **Cost: a source is asked once per subject, and only when it might answer.**
   Wikimedia rate-limits a burst — an unbounded probe earned a 429 inside about
   twenty calls — and every request also costs the player latency, so three
@@ -507,8 +551,8 @@ sees is produced locally from a closed, code-owned vocabulary.
   margin and covers 27 of the 28. The clocks still nest: one brief's worst case
   (this budget, `_BACKDROP_LATE_COMMIT_GRACE_SECS`, then `_BACKDROP_NARRATOR_CYCLES`
   silent stalls of `_BACKDROP_ATTEMPT_SECS`) is 780s, under
-  `BACKDROP_STALE_SECS` (900s), and fast art mode uses the same budget for its one
-  attempt. Pinned by
+  `BACKDROP_STALE_SECS` (900s), and both art tiers (`standard`, `polished`) use
+  the same budget and the same two attempts. Pinned by
   `test_an_illustrator_committing_at_the_measured_p90_publishes_its_own_art` and
   `test_one_briefs_whole_recovery_fits_inside_the_stale_ceiling`. When that budget elapses without an exact commit, the server
   publishes the traced underlay ALONE as the page's backdrop — `commit_underlay_only`

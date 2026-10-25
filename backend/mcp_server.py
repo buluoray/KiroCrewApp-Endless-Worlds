@@ -661,15 +661,17 @@ _TOOLS: list[dict[str, Any]] = [
         "name": "endless_commit_backdrop",
         "description": (
             "Publish the ILLUSTRATOR's final backdrop after visual draft review. "
-            "Pass the opaque `draftId` returned by endless_submit_backdrop_draft, "
-            "the final desktop SVG as `markup`, the independently composed portrait "
-            "SVG as `mobile`, and optional `buttons`. The final may be the reviewed "
-            "draft unchanged or its one revision. Publication is atomic and refused "
-            "unless the draft id and page match; draft thumbnails are never public."
+            "Pass ONLY `runId`, `turn` and the `draftId` of the draft you reviewed "
+            "last: the server publishes that draft's own desktop, mobile and "
+            "buttons SVGs, so never re-send the markup (re-typing it is a minute of "
+            "waiting for bytes the server already holds). To change anything, "
+            "submit it as a new draft and review it first. Publication is atomic "
+            "and refused unless the draft id and page match; draft thumbnails are "
+            "never public."
         ),
         "inputSchema": {
             "type": "object",
-            "required": ["runId", "turn", "draftId", "markup", "mobile"],
+            "required": ["runId", "turn", "draftId"],
             "additionalProperties": False,
             "properties": {
                 "runId": _RUN_ID,
@@ -3443,28 +3445,50 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
     draft = _backdrop_draft_store(run_id).submit(
-        markup, mobile, turn=turn, buttons=args.get("buttons"), brief_id=brief_id
+        markup,
+        mobile,
+        turn=turn,
+        buttons=args.get("buttons"),
+        brief_id=brief_id,
+        source={
+            "markup": args["markup"],
+            "mobile": args["mobile"],
+            "buttons": args.get("buttons") or "",
+        },
     )
-    # The player's art-quality tier decides what the review pass owes: standard
-    # keeps the lane's full review contract; fast turns it into a structural
-    # sanity glance so the first competent draft ships.
-    fast = read_settings(_DATA)["artQuality"] == "fast"
     return {
         "backdrop": "drafted",
         "draftId": draft["draftId"],
         "turn": turn,
         "previews": draft["previews"],
-        "next": (
-            (
-                "fast art mode: glance at the previews only to confirm nothing is "
-                "structurally broken (blank frame, unreadable composition), then "
-                "commit THIS draft with endless_commit_backdrop — do not spend a "
-                "revision pass."
-            )
-            if fast
-            else "read every preview together, then follow the lane's review-pass contract"
-        ),
+        "next": _draft_next(read_settings(_DATA)["artQuality"]),
     }
+
+
+def _draft_next(art_quality: str) -> str:
+    """What the draft answer tells the illustrator to do with its previews.
+
+    The player's art-quality tier decides what the review pass owes. ``standard``
+    (the default) is a structural sanity glance so the first competent draft
+    ships: measured, the polish revision cost ~40 s a page for no visible gain.
+    ``polished`` keeps the lane's full review contract with its one revision.
+    """
+    commit = (
+        "commit with endless_commit_backdrop passing only runId, turn and THIS "
+        "draftId — never the markup."
+    )
+    if art_quality == "polished":
+        return (
+            "polished art mode: read every preview together and follow the lane's "
+            "review-pass contract (at most one revision, as a new draft, reviewed "
+            "before you commit its draftId); then " + commit
+        )
+    return (
+        "standard art mode: read the previews together only to confirm nothing is "
+        "structurally broken (blank frame, clipped subject, unreadable composition). "
+        "Do not spend a revision pass on polish — only a broken render earns one "
+        "corrected draft. Then " + commit
+    )
 
 
 def _require_commit_brief(run_id: str, turn: int, draft: dict[str, Any]) -> str:
@@ -3504,6 +3528,41 @@ def _require_commit_brief(run_id: str, turn: int, draft: dict[str, Any]) -> str:
             "this page's brief was replaced; stop — the current brief has its own illustrator"
         )
     return live_id or drawn_for
+
+
+def _reviewed_draft_markup(
+    draft: dict[str, Any], args: dict[str, Any]
+) -> tuple[str, str, str | None]:
+    """The SVGs to publish: the reviewed draft's own, by its id.
+
+    The commit publishes what was rendered and reviewed, so the illustrator passes
+    only the ``draftId``. Markup it still sends anyway must be byte-identical to
+    that draft — a commit can never carry an unreviewed edit. A draft recorded
+    before drafts kept their source (a gateway restart across an upgrade) has
+    nothing to publish by id, so it still needs the markup passed explicitly.
+    """
+    source = draft.get("source") if isinstance(draft.get("source"), dict) else {}
+    sent = {k: args.get(k) for k in ("markup", "mobile", "buttons")}
+    if not source:
+        if not (isinstance(sent["markup"], str) and isinstance(sent["mobile"], str)):
+            raise BackdropError(
+                "this draft predates commit-by-id; resubmit it with "
+                "endless_submit_backdrop_draft, then commit the new draftId"
+            )
+        return sent["markup"], sent["mobile"], sent["buttons"]
+    for key in ("markup", "mobile", "buttons"):
+        given = sent[key]
+        if isinstance(given, str) and given.strip() and given != source.get(key, ""):
+            raise BackdropError(
+                f"`{key}` differs from the reviewed draft; commit publishes the draft "
+                "by its draftId — pass only runId, turn and draftId, or submit the "
+                "change as a new draft and review it first"
+            )
+    return (
+        str(source.get("markup") or ""),
+        str(source.get("mobile") or ""),
+        source.get("buttons") or None,
+    )
 
 
 def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
@@ -3554,12 +3613,13 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
                 # Which ladder rung won, so a brief that only ever matches after
                 # widening is visible as a brief to rewrite, not a silent success.
                 trace_audit["matched"] = str(search.get("matched"))
-    markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
-    mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
+    raw_markup, raw_mobile, raw_buttons = _reviewed_draft_markup(draft, args)
+    markup = _apply_underlay(run_id, turn, raw_markup, "desktop")
+    mobile = _apply_underlay(run_id, turn, raw_mobile, "mobile")
     _require_wanted_page(run_id, turn)
     version = _backdrop_store(run_id).set(
         markup,
-        args.get("buttons"),
+        raw_buttons,
         turn,
         mobile,
         source=source if isinstance(source, dict) else None,

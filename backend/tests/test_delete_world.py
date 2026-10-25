@@ -523,12 +523,8 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(world,
     assert store.read_backdrop_request(run_id) is None
 
 
-def test_fast_art_quality_dispatches_one_illustrator_and_skips_the_revision_pass(
-    world, monkeypatch
-):
-    """The player's fast tier is enforced at the recovery loop, not suggested:
-    one illustrator attempt (standard gets two), and that attempt's task tells it
-    to ship its first competent draft instead of spending a revision pass."""
+def _dispatched_tasks(world, monkeypatch, art_quality):
+    """Run one recovery whose illustrators all end without art; return their tasks."""
     from backdrop import BackdropStore
 
     store = world["store"]
@@ -578,14 +574,31 @@ def test_fast_art_quality_dispatches_one_illustrator_and_skips_the_revision_pass
             painter_model="paint-model",
             narrator_model="story-model",
             reasoning_effort="high",
-            art_quality="fast",
+            art_quality=art_quality,
         )
     )
+    return [call[0] for call in spawn.calls]
 
-    assert len(spawn.calls) == 1, "fast tier must cap the illustrators at one attempt"
-    task = spawn.calls[0][0]
-    assert "fast art mode: no revision pass" in task
-    assert "revise at most once" not in task
+
+def test_standard_art_quality_skips_the_revision_pass(world, monkeypatch):
+    """The default tier ships the first competent draft: every attempt's task
+    forbids a polish revision and commits by draftId, and the attempt cap is the
+    same two the illustrator always had."""
+    tasks = _dispatched_tasks(world, monkeypatch, "standard")
+    assert len(tasks) == routes_mod._BACKDROP_ILLUSTRATOR_ATTEMPTS
+    for task in tasks:
+        assert "Standard art mode: no revision pass for polish" in task
+        assert "revise at most once" not in task
+        assert "never the markup" in task
+
+
+def test_polished_art_quality_still_allows_its_one_revision(world, monkeypatch):
+    tasks = _dispatched_tasks(world, monkeypatch, "polished")
+    assert len(tasks) == routes_mod._BACKDROP_ILLUSTRATOR_ATTEMPTS
+    for task in tasks:
+        assert "revise at most once" in task
+        assert "Polished art mode" in task
+        assert "no revision pass" not in task
 
 
 # -- late illustrator commit grace ------------------------------------------------
@@ -722,7 +735,7 @@ def test_an_ended_illustrator_gets_no_grace_even_with_a_draft(world, monkeypatch
 _MEASURED_P90_COMMIT_SECS = 159.0
 
 
-@pytest.mark.parametrize("art_quality", ["standard", "fast"])
+@pytest.mark.parametrize("art_quality", ["standard", "polished"])
 def test_an_illustrator_committing_at_the_measured_p90_publishes_its_own_art(
     world, monkeypatch, art_quality
 ):

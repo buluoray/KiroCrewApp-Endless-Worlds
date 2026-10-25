@@ -566,11 +566,18 @@ class BackdropDraftStore:
         turn: int,
         buttons: str | None = None,
         brief_id: str = "",
+        source: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Validate all draft SVGs, then atomically expose only raster previews.
 
         ``brief_id`` records which brief the illustrator said it drew, so the commit
         can refuse a draft drawn for a brief that is no longer the page's.
+
+        ``source`` is the illustrator's own markup as it sent it (before the
+        underlay splice). It is kept in the private draft record so the commit can
+        publish exactly the reviewed draft by its id, sparing the model from
+        re-typing SVGs the server already holds. It never leaves this file except
+        through the commit, which validates it again.
         """
         clean_markup = compile_backdrop(markup)
         clean_mobile = compile_backdrop(mobile)
@@ -596,6 +603,10 @@ class BackdropDraftStore:
             draft = {"draftId": draft_id, "turn": int(turn), "previews": previews}
             if brief_id:
                 draft["briefId"] = str(brief_id)
+            if source:
+                draft["source"] = {
+                    k: str(v) for k, v in source.items() if isinstance(v, str) and v.strip()
+                }
             old = self._load()
             self._save(draft)
             self._remove_previews(old)

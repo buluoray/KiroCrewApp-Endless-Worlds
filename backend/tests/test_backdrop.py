@@ -250,16 +250,12 @@ def test_draft_then_final_backdrop_stores_and_versions(data):
     assert draft["ok"] is True and draft["backdrop"] == "drafted"
     assert BackdropStore(data, run_id).current() is None, "draft must not publish"
 
-    out = _call(
-        "endless_commit_backdrop",
-        runId=run_id,
-        turn=1,
-        draftId=draft["draftId"],
-        markup=_svg("#121"),
-        mobile=_svg("#122"),
-    )
+    # Commit by id alone: the server publishes the reviewed draft's own SVGs.
+    out = _call("endless_commit_backdrop", runId=run_id, turn=1, draftId=draft["draftId"])
     assert out["ok"] is True and out["version"] == 1
-    assert "#121" in BackdropStore(data, run_id).current()["markup"]
+    published = BackdropStore(data, run_id).current()
+    assert "#111" in published["markup"]
+    assert "#112" in published["mobile"]
     assert not (data / "runs" / run_id / "backdrop-draft.json").exists()
     assert not any(draft_path.exists() for draft_path in map(Path, draft["previews"].values()))
 
@@ -273,6 +269,109 @@ def test_draft_then_final_backdrop_stores_and_versions(data):
         mobile=_svg("#223"),
     )
     assert out2["version"] == 2
+
+
+def test_commit_refuses_markup_that_differs_from_the_reviewed_draft(data):
+    """A commit can never carry an unreviewed edit: markup it sends anyway must be
+    byte-identical to the draft, or nothing is published."""
+    run_id = "e" * 32
+    draft = _submit_draft(data, run_id, 1, _svg("#111"), _svg("#112"))
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=_svg("#999"),
+        mobile=_svg("#112"),
+    )
+    assert out["ok"] is False
+    assert "differs from the reviewed draft" in out["error"]
+    assert BackdropStore(data, run_id).current() is None
+    # The same draft still publishes when the identical bytes are echoed back.
+    same = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=_svg("#111"),
+        mobile=_svg("#112"),
+    )
+    assert same["ok"] is True
+    assert "#111" in BackdropStore(data, run_id).current()["markup"]
+
+
+def test_commit_by_id_publishes_the_drafts_buttons_motif(data):
+    from kiro_crew.apps.app_storage import AppStorage
+
+    from store import RunStore
+
+    run_id = "f" * 32
+    RunStore(AppStorage("endless-worlds", data), data).request_backdrop(
+        run_id, turn=1, brief="test art"
+    )
+    draft = _call(
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=1,
+        markup=_svg("#111"),
+        mobile=_svg("#112"),
+        buttons=_svg("#abc"),
+    )
+    out = _call("endless_commit_backdrop", runId=run_id, turn=1, draftId=draft["draftId"])
+    assert out["ok"] is True
+    assert "#abc" in (BackdropStore(data, run_id).current()["buttons"] or "")
+
+
+def test_a_draft_recorded_without_its_source_still_needs_the_markup(data):
+    """A draft saved before drafts kept their SVGs (gateway restart across an
+    upgrade) has nothing to publish by id: an id-only commit is refused with the
+    way out, and the explicit pair still publishes as before."""
+    run_id = "9" * 32
+    draft = _submit_draft(data, run_id, 1, _svg("#111"), _svg("#112"))
+    path = data / "runs" / run_id / "backdrop-draft.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record.pop("source")
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    bare = _call("endless_commit_backdrop", runId=run_id, turn=1, draftId=draft["draftId"])
+    assert bare["ok"] is False and "resubmit" in bare["error"]
+    assert BackdropStore(data, run_id).current() is None
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft["draftId"],
+        markup=_svg("#111"),
+        mobile=_svg("#112"),
+    )
+    assert out["ok"] is True
+
+
+def test_the_draft_answer_skips_the_revision_by_default_and_keeps_it_when_polished(data):
+    """The draft tool's `next` is the illustrator's last word on the review pass.
+    With no saved settings (the default tier) it forbids a polish revision; the
+    polished tier hands back the lane's revision contract."""
+    from settings import write_settings
+
+    default = _submit_draft(data, "7" * 32, 1, _svg("#111"), _svg("#112"))
+    assert "standard art mode" in default["next"]
+    assert "Do not spend a revision pass on polish" in default["next"]
+
+    write_settings(data, model="", reasoning_effort="", art_quality="polished")
+    polished = _submit_draft(data, "6" * 32, 1, _svg("#111"), _svg("#112"))
+    assert "polished art mode" in polished["next"]
+    assert "at most one revision" in polished["next"]
+    assert "Do not spend a revision pass" not in polished["next"]
+    for answer in (default, polished):
+        assert "never the markup" in answer["next"]
+
+
+def test_the_draft_source_never_reaches_the_submit_answer(data):
+    """The stored source is private to the draft record: the model already has its
+    own markup, and echoing it back would cost the very tokens this saves."""
+    draft = _submit_draft(data, "8" * 32, 1, _svg("#111"), _svg("#112"))
+    assert "source" not in draft
+    assert "#111" not in json.dumps(draft)
 
 
 def test_submit_backdrop_draft_refuses_non_svg_atomically(data):
@@ -721,18 +820,11 @@ def test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_brief
     store, run_id = _writing(data)
     _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a gate")
     live = store.read_backdrop_request(run_id)["briefId"]
-    draft = _early_draft(run_id, 2, live)
+    draft = _early_draft(run_id, 2, live, color="#123")
     BackdropStore(data, run_id).set(_svg("#999"), turn=2, brief_id=live)
     store.clear_backdrop_request(run_id)
 
-    ok = _call(
-        "endless_commit_backdrop",
-        runId=run_id,
-        turn=2,
-        draftId=draft["draftId"],
-        markup=_svg("#123"),
-        mobile=_svg("#123"),
-    )
+    ok = _call("endless_commit_backdrop", runId=run_id, turn=2, draftId=draft["draftId"])
     assert ok["ok"] is True
     assert "#123" in BackdropStore(data, run_id).exact(2)["markup"]
 
@@ -864,14 +956,7 @@ def test_a_life_deleted_while_the_commit_composes_gets_no_art_written(data, monk
 
     monkeypatch.setattr(srv, "_apply_underlay", splice)
 
-    out = _call(
-        "endless_commit_backdrop",
-        runId=run_id,
-        turn=1,
-        draftId=draft_id,
-        markup=_svg("#123"),
-        mobile=_svg("#123"),
-    )
+    out = _call("endless_commit_backdrop", runId=run_id, turn=1, draftId=draft_id)
 
     assert out["ok"] is False and "deleted" in out["error"]
     assert _leftovers(data, run_id) == []
