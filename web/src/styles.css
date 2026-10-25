@@ -1068,6 +1068,14 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 @media (hover: hover) { .ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); } }
 .ew-pager-arw:disabled { opacity: .35; cursor: default; }
+/* Reopens the entry recap the reader hid; same frame and 44px target as the arrows. */
+.ew-pager-recap {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid var(--border, #2d2f3d);
+  color: var(--text, #e2e8f0); font: inherit; font-size: 13px; white-space: nowrap;
+}
+@media (hover: hover) { .ew-pager-recap:hover { border-color: var(--accent, #7c3aed); } }
 
 /* The standing summary above the prose. It had no surface at all — 13px muted rows
    sitting directly on the page's backdrop art, which is where it became hard to
@@ -1301,7 +1309,12 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   display: flex; justify-content: space-between; gap: 8px; margin-top: 6px;
 }
 .ew-progress-label { font-size: 12px; color: var(--muted, #6b7280); }
-.ew-progress-count { font-size: 11px; color: var(--muted, #6b7280); flex: 0 0 auto; }
+.ew-progress-count {
+  font-size: 11px; color: var(--muted, #6b7280); flex: 0 0 auto;
+  display: inline-flex; gap: 6px;
+}
+/* Fixed-width digits so the clock does not jitter the stage label each second. */
+.ew-progress-elapsed { font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {
   .ew-progress-track::after { animation: none; opacity: 0; }
 }

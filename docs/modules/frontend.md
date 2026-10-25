@@ -234,8 +234,22 @@ guarantee.
   (`progressPct`, both capped at 92% until the commit lands), because a month is
   only two or three calls and the long one is the write, so a call-only bar stood
   still for about a minute. Beside the tuned waiting phrase it shows the server's
-  own `generating.stage` (`play.stage.reading` / `writing` / `painting`). Pinned by
-  `test_rail.py::test_turn_progress_names_the_server_stage_and_creeps_between_calls`.
+  own `generating.stage` (`play.stage.reading` / `writing` / `painting`), and beside
+  that an elapsed clock (`formatElapsed`, `m:ss`) counted from `askedAt`, so a reload
+  keeps the real wait. Only the label and stage are live regions; the clock sits
+  outside them (a screen reader would otherwise read every second) and is a plain
+  text change, so reduced motion needs nothing more. Pinned by
+  `test_rail.py::test_turn_progress_names_the_server_stage_and_creeps_between_calls`
+  and `test_play_flow.py::test_the_wait_shows_time_since_the_ask_without_reading_every_second_aloud`.
+
+- **A hidden entry recap can come back; echo lines name their event.** Hiding
+  "Where this life left off" lights a `play.recapReopen` button in the pager (live
+  page only) that reopens it; keyboard focus moves between Hide and Recap rather
+  than falling to the page. A newer month retires both the recap and the button.
+  Each echo's folded line carries its own event title (`play.echoLineTitled`,
+  the answering event, else its source), so two echoes of one page no longer read
+  the same. Pinned by `test_play_flow.py::test_a_hidden_recap_can_be_reopened_from_the_pager`
+  and `test_each_echo_line_names_its_own_event`.
   A failed turn preserves the player's input for retry; and the top-of-story pager
   addresses months by turn *number*, not an offset — an offset shifts under a turn
   committed mid-paging. `api.chronicle(before)` therefore takes a turn number.
