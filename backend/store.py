@@ -437,96 +437,32 @@ class RunStore:
 
     # -- the world's law, delivered once -----------------------------------
     #
-    # The narrator's session is ONE conversation that spans every turn of a life:
-    # measured on a live run, a single .jsonl held every turn of it, and every user
-    # message in that file re-sent the whole 15,000-character rulebook. At turn four
-    # the rulebook was 70% of a 21,700-character prompt, and it grows without bound
-    # because nothing about it changes.
-    #
-    # So it is delivered once and then referred to. This marker is what "once" means;
-    # it names the slot it was delivered to, because a rulebook read into a
-    # conversation that no longer exists has not been delivered to the one that does.
+    # Which conversation was last handed the world's rulebook in its USER message.
+    # The turn loop no longer sends one (the rulebook rides only in a full
+    # ``endless_read_runtime``), so nothing writes this marker any more; the key is
+    # kept so a life recorded by an older version still has it cleared on a
+    # conversation reset and on delete, rather than left behind on disk.
 
     @staticmethod
     def _brief_key(run_id: str) -> str:
         return f"briefed-{run_id}"
 
-    def mark_briefed(
-        self,
-        run_id: str,
-        *,
-        slot: str,
-        turn: int = 0,
-        carried: dict[str, str] | None = None,
-    ) -> None:
-        """Record that this run's rulebook has been read into ``slot``.
-
-        Called AFTER the prompt carrying it is dispatched, never before. Marking
-        first and failing to send would leave a life whose narrator never saw its
-        world; marking after and crashing costs one redundant re-send, which is the
-        safe direction to be wrong in.
-
-        ``turn`` and ``carried`` say what THIS attempt's prompt itself held:
-        ``carried`` maps a block name (``brief``, ``shape``) to the
-        ``content_tag`` of the exact text sent. ``endless_read_runtime`` reads it
-        (``prompt_carried``) so a full read in the same attempt does not hand the
-        narrator a second copy of text that is in the prompt in front of it. An
-        opening prompt that carries neither records ``{}`` and the read sends both.
-        """
+    def mark_briefed(self, run_id: str, *, slot: str, turn: int = 0) -> None:
+        """Write the legacy rulebook-delivery marker (tests and older data only)."""
         _check_run_id(run_id)
         self._kv.set(
             self._brief_key(run_id),
-            {
-                "slot": slot,
-                "at": time.time(),
-                "turn": int(turn),
-                "carried": dict(carried or {}),
-            },
+            {"slot": slot, "at": time.time(), "turn": int(turn)},
         )
 
-    def prompt_carried(self, run_id: str, turn: int) -> dict[str, str]:
-        """What the prompt of the attempt now writing ``turn`` carried, by tag.
-
-        Trusted only for that exact attempt: the marker must name ``turn``, the
-        in-flight record must be for ``turn``, and the marker must have been
-        written at or after that record's ``askedAt``. ``mark_pending`` runs
-        before dispatch and ``mark_briefed`` after it, so a retried attempt whose
-        prompt carried no rulebook has a newer ``askedAt`` than the old marker and
-        reads as carrying nothing — the read then sends the blocks whole.
-        """
-        _check_run_id(run_id)
-        raw = self._kv.get(self._brief_key(run_id))
-        if not isinstance(raw, dict):
-            return {}
-        try:
-            if int(raw.get("turn") or 0) != int(turn) or int(turn) <= 0:
-                return {}
-            pending = self.read_pending(run_id) or {}
-            if int(pending.get("turn") or 0) != int(turn):
-                return {}
-            asked = float(pending.get("askedAt") or 0.0)
-            if not asked or float(raw.get("at") or 0.0) < asked:
-                return {}
-        except (TypeError, ValueError):
-            return {}
-        carried = raw.get("carried")
-        if not isinstance(carried, dict):
-            return {}
-        return {str(k): str(v) for k, v in carried.items() if isinstance(v, str)}
-
     def briefed_slot(self, run_id: str) -> str:
-        """Which slot holds this run's rulebook, or "" if none does."""
+        """The slot the legacy marker names, or "" if there is none."""
         _check_run_id(run_id)
         raw = self._kv.get(self._brief_key(run_id))
         return str(raw.get("slot") or "") if isinstance(raw, dict) else ""
 
     def clear_briefed(self, run_id: str) -> None:
-        """Forget that the rulebook was delivered — the next turn re-sends it.
-
-        The companion to a conversation reset that KEEPS the slot: the marker
-        names a slot, the slot survives, so without this the turn loop would
-        conclude the (brand-new) conversation already holds the world's law.
-        """
+        """Drop the legacy rulebook-delivery marker. Safe when there is none."""
         _check_run_id(run_id)
         self._kv.delete(self._brief_key(run_id))
 
@@ -633,7 +569,14 @@ class RunStore:
         return f"pending-{run_id}"
 
     def mark_pending(
-        self, run_id: str, *, turn: int, slot: str, action: str = "", close: bool = False
+        self,
+        run_id: str,
+        *,
+        turn: int,
+        slot: str,
+        action: str = "",
+        close: bool = False,
+        notes: list[str] | None = None,
     ) -> None:
         """Record that ``turn`` was asked of ``slot``, before asking.
 
@@ -644,6 +587,10 @@ class RunStore:
         ``close`` records that the player asked to close the life with this turn.
         It lives only here, in the app's own record, so the commit can end the
         life on the player's word and never on a narrator's claim.
+
+        ``notes`` are the app's own lines for this turn (``turn.turn_notes``):
+        ``endless_read_runtime`` hands them over as ``thisTurn``, so the user
+        message does not have to carry them.
         """
         _check_run_id(run_id)
         record: dict[str, Any] = {
@@ -659,6 +606,8 @@ class RunStore:
         }
         if close:
             record["close"] = True
+        if notes:
+            record["notes"] = [str(n) for n in notes]
         self._kv.set(self._pending_key(run_id), record)
 
     def read_pending(self, run_id: str) -> dict[str, Any] | None:

@@ -101,7 +101,6 @@ async def _advance(store, run_id, state_obj, dispatch):
         state_obj=state_obj,
         store=store,
         run_id=run_id,
-        rulebook="r",
         dispatch=dispatch,
         inline_wait_secs=0.3,
     )

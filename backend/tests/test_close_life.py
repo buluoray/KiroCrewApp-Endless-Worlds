@@ -9,7 +9,7 @@ import pytest
 import mcp_server as srv
 from content import Content
 from narrator import APP_NAME, MEMORY_MODE
-from turn import advance_turn, compose_prompt
+from turn import advance_turn, compose_prompt, turn_notes
 from view import resolve_ending
 
 BASE = {
@@ -107,14 +107,14 @@ def test_the_close_rides_only_in_the_apps_pending_record(tmp_path, monkeypatch):
     assert "ended" not in store.read_state(run)
 
 
-def test_the_close_prompt_is_the_apps_line_not_quoted_player_words():
-    prompt = compose_prompt(
-        rulebook="", state={"turn": 3}, chronicle=[], run_id="a" * 32, close=True
-    )
-    assert Content("en")("turn.close") in prompt
-    assert Content("en")("turn.action.preamble") not in prompt
-    plain = compose_prompt(rulebook="", state={"turn": 3}, chronicle=[], run_id="a" * 32)
-    assert Content("en")("turn.close") not in plain
+def test_the_close_note_is_the_apps_line_not_quoted_player_words():
+    notes = turn_notes(language="en", close=True)
+    assert Content("en")("turn.close") in notes
+    assert Content("en")("turn.action.preamble") not in notes
+    assert Content("en")("turn.close") not in turn_notes(language="en")
+    # The message itself carries no close line: it reaches the narrator in the read.
+    prompt = compose_prompt(state={"turn": 3}, run_id="a" * 32)
+    assert Content("en")("turn.close") not in prompt
 
 
 class _Slot:
@@ -155,14 +155,15 @@ def test_advance_turn_records_the_close_before_the_narrator_is_asked(tmp_path, m
             state_obj=_State(),
             store=store,
             run_id=run,
-            rulebook="r",
             dispatch=dispatch,
             inline_wait_secs=0.2,
             close=True,
         )
     )
     assert seen["pending"]["close"] is True and seen["pending"]["turn"] == 2
-    assert Content("en")("turn.close") in seen["prompt"]
+    assert Content("en")("turn.close") not in seen["prompt"]
+    read = json.loads(srv.call_tool("endless_read_runtime", {"runId": run}))
+    assert Content("en")("turn.close") in read["thisTurn"], "the read must ask for the epilogue"
 
 
 def test_a_life_that_has_not_begun_cannot_be_closed(tmp_path, monkeypatch):

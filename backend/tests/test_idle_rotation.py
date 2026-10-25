@@ -23,7 +23,6 @@ sys.path.insert(0, str(_BACKEND))
 
 import mcp_server as srv  # noqa: E402
 import narrator  # noqa: E402
-from content import Content  # noqa: E402
 from perf import TurnPerf  # noqa: E402
 from turn import (  # noqa: E402
     IDLE_ROTATION_SECS,
@@ -130,8 +129,6 @@ def _ask(store, run, state, action="wait"):
             state_obj=state,
             store=store,
             run_id=run,
-            rulebook="THE LAW",
-            shape="THE SHAPE",
             dispatch=_dispatch,
             inline_wait_secs=0.01,
             action=action,
@@ -202,8 +199,7 @@ def test_the_turn_after_a_pause_starts_fresh_and_forgets_what_was_sent(app):
     slot_key = narrator.narrator_slot_key(run)
     state = _State()
     state.slots[slot_key] = _Slot(slot_key)
-    # The old conversation holds the rulebook and some recall bodies.
-    store.mark_briefed(run, slot=slot_key, turn=2)
+    # The old conversation holds some recall bodies.
     store.mark_recall_sent(run, ["world:abc", "person:mira:123", "event-1-x"])
     assert store.recall_sent(run)
     _age_last_commit(store, run, IDLE_ROTATION_SECS + 60)
@@ -216,10 +212,12 @@ def test_the_turn_after_a_pause_starts_fresh_and_forgets_what_was_sent(app):
     assert store.rotation_turn(run) == 2
     # Every "already sent" marker belongs to the discarded conversation.
     assert store.recall_sent(run) == set()
-    # The fresh conversation is re-briefed and told to patch.
-    prompt = state.prompts[-1]
-    assert "THE LAW" in prompt
-    assert Content("en")("turn.patch") in prompt
+    # The fresh conversation is asked in the same few lines; its first read is
+    # full, so it carries the rulebook again and says to commit a patch.
+    assert "THE LAW" not in state.prompts[-1]
+    read = json.loads(srv.call_tool("endless_read_runtime", {"runId": run}))
+    assert "brief" in read and "shape" in read
+    assert "statePatch" in read["commitWith"]
 
     # A double tap on the same month neither rotates nor discards again.
     _ask(store, run, state)
@@ -232,14 +230,12 @@ def test_a_short_pause_keeps_the_conversation(app):
     slot_key = narrator.narrator_slot_key(run)
     state = _State()
     state.slots[slot_key] = _Slot(slot_key)
-    store.mark_briefed(run, slot=slot_key, turn=2)
     _age_last_commit(store, run, IDLE_ROTATION_SECS - 60)
 
     _ask(store, run, state)
 
     assert _rotations(store, run) == []
     assert state.sessions.discarded == []
-    assert Content("en")("turn.patch") not in state.prompts[-1]
 
 
 def test_the_fresh_narrator_that_follows_the_read_commits_a_patch(app):
@@ -247,7 +243,6 @@ def test_the_fresh_narrator_that_follows_the_read_commits_a_patch(app):
     slot_key = narrator.narrator_slot_key(run)
     state = _State()
     state.slots[slot_key] = _Slot(slot_key)
-    store.mark_briefed(run, slot=slot_key, turn=2)
     _age_last_commit(store, run, IDLE_ROTATION_SECS + 60)
     _ask(store, run, state)
     assert _rotations(store, run) == ["idle"]

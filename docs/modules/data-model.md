@@ -20,7 +20,7 @@ deletion.
 | `kv/run.<runId>.state.json` | current world state (whole-value `AppStorage` entry, atomic write) |
 | `kv/run.<runId>.prev.json` | last-known-good state — the rollback target |
 | `kv/index.json` | `{ "runs": [ …Lives-view rows… ] }`, the shelf |
-| `kv/briefed-<runId>.json` | `{ slot, at, turn, carried }` rulebook-delivery marker; `carried` tags the exact brief/shape that turn's prompt held (`prompt_carried`) |
+| `kv/briefed-<runId>.json` | `{ slot, at, turn }` legacy rulebook-delivery marker; no longer written by the turn loop (the rulebook rides only in a full read), still cleared on reset and delete |
 | `kv/pending-<runId>.json` | in-flight-turn record (`turn`, `slot`, `askedAt`, `action`, `close?` — the player closing the life, see turn-loop — `readAt?`, `readTurn?`, …) |
 | `runs/<runId>/chronicle.jsonl` | append-only, one JSON line per committed turn (`turn`, `prose`, `action`, `choices`, `events`, `gains`, `memory?`, `picked?` (the offered choice the action was, observed by the app; see memory-graph.md), and the `digest?`/`panels?` snapshot of the standing that turn ended on) |
 | `mcp_server.py` (`_advance_turn`) | applies `RESERVED_STATE_KEYS` carry-forward, then the milestone rebuild and the systems engine, on each commit |
@@ -152,8 +152,8 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   `narrator-generation-`, `backdrop-request-`, the index row, and the
   `runs/<id>/` tree all go. Load-bearing
   because a leaked `pending-` makes `turn.generating` report a turn in flight for
-  a life that no longer exists, and a leaked `briefed-` misreports rulebook
-  delivery for a reused id. The delete routes then cancel the life's backdrop
+  a life that no longer exists; `briefed-` is legacy and is dropped so an
+  older version's marker is not left behind. The delete routes then cancel the life's backdrop
   recovery task, and the art tools refuse a still-running illustrator's late
   calls without writing, so nothing recreates the tree afterwards
   (scenes-and-backdrop.md, early-illustrator rule 6). Enforced by `store.delete_run`; pinned by

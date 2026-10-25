@@ -17,9 +17,9 @@ dismissal and deliberately not for the sweep. So the app registers a hook and is
 TOLD, rather than inferring.
 
 Manual: one seam, ``reset_narrator_conversation``, discards the conversation
-through the LIVE manager and clears the briefed marker in the same call — a
-discarded conversation that kept its slot would otherwise never re-brief
-(``brief_now = fresh_slot or briefed != slot_key`` stays False on both arms).
+through the LIVE manager and clears the legacy briefed marker in the same call.
+The fresh conversation holds no fingerprint, so its first read is full and
+carries the rulebook again.
 """
 
 from __future__ import annotations
@@ -386,7 +386,6 @@ def test_clear_briefed_round_trip(store, run):
 def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, monkeypatch):
     from turn import advance_turn
 
-    RULEBOOK = "the world does not revolve around the player"
     state = FakeState()
     sent: list[str] = []
 
@@ -400,10 +399,8 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
                 state_obj=state,
                 store=store,
                 run_id=run,
-                rulebook=RULEBOOK,
                 dispatch=dispatch,
                 inline_wait_secs=0.3,
-                shape="declare state in this shape: status",
             )
         )
 
@@ -419,7 +416,6 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
     monkeypatch.setitem(sys.modules, "kiro_crew.apps.teardown", teardown)
 
     advance()
-    assert RULEBOOK in sent[0]
     assert APP_NAME in registry, "the turn path must arm the hook, since core forgets it"
     store.commit_state(run, {**store.read_state(run), "turn": 1})
     store.append_turn(run, {"turn": 1, "prose": "the snow stopped"})
@@ -431,7 +427,7 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
     assert state.sessions.discarded == [key], "a dismissal must discard the conversation"
 
     advance()
-    assert RULEBOOK in sent[1], "the fresh conversation must be re-briefed"
+    assert len(sent) == 2 and run in sent[1], "the fresh conversation is asked the month"
 
     # A third turn on the SAME (reopened) tab must not rotate again: the dismissal
     # recorded its turn, so the planned rotation sees the boundary already spent.
@@ -439,7 +435,6 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
     store.append_turn(run, {"turn": 2, "prose": "spring"})
     advance()
     assert len(state.sessions.discarded) == 1, "one dismissal, one reset"
-    assert RULEBOOK not in sent[2]
 
 
 def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
@@ -463,10 +458,8 @@ def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
                 state_obj=state,
                 store=store,
                 run_id=run,
-                rulebook="rules",
                 dispatch=dispatch,
                 inline_wait_secs=0.3,
-                shape="declare state in this shape: status",
             )
         )
 

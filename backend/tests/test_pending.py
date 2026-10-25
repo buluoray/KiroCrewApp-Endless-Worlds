@@ -119,7 +119,6 @@ async def _advance(store, run_id, dispatch, **kw):
         state_obj=state_obj,
         store=store,
         run_id=run_id,
-        rulebook="r",
         dispatch=dispatch,
         inline_wait_secs=kw.pop("inline_wait_secs", 0.4),
         **kw,

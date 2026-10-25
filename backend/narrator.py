@@ -356,18 +356,10 @@ async def reset_narrator_conversation(state: Any, store: Any, run_id: str) -> bo
     linkage stays), the slot survives (the tab stays open), and narrative state is
     untouched.
 
-    The briefed marker is cleared IN THE SAME seam, not left to callers: the turn
-    loop re-sends the world's rulebook only when ``fresh_slot or briefed !=
-    slot_key`` (turn.py), and a discard that keeps the slot leaves both false — a
-    new conversation that was never told the rules of its world. One seam, one
-    invariant: a discarded conversation always re-briefs.
-
-    Cleared BEFORE the discard, which is what makes that invariant hold rather
-    than merely stating it. Reversed, a failed clear leaves a brand-new
-    conversation that will never be told the rules — the exact state this is
-    supposed to make impossible. In this order the same failure only leaves the
-    OLD conversation about to be re-briefed once more, which costs a re-send and
-    nothing else.
+    The new conversation is told its world's rules by its own first read: it
+    holds no fingerprint, so that read is full and carries the rulebook. The
+    legacy briefed marker (written by older versions) is cleared here too, so it
+    is not left behind.
 
     Best-effort like its siblings: a missing runtime or a bad id is a no-op.
 

@@ -516,8 +516,10 @@ def test_two_failed_illustrators_notify_the_same_narrator_behind_the_gate(world,
         assert "First call endless_submit_backdrop_draft" not in task
         assert "draw directly from the brief" not in task
     assert len(prompts) == 1
-    assert "do NOT narrate" in prompts[0]
-    assert "endless_commit_fallback_backdrop" in prompts[0]
+    # Which page, and nothing the narrator's own prompt already says about how.
+    assert run_id in prompts[0] and "turn 1" in prompts[0]
+    assert prompts[0].startswith("Internal page-art recovery")
+    assert len(prompts[0]) < 200
     assert store.read_backdrop_request(run_id) is None
 
 
