@@ -54,10 +54,49 @@ turn 200 as at turn 1.
   `test_a_turn_with_tool_activity_is_never_healed`, and
   `test_the_heal_is_capped_so_a_broken_fresh_slot_cannot_loop`.
 
+- **A conversation is replaced after a pause or after eight turns, once per
+  boundary.** Every model call re-sends the conversation so far, and the prompt
+  cache that makes that cheap lives minutes while players pause longer (measured:
+  55% of gaps over 5 min, 27% over 30). So `_should_rotate()` starts a fresh
+  conversation when the gap since the last commit (`RunStore.committed_at`, read
+  from that commit's provenance record and trusted only for the committed turn)
+  exceeds `IDLE_ROTATION_SECS` (300, reason `idle`), at `ROTATION_MAX_TURNS` (8,
+  reason `budget`), or on a chapter boundary (`chapter`); an install change
+  (`install`) is checked first. Idle never fires while a live in-flight record
+  exists for the next month, because a second ask five minutes after a first one
+  that did not rotate would otherwise discard the narrator still writing it; an
+  unknown commit time never rotates. Every reason goes through the same seam:
+  `mark_rotation(turn=baseline)` before `reset_narrator_conversation` (which
+  clears the briefed marker and suppresses the transcript replay), so a retry or
+  double tap sees the marker at `baseline` and never rotates twice, and the
+  recall-sent record (lore, recall candidates, people cards, held blocks) is
+  stamped with the old rotation and reads as empty. The perf ledger records the
+  reason; `tools/perf_audit.py` groups turns by it. Pinned by
+  `test_a_pause_past_the_threshold_rotates_and_a_short_one_does_not`,
+  `test_an_idle_boundary_rotates_exactly_once`,
+  `test_idle_never_discards_a_narrator_still_writing_the_month`,
+  `test_an_unknown_commit_time_never_rotates_on_idleness`,
+  `test_a_commit_time_for_another_month_is_not_trusted`,
+  `test_the_budget_caps_a_conversation_at_eight_turns`, and
+  `test_the_turn_after_a_pause_starts_fresh_and_forgets_what_was_sent`.
+
+- **A fresh conversation commits a patch, not the whole state.** Its first read
+  is full (it holds no `since`), and that read's `fingerprint` names exactly the
+  state it sent, so `endless_advance_turn` accepts a `statePatch` with
+  `basedOn` = that fingerprint. Measured narrators in that position re-declared
+  the full state instead (20-24 KB of output, ~115 s against ~64 s for a
+  continued turn), so the fresh prompt carries `turn.patch` and every full read
+  of a life past its opening carries `commitWith` (`read.patch`, naming the
+  fingerprint). Pinned by
+  `test_the_fresh_narrator_that_follows_the_read_commits_a_patch`,
+  `test_a_delta_read_carries_no_commit_note`, and
+  `test_an_opening_read_carries_no_commit_note`.
+
 - **The prompt size is independent of life length.** A turn's prompt carries the
   run id, the turn number, the player's action, and — only on the turn that needs
-  it — the rulebook; it never carries state or history, because the narrator's
-  session is one continuous conversation per life and already holds what it wrote.
+  it — the rulebook; it never carries state or history, because within a
+  conversation the narrator already holds what it wrote, and a fresh conversation
+  re-anchors with one full read.
   Enforced by `compose_prompt()`; pinned by
   `test_no_amount_of_history_grows_the_prompt` (a 1-turn and a 200-turn life
   differ by a bounded margin the test fixes) and

@@ -73,17 +73,39 @@ TURN_DEADLINE_SECS = 300.0
 #: in the request that asked for it.
 TURN_INLINE_WAIT_SECS = 20.0
 
-#: Turn budget for one narrator conversation before a planned rotation, the
-#: backstop for worlds that never open a chapter. Sized from a measured life:
-#: the transcript grew ~40 KB/turn before the delta-read work and ~25 KB/turn is
-#: the expected floor after it, so 24 turns ≈ 600 KB — comfortably under the
-#: point where the harness starts compacting the conversation on its own, which
-#: is the uncontrolled event rotation exists to preempt. A heuristic, not a
-#: contract; the chapter trigger below is preferred whenever the world has one.
-ROTATION_MAX_TURNS = 24
+#: Turn budget for one narrator conversation before a planned rotation.
+#:
+#: Every model call in a turn re-sends the whole conversation, so input grows
+#: with each turn the conversation has lived: measured ~8 KB of history per turn
+#: and three calls per turn, so turn k of a conversation sends ~140 KB + 25 KB·k
+#: (turn 8 ≈ 310 KB, turn 24 ≈ 660 KB). A fresh conversation re-anchors with one
+#: full read (13-24 KB on real lives since the summarised read), so past ~8 turns
+#: the history costs more than starting again. Real play almost never reaches the
+#: cap — the idle rotation below fires first (measured bursts: median 1 turn,
+#: longest 7) — so this bounds a long fast burst, nothing else.
+ROTATION_MAX_TURNS = 8
+
+#: How long since the last commit before the next turn starts a fresh
+#: conversation (rotation reason ``idle``).
+#:
+#: The point is the prompt cache. Within its lifetime the conversation so far is
+#: re-read cheaply; after it, every call pays the whole history at full price,
+#: and a fresh conversation (rulebook prefix + one full read) is then the cheaper
+#: thing to send. The real lifetime behind Kiro credits is not documented; 5 min is
+#: the common default, and on one measured life turns after a gap under 5 min sat
+#: ~0.5 credits under the cost fit while turns after 6-13 min did not. Replayed
+#: over real gaps, breaking at 5 min cost 0.43x today's input if the cache lives
+#: 5 min and 0.55x if it lives 30 — both well under keeping the conversation.
+IDLE_ROTATION_SECS = 300.0
 
 
-def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed: bool) -> str:
+def _should_rotate(
+    store: RunStore,
+    run_id: str,
+    baseline: int,
+    chapter_crossed: bool,
+    now: float | None = None,
+) -> str:
     """The rotation reason ("" = none): one planned rotation per boundary.
 
     ``rotation_turn`` records where the conversation last started fresh, so a
@@ -91,6 +113,11 @@ def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed:
     requested — the second request sees the marker already at ``baseline``.
     Returns the reason as a string (truthiness unchanged for callers) so the
     perf ledger can say WHY a conversation restarted.
+
+    ``idle`` never fires while the next month is being written. The gap is dated
+    from the last commit, so a second tab (or a slow narrator's own retry) asking
+    five minutes after a first ask that did NOT rotate would otherwise discard
+    the conversation of the narrator still writing that month.
     """
     if baseline <= 0:
         return ""
@@ -99,7 +126,13 @@ def _should_rotate(store: RunStore, run_id: str, baseline: int, chapter_crossed:
         return ""
     if chapter_crossed:
         return "chapter"
-    return "budget" if (baseline - done) >= ROTATION_MAX_TURNS else ""
+    if (baseline - done) >= ROTATION_MAX_TURNS:
+        return "budget"
+    committed = store.committed_at(run_id, baseline)
+    if committed is None or _in_flight(store, run_id, baseline + 1) is not None:
+        return ""
+    clock = time.time() if now is None else now
+    return "idle" if clock - committed > IDLE_ROTATION_SECS else ""
 
 
 #: One fresh conversation per stuck turn. A SECOND zero-contact expiry on a
@@ -192,8 +225,15 @@ def compose_prompt(
     prose_length: str = "",
     backdrops_enabled: bool = True,
     close: bool = False,
+    fresh: bool = False,
 ) -> str:
     """Everything the narrator needs to write the next turn, and nothing else.
+
+    ``fresh`` says this prompt opens a new conversation for a life already under
+    way. Its narrator holds no fingerprint until its first read, and measured
+    narrators in that position re-declared the whole state (20-24 KB of output,
+    ~115 s a turn against ~60 s for a patch) — so the prompt says, once, that the
+    read's fingerprint is enough for a patch.
 
     ``run_id`` is not optional and is not decoration: every tool the narrator has
     takes it, so a prompt without it leaves the narrator guessing an identifier.
@@ -251,6 +291,9 @@ def compose_prompt(
 
     if shape:
         parts += ["", shape]
+
+    if fresh and turn > 0:
+        parts += ["", text("turn.patch")]
 
     parts += ["", text("turn.ask", turn=turn + 1)]
     if close:
@@ -656,6 +699,7 @@ async def advance_turn(
         prose_length=prose_length,
         backdrops_enabled=backdrops_enabled,
         close=close,
+        fresh=brief_now,
     )
 
     # BEFORE dispatch, never after. The window this closes is the one between

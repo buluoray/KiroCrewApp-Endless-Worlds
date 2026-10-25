@@ -2359,6 +2359,16 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
         out["basedOn"] = since
     else:
         out["state"] = state
+        if int(state.get("turn") or 0) >= 1:
+            # A full read is a baseline too: the fingerprint above names exactly
+            # the state just sent. Said here because a fresh conversation (an idle
+            # or budget rotation) reads in full every time, and narrators measured
+            # in that position re-declared the whole state — 20-24 KB of output
+            # per turn where a patch was 0.4-3.6 KB.
+            lang_patch = state.get("language")
+            out["commitWith"] = Content(lang_patch if isinstance(lang_patch, str) else "en")(
+                "read.patch", fingerprint=fingerprint
+            )
         if since:
             # Said out loud: a narrator that asked for a delta and got a snapshot
             # should know its baseline was not recognised, not quietly assume the

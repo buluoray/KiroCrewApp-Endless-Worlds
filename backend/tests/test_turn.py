@@ -168,6 +168,7 @@ def test_the_prompt_has_no_channel_for_the_players_own_memory():
     reaches here and the second is a bool, so neither can carry the player's own
     text. A NEW parameter added to this set must clear the same bar — no free
     text about the player. ``close`` is a bool too: the player closing the life.
+    ``fresh`` is a bool: whether this prompt opens a new conversation.
     """
     params = set(inspect.signature(compose_prompt).parameters)
     assert params == {
@@ -182,6 +183,7 @@ def test_the_prompt_has_no_channel_for_the_players_own_memory():
         "prose_length",
         "backdrops_enabled",
         "close",
+        "fresh",
     }
 
 
