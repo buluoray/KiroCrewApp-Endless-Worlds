@@ -142,7 +142,9 @@ def test_the_newest_months_keep_their_whole_prose(app):
     assert [m["turn"] for m in whole] == [11, 12, 13, 14]
     for m in whole:
         assert m["prose"].endswith(_LONG) and "short" not in m
-        assert [c["id"] for c in m["choices"]] == ["go", "stay"]
+        # What was offered, by label; a past button's id and look are the page's.
+        assert [c["label"] for c in m["choices"]] == ["go", "stay"]
+        assert all(set(c) <= {"label", "fateful"} for c in m["choices"])
         # The memory a month declared is named, not retold beside its own prose.
         assert m["memory"] == {
             "events": [
@@ -161,16 +163,23 @@ def test_the_newest_months_keep_their_whole_prose(app):
         }
 
 
-def test_a_re_read_month_leaves_out_the_choice_art():
-    # The drawing on a weighty choice is the page's, not the narrator's.
+def test_a_re_read_month_keeps_only_what_each_choice_offered():
+    # The drawing, motion and id of a past button are the page's, not the narrator's.
     entry = {
         "turn": 3,
         "prose": "p",
-        "choices": [{"id": "stay", "label": "stay", "fateful": True, "art": "<svg/>"}],
+        "choices": [
+            {
+                "id": "stay",
+                "label": "stay",
+                "fateful": True,
+                "art": "<svg/>",
+                "effect": "aura",
+                "tint": "#112233",
+            }
+        ],
     }
-    assert srv._narrator_month(entry)["choices"] == [
-        {"id": "stay", "label": "stay", "fateful": True}
-    ]
+    assert srv._narrator_month(entry)["choices"] == [{"label": "stay", "fateful": True}]
     assert entry["choices"][0]["art"] == "<svg/>"  # the stored month is untouched
 
 
@@ -187,7 +196,8 @@ def test_trimming_drops_the_oldest_summaries_first_and_says_so(app, monkeypatch)
     dropped = out["recentTrimmed"]["dropped"]
     assert dropped and dropped == list(range(3, 3 + len(dropped)))
     assert turns == list(range(3 + len(dropped), 15))
-    assert out["recentTrimmed"]["shortened"] == []
+    # An empty list is left out of a reply, so "nothing shortened" is no key.
+    assert "shortened" not in out["recentTrimmed"]
     assert "memoryEvents" in out["recentTrimmed"]["note"]
     # Every whole month survived.
     assert sum(1 for m in out["recentTurns"] if not m.get("short")) == srv.FULL_MONTHS
@@ -224,7 +234,7 @@ def test_a_delta_read_is_never_trimmed_or_summarised(app, monkeypatch):
     fp = call("endless_read_runtime", runId=run)["fingerprint"]
     monkeypatch.setattr(srv, "READ_CEILING", 1)
     delta = call("endless_read_runtime", runId=run, since=fp)
-    assert delta["recentTurns"] == []
+    assert "recentTurns" not in delta  # none re-sent; an empty list is left out
     assert "recentTrimmed" not in delta
     assert delta["basedOn"] == fp and "state" not in delta
 
@@ -281,7 +291,7 @@ def test_unchanged_scenes_are_held_and_a_changed_ledger_is_sent(app, monkeypatch
     monkeypatch.setattr(srv, "_scene_ledger", lambda _run: _Ledger(rows))
 
     full = call("endless_read_runtime", runId=run)
-    assert full["scenes"] == rows
+    assert full["scenes"] == [{"id": "ask", "kind": "choice"}]  # the null answer is left out
     delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
     assert "scenes" not in delta and "scenes" in delta["held"]
 
@@ -292,10 +302,16 @@ def test_unchanged_scenes_are_held_and_a_changed_ledger_is_sent(app, monkeypatch
 
 
 def test_no_scenes_is_still_said_on_every_read(app):
+    """No scenes is said by absence: a missing list is empty (the read's own
+    description says so), and it is never confused with a held ledger because a
+    held block is named in `held`."""
     store, run = _life()
     full = call("endless_read_runtime", runId=run)
     delta = call("endless_read_runtime", runId=run, since=full["fingerprint"])
-    assert full["scenes"] == [] and delta["scenes"] == []
+    for out in (full, delta):
+        assert "scenes" not in out and "scenes" not in out.get("held", [])
+    tool = next(t for t in srv.list_tools() if t["name"] == "endless_read_runtime")
+    assert "a missing list is empty" in tool["description"]
 
 
 # -- the brief and shape ride only in a full read ---------------------------

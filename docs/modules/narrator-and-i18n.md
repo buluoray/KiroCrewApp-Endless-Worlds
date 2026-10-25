@@ -55,7 +55,12 @@ argument.
   `recentTrimmed`, never cut silently, and the state is never cut. The short rows
   are built from what was committed, in the life's own language; they add no
   words of the app's own except the `recentTrimmed.note`, which is English like
-  the read's other notes. Contract and tests in [turn-loop](turn-loop.md).
+  the read's other notes. A re-read month's `choices` keep only what was offered
+  (`label`, and `fateful`): a past button's id, art, `effect` and `tint` are the
+  page's, and the player's pick is the month's `action` (`_PAST_CHOICE_FIELDS`;
+  pinned by `test_context_dedupe.test_a_re_read_month_keeps_only_what_each_choice_offered`).
+  The whole read goes out lean and compact, as [surface](surface.md) describes.
+  Contract and tests in [turn-loop](turn-loop.md).
 
 - **One slot per conversation, many conversations per life.** A life's
   conversation is replaced after a pause past `IDLE_ROTATION_SECS` (5 min), every

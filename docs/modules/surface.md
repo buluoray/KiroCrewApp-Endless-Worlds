@@ -245,6 +245,30 @@ processes self-locate the same data dir so routes and tools see one set of files
   `test_an_unknown_tool_is_refused_by_name`; every bad field named by
   `test_every_bad_field_is_named`.
 
+- **Every reply is lean, because every byte is paid on every later call.** A turn
+  makes several model calls and each resends the whole conversation, so a tool
+  result is paid again on every later call. `call_tool` encodes every reply,
+  success and error alike, through `_encode`: compact separators, and `_lean`
+  drops dict entries that are null, `""`, `[]` or `{}`. The `state` and the
+  delta's `changed` are the exceptions (`_VERBATIM_KEYS`) and go out exactly as
+  stored, because a null there is the narrator's own retire marker and the state
+  is the baseline its fingerprint names. `endless_read_runtime`'s description
+  says what an omitted field means (a missing list is empty, a missing text
+  blank, a missing flag false). The `world` block is the Library row cut to
+  `_NARRATOR_WORLD_FIELDS`; `opening[].worldDecides` and `chapters[].brief` are
+  sent only when true. `_fit_recent` measures the read through the same encoder.
+  Pinned by `test_mcp_bytes.test_replies_carry_no_padding_whitespace`,
+  `test_no_empty_field_is_sent_outside_the_state` and
+  `test_the_world_block_carries_only_what_narrating_needs`.
+
+- **Tool specs say how to call, not how to narrate.** Each tool's name,
+  description and schema sit in the prefix of every model call. The descriptions
+  carry only what calling the tool right needs; how to write a turn, a choice or a
+  backdrop brief lives in the narrator's prompt and the read's `shape`. The run id
+  description repeated in every schema is one line. The narrator's own tool specs
+  are held under `NARRATOR_SPEC_BUDGET` by
+  `test_mcp_bytes.test_narrator_tool_specs_fit_their_budget`.
+
 - **The run id is repaired at the boundary, not defended at the store.** A stored id
   is `uuid4().hex` — 32 lowercase hex and nothing else — so any decoration a narrator
   adds (`run-<id>`, `run_<id>`, `run-id-<id>`, quotes, whitespace, a case mangle) is

@@ -366,9 +366,8 @@ def test_read_runtime_returns_state_world_and_scenes(app):
 
     assert out["turn"] == 4
     assert out["world"]["title"] == "W"
-    assert out["scenes"] == [
-        {"sceneId": "map", "asks": True, "answered": False, "region": "", "label": ""}
-    ]
+    # A scene's blank region and label are left out of the reply, not sent as "".
+    assert out["scenes"] == [{"sceneId": "map", "asks": True, "answered": False}]
     assert "rulebook" not in out, "the rulebook is opt-in; it is large"
 
     with_prose = call("endless_read_runtime", runId=run, includeProse=True)
