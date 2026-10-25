@@ -195,8 +195,9 @@ def conversation_turns(perf_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     commits: list[dict[str, Any]] = []
     for row in perf_rows:
         step = row.get("step")
+        raw_turn: Any = row.get("turn")
         try:
-            turn = int(row.get("turn"))
+            turn = int(raw_turn)
         except (TypeError, ValueError):
             continue
         if step == "rotation":

@@ -98,7 +98,9 @@ def test_each_echo_line_names_its_own_event():
     play = module("play.tsx")
     mark = play.split("function EchoMark(", 1)[1].split("\nexport function ", 1)[0]
     line = mark.split('className="ew-echo-line"', 1)[1].split("</button>", 1)[0]
-    assert "t('play.echoLineTitled', { title: e.title || e.sourceTitle, turn: e.sourceTurn })" in line
+    assert (
+        "t('play.echoLineTitled', { title: e.title || e.sourceTitle, turn: e.sourceTurn })" in line
+    )
     for lang in ("en", "zh"):
         s = _strings(lang).get("play.echoLineTitled", "")
         assert "{title}" in s and "{turn}" in s, f"{lang} echo line lacks its title"
