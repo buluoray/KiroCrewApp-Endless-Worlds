@@ -40,6 +40,8 @@ import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
 import { StoryPage } from './story-page'
 import { PagePicker } from './page-picker'
+import { HoldArrow, PageScrubber } from './page-scrubber'
+import { createScrubStore } from './scrub-store'
 import { buildTabs, tabIcon } from './tabbar'
 
 /** Keys the pager answers when focus is on the page itself. */
@@ -409,6 +411,9 @@ export function PlayPage({
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
+  // The page being flipped to while the reader drags the scrubber or holds an arrow.
+  // Outside this component's state on purpose: a step must not re-render the story.
+  const [scrub] = useState(createScrubStore)
 
   const [chron, setChron] = useState<PastTurn[]>([])
   useEffect(() => {
@@ -977,6 +982,21 @@ export function PlayPage({
   const pastAction = isLive ? '' : (shownEntry?.action ?? '')
   // Forward when the turn number grew (a new page or a step right), back otherwise.
   const pageDir = shownTurn >= prevTurnRef.current ? 'fwd' : 'back'
+  // A scrub, a held arrow or one click lands here, once: the newest page is the
+  // LIVE page, like Latest.
+  const goPage = (n: number) => setViewTurn(n >= latest ? null : Math.max(1, n))
+  // The scrubber: one position per page, a second row of the top bar. Only for a
+  // life with pages to flip between.
+  const scrubber =
+    latest >= 2 ? (
+      <PageScrubber
+        runId={runId}
+        shown={shownTurn}
+        latest={latest}
+        store={scrub}
+        onCommit={goPage}
+      />
+    ) : null
   const pager =
     latest >= 1 ? (
       <div className="ew-pager" ref={pagerRef}>
@@ -990,30 +1010,35 @@ export function PlayPage({
         >
           <Chevron dir="first" />
         </button>
-        <button
-          className="ew-pager-arw"
-          type="button"
+        <HoldArrow
+          dir={-1}
+          shown={shownTurn}
+          latest={latest}
+          store={scrub}
+          onCommit={goPage}
           disabled={shownTurn <= 1}
-          aria-label={t('play.prevTurn')}
-          onClick={() => setViewTurn(Math.max(1, shownTurn - 1))}
+          label={t('play.prevTurn')}
         >
           <Chevron dir="l" />
-        </button>
+        </HoldArrow>
         <PagePicker
           runId={runId}
           shown={shownTurn}
           latest={latest}
+          preview={scrub}
           onJump={(n) => setViewTurn(n)}
         />
-        <button
-          className="ew-pager-arw"
-          type="button"
+        <HoldArrow
+          dir={1}
+          shown={shownTurn}
+          latest={latest}
+          store={scrub}
+          onCommit={goPage}
           disabled={shownTurn >= latest}
-          aria-label={t('play.nextTurn')}
-          onClick={() => setViewTurn(shownTurn + 1 >= latest ? null : shownTurn + 1)}
+          label={t('play.nextTurn')}
         >
           <Chevron dir="r" />
-        </button>
+        </HoldArrow>
         {/* Latest is always the LIVE page (null), never a past page that happens to
             carry the newest number, so a turn in flight, the painting stage and the
             recap all come back with it. */}
@@ -1549,10 +1574,13 @@ export function PlayPage({
           `z-index: 2` is enough to clear the story it floats over. `fixed` still
           resolves against the shell, which spans the window, so the offset means what
           it says. */}
-      {readerBar ? <div className="ew-topbar-slot" /> : null}
+      {readerBar ? (
+        <div className={'ew-topbar-slot' + (scrubber ? ' ew-topbar-slot-scrub' : '')} />
+      ) : null}
       <div
         className={
           'ew-topbar' +
+          (scrubber ? ' ew-topbar-scrub' : '') +
           (readerBar ? ' ew-topbar-fixed' : '') +
           (readerBar && barHidden ? ' ew-topbar-hidden' : '')
         }
@@ -1561,6 +1589,7 @@ export function PlayPage({
           {t('play.back')}
         </button>
         {pager}
+        {scrubber}
       </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep

@@ -18,6 +18,8 @@ guarantee.
 | `api.ts` | typed HTTP helpers over `/api/apps/endless-worlds`; `ApiError` with a machine code; preconditions as body fields; `models()` field-drift tolerance |
 | `play.tsx` | the live reading view — server-driven generating state + poll, tool-call turn progress, retry, turn-number pager |
 | `page-picker.tsx` | the pager's page indicator and its jump-to-month picker (number field + windowed list of every month with a hint) |
+| `page-scrubber.tsx` | the press-and-drag page scrubber, hold-to-repeat Prev/Next, wheel and slider keys |
+| `scrub-store.ts` | the page being flipped to, outside React state so a step re-renders only what shows it |
 | `scene.tsx` | `SceneSlot` — the single scene iframe, created once and never moved |
 | `opening.tsx` | the opening form — sealed world-decided groups, 30-day draft TTL |
 | `create-world.tsx` | the world-creation surfaces, mirroring life creation |
@@ -275,6 +277,24 @@ guarantee.
   loop. Left/Right/Home/End page while focus is on the page itself — never from a
   field (the free-action box above all), a tab strip, a dialog, or while a sheet
   covers the column or the pager is hidden. Pinned by `test_page_jump.py`.
+
+- **Press and slide to flip fast.** `page-scrubber.tsx` adds a slim full-width track
+  as the top bar's second row (a life of 2+ pages; the fixed bar's slot grows by that
+  row). Drag it — mouse or finger, pointer capture, `touch-action: none` so the page
+  never scrolls — and the thumb, the page indicator and a floating label (page number
+  plus the same index hint the picker shows, from the one shared `loadPageIndex`
+  read) follow live; release loads that ONE page. Holding Prev/Next (`HoldArrow`)
+  keeps flipping after 300ms and speeds up the longer it is held (`holdInterval`);
+  a plain click is still one page, and release loads only the last. The wheel over
+  the track moves one page per notch (`wheelSteps` accumulates trackpad deltas) and
+  the keys follow the ARIA slider pattern (arrows ±1, PageUp/PageDown ±10,
+  Home/End); both load once the reader pauses (`SCRUB_SETTLE_MS`). While flipping,
+  the number lives in `scrub-store.ts` (a `useSyncExternalStore` store) that only
+  the thumb, label and indicator subscribe to, so the story does not re-render per
+  step. The track is `role="slider"` with `aria-valuetext` "Page 12 of 120";
+  `StoryPage` announces the landed page once and leaves focus on the slider. The
+  newest page lands on the live page, like Latest. Pinned by `test_page_scrubber.py`;
+  the pointer paths run for real in `devtools/scrub.test.mjs`.
 
 - **Opening groups the world decided are sealed, not offered; drafts expire in 30
   days.** `opening.tsx` renders a `worldDecides` group as a sealed note rather than

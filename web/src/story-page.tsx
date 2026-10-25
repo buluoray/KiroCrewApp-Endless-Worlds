@@ -27,7 +27,10 @@ export function StoryPage({
       el &&
       el.getClientRects().length &&
       getComputedStyle(el).visibility !== 'hidden' &&
-      (active === document.body || (active && root?.contains(active)))
+      (active === document.body || (active && root?.contains(active))) &&
+      // A reader flipping with the scrubber's keys keeps it: the live region still
+      // announces the page, once.
+      !active?.closest('[role="slider"]')
     ) {
       el.focus({ preventScroll: true })
     }
