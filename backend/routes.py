@@ -459,15 +459,16 @@ async def _recover_backdrop(
                         "with EXACTLY this runId and turn, glance at the returned "
                         "preview PNGs only to confirm nothing is structurally broken "
                         "(blank frame, unreadable composition), and publish that "
-                        "first draft with endless_commit_backdrop using the returned "
-                        "draftId — fast art mode: no revision pass. "
+                        "first draft with endless_commit_backdrop passing only runId, "
+                        "turn and the returned draftId (never the markup) — fast art "
+                        "mode: no revision pass. "
                     )
                     if art_quality == "fast"
                     else (
                         "with EXACTLY this runId and turn, read every returned preview "
-                        "PNG together as images, revise at most once, and publish the "
-                        "final pair with endless_commit_backdrop using the returned "
-                        "draftId. "
+                        "PNG together as images, revise at most once (as a new draft), "
+                        "and publish with endless_commit_backdrop passing only runId, "
+                        "turn and the latest reviewed draftId — never the markup. "
                     )
                 )
                 task = (

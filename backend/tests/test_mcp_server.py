@@ -169,7 +169,9 @@ def test_the_salvaged_arrays_publish_their_shape_without_arming_a_refusal():
     ]
 
 
-def test_backdrop_visual_review_schemas_require_the_complete_pair_and_draft_id():
+def test_backdrop_visual_review_schemas_require_the_pair_at_draft_and_only_the_id_at_commit():
+    """The draft carries the SVGs; the commit names the reviewed draft by id and
+    the server publishes that draft's own bytes, so the model never re-types them."""
     schemas = {tool["name"]: tool["inputSchema"] for tool in srv.list_tools()}
     assert schemas["endless_submit_backdrop_draft"]["required"] == [
         "runId",
@@ -177,13 +179,7 @@ def test_backdrop_visual_review_schemas_require_the_complete_pair_and_draft_id()
         "markup",
         "mobile",
     ]
-    assert schemas["endless_commit_backdrop"]["required"] == [
-        "runId",
-        "turn",
-        "draftId",
-        "markup",
-        "mobile",
-    ]
+    assert schemas["endless_commit_backdrop"]["required"] == ["runId", "turn", "draftId"]
 
 
 def test_an_unknown_tool_is_refused_by_name():
