@@ -629,6 +629,18 @@ class BackdropDraftStore:
         self._remove_previews(draft)
         self._path.unlink(missing_ok=True)
 
+    def discard_from(self, turn: int) -> None:
+        """Drop the draft (and its previews) if it was drawn for ``turn`` or later.
+
+        A retry of an uncommitted page calls this: a draft left by the abandoned
+        attempt is bound to the turn number only, so it would otherwise be
+        reviewable and publishable against a page written from different words.
+        """
+        draft = self._load()
+        if draft is not None and int(draft.get("turn") or 0) >= int(turn):
+            self._remove_previews(draft)
+            self._path.unlink(missing_ok=True)
+
 
 class BackdropStore:
     """One run's current background, persisted as a single JSON file.

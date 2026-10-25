@@ -336,8 +336,9 @@ turn 200 as at turn 1.
   turn is still in flight. `turn.brief_in_flight` recognises it (bound to the live
   attempt by `pendingAt`), and the play view's generating poll and the request's
   own inline wait (`advance_turn(on_poll=...)`) both start recovery for it. A new
-  narrator attempt for a turn first drops any brief or art an abandoned attempt
-  left for it (`turn.forget_unpublished_art`, called just before `mark_pending`).
+  narrator attempt for a turn first drops any brief, art, traced underlay,
+  reference candidates or unpublished draft an abandoned attempt left for it
+  (`turn.forget_unpublished_art`, called just before `mark_pending`).
   The details and their tests live in
   [scenes-and-backdrop.md](scenes-and-backdrop.md); this loop's half is pinned by
   `test_a_new_attempt_drops_the_art_and_brief_its_abandoned_attempt_left` and

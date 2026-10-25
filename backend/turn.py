@@ -30,10 +30,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import narrator
-from backdrop import BackdropStore
+from backdrop import BackdropDraftStore, BackdropStore
 from content import Content
 from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from perf import TurnPerf
+from phototrace import CandidateStore, TraceStore
 from store import RunStore
 
 logger = logging.getLogger(__name__)
@@ -809,11 +810,20 @@ def forget_unpublished_art(store: RunStore, run_id: str, turn: int) -> None:
     it), so a brief or an early-drawn backdrop found there came from an attempt
     whose prose never landed. Left in place, the retry's page would publish with art
     drawn for words it does not contain, or wait on a brief it never wrote.
+
+    The illustrator's working files go too: its traced underlay, its reference
+    candidates and its unpublished draft are bound to the turn number only. A kept
+    underlay forced the retry's motif draft to carry the old photo's placeholder
+    (so it was refused) and was then published on the new page by the server's
+    timeout fallback.
     """
     request = store.read_backdrop_request(run_id)
     if request and int(request.get("turn") or 0) >= turn:
         store.clear_backdrop_request(run_id)
     BackdropStore(store.data_dir, run_id).discard_from(turn)
+    BackdropDraftStore(store.data_dir, run_id).discard_from(turn)
+    TraceStore(store.data_dir, run_id).discard_from(turn)
+    CandidateStore(store.data_dir, run_id).discard_from(turn)
 
 
 def generating(store: RunStore, run_id: str, state_obj: Any = None) -> dict[str, Any] | None:

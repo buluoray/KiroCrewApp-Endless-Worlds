@@ -568,8 +568,13 @@ sees is produced locally from a closed, code-owned vocabulary.
   2. **An abandoned page gets nothing.** If the attempt ends without a month, goes
      stale, or a retry replaces its record, `_page_abandoned` turns true. The waits
      stop, recovery returns without another illustrator or a repair prompt, and the
-     next attempt for that turn drops the brief and any early art
-     (`turn.forget_unpublished_art`, `BackdropStore.discard_from`).
+     next attempt for that turn drops the brief, any early art, and the old
+     illustrator's working files: its traced underlay, its reference candidates
+     and its unpublished draft (`turn.forget_unpublished_art`, each store's
+     `discard_from`). Those files are bound to the turn number only. A kept
+     underlay made the retry's motif draft fail for lacking the old photo's
+     placeholder, and the server's timeout fallback then published the old photo
+     on the new page.
   3. **An old illustrator cannot paint the retry.** The illustrator task carries the
      `briefId`, `endless_submit_backdrop_draft` stores it on the draft, and
      `_require_live_brief` / `_require_commit_brief` refuse a draft for a brief
@@ -598,7 +603,8 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_a_second_brief_while_the_first_is_being_painted_is_declined`,
   `test_a_recovery_rebrief_still_replaces_a_painted_brief`,
   `test_an_early_draft_must_name_the_live_brief`,
-  `test_art_for_an_abandoned_attempt_cannot_reach_the_retry`, and
+  `test_art_for_an_abandoned_attempt_cannot_reach_the_retry`,
+  `test_the_retry_does_not_inherit_the_abandoned_attempts_trace_or_draft`, and
   `test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_briefs_art`
   (`test_backdrop.py`).
 

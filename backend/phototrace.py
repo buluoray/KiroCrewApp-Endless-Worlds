@@ -1158,6 +1158,21 @@ class TraceStore:
     def clear(self) -> None:
         self._path.unlink(missing_ok=True)
 
+    def discard_from(self, turn: int) -> None:
+        """Clear this record if it was made for ``turn`` or later.
+
+        Called when a retry is dispatched for an uncommitted page: what an
+        abandoned attempt's illustrator traced is bound to the turn number only,
+        so the retry's page would otherwise be built on a photograph chosen for
+        words it does not contain.
+        """
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(data, dict) and int(data.get("turn", -1)) >= int(turn):
+            self._path.unlink(missing_ok=True)
+
 
 class CandidateStore:
     """Traced reference candidates awaiting the Illustrator's pick, server-side only.
@@ -1216,6 +1231,21 @@ class CandidateStore:
 
     def clear(self) -> None:
         self._path.unlink(missing_ok=True)
+
+    def discard_from(self, turn: int) -> None:
+        """Clear this record if it was made for ``turn`` or later.
+
+        Called when a retry is dispatched for an uncommitted page: what an
+        abandoned attempt's illustrator traced is bound to the turn number only,
+        so the retry's page would otherwise be built on a photograph chosen for
+        words it does not contain.
+        """
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(data, dict) and int(data.get("turn", -1)) >= int(turn):
+            self._path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
