@@ -1243,7 +1243,10 @@ button.ew-pager-turn:focus-visible {
    canvas ink (--text for the centre, --muted fading out for the rest; measured in
    test_theme_contrast.py); the centre number alone, larger and in full ink, marks the
    page, with no ribbon or underline. The row is the same 44px as the back link, so
-   the fixed bar's slot is its plain height.
+   the fixed bar's slot is its plain height. Each number's slot is that full 44px
+   row, top 0, so its glyphs centre on the same line as the link and the `>|` mark
+   (a slot inset from the top pushed them down; devtools/wheel-align.test.mjs
+   measures the ink).
    The back link never wraps or shrinks; the wheel takes the width it leaves. Numbers
    turn on a drum (perspective + rotateY per number, set inline from wheelLook()),
    fade out under a mask toward both ends, and the centre one ticks — a quick settle
@@ -1276,7 +1279,7 @@ button.ew-pager-turn:focus-visible {
   mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
 }
 .ew-wheel-n {
-  position: absolute; left: 50%; top: 6px; width: 44px; height: 36px; margin-left: -22px;
+  position: absolute; left: 50%; top: 0; width: 44px; height: 44px; margin-left: -22px;
   display: flex; align-items: center; justify-content: center;
   color: var(--muted, #c3c8d3); font-size: 20px; font-variant-numeric: oldstyle-nums;
   will-change: transform, opacity;

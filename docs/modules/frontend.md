@@ -342,7 +342,11 @@ guarantee.
   picker instead of counting as an outside press. The way back to the live page is
   the small mark at the wheel's end (`.ew-wheel-latest`, named `play.latestTurn`,
   disabled on the live page). The hidden-recap button stays in the same row. The bar
-  is one 44px row, so the fixed bar's slot does not grow. Pinned by
+  is one 44px row, so the fixed bar's slot does not grow. Each number's slot fills
+  that row (`.ew-wheel-n`, `top: 0; height: 44px`), so the back link, the centre
+  number and the `>|` mark share one vertical centre; `devtools/wheel-align.test.mjs`
+  measures their ink centres within 2px at 320, 375 and 480px, both themes, on a
+  1-, 2- and 3-digit page (same `EW_POD_URL` / `EW_POD_SESSION` contract). Pinned by
   `test_page_wheel.py` and `test_theme_contrast.py`; the swipe, coast, snap, one read,
   no pager buttons, the one-line back link, the picker and the way back run in
   `devtools/scrub.test.mjs` at 375px.
