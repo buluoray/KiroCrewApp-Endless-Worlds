@@ -1062,12 +1062,22 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 }
 .ew-pager-arw {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
-  background: transparent; border: 1px solid var(--border, #2d2f3d);
+  width: 44px; height: 44px; border-radius: 6px; cursor: pointer;
+  /* Quiet ink on the page: a hairline frame in the fore-edge's paper tone, so the
+     arrows read as part of the same book as the scrubber under them. */
+  background: transparent; border: 1px solid rgba(232, 222, 200, .2);
   color: var(--text, #e2e8f0);
+  transition: background-color .15s ease, border-color .15s ease;
 }
-@media (hover: hover) { .ew-pager-arw:hover:not(:disabled) { border-color: var(--accent, #7c3aed); } }
+@media (hover: hover) {
+  .ew-pager-arw:hover:not(:disabled) {
+    background: rgba(232, 222, 200, .07); border-color: rgba(232, 222, 200, .42);
+  }
+}
+.ew-pager-arw:active:not(:disabled) { background: rgba(232, 222, 200, .12); }
+.ew-pager-arw:focus-visible { outline: 2px solid var(--ew-accent-ink, #c4b5fd); outline-offset: 1px; }
 .ew-pager-arw:disabled { opacity: .35; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .ew-pager-arw { transition: none; } }
 /* Reopens the entry recap the reader hid; same frame and 44px target as the arrows. */
 .ew-pager-recap {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1083,6 +1093,10 @@ button.ew-pager-turn {
   min-height: 44px; padding: 0 8px; border-radius: 8px; cursor: pointer;
   background: transparent; border: 1px solid transparent; font: inherit;
   font-size: 13px; color: var(--muted, #6b7280); white-space: nowrap;
+  /* The running head: the folio's reading face, so the pager names its page the
+     way the scrubber's slip does. */
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", "Songti SC", serif;
+  font-variant-numeric: oldstyle-nums; letter-spacing: .03em;
   overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 @media (hover: hover) { button.ew-pager-turn:hover { border-color: var(--border, #2d2f3d); } }
@@ -1148,29 +1162,137 @@ button.ew-pager-turn:focus-visible {
   -webkit-tap-highlight-color: transparent; outline: none;
 }
 .ew-scrub-track:focus-visible { outline: 2px solid var(--ew-accent-ink, #c4b5fd); outline-offset: 1px; }
+/* The rail is a book's fore-edge seen from the side: fine stacked page lines on a
+   faint paper ground, top and bottom edges a shade darker like the boards. The line
+   pitch comes from the life's length (--ew-edge-gap, set by edgeGap()), so a long
+   life is a thicker, denser book. The pages already read are the thumbed part:
+   warmer paper, darker lines. Plain gradients, no image. */
+.ew-scrub {
+  --ew-edge-line: rgba(232, 222, 200, .15);
+  --ew-edge-paper: rgba(232, 222, 200, .07);
+  --ew-edge-read-line: rgba(214, 172, 118, .4);
+  --ew-edge-read-paper: rgba(196, 152, 100, .16);
+}
 .ew-scrub-rail {
-  position: absolute; left: 8px; right: 8px; top: 50%; height: 4px; margin-top: -2px;
-  border-radius: 2px; background: var(--border, #2d2f3d); overflow: hidden;
+  position: absolute; left: 8px; right: 8px; top: 50%; height: 12px; margin-top: -6px;
+  border-radius: 1px; overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, .3), transparent 35% 65%, rgba(0, 0, 0, .3)),
+    repeating-linear-gradient(90deg, var(--ew-edge-line) 0 1px, transparent 1px var(--ew-edge-gap, 3px)),
+    var(--ew-edge-paper);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, .35), inset 0 -1px 0 rgba(0, 0, 0, .35);
 }
-.ew-scrub-fill { height: 100%; background: var(--accent, #7c3aed); }
+.ew-scrub-fill {
+  height: 100%;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, .3), transparent 35% 65%, rgba(0, 0, 0, .3)),
+    repeating-linear-gradient(90deg, var(--ew-edge-read-line) 0 1px, transparent 1px var(--ew-edge-gap, 3px)),
+    var(--ew-edge-read-paper);
+}
+/* The thumb is a cloth ribbon bookmark hanging across the edge, with a notched tail.
+   The outer box carries the shadow (a clip-path would clip it) and the position;
+   the ribbon inside is clipped to its swallowtail. Only `left` moves per step. */
 .ew-scrub-thumb {
-  position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
-  border-radius: 50%; background: var(--ew-accent-ink, #c4b5fd);
-  box-shadow: 0 0 0 2px var(--bg, #1a1b26); will-change: left;
+  position: absolute; top: 1px; width: 10px; height: 31px; margin-left: -5px;
+  pointer-events: none; will-change: left;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .7));
 }
-.ew-scrub-on .ew-scrub-thumb { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
-/* Floats under the thumb. Shifted left by the same fraction it sits along the rail,
-   so it stays inside the bar at both ends. */
+.ew-scrub-ribbon {
+  display: block; width: 100%; height: 100%;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+  /* The host's accent dyed deeper, a lighter weave down the middle and a darker
+     fold at each edge, so it reads as cloth rather than a flat bar. */
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .32), transparent 30% 70%, rgba(0, 0, 0, .32)),
+    linear-gradient(90deg, transparent 46%, rgba(255, 255, 255, .22) 46% 54%, transparent 54%),
+    color-mix(in srgb, var(--accent, #7c3aed) 70%, #4a0f1c);
+  transform-origin: 50% 0;
+  transition: transform .15s ease-out;
+}
+.ew-scrub-on .ew-scrub-ribbon { transform: scaleY(1.16); }
+.ew-scrub-track:focus-visible .ew-scrub-ribbon { transform: scaleY(1.16); }
+@media (prefers-reduced-motion: reduce) { .ew-scrub-ribbon { transition: none; } }
+/* The label is a folio slip: the page number in a reading face, set in small caps
+   with old-style figures, the player's action in italic under a hairline. Opaque
+   paper with its own ink, the same in a light and a dark dashboard, so it reads over
+   any page art (measured in test_theme_contrast.py). Floats under the ribbon's tail,
+   shifted left by the same fraction it sits along the rail, so it stays inside the
+   bar at both ends. */
 .ew-scrub-tip {
-  position: absolute; top: calc(100% + 4px); z-index: 6; pointer-events: none;
-  display: flex; flex-direction: column; gap: 2px;
-  max-width: min(280px, calc(100vw - 32px)); padding: 6px 10px; border-radius: 8px;
-  background: var(--bg-elevated, #21222e); color: var(--text, #e2e8f0);
-  border: 1px solid var(--border, #2d2f3d); box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
-  font-size: 12px; line-height: 1.35;
+  position: absolute; top: calc(100% + 12px); z-index: 6; pointer-events: none;
+  display: flex; flex-direction: column; gap: 3px;
+  max-width: min(280px, calc(100vw - 32px)); padding: 7px 12px 8px; border-radius: 2px;
+  background: #f3ecdd; color: #2b2118;
+  border: 1px solid rgba(60, 40, 20, .28);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .5) inset, 0 8px 22px rgba(0, 0, 0, .5);
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", "Songti SC", serif;
+  font-size: 13px; line-height: 1.35;
 }
-.ew-scrub-tip-n { font-variant-numeric: tabular-nums; color: var(--ew-accent-ink, #c4b5fd); white-space: nowrap; }
-.ew-scrub-tip-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ew-scrub-tip-n {
+  white-space: nowrap; color: #2b2118;
+  font-variant: small-caps; font-variant-numeric: oldstyle-nums; letter-spacing: .06em;
+}
+.ew-scrub-tip-hint {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #5a4632; font-style: italic;
+  border-top: 1px solid rgba(60, 40, 20, .2); padding-top: 3px;
+}
+
+/* The phone's page wheel: the iOS time wheel laid on its side, printed on the same
+   folio paper and ink as the slider's slip, with the slider's ribbon marking the
+   centre. A fixed 58px row (36px of numbers, the action line under them), so the
+   fixed bar's slot grows by exactly that and its gap. Numbers turn on a drum
+   (perspective + rotateY per number, set inline from wheelLook()), fade out under a
+   mask toward both ends, and the centre one ticks — a quick settle from a touch
+   larger — each time a new page crosses it. */
+.ew-topbar-slot.ew-topbar-slot-wheel { height: 130px; }
+.ew-wheel {
+  position: relative; flex: 1 0 100%; min-width: 0; height: 58px; box-sizing: border-box;
+  border-radius: 3px; overflow: hidden;
+  background: #f3ecdd; color: #2b2118;
+  border: 1px solid rgba(60, 40, 20, .28);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .5) inset, 0 4px 14px rgba(0, 0, 0, .4);
+  font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", "Songti SC", serif;
+}
+.ew-wheel-track {
+  position: relative; height: 38px; cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent; outline: none;
+}
+.ew-wheel-on { cursor: grabbing; }
+.ew-wheel-track:focus-visible { box-shadow: inset 0 0 0 2px #6b3fd4; }
+.ew-wheel-drum {
+  position: absolute; inset: 0; perspective: 420px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent);
+}
+.ew-wheel-n {
+  position: absolute; left: 50%; top: 2px; width: 44px; height: 36px; margin-left: -22px;
+  display: flex; align-items: center; justify-content: center;
+  color: #2b2118; font-size: 21px; font-variant-numeric: oldstyle-nums;
+  will-change: transform, opacity;
+}
+.ew-wheel-c { font-weight: 600; }
+.ew-wheel-face { display: block; }
+.ew-wheel-on .ew-wheel-c .ew-wheel-face { animation: ew-wheel-tick .14s ease-out; }
+@keyframes ew-wheel-tick { from { transform: scale(1.16); } to { transform: none; } }
+/* The ribbon over the centre: the desktop bookmark, shortened to a tab. */
+.ew-wheel-ribbon {
+  position: absolute; left: 50%; top: -1px; z-index: 1; width: 8px; height: 11px; margin-left: -4px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%);
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .3), transparent 30% 70%, rgba(0, 0, 0, .3)),
+    color-mix(in srgb, var(--accent, #7c3aed) 70%, #4a0f1c);
+  pointer-events: none;
+}
+.ew-wheel-hint {
+  height: 18px; padding: 0 12px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #5a4632; font-style: italic; font-size: 12.5px; line-height: 18px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ew-wheel-on .ew-wheel-c .ew-wheel-face { animation: none; }
+}
 
 /* The standing summary above the prose. It had no surface at all — 13px muted rows
    sitting directly on the page's backdrop art, which is where it became hard to
@@ -1197,8 +1319,20 @@ button.ew-pager-turn:focus-visible {
 @keyframes ew-page-back { from { opacity: 0; transform: translateX(-26px); } to { opacity: 1; transform: none; } }
 .ew-turnpage-fwd { animation: ew-page-fwd .3s ease-out both; }
 .ew-turnpage-back { animation: ew-page-back .3s ease-out both; }
+/* Landing several pages away with the scrubber or a held arrow leafs the book: a
+   soft fold of shadow rests on the leading edge of the new page and lifts off. One
+   short pass, no layout, nothing to read; reduced motion draws none of it. */
+.ew-turnpage { position: relative; }
+.ew-leaf {
+  position: absolute; inset: -6px -8px; pointer-events: none; z-index: 1;
+  animation: ew-leaf .42s ease-out both;
+}
+.ew-leaf-fwd { background: linear-gradient(270deg, rgba(0, 0, 0, .34), rgba(0, 0, 0, .08) 18%, transparent 42%); }
+.ew-leaf-back { background: linear-gradient(90deg, rgba(0, 0, 0, .34), rgba(0, 0, 0, .08) 18%, transparent 42%); }
+@keyframes ew-leaf { from { opacity: 1; } to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .ew-turnpage-fwd, .ew-turnpage-back { animation: none; }
+  .ew-leaf { display: none; animation: none; }
 }
 .ew-drow {
   display: flex; gap: 8px; padding: 6px 0; font-size: 13px; line-height: 1.7;

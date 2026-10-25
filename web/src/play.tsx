@@ -41,6 +41,7 @@ import { PanelBox, Prose, Waiting } from './ui'
 import { StoryPage } from './story-page'
 import { PagePicker } from './page-picker'
 import { HoldArrow, PageScrubber } from './page-scrubber'
+import { PageWheel, usePhoneLayout } from './page-wheel'
 import { createScrubStore } from './scrub-store'
 import { buildTabs, tabIcon } from './tabbar'
 
@@ -414,6 +415,12 @@ export function PlayPage({
   // The page being flipped to while the reader drags the scrubber or holds an arrow.
   // Outside this component's state on purpose: a step must not re-render the story.
   const [scrub] = useState(createScrubStore)
+  // On a phone the scrubber is a sideways page wheel instead of the fore-edge slider.
+  const phone = usePhoneLayout()
+  // The page a scrub or a held arrow just landed on from several pages away, and
+  // which way the book was leafed: the story draws one soft fold over that page.
+  // State, not derived from the previous turn, so a later re-render cannot replay it.
+  const [leaf, setLeaf] = useState<{ turn: number; dir: 'fwd' | 'back' } | null>(null)
 
   const [chron, setChron] = useState<PastTurn[]>([])
   useEffect(() => {
@@ -985,17 +992,37 @@ export function PlayPage({
   // A scrub, a held arrow or one click lands here, once: the newest page is the
   // LIVE page, like Latest.
   const goPage = (n: number) => setViewTurn(n >= latest ? null : Math.max(1, n))
-  // The scrubber: one position per page, a second row of the top bar. Only for a
-  // life with pages to flip between.
+  // The scrubber's and the held arrows' landing: the same jump, plus the leafing
+  // fold when it passed more than one page. One click stays a plain page turn.
+  const leafTo = (n: number) => {
+    const to = Math.min(latest, Math.max(1, n))
+    setLeaf(
+      Math.abs(to - shownTurn) > 1 ? { turn: to, dir: to > shownTurn ? 'fwd' : 'back' } : null,
+    )
+    goPage(n)
+  }
+  // The scrubber: one position per page, a second row of the top bar — the book's
+  // fore-edge on a wide screen, the sideways page wheel on a phone. Only for a life
+  // with pages to flip between.
   const scrubber =
     latest >= 2 ? (
-      <PageScrubber
-        runId={runId}
-        shown={shownTurn}
-        latest={latest}
-        store={scrub}
-        onCommit={goPage}
-      />
+      phone ? (
+        <PageWheel
+          runId={runId}
+          shown={shownTurn}
+          latest={latest}
+          store={scrub}
+          onCommit={leafTo}
+        />
+      ) : (
+        <PageScrubber
+          runId={runId}
+          shown={shownTurn}
+          latest={latest}
+          store={scrub}
+          onCommit={leafTo}
+        />
+      )
     ) : null
   const pager =
     latest >= 1 ? (
@@ -1015,7 +1042,7 @@ export function PlayPage({
           shown={shownTurn}
           latest={latest}
           store={scrub}
-          onCommit={goPage}
+          onCommit={leafTo}
           disabled={shownTurn <= 1}
           label={t('play.prevTurn')}
         >
@@ -1033,7 +1060,7 @@ export function PlayPage({
           shown={shownTurn}
           latest={latest}
           store={scrub}
-          onCommit={goPage}
+          onCommit={leafTo}
           disabled={shownTurn >= latest}
           label={t('play.nextTurn')}
         >
@@ -1186,6 +1213,13 @@ export function PlayPage({
 
       <StoryPage page={shownTurn} loading={pageLoading}>
         <div className={`ew-turnpage ew-turnpage-${pageDir}`} key={shownTurn}>
+          {leaf?.turn === shownTurn ? (
+            <div
+              className={`ew-leaf ew-leaf-${leaf.dir}`}
+              aria-hidden="true"
+              onAnimationEnd={() => setLeaf(null)}
+            />
+          ) : null}
           {pageLoading ? (
             <div className="ew-meta">{t('history.reading')}</div>
           ) : (
@@ -1575,7 +1609,12 @@ export function PlayPage({
           resolves against the shell, which spans the window, so the offset means what
           it says. */}
       {readerBar ? (
-        <div className={'ew-topbar-slot' + (scrubber ? ' ew-topbar-slot-scrub' : '')} />
+        <div
+          className={
+            'ew-topbar-slot' +
+            (scrubber ? (phone ? ' ew-topbar-slot-wheel' : ' ew-topbar-slot-scrub') : '')
+          }
+        />
       ) : null}
       <div
         className={

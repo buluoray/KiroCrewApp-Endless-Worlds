@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
@@ -60,14 +61,24 @@ export function wheelSteps(acc: number): { steps: number; rest: number } {
   return { steps: 0, rest: acc }
 }
 
+/** The pitch, in px, of the page lines drawn on the fore-edge rail: a short life is
+ *  a thin book with open lines, a long one a thick book with tight lines. */
+export function edgeGap(latest: number): number {
+  if (latest < 24) return 6
+  if (latest < 72) return 4
+  if (latest < 200) return 3
+  return 2
+}
+
 /** Where on the rail page `n` sits, 0..1. */
 function railFrac(n: number, latest: number): number {
   return latest > 1 ? (n - 1) / (latest - 1) : 1
 }
 
 /**
- * The scrubber: a slim track with one position per page. Press and drag and the
- * thumb, the page indicator and a small label follow the pointer; release loads that
+ * The scrubber: a slim track with one position per page, drawn as a book's fore-edge
+ * with a ribbon bookmark for the thumb and a folio slip for the label. Press and drag
+ * and the ribbon, the page indicator and the slip follow the pointer; release loads that
  * one page. Nothing is fetched while dragging — the flipping number lives in the
  * scrub store, which only the thumb, the label and the indicator read, so the story
  * does not re-render per step. The wheel and the keys flip the same way and load
@@ -214,10 +225,19 @@ export function PageScrubber({
         onLostPointerCapture={onPointerEnd}
         onKeyDown={onKeyDown}
       >
-        <div ref={rail} className="ew-scrub-rail" aria-hidden="true">
+        <div
+          ref={rail}
+          className="ew-scrub-rail"
+          aria-hidden="true"
+          style={{ '--ew-edge-gap': `${edgeGap(latest)}px` } as CSSProperties}
+        >
           <div className="ew-scrub-fill" style={{ width: `${frac * 100}%` }} />
         </div>
-        <div className="ew-scrub-thumb" aria-hidden="true" style={{ left: at }} />
+        {/* The ribbon bookmark: drawing only. The slider's role, values and focus
+            stay on the track around it. */}
+        <div className="ew-scrub-thumb" aria-hidden="true" style={{ left: at }}>
+          <span className="ew-scrub-ribbon" />
+        </div>
       </div>
       {active ? (
         <div

@@ -202,3 +202,29 @@ def test_the_world_title_field_takes_its_ink_from_its_own_theme() -> None:
         field = _over(_rgb(card), 0.85, BLACK)
         got = _contrast(_rgb(text), field)
         assert got >= BODY_FLOOR, f"the world title field in {theme} is {got:.2f}:1"
+
+
+def test_the_scrubber_folio_reads_on_its_own_paper_in_every_theme() -> None:
+    """The drag label is an opaque paper slip with fixed ink, so neither the dashboard
+    theme nor the page art behind it can take its contrast away."""
+    tip = _rule(r"\.ew-scrub-tip")
+    paper = _decl(tip, "background")
+    assert re.fullmatch(r"#[0-9a-fA-F]{6}", paper), f"the folio paper must be opaque, not {paper!r}"
+    ground = _rgb(paper)
+    for sel in (r"\.ew-scrub-tip", r"\.ew-scrub-tip-n", r"\.ew-scrub-tip-hint"):
+        ink = _decl(_rule(sel), "color")
+        assert ink.startswith("#"), f"{sel} ink must be the folio's own, not {ink!r}"
+        got = _contrast(_rgb(ink), ground)
+        assert got >= BODY_FLOOR, f"{sel} on the folio is {got:.2f}:1"
+
+
+def test_the_phone_page_wheel_reads_on_the_same_paper() -> None:
+    """The wheel's centre number and its action line are body text on folio paper."""
+    paper = _decl(_rule(r"\.ew-wheel"), "background")
+    assert re.fullmatch(r"#[0-9a-fA-F]{6}", paper), f"the wheel paper must be opaque, not {paper!r}"
+    ground = _rgb(paper)
+    for sel in (r"\.ew-wheel", r"\.ew-wheel-n", r"\.ew-wheel-hint"):
+        ink = _decl(_rule(sel), "color")
+        assert ink.startswith("#"), f"{sel} ink must be the wheel's own, not {ink!r}"
+        got = _contrast(_rgb(ink), ground)
+        assert got >= BODY_FLOOR, f"{sel} on the wheel is {got:.2f}:1"
