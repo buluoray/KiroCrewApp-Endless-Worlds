@@ -575,10 +575,9 @@ class BackdropDraftStore:
 
         ``source`` is the illustrator's own markup as it sent it (before the
         underlay splice). It is kept in the private draft record so the commit can
-        publish exactly the reviewed draft by its id: re-typing two SVGs at commit
-        was a full minute of model output on painterly pages, for bytes the server
-        already held. It never leaves this file except through the commit, which
-        validates it again.
+        publish exactly the reviewed draft by its id, sparing the model from
+        re-typing SVGs the server already holds. It never leaves this file except
+        through the commit, which validates it again.
         """
         clean_markup = compile_backdrop(markup)
         clean_mobile = compile_backdrop(mobile)
