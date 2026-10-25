@@ -208,7 +208,18 @@ _BACKDROP_POLL_SECS = 0.25
 #: running or the narrator hand-draw. Deliberately shorter than
 #: ``_BACKDROP_ATTEMPT_SECS`` × attempts: a scene page's underlay is already the
 #: bulk of the image, so a fast real image beats waiting minutes for the overlay.
-_BACKDROP_FALLBACK_SECS = 120.0
+#:
+#: Set from measured runs, not guessed. Dispatch -> ``endless_commit_backdrop``
+#: across 36 illustrator dispatches in six lives (five local, one pod), counting
+#: commits that arrived after the old 120s budget: n=28, median 99s, p90 159s,
+#: max 214s; 10 of the 28 committed after 120s, so the old budget published a
+#: fallback page after the illustrator's credits were already spent. p90 plus a
+#: ~20s margin, rounded, covers 27 of the 28 measured commits. It still
+#: fits the other clocks: one brief's worst case (this budget, the late-commit
+#: grace, then ``_BACKDROP_NARRATOR_CYCLES`` silent stalls of
+#: ``_BACKDROP_ATTEMPT_SECS``) is 780s, under ``_BACKDROP_STALE_SECS``. Fast art
+#: mode shares it: its single attempt commits its first draft (p90 119s).
+_BACKDROP_FALLBACK_SECS = 180.0
 #: How long an illustrator that is still running AND already holds a submitted
 #: draft for this page may finish, once the budget above is spent, before the
 #: narrator is asked to repair the page by hand. Such an illustrator is in its

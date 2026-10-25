@@ -716,6 +716,87 @@ def test_an_ended_illustrator_gets_no_grace_even_with_a_draft(world, monkeypatch
     assert _time.monotonic() - started < 10.0
 
 
+# -- the illustrator budget is sized from measured commits -----------------------
+
+#: The p90 dispatch-to-commit time measured across real illustrator runs.
+_MEASURED_P90_COMMIT_SECS = 159.0
+
+
+@pytest.mark.parametrize("art_quality", ["standard", "fast"])
+def test_an_illustrator_committing_at_the_measured_p90_publishes_its_own_art(
+    world, monkeypatch, art_quality
+):
+    """An illustrator that commits at the measured p90 lands inside the budget: its
+    art is the page's, with no server fallback and no narrator repair turn."""
+    from backdrop import BackdropStore
+    from backdrop_timing import BackdropTimeline
+
+    store = world["store"]
+    run_id = _new_life(world)
+    spawn = _Illustrator(world, run_id)
+    store.request_backdrop(run_id, turn=1, brief="a red gate closes")
+    world["ctx"].spawn = spawn
+    waited = []
+
+    async def wait_commit_at_p90(ctx, store_, run_id_, turn, spawn_id, deadline_secs=0.0):
+        # The budget the recovery hands this illustrator decides whether its
+        # commit, arriving at the measured p90, is waited for or thrown away.
+        waited.append(deadline_secs)
+        if deadline_secs < _MEASURED_P90_COMMIT_SECS:
+            return False
+        BackdropStore(world["data"], run_id_).set(_ART, turn=turn)
+        store_.clear_backdrop_request(run_id_)
+        return True
+
+    monkeypatch.setattr(routes_mod, "_wait_for_backdrop", wait_commit_at_p90)
+    monkeypatch.setattr(routes_mod, "ensure_narrator_slot_ex", lambda *a, **k: (object(), False))
+    prompts = []
+
+    def fake_dispatcher(_runner):
+        def dispatch(_state, _slot, prompt, **_kw):
+            prompts.append(prompt)
+            BackdropStore(world["data"], run_id).set(_ART, turn=1)
+            store.clear_backdrop_request(run_id)
+            return True
+
+        return dispatch
+
+    monkeypatch.setattr(routes_mod, "make_dispatcher", fake_dispatcher)
+    monkeypatch.setattr(routes_mod, "_narrator_runner", lambda: object())
+    asyncio.run(
+        routes_mod._recover_backdrop(
+            world["ctx"],
+            store,
+            object(),
+            run_id,
+            painter_model="",
+            narrator_model="",
+            reasoning_effort="",
+            art_quality=art_quality,
+        )
+    )
+
+    assert prompts == []
+    assert spawn.calls == ["endless-illustrator"]
+    assert waited and waited[0] >= _MEASURED_P90_COMMIT_SECS
+    steps = [e["step"] for e in BackdropTimeline(world["data"], run_id).read(1)]
+    assert "recover:illustrator-committed" in steps
+    assert "recover:illustrator-timeout" not in steps
+    assert "server-fallback-commit" not in steps
+
+
+def test_one_briefs_whole_recovery_fits_inside_the_stale_ceiling():
+    """One brief's longest recovery (the illustrator budget, the late-commit grace,
+    then every silent narrator stall) ends before the page stops being withheld,
+    so a slow last chance is never released mid-wait."""
+    worst = (
+        routes_mod._BACKDROP_FALLBACK_SECS
+        + routes_mod._BACKDROP_LATE_COMMIT_GRACE_SECS
+        + routes_mod._BACKDROP_NARRATOR_CYCLES * routes_mod._BACKDROP_ATTEMPT_SECS
+    )
+    assert worst < routes_mod._BACKDROP_STALE_SECS
+
+
 # -- the illustrator starts with the brief, not after the prose ------------------
 
 

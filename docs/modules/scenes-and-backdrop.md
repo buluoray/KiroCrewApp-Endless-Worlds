@@ -498,8 +498,19 @@ sees is produced locally from a closed, code-owned vocabulary.
 - **Backdrop-agent failure stays behind the curtain, and a timed-out scene never
   falls through to the narrator hand-drawing one.** The brief is cleared on successful commit, not on dispatch, so
   a dropped request or gateway restart can resume recovery. The backend gives the
-  model a whole-recovery budget of `_BACKDROP_FALLBACK_SECS` (120s) across its
-  illustrator attempts. When that budget elapses without an exact commit, the server
+  model a whole-recovery budget of `_BACKDROP_FALLBACK_SECS` (180s) across its
+  illustrator attempts. The value comes from measured dispatch-to-commit times
+  in `backdrop-timeline.jsonl` (36 dispatches, 28 commits: median 99s, p90 159s,
+  max 214s, late commits included). At the earlier 120s, 10 of those 28 commits
+  arrived after the server had already published a fallback page, so the
+  illustrator's credits bought art the page did not wait for. 180s is p90 plus a
+  margin and covers 27 of the 28. The clocks still nest: one brief's worst case
+  (this budget, `_BACKDROP_LATE_COMMIT_GRACE_SECS`, then `_BACKDROP_NARRATOR_CYCLES`
+  silent stalls of `_BACKDROP_ATTEMPT_SECS`) is 780s, under
+  `BACKDROP_STALE_SECS` (900s), and fast art mode uses the same budget for its one
+  attempt. Pinned by
+  `test_an_illustrator_committing_at_the_measured_p90_publishes_its_own_art` and
+  `test_one_briefs_whole_recovery_fits_inside_the_stale_ceiling`. When that budget elapses without an exact commit, the server
   publishes the traced underlay ALONE as the page's backdrop — `commit_underlay_only`
   composes the stored desktop/mobile fragment (a traced photo, or the procedural
   base) into a bare `etr-underlay` placeholder shell and writes it through the normal
