@@ -3620,11 +3620,14 @@ def _draft_next(art_quality: str) -> str:
             "review-pass contract (at most one revision, reviewed before you commit "
             "its draftId); " + patch + ". Then " + commit
         )
+    # Standard keeps its measured wording on purpose: naming the cheap patch tool
+    # here made the illustrator "fix" 3 of 5 renders that were not broken, which
+    # turned the first-draft tier back into a revision tier.
     return (
         "standard art mode: read the previews together only to confirm nothing is "
         "structurally broken (blank frame, clipped subject, unreadable composition). "
         "Do not spend a revision pass on polish — only a broken render earns one "
-        "correction; " + patch + ". Then " + commit
+        "corrected draft. Then " + commit
     )
 
 

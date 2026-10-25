@@ -198,7 +198,7 @@ def test_the_tool_accepts_the_baseline_it_hands_out():
 # ── the read is now required ─────────────────────────────────────────────────
 
 
-def test_a_commit_without_a_reading_is_refused(store, run):
+def test_a_commit_without_a_reading_is_refused(store, run, monkeypatch):
     """The prompt no longer carries the state, the history, or the readings on the
     narrator's own recent turns. A narrator that skips `endless_read_runtime` is writing
     a month from the player's sentence and its own memory — not a slow turn or an ugly
@@ -206,7 +206,7 @@ def test_a_commit_without_a_reading_is_refused(store, run):
     """
     import mcp_server as srv
 
-    srv._store = lambda: store  # type: ignore[assignment]
+    monkeypatch.setattr(srv, "_store", lambda: store)
     store.mark_pending(run, turn=1, slot="s")
 
     out = srv._advance_turn({"runId": run, "turn": 1, "prose": "p", "state": {}})
@@ -218,12 +218,12 @@ def test_a_commit_without_a_reading_is_refused(store, run):
     assert int(store.read_state(run).get("turn") or 0) == 0, "the turn landed anyway"
 
 
-def test_the_same_commit_succeeds_once_the_narrator_has_looked(store, run):
+def test_the_same_commit_succeeds_once_the_narrator_has_looked(store, run, monkeypatch):
     """The refusal must be recoverable in one step, or it is a deadlock wearing a
     reason."""
     import mcp_server as srv
 
-    srv._store = lambda: store  # type: ignore[assignment]
+    monkeypatch.setattr(srv, "_store", lambda: store)
     store.mark_pending(run, turn=1, slot="s")
     store.note_runtime_read(run, turn=1)
 
@@ -232,7 +232,7 @@ def test_the_same_commit_succeeds_once_the_narrator_has_looked(store, run):
     assert int(store.read_state(run)["turn"]) == 1
 
 
-def test_a_missing_record_does_not_refuse(store, run):
+def test_a_missing_record_does_not_refuse(store, run, monkeypatch):
     """Enforced on EVIDENCE, never on the absence of it.
 
     A missing in-flight record proves nothing about the narrator — the app may simply
@@ -241,18 +241,18 @@ def test_a_missing_record_does_not_refuse(store, run):
     """
     import mcp_server as srv
 
-    srv._store = lambda: store  # type: ignore[assignment]
+    monkeypatch.setattr(srv, "_store", lambda: store)
     assert store.read_pending(run) is None
 
     out = srv._advance_turn({"runId": run, "turn": 1, "prose": "p", "state": {}})
     assert out["committed"] is True
 
 
-def test_a_record_for_another_turn_does_not_vouch_for_this_one(store, run):
+def test_a_record_for_another_turn_does_not_vouch_for_this_one(store, run, monkeypatch):
     """A reading taken before the previous month is not a reading of this one."""
     import mcp_server as srv
 
-    srv._store = lambda: store  # type: ignore[assignment]
+    monkeypatch.setattr(srv, "_store", lambda: store)
     store.mark_pending(run, turn=1, slot="s")
     store.note_runtime_read(run, turn=1)
     store.commit_state(run, {**store.read_state(run), "turn": 1})
@@ -313,7 +313,7 @@ def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_
     assert all(g.get("worldDecides", True) is True for g in out["opening"])
 
 
-def test_recent_turns_ride_only_on_a_full_read(store, run):
+def test_recent_turns_ride_only_on_a_full_read(store, run, monkeypatch):
     """The narrator's session already holds the months it wrote, so a delta read
     (one that carried a baseline it could still name) gets no recent chronicle —
     only a full snapshot (a lost baseline, or the first read) does.
@@ -327,7 +327,7 @@ def test_recent_turns_ride_only_on_a_full_read(store, run):
     specific old month goes through ``memoryEvents``, which asks by id."""
     import mcp_server as srv
 
-    srv._store = lambda: store  # type: ignore[assignment]
+    monkeypatch.setattr(srv, "_store", lambda: store)
     st = {"turn": 2, "worldId": "w", "status": {"age": 7}}
     store.commit_state(run, st)
     store.append_turn(run, {"turn": 1, "prose": "born", "action": ""})

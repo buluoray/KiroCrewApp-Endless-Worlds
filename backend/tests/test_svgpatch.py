@@ -363,9 +363,11 @@ def test_both_art_modes_tell_the_illustrator_to_revise_by_patch(data):
     standard = _draft(data, "12" * 16)
     write_settings(data, model="", reasoning_effort="", art_quality="polished")
     polished = _draft(data, "34" * 16)
-    for answer in (standard, polished):
-        assert "endless_revise_backdrop_draft" in answer["next"]
-        assert "never re-type the whole SVG" in answer["next"]
+    assert "endless_revise_backdrop_draft" in polished["next"]
+    assert "never re-type the whole SVG" in polished["next"]
+    # Standard ships the first draft: naming the cheap patch tool there was
+    # measured to invite "fixes" to renders that were not broken.
+    assert "endless_revise_backdrop_draft" not in standard["next"]
 
 
 def test_the_underlay_placeholder_survives_ids_and_patches():
