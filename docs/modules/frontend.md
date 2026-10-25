@@ -289,3 +289,16 @@ guarantee.
   when running it with `node --test`; absent these, it skips rather than touching
   a live home. Turn writes and empty-shelf reads are intercepted fixtures; other
   reads reach the real app. Native screen-reader speech is not automated here.
+
+- **A month written while the reader is on the page updates what surrounds it.**
+  The rail's row for the open life reads the shelf's run list, which `load()`
+  fetches once; `PlayPage` reports a signature of the row's own facts (turn,
+  unborn, ended, being written) through `onRowState`, and `refreshRuns` re-reads
+  only the run list when it moves, keeping the newest response. The "where this
+  life left off" recap opens on entering a life and closes when a newer month
+  lands while the reader is there (`recapTurn`), so it never summarises the page
+  that just arrived. The first-page hint carries `ew-first-turn-hint`, which
+  cancels the shared `.ew-hint` negative top margin that otherwise laid it over
+  the last line of prose. Pinned by `test_play_flow.py` and, against a seeded
+  disposable pod with turn writes intercepted, `devtools/play-flow.test.mjs`
+  (same `EW_POD_URL` / `EW_POD_SESSION` contract as `play-ux.test.mjs`).
