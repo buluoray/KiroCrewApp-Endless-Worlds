@@ -16,10 +16,10 @@ line by which call site fires: ``notify_slot_closed`` runs for a deliberate
 dismissal and deliberately not for the sweep. So the app registers a hook and is
 TOLD, rather than inferring.
 
-Manual: one seam, ``reset_narrator_conversation``, discards the conversation
-through the LIVE manager and clears the legacy briefed marker in the same call.
-The fresh conversation holds no fingerprint, so its first read is full and
-carries the rulebook again.
+Manual: one seam, ``reset_narrator_conversation``, moves the life to a new
+conversation key and removes the old conversation's slot, session and
+transcript. A new key is what makes the conversation new: core keys its resume
+pointer, transcript and history replay by the slot key.
 """
 
 from __future__ import annotations
@@ -220,13 +220,7 @@ def test_the_hook_is_registered_under_this_app(store, run, monkeypatch):
     )
 
 
-def test_a_dismissal_delivered_by_core_resets_the_conversation(store, run, monkeypatch):
-    import types
-
-    chat_utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    chat_utils._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", chat_utils)
-
+def test_a_dismissal_delivered_by_core_moves_the_life_to_a_new_key(store, run, monkeypatch):
     state = FakeState()
     ensure_narrator_slot_ex(state, run)
     key = narrator_slot_key(run)
@@ -236,12 +230,28 @@ def test_a_dismissal_delivered_by_core_resets_the_conversation(store, run, monke
     hook = _register_hook(state, store, monkeypatch)[APP_NAME]
     asyncio.run(hook(key))
 
-    assert state.sessions.discarded == [key]
+    assert store.conversation_number(run) == 1, "the next turn must open a new key"
+    assert store.stale_conversations(run) == [0], "the dismissed one is removed next turn"
+    assert state.sessions.discarded == [], (
+        "core is closing this very slot while the hook runs; touching its session "
+        "from inside the hook would race that close"
+    )
     assert store.briefed_slot(run) == "", "the fresh conversation must re-brief"
     assert store.rotation_turn(run) == 7, (
         "the rotation marker must record this turn, or the next turn's planned "
         "rotation discards the conversation this just created"
     )
+
+
+def test_closing_an_old_conversation_does_not_move_the_life_again(store, run, monkeypatch):
+    """Retiring an old key goes through core's close, which calls this same hook."""
+    state = FakeState()
+    store.begin_conversation(run)
+    hook = _register_hook(state, store, monkeypatch)[APP_NAME]
+
+    asyncio.run(hook(narrator_slot_key(run, 0)))
+
+    assert store.conversation_number(run) == 1
 
 
 def test_a_foreign_slot_name_is_ignored(store, run, monkeypatch):
@@ -267,14 +277,13 @@ def test_a_foreign_slot_name_is_ignored(store, run, monkeypatch):
 
 def test_a_failing_reset_does_not_block_the_dismissal(store, run, monkeypatch):
     """Core refuses a close whose hook raises. That is right for an app whose hook
-    pauses a worker and wrong for ours: the player wants the tab gone, and a stale
-    pointer is the behaviour that shipped before this existed."""
+    pauses a worker and wrong for ours: the player wants the tab gone."""
     state = FakeState()
 
-    async def boom(*_a, **_kw):
-        raise RuntimeError("session store is wedged")
+    def boom(*_a, **_kw):
+        raise RuntimeError("store is wedged")
 
-    monkeypatch.setattr(narrator, "reset_narrator_conversation", boom)
+    monkeypatch.setattr(narrator, "start_new_conversation", boom)
     hook = _register_hook(state, store, monkeypatch)[APP_NAME]
 
     asyncio.run(hook(narrator_slot_key(run)))  # must not raise
@@ -289,77 +298,43 @@ def test_no_dashboard_runtime_is_a_no_op(store, monkeypatch):
 # ── the reset seam: live manager, and the briefed marker dies with it ───────
 
 
-def test_reset_discards_through_the_live_manager(store, run, monkeypatch):
-    # ``chat_utils`` transitively imports messaging SDKs this test environment
-    # does not ship, so the seam's import is satisfied from ``sys.modules`` with
-    # a module exposing the one name it needs. The transform is identity — what
-    # is under test is the seam's contract, not core's filename sanitiser.
-    import types
-
-    fake = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    fake._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", fake)
-
+def test_reset_opens_a_new_key_and_closes_the_old_slot(store, run, monkeypatch):
+    unlinked = _fake_core(monkeypatch)
     state = FakeState()
+    state.sessions = PurgeFakeSessions(sid="sid-old")
     ensure_narrator_slot_ex(state, run)
     key = narrator_slot_key(run)
     store.mark_briefed(run, slot=key)
+
     done = asyncio.run(reset_narrator_conversation(state, store, run))
+
     assert done
-    assert state.sessions.discarded == [key]
-    assert store.briefed_slot(run) == "", "a discarded conversation must re-brief"
-    assert key in state.slots, "the tab (slot) survives a conversation reset"
-    assert state.sessions.replays == [False], (
-        "replay must be suppressed: clearing the resume pointer is exactly what "
-        "makes core's next cold start rebuild the discarded transcript as a "
-        "[CONVERSATION HISTORY] block, so a reset that leaves replay on hands the "
-        "fresh narrator a reconstruction of the pages it just forgot"
-    )
+    assert store.conversation_number(run) == 1
+    assert key not in state.slots, "the old conversation's slot must be closed"
+    assert unlinked == ["sid-old"], "the old kiro-cli session must be removed"
+    assert store.stale_conversations(run) == []
+    assert store.briefed_slot(run) == "", "a new conversation must re-brief"
 
 
 def test_reset_still_runs_on_a_core_without_the_replay_knob(store, run, monkeypatch):
-    """``replay`` only exists on core builds carrying the conversation-reset knob.
-
-    On an older one the reset must still happen — with replay, which is the old
-    behaviour — rather than raising a TypeError the caller reads as a failed reset.
-    """
-    import types
-
-    fake = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    fake._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", fake)
-
+    """``replay`` only exists on newer core. The reset no longer depends on it at
+    all: the new key has no history to replay whatever core does."""
+    _fake_core(monkeypatch)
     state = FakeState()
-    state.sessions = LegacyFakeSessions()
+    state.sessions = LegacyPurgeFakeSessions(sid="sid-legacy")
     ensure_narrator_slot_ex(state, run)
-    key = narrator_slot_key(run)
-    done = asyncio.run(reset_narrator_conversation(state, store, run))
-    assert done, "a core without the knob must still get its conversation reset"
-    assert state.sessions.discarded == [key]
-
-
-def test_a_kwargs_forwarding_manager_is_offered_the_knob():
-    """A ``**kwargs`` signature forwards, so it must be treated as accepting it —
-    otherwise a wrapper around core silently downgrades every reset to replay-on."""
-    from narrator import _accepts_replay
-
-    async def forwards(key, **kw):  # pragma: no cover - signature only
-        ...
-
-    async def positional_only(key):  # pragma: no cover - signature only
-        ...
-
-    assert _accepts_replay(forwards)
-    assert not _accepts_replay(positional_only)
-    # Unintrospectable degrades to the pre-knob call rather than raising.
-    assert not _accepts_replay(object())
+    assert asyncio.run(reset_narrator_conversation(state, store, run))
+    assert store.conversation_number(run) == 1
 
 
 def test_reset_survives_a_missing_runtime(store, run):
+    """No session runtime still moves the life: the new key is what makes it fresh."""
+
     class NoSessions:
         _slots: dict = {}
 
-    assert not asyncio.run(reset_narrator_conversation(NoSessions(), store, run))
+    assert asyncio.run(reset_narrator_conversation(NoSessions(), store, run))
+    assert store.conversation_number(run) == 1
 
 
 def test_reset_refuses_a_bad_run_id(store):
@@ -424,17 +399,18 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
     key = narrator_slot_key(run)
     asyncio.run(registry[APP_NAME](key))
     state.slots.pop(key)
-    assert state.sessions.discarded == [key], "a dismissal must discard the conversation"
 
     advance()
     assert len(sent) == 2 and run in sent[1], "the fresh conversation is asked the month"
+    assert narrator_slot_key(run, 1) in state.slots, "the turn must run on the new key"
+    assert store.stale_conversations(run) == [], "the dismissed conversation is removed"
 
-    # A third turn on the SAME (reopened) tab must not rotate again: the dismissal
-    # recorded its turn, so the planned rotation sees the boundary already spent.
+    # A third turn on the SAME tab must not rotate again: the dismissal recorded
+    # its turn, so the planned rotation sees the boundary already spent.
     store.commit_state(run, {**store.read_state(run), "turn": 2})
     store.append_turn(run, {"turn": 2, "prose": "spring"})
     advance()
-    assert len(state.sessions.discarded) == 1, "one dismissal, one reset"
+    assert store.conversation_number(run) == 1, "one dismissal, one new conversation"
 
 
 def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
@@ -485,27 +461,14 @@ def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
         "a tidied-away tab is not a dismissal; discarding here would lose a "
         "conversation the player never asked to end"
     )
+    assert store.conversation_number(run) == 0, "the same conversation resumes"
 
 
-# ── the purge seam: a build swap must also start empty ──────────────────────
-#
-# The update path does not go through ``reset_narrator_conversation`` — it calls
-# ``purge_narrator_session``, which tears the conversation down harder (it deletes
-# kiro-cli's transcript too) and therefore skipped the one call that arms core's
-# replay suppression. Measured on a live gateway: every turn after an app update
-# cold-started at ~106K tokens with three quarters of the prompt spent on a
-# ``[CONVERSATION HISTORY]`` rebuild of the conversation just deleted, so the
-# update looked like it had never reset anything.
+# ── core stand-ins for the reset tests above ────────────────────────────────
 
 
 class PurgeFakeSessions:
-    """Core's purge surface, faithful about the two effects order depends on.
-
-    ``remove`` clears an armed suppression (core does, correctly: it is tearing
-    down a session it expects to resume), and the suppressing call ends in
-    ``clear_sid``. Modelling both is what lets the ordering tests below fail for
-    the real reason rather than by asserting a list of strings.
-    """
+    """The session-manager calls a retired conversation's cleanup makes."""
 
     def __init__(self, sid: str = "sid-1"):
         self.calls: list[str] = []
@@ -538,12 +501,8 @@ class LegacyPurgeFakeSessions(PurgeFakeSessions):
 
 
 def _fake_core(monkeypatch) -> list[str]:
-    """Stand in for the two dashboard modules the purge seam imports.
-
-    Neither ships in this environment (``chat_utils`` transitively pulls in
-    messaging SDKs), and the identity ``_history_key_for`` keeps the assertions
-    about core's filename sanitiser out of a test about ordering.
-    """
+    """Stand in for the dashboard modules the cleanup imports; returns the ids
+    whose kiro-cli files were unlinked."""
     import types
 
     utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
@@ -555,90 +514,3 @@ def _fake_core(monkeypatch) -> list[str]:
     transfer._unlink_layer_b_files = unlinked.append
     monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.session_transfer", transfer)
     return unlinked
-
-
-def test_a_purge_spares_the_replacement_a_replay_of_what_it_replaced(store, run, monkeypatch):
-    _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions()
-
-    assert asyncio.run(narrator.purge_narrator_session(state, run))
-    assert state.sessions.replays == [False]
-    assert state.sessions.suppressed, (
-        "a purged conversation whose resume pointer is gone is exactly the state "
-        "in which core rebuilds its own conversation log as a [CONVERSATION "
-        "HISTORY] block, so a purge that never arms the suppression hands the "
-        "replacement a reconstruction of the build it was meant to replace"
-    )
-
-
-def test_the_suppression_is_armed_after_the_remove_that_would_wipe_it(store, run, monkeypatch):
-    """Ordering, not decoration: ``remove`` discards the same flag."""
-    _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions()
-
-    asyncio.run(narrator.purge_narrator_session(state, run))
-    assert state.sessions.calls.index("discard") > state.sessions.calls.index("remove")
-    assert state.sessions.suppressed, "armed before the teardown, the flag is wiped by it"
-
-
-def test_the_suppression_does_not_cost_the_id_the_unlink_needs(store, run, monkeypatch):
-    """The suppressing call ends in ``clear_sid``, so it must follow the one read."""
-    unlinked = _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions(sid="sid-42")
-
-    assert asyncio.run(narrator.purge_narrator_session(state, run))
-    assert unlinked == ["sid-42"], (
-        "armed before forget_conversation, the id is blanked and kiro-cli's own "
-        "transcript is left on disk for a life that no longer exists"
-    )
-    assert state.sessions.calls.index("discard") > state.sessions.calls.index("forget")
-
-
-def test_a_run_with_no_session_id_is_still_spared_the_replay(store, run, monkeypatch):
-    """A missing id does not mean a missing replay.
-
-    Core's log is keyed by the session key, not by that id, so a run whose
-    pointer was already gone still has a transcript to be handed back — which is
-    why the arming precedes the no-id early return.
-    """
-    unlinked = _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = PurgeFakeSessions(sid="")
-
-    assert not asyncio.run(narrator.purge_narrator_session(state, run))
-    assert unlinked == [], "there is no id whose files could be unlinked"
-    assert state.sessions.suppressed, "the replay is the part that still applies"
-
-
-def test_a_purge_still_completes_on_a_core_without_the_replay_knob(store, run, monkeypatch):
-    """The knob only exists on newer core. Its absence must not fail the purge."""
-    unlinked = _fake_core(monkeypatch)
-    state = FakeState()
-    state.sessions = LegacyPurgeFakeSessions(sid="sid-legacy")
-
-    assert asyncio.run(narrator.purge_narrator_session(state, run)), (
-        "an older core still has to get its conversation purged, with replay, "
-        "rather than the deletion the player asked for reporting a failure"
-    )
-    assert unlinked == ["sid-legacy"]
-    assert not narrator._accepts_replay(state.sessions.discard_conversation), (
-        "the premise: this build's signature refuses the keyword, so the guard is "
-        "what keeps the seam from offering it"
-    )
-
-
-def test_a_failing_suppression_does_not_fail_the_purge(store, run, monkeypatch):
-    """It only ever spares a reconstruction; it cannot be worth a failed delete."""
-    unlinked = _fake_core(monkeypatch)
-
-    class Angry(PurgeFakeSessions):
-        async def discard_conversation(self, key, *, replay=True):
-            raise RuntimeError("core is unhappy")
-
-    state = FakeState()
-    state.sessions = Angry(sid="sid-9")
-    assert asyncio.run(narrator.purge_narrator_session(state, run))
-    assert unlinked == ["sid-9"]

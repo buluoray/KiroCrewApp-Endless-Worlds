@@ -137,12 +137,16 @@ def test_a_turn_message_has_no_channel_for_a_rulebook():
 
 
 def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monkeypatch):
-    purged: list[str] = []
+    from conftest import FakeGatewayApi
 
-    async def record_purge(_state, run_id):
-        purged.append(run_id)
-        return True
+    calls: list[str] = []
 
+    class Recording(FakeGatewayApi):
+        async def delete(self, path):
+            calls.append(path)
+            return await super().delete(path)
+
+    monkeypatch.setattr(narrator, "_gateway_api", Recording)
     state_obj = FakeState()
     sent: list[str] = []
     _advance(state_obj, store, run, _prompts(sent))
@@ -153,13 +157,17 @@ def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monke
     store.append_turn(run, {"turn": 1, "prose": "the first month remains"})
     before_chronicle = store.read_chronicle(run)
 
-    monkeypatch.setattr(narrator, "purge_narrator_session", record_purge)
     monkeypatch.setattr(narrator, "app_install_generation", lambda: "updated-install")
     _advance(state_obj, store, run, _prompts(sent))
 
-    new_slot = state_obj.slots[narrator.narrator_slot_key(run)]
+    new_slot = state_obj.slots[narrator.narrator_slot_key(run, 1)]
     assert new_slot is not old_slot, "the pre-update conversation was reused"
-    assert purged == [run], "the pre-update persisted conversation was not purged"
+    assert narrator.narrator_slot_key(run) not in state_obj.slots, "the old slot was left open"
+    old_key = narrator.narrator_slot_key(run)
+    assert calls == [
+        f"/api/chat/slots/{old_key}",
+        f"/api/sessions/dashboard%3A{old_key}",
+    ], "the pre-update conversation must be removed through the public API"
     assert store.narrator_generation(run) == "updated-install"
     _assert_thin(sent[1], run)
     assert store.read_state(run) == saved, "slot replacement changed the save"

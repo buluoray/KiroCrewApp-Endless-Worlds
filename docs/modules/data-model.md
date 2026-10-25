@@ -21,6 +21,7 @@ deletion.
 | `kv/run.<runId>.prev.json` | last-known-good state — the rollback target |
 | `kv/index.json` | `{ "runs": [ …Lives-view rows… ] }`, the shelf |
 | `kv/briefed-<runId>.json` | `{ slot, at, turn }` legacy rulebook-delivery marker; no longer written by the turn loop (the rulebook rides only in a full read), still cleared on reset and delete |
+| `kv/conversation-<runId>.json` | `{ n, stale, at }`: the life's current narrator conversation number (slot key `narrator_slot_key(runId, n)`) and earlier numbers whose slot, session and transcript are not yet confirmed removed. Absent means conversation 0, the bare `endless-run-<runId>` key |
 | `kv/pending-<runId>.json` | in-flight-turn record (`turn`, `slot`, `askedAt`, `action`, `close?` — the player closing the life, see turn-loop — `readAt?`, `readTurn?`, …) |
 | `runs/<runId>/chronicle.jsonl` | append-only, one JSON line per committed turn (`turn`, `prose`, `action`, `choices`, `events`, `gains`, `memory?`, `picked?` (the offered choice the action was, observed by the app; see memory-graph.md), and the `digest?`/`panels?` snapshot of the standing that turn ended on) |
 | `mcp_server.py` (`_advance_turn`) | applies `RESERVED_STATE_KEYS` carry-forward, then the milestone rebuild and the systems engine, on each commit |
@@ -148,9 +149,13 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   `test_pending.test_marking_a_turn_in_flight_does_not_spend_the_rollback_point`.
 
 - **`delete_run` drops every key a life owns.** State, prev, `briefed-`,
-  `pending-`, `recall-sent-`, `slot-heals-`, `rotation-`, `provenance-`,
-  `narrator-generation-`, `backdrop-request-`, the index row, and the
-  `runs/<id>/` tree all go. Load-bearing
+  `pending-`, `recall-sent-`, `slot-heals-`, `rotation-`, `conversation-`,
+  `provenance-`, `narrator-generation-`, `backdrop-request-`, the index row, and
+  the `runs/<id>/` tree all go. The delete routes read the conversation count
+  BEFORE `delete_run` and then remove every conversation the life had (slot,
+  transcript, resume pointer, kiro-cli files) through
+  `retire_all_conversations`, which uses the public API (turn-loop); pinned by
+  `test_conversation_keys.test_deleting_a_life_removes_all_its_conversations`. Load-bearing
   because a leaked `pending-` makes `turn.generating` report a turn in flight for
   a life that no longer exists; `briefed-` is legacy and is dropped so an
   older version's marker is not left behind. The delete routes then cancel the life's backdrop

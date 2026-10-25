@@ -71,3 +71,54 @@ def _ensure_gateway_importable() -> None:
 
 
 _ensure_gateway_importable()
+
+
+import pytest  # noqa: E402
+
+
+class FakeGatewayApi:
+    """The two public DELETE routes, as the gateway answers an app token.
+
+    ``DELETE /api/chat/slots/{slot}`` removes a live slot only when this app owns
+    it; ``DELETE /api/sessions/{key}`` deletes the transcript. Anything else, and
+    any slot or transcript the app does not own, is 404 — the gateway's own
+    answer for "not yours" and "missing" alike.
+    """
+
+    def __init__(self, state):
+        self.state = state
+        self.calls: list[str] = []
+
+    async def delete(self, path: str) -> int:
+        from urllib.parse import unquote
+
+        import narrator
+
+        self.calls.append(path)
+        if path.startswith("/api/chat/slots/"):
+            key = unquote(path[len("/api/chat/slots/") :])
+            slots = getattr(self.state, "_slots", None)
+            slot = slots.get(key) if isinstance(slots, dict) else None
+            if slot is None or getattr(slot, "_app", "") != narrator.APP_NAME:
+                return 404
+            slots.pop(key, None)
+            return 200
+        if path.startswith("/api/sessions/"):
+            key = unquote(path[len("/api/sessions/") :])
+            log = getattr(self.state, "conversation_log", None)
+            if log is not None and hasattr(log, "delete_session"):
+                log.delete_session(key)
+            return 200
+        return 404
+
+
+@pytest.fixture(autouse=True)
+def _fake_gateway_api(monkeypatch):
+    """Answer the app's public API calls in-process by default.
+
+    The real client needs a running gateway and this app's secret. Tests that
+    model core more closely install their own stand-in over this one.
+    """
+    import narrator
+
+    monkeypatch.setattr(narrator, "_gateway_api", FakeGatewayApi)

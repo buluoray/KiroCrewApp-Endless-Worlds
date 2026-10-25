@@ -81,6 +81,19 @@ def pct(values: list[float], q: float) -> float | None:
     return ordered[rank - 1]
 
 
+def _narrator_transcripts(sessions_dir: Path, run_id: str) -> list[Path]:
+    """This life's narrator transcripts on disk, in conversation order."""
+    stem = f"dashboard_endless-run-{run_id}"
+    found: list[tuple[int, Path]] = []
+    if (sessions_dir / f"{stem}.jsonl").is_file():
+        found.append((0, sessions_dir / f"{stem}.jsonl"))
+    for path in sessions_dir.glob(f"{stem}-c*.jsonl"):
+        suffix = path.name[len(stem) + 2 : -len(".jsonl")]
+        if suffix.isdigit():
+            found.append((int(suffix), path))
+    return [path for _n, path in sorted(found)]
+
+
 def narrator_turns(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One record per narrator conversation turn that carries ``turn_stats``."""
     turns: list[dict[str, Any]] = []
@@ -237,8 +250,12 @@ def collect(data_dir: Path, sessions_dir: Path) -> dict[str, Any]:
             convo.append({"run": run_id, **rec})
         for rec in art_turns(_jsonl(runs_dir / run_id / "backdrop-timeline.jsonl")):
             arts.append({"run": run_id, **rec})
-        for rec in narrator_turns(_jsonl(sessions_dir / f"dashboard_endless-run-{run_id}.jsonl")):
-            narr.append({"run": run_id, **rec})
+        # One transcript per conversation: the bare key is conversation 0, later
+        # ones carry ``-c<n>``. Retired conversations' transcripts are deleted, so
+        # only the conversations still on disk are read.
+        for transcript in _narrator_transcripts(sessions_dir, run_id):
+            for rec in narrator_turns(_jsonl(transcript)):
+                narr.append({"run": run_id, **rec})
     return {
         "runs": run_ids,
         "commits": commits,

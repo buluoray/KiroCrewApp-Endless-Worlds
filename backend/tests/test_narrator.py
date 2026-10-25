@@ -8,6 +8,7 @@ importable, and skips otherwise.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -31,7 +32,6 @@ from narrator import (  # noqa: E402
     ensure_narrator_slot,
     is_narrator_slot,
     narrator_slot_key,
-    release_narrator_slot,
 )
 
 AGENT_JSON = _BACKEND.parent / "agents" / "narrator.json"
@@ -130,30 +130,23 @@ def test_install_generation_changes_on_update_and_same_content_reinstall(tmp_pat
     )
 
 
-@pytest.mark.parametrize(
-    ("app", "mode", "error"),
-    [
-        ("some-other-app", MEMORY_MODE, SlotOwnedByAnother),
-        (APP_NAME, "persistent", MemoryModeConflict),
-    ],
-)
-def test_stale_install_release_keeps_foreign_or_unsealed_slots(app, mode, error):
+def test_retiring_an_old_conversation_never_touches_a_foreign_slot():
     state = FakeState()
-    slot = FakeSlot(narrator_slot_key("run-1"), app=app, memory_mode=mode)
+    slot = FakeSlot(narrator_slot_key("run-1"), app="some-other-app", memory_mode=MEMORY_MODE)
     state.slots[slot.key] = slot
 
-    with pytest.raises(error):
-        narrator.release_stale_narrator_slot(state, "run-1")
-
+    # The gateway answers 404 for a slot this app does not own, so there is
+    # nothing of ours left to track, and the slot itself is untouched.
+    asyncio.run(narrator.retire_narrator_conversation(state, "run-1", 0))
     assert state.slots[slot.key] is slot
 
 
-def test_stale_install_release_removes_only_the_app_owned_sealed_slot():
+def test_retiring_an_old_conversation_removes_the_app_owned_slot():
     state = FakeState()
-    slot = FakeSlot(narrator_slot_key("run-1"), app=APP_NAME, memory_mode=MEMORY_MODE)
+    slot = FakeSlot(narrator_slot_key("run-1", 3), app=APP_NAME, memory_mode=MEMORY_MODE)
     state.slots[slot.key] = slot
 
-    assert narrator.release_stale_narrator_slot(state, "run-1") is True
+    assert asyncio.run(narrator.retire_narrator_conversation(state, "run-1", 3)) is True
     assert slot.key not in state.slots
 
 
@@ -696,50 +689,6 @@ class TestAgainstRealCore:
 # -- release on delete ----------------------------------------------------
 
 
-class FakeRuntime:
-    """Mirrors the fields release_narrator_slot touches on core's state: the raw
-    ``_slots`` dict, and the two best-effort hooks."""
-
-    def __init__(self) -> None:
-        self._slots: dict[str, FakeSlot] = {}
-        self.cancelled: list[str] = []
-        self.pushed = 0
-
-    def cancel_questions_for_slot(self, key: str) -> None:
-        self.cancelled.append(key)
-
-    def _push_slots(self) -> None:
-        self.pushed += 1
-
-
-def test_release_drops_this_apps_slot_and_refreshes():
-    rt = FakeRuntime()
-    key = narrator_slot_key("run-1")
-    rt._slots[key] = FakeSlot(key, app=APP_NAME, memory_mode=MEMORY_MODE)
-
-    assert release_narrator_slot(rt, "run-1") is True
-    assert key not in rt._slots, "the deleted life's slot is gone"
-    assert rt.cancelled == [key], "its pending question cards are cancelled"
-    assert rt.pushed == 1, "the slot list is refreshed"
-
-
-def test_release_never_removes_a_slot_another_owner_holds():
-    rt = FakeRuntime()
-    key = narrator_slot_key("run-2")
-    rt._slots[key] = FakeSlot(key, app="someone-else", memory_mode=MEMORY_MODE)
-
-    assert release_narrator_slot(rt, "run-2") is False
-    assert key in rt._slots, "a slot this app does not own is left alone"
-
-
-def test_release_is_a_guarded_noop_on_bad_input():
-    # No slot present, a runtime without _slots, and a bad run id all no-op rather
-    # than raising — a cleanup failure must never fail the deletion.
-    assert release_narrator_slot(FakeRuntime(), "run-3") is False
-    assert release_narrator_slot(object(), "run-3") is False
-    assert release_narrator_slot(FakeRuntime(), "not a run id!!") is False
-
-
 def test_the_slot_is_created_under_this_app_so_its_origin_is_app():
     """The app passes ``app=APP_NAME`` to get_or_create_slot, which is exactly what
     makes core tag the slot's origin APP rather than USER
@@ -748,22 +697,3 @@ def test_the_slot_is_created_under_this_app_so_its_origin_is_app():
     state = FakeState()
     ensure_narrator_slot(state, "run-1")
     assert state.create_calls[0]["app"] == APP_NAME
-
-
-def test_purge_is_a_guarded_noop_without_a_session_store():
-    import asyncio
-
-    class NoSessions:
-        pass
-
-    assert asyncio.run(narrator.purge_narrator_session(NoSessions(), "run-1")) is False
-    assert asyncio.run(narrator.purge_narrator_session(object(), "run-1")) is False
-
-
-def test_purge_is_a_noop_on_a_bad_run_id():
-    import asyncio
-
-    class S:
-        sessions = object()
-
-    assert asyncio.run(narrator.purge_narrator_session(S(), "not a run id!!")) is False

@@ -158,11 +158,10 @@ from memory_routes import memory_routes  # noqa: E402
 from narrator import (  # noqa: E402
     ensure_narrator_slot_ex,
     ensure_worldsmith_slot,
-    narrator_slot_key,
-    purge_narrator_session,
-    release_narrator_slot,
+    life_slot_keys,
     release_worldsmith_slot,
     reset_narrator_conversation,
+    retire_all_conversations,
     worldsmith_slot_key,
 )
 from opening import (  # noqa: E402
@@ -579,6 +578,7 @@ async def _recover_backdrop(
                 project=str(ctx.data_dir / "runs" / run_id),
                 model=narrator_model,
                 reasoning_effort=reasoning_effort,
+                conversation=store.conversation_number(run_id),
             )
             # Only which page, and that the illustrators failed. How to recover
             # (no narrating, a simpler brief or the direct fallback, no reply) is
@@ -1160,6 +1160,7 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
     removed: list[str] = []
     for life in facts["lives"]:
         try:
+            conversations = _conversation_numbers(store, str(life["runId"]))
             store.delete_run(str(life["runId"]))
             removed.append(str(life["runId"]))
             # Nothing may paint for a life that no longer exists.
@@ -1168,8 +1169,7 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
             # conversation so nothing lingers for a run that no longer exists.
             # Best-effort by design.
             if state_obj is not None:
-                release_narrator_slot(state_obj, str(life["runId"]))
-                await purge_narrator_session(state_obj, str(life["runId"]))
+                await retire_all_conversations(state_obj, str(life["runId"]), conversations)
         except Exception as exc:  # noqa: BLE001
             failed.append({"runId": str(life["runId"]), "problem": str(exc)})
 
@@ -1282,7 +1282,15 @@ async def life_deletion(request: web.Request, ctx: AppContext) -> web.Response:
     return web.json_response(_life_deletion_facts(ctx, run_id, _gateway_state(request)))
 
 
-def _usage_rows_for(run_id: str) -> list[dict[str, Any]]:
+def _conversation_numbers(store: RunStore, run_id: str) -> list[int]:
+    """Every narrator conversation number this life has had, current one last."""
+    try:
+        return list(range(store.conversation_number(run_id) + 1))
+    except Exception:  # noqa: BLE001 — an unreadable record still has conversation 0
+        return [0]
+
+
+def _usage_rows_for(store: RunStore, run_id: str) -> list[dict[str, Any]]:
     """The narrator conversation's per-turn billing rows, or ``[]``.
 
     Guarded import: the host only grew a per-turn usage reader recently, so a
@@ -1298,7 +1306,11 @@ def _usage_rows_for(run_id: str) -> list[dict[str, Any]]:
     except ImportError:
         return []
     try:
-        return slot_turn_usage(narrator_slot_key(run_id))
+        # One key per conversation, so a life's rows are spread over all of them.
+        rows: list[dict[str, Any]] = []
+        for key in life_slot_keys(store, run_id):
+            rows.extend(slot_turn_usage(key))
+        return rows
     except Exception as exc:  # noqa: BLE001 — billing is annotation, never a route failure
         logger.debug("per-turn usage read failed for %s: %s", run_id, exc)
         return []
@@ -1325,7 +1337,7 @@ async def life_perf(request: web.Request, ctx: AppContext) -> web.Response:
     rows = TurnPerf(ctx.data_dir, run_id).rows()
     timeline = BackdropTimeline(ctx.data_dir, run_id)
     events = timeline.events()
-    turns = join_usage(perf_aggregate(rows, events), _usage_rows_for(run_id))
+    turns = join_usage(perf_aggregate(rows, events), _usage_rows_for(store, run_id))
     has_credits = any("credits" in t for t in turns)
     return web.json_response(
         {
@@ -1455,6 +1467,8 @@ async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
             status=409,
         )
 
+    # Read before the store forgets the life: the count goes with it.
+    conversations = _conversation_numbers(store, run_id)
     try:
         store.delete_run(run_id)
     except Exception as exc:  # noqa: BLE001
@@ -1471,8 +1485,7 @@ async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
     _app = getattr(request, "app", None)
     state_obj = _app.get("state") if _app is not None else None
     if state_obj is not None:
-        release_narrator_slot(state_obj, run_id)
-        await purge_narrator_session(state_obj, run_id)
+        await retire_all_conversations(state_obj, run_id, conversations)
 
     return web.json_response({"runId": run_id, "deleted": True, "turn": facts["turn"]})
 

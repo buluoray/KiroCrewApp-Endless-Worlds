@@ -493,6 +493,72 @@ class RunStore:
         _check_run_id(run_id)
         self._kv.set(self._rotation_key(run_id), {"turn": int(turn), "at": time.time()})
 
+    # -- which narrator conversation is current ------------------------------
+    #
+    # Each conversation of a life gets its OWN slot key (``narrator_slot_key(run,
+    # n)``), because core keys everything it keeps about a conversation by that
+    # key: the resume pointer to kiro-cli's session, its own transcript, and the
+    # history replay it builds from that transcript on a cold start. Reusing one
+    # key per life meant a "new" conversation could find the old one again
+    # through any of the three. A new number is a key core has never seen.
+    #
+    # ``n`` is the current conversation; ``stale`` lists earlier ones whose slot,
+    # session and transcript are not yet confirmed removed. A life without a
+    # record is on conversation 0, the key every life used before this existed,
+    # so an existing life moves to the new scheme on its next rotation.
+
+    @staticmethod
+    def _conversation_key(run_id: str) -> str:
+        return f"conversation-{run_id}"
+
+    def _read_conversation(self, run_id: str) -> tuple[int, list[int]]:
+        raw = self._kv.get(self._conversation_key(run_id))
+        if not isinstance(raw, dict):
+            return 0, []
+        try:
+            n = max(0, int(raw.get("n") or 0))
+            stale = sorted({int(s) for s in raw.get("stale") or [] if 0 <= int(s) < n})
+        except (TypeError, ValueError):
+            return 0, []
+        return n, stale
+
+    def conversation_number(self, run_id: str) -> int:
+        """The number of this life's current narrator conversation (0 = first)."""
+        _check_run_id(run_id)
+        return self._read_conversation(run_id)[0]
+
+    def begin_conversation(self, run_id: str) -> int:
+        """Move this life to a brand-new conversation number and return it.
+
+        Synchronous, with no await between the read and the write, so two requests
+        on one event loop cannot both move from the same number: whichever runs
+        second starts from the number the first wrote. The caller's own guard (the
+        rotation marker) is what keeps a retry from moving it a second time.
+        """
+        _check_run_id(run_id)
+        n, stale = self._read_conversation(run_id)
+        self._kv.set(
+            self._conversation_key(run_id),
+            {"n": n + 1, "stale": sorted({*stale, n}), "at": time.time()},
+        )
+        return n + 1
+
+    def stale_conversations(self, run_id: str) -> list[int]:
+        """Earlier conversation numbers whose removal is not yet confirmed."""
+        _check_run_id(run_id)
+        return self._read_conversation(run_id)[1]
+
+    def forget_stale_conversation(self, run_id: str, n: int) -> None:
+        """Record that conversation ``n`` was removed."""
+        _check_run_id(run_id)
+        current, stale = self._read_conversation(run_id)
+        if n not in stale:
+            return
+        self._kv.set(
+            self._conversation_key(run_id),
+            {"n": current, "stale": [s for s in stale if s != n], "at": time.time()},
+        )
+
     # -- recall material already delivered in this conversation -------------
     #
     # Lore entries and recall candidates are re-SELECTED every turn (the same
@@ -521,9 +587,14 @@ class RunStore:
             return set()
         try:
             stamped = int(raw.get("rotation") or 0)
+            conversation = int(raw.get("conversation") or 0)
         except (TypeError, ValueError):
             return set()
-        if stamped != self.rotation_turn(run_id):
+        # Both stamps: a slot heal starts a new conversation without moving the
+        # rotation marker, and that conversation has received nothing either.
+        if stamped != self.rotation_turn(run_id) or conversation != self.conversation_number(
+            run_id
+        ):
             return set()  # written under a conversation that no longer exists
         ids = raw.get("ids")
         return {str(i) for i in ids} if isinstance(ids, list) else set()
@@ -545,6 +616,7 @@ class RunStore:
             self._recall_sent_key(run_id),
             {
                 "rotation": self.rotation_turn(run_id),
+                "conversation": self.conversation_number(run_id),
                 "ids": sorted(merged),
                 "at": time.time(),
             },
@@ -873,6 +945,7 @@ class RunStore:
         self._kv.delete(self._brief_key(run_id))
         self._kv.delete(self._provenance_key(run_id))
         self._kv.delete(self._rotation_key(run_id))
+        self._kv.delete(self._conversation_key(run_id))
         self._kv.delete(self._recall_sent_key(run_id))
         self._kv.delete(self._pending_key(run_id))
         self._kv.delete(self._heal_key(run_id))

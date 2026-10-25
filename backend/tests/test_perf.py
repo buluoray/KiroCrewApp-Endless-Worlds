@@ -293,7 +293,17 @@ def test_usage_rows_helper_returns_empty_without_the_host_reader(monkeypatch):
 
     fake = types.ModuleType("kiro_crew.dashboard.handlers.usage")  # no reader attr
     monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
-    assert routes._usage_rows_for("some-life") == []
+    assert routes._usage_rows_for(_OneConversation(), "some-life") == []
+
+
+class _OneConversation:
+    """The one store method the usage helper reads."""
+
+    def __init__(self, n: int = 0):
+        self.n = n
+
+    def conversation_number(self, _run_id):
+        return self.n
 
 
 def test_usage_rows_helper_reads_the_narrator_slot(monkeypatch):
@@ -311,9 +321,20 @@ def test_usage_rows_helper_reads_the_narrator_slot(monkeypatch):
     fake = types.ModuleType("kiro_crew.dashboard.handlers.usage")
     fake.slot_turn_usage = fake_reader
     monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
-    rows = routes._usage_rows_for("some-life")
+    rows = routes._usage_rows_for(_OneConversation(), "some-life")
     assert rows and rows[0]["credits"] == 1.5
     assert seen == [narrator_slot_key("some-life")]
+
+    # A life that rotated has one key per conversation, and every one of them
+    # holds some of its turns.
+    seen.clear()
+    rows = routes._usage_rows_for(_OneConversation(2), "some-life")
+    assert seen == [
+        narrator_slot_key("some-life"),
+        narrator_slot_key("some-life", 1),
+        narrator_slot_key("some-life", 2),
+    ]
+    assert len(rows) == 3
 
 
 def test_usage_rows_helper_swallows_a_failing_reader(monkeypatch):
@@ -327,7 +348,7 @@ def test_usage_rows_helper_swallows_a_failing_reader(monkeypatch):
     fake = types.ModuleType("kiro_crew.dashboard.handlers.usage")
     fake.slot_turn_usage = boom
     monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.handlers.usage", fake)
-    assert routes._usage_rows_for("some-life") == []
+    assert routes._usage_rows_for(_OneConversation(), "some-life") == []
 
 
 # ── the page: the trail has to be readable, in both languages ───────────────
