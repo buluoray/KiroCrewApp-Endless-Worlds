@@ -149,3 +149,16 @@ one panel — it blanks the whole page.
   because a narrator holding the mount identity could forge an answer to the question
   it just asked. `test_an_answer_aimed_at_a_replaced_scene_is_refused` and
   `test_a_second_answer_never_overwrites_the_first` pin the write-suppression.
+
+## Growth this month
+
+`build_play_view` carries `growth`: rows computed by the route with
+`view.growth_rows` from the current and prior COMMITTED states, so every number is
+the backend's (`systems.growth`). A row appears only for a gain-fed ledger that
+rose, and is labelled by the panel field that shows its derived rank (`tierInto`)
+or the ledger itself; a ledger shown in no panel has no player-facing name and is
+left out rather than named by its path. `tierChanged` marks a new rank. The route
+passes no prior state while a page's art is pending, so the next month's growth is
+not shown over the previous prose. The play page renders the rows beside the
+milestone marker. Pinned by
+`test_growth.test_the_page_shows_backend_growth_by_its_panel_label_only`.

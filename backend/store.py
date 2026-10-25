@@ -551,28 +551,34 @@ class RunStore:
     def _pending_key(run_id: str) -> str:
         return f"pending-{run_id}"
 
-    def mark_pending(self, run_id: str, *, turn: int, slot: str, action: str = "") -> None:
+    def mark_pending(
+        self, run_id: str, *, turn: int, slot: str, action: str = "", close: bool = False
+    ) -> None:
         """Record that ``turn`` was asked of ``slot``, before asking.
 
         The caller must do this BEFORE dispatching. Written after would leave open
         exactly the window it exists to close: the player leaves, the request dies
         mid-flight, and nothing on disk says a narrator is still working.
+
+        ``close`` records that the player asked to close the life with this turn.
+        It lives only here, in the app's own record, so the commit can end the
+        life on the player's word and never on a narrator's claim.
         """
         _check_run_id(run_id)
-        self._kv.set(
-            self._pending_key(run_id),
-            {
-                "turn": int(turn),
-                "slot": slot,
-                "askedAt": time.time(),
-                # The player's own words, carried here so the narrator's commit can
-                # fold them into the chronicle. Reviewing a past month is about
-                # seeing the FORK, not only the outcome — and the commit path never
-                # learns the action any other way, because the narrator is told the
-                # intent in prose and does not echo it back.
-                "action": action,
-            },
-        )
+        record: dict[str, Any] = {
+            "turn": int(turn),
+            "slot": slot,
+            "askedAt": time.time(),
+            # The player's own words, carried here so the narrator's commit can
+            # fold them into the chronicle. Reviewing a past month is about
+            # seeing the FORK, not only the outcome — and the commit path never
+            # learns the action any other way, because the narrator is told the
+            # intent in prose and does not echo it back.
+            "action": action,
+        }
+        if close:
+            record["close"] = True
+        self._kv.set(self._pending_key(run_id), record)
 
     def read_pending(self, run_id: str) -> dict[str, Any] | None:
         """The in-flight record, or ``None``.

@@ -182,7 +182,7 @@ from turn import (  # noqa: E402
     make_dispatcher,
     unanswered,
 )
-from view import build_play_view, resolve_ending, world_detail  # noqa: E402
+from view import build_play_view, growth_rows, resolve_ending, world_detail  # noqa: E402
 from widget import CSP, SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
@@ -1516,6 +1516,13 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
     action = str(body.get("action") or "")[:500]  # R4.5
     style = str(body.get("style") or "")[:64]
     wanted = body.get("turn")
+    # The player closing this life by choice. Only a literal ``true`` counts, and
+    # it travels in the app's own in-flight record (store.mark_pending) to the
+    # commit, which is what ends the life — the narrator is only asked for the
+    # last page. A close carries no player words of its own.
+    close = body.get("close") is True
+    if close:
+        action = ""
 
     store = _store(ctx)
 
@@ -1575,6 +1582,12 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
             }
         )
 
+    if close and int(run_state.get("turn") or 0) < 1:
+        # A life that has not had its first month has nothing to close yet.
+        return web.json_response(
+            {"field": "close", "expected": "a life that has begun"}, status=409
+        )
+
     from kiro_crew.dashboard.chat_runner import _run_chat  # noqa: PLC0415
 
     _cfg = read_settings(ctx.data_dir)
@@ -1601,6 +1614,7 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         prose_length=_cfg["proseLength"],
         backdrops_enabled=bool(_cfg["backdrops"]),
         on_poll=lambda: _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg),
+        close=close,
     )
 
     # The prose may be committed, but requested art is the other half of this page.
@@ -2054,6 +2068,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
         unlocked=unlocked,
         milestones_reached=milestones_reached,
         milestones=milestones_all,
+        growth=growth_rows(pack.template, state, prev),
         capability_packs=pack.capability_packs,
     )
     view["runId"] = run_id

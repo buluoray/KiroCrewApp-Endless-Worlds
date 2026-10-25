@@ -78,3 +78,27 @@ def test_first_run_and_keyboard_copy_exists_in_both_languages():
                 "zh": "书架还是空的。第一个世界，正等你推门。",
             }[lang]
         )
+
+
+def test_closing_a_life_takes_a_confirm_step_and_sends_only_the_close_flag():
+    src = module("play.tsx")
+    # The visible control only ARMS; the send lives in the confirm step.
+    assert "onClick={() => setArm(arm === CLOSE ? '' : CLOSE)}" in src
+    assert src.count("close: true") == 1
+    send = src.index("close: true")
+    assert src.rfind("arm === CLOSE && !busy", 0, send) != -1
+    assert "'.ew-close-life button'" in src  # cancel returns focus here
+    # Growth rows come from the view, never computed in the page.
+    assert "(v.growth ?? [])" in src
+    base = Path(__file__).resolve().parents[2] / "web/src/strings"
+    keys = [
+        "play.closeLife",
+        "play.closeLifeConfirm",
+        "play.closeLifeYes",
+        "play.closeLifeNo",
+        "play.growth",
+        "play.growthTier",
+    ]
+    for lang in ("en", "zh"):
+        catalog = json.loads((base / f"{lang}.json").read_text())
+        assert all(catalog.get(key) for key in keys)

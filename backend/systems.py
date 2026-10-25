@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from template import GAIN_FED_SYSTEM_KINDS
+
 
 def _num(value: Any) -> float:
     """A number from whatever the state or a gain's amount holds. Gains carry amount
@@ -161,3 +163,52 @@ def apply_systems(
                 _set(state, s.into, bool(unlocked))
         except Exception:  # noqa: BLE001
             continue
+
+
+def gain_fields(template: Any) -> list[dict[str, Any]]:
+    """The gain names this world's systems count, in declaration order.
+
+    One row per ``accrual``/``resource`` system: the ``field`` a gain must carry
+    to feed it (the last segment of ``into``) and, for a tiered ledger, the tier
+    names in order. This is what tells the narrator a world counts growth at all —
+    a world that never names the field gets no gains, and a ledger that never
+    moves.
+    """
+    rows: list[dict[str, Any]] = []
+    for s in getattr(template, "systems", None) or []:
+        if s.kind not in GAIN_FED_SYSTEM_KINDS:
+            continue
+        tiers = [
+            str(t.get("name") or "")
+            for t in sorted(
+                (t for t in s.tiers if isinstance(t.get("at"), (int, float))),
+                key=lambda t: t["at"],
+            )
+            if t.get("name")
+        ]
+        rows.append({"field": _tail(s.into), "kind": s.kind, "tiers": tiers})
+    return rows
+
+
+def growth(template: Any, state: dict[str, Any], prev: dict[str, Any]) -> list[dict[str, Any]]:
+    """What each gain-fed ledger moved by on the last committed turn.
+
+    Read from the two COMMITTED states, so the numbers are the backend's own —
+    never a narrator's claim. A ledger that did not move is omitted. ``tier`` is
+    the derived rank now (or ``None``), and ``tierChanged`` says the rank moved.
+    """
+    rows: list[dict[str, Any]] = []
+    for s in getattr(template, "systems", None) or []:
+        if s.kind not in GAIN_FED_SYSTEM_KINDS:
+            continue
+        delta = _num(_get(state, s.into)) - _num(_get(prev, s.into))
+        if not delta:
+            continue
+        row: dict[str, Any] = {"system": s.id, "into": s.into, "delta": _tidy(delta)}
+        if s.tier_into:
+            now = _get(state, s.tier_into)
+            row["tierInto"] = s.tier_into
+            row["tier"] = now if isinstance(now, str) and now else None
+            row["tierChanged"] = now != _get(prev, s.tier_into)
+        rows.append(row)
+    return rows

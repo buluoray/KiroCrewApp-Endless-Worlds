@@ -125,3 +125,12 @@ carry its thread state. `candidates` treats turn zero as a real turn and only
 are not rewritten. Pinned by
 `test_game_state_integrity.test_an_inherited_thread_keeps_its_open_state_at_turn_zero`
 and `test_an_inherited_resolved_thread_stays_resolved`.
+
+A thread opened only through events' `threads` effects has no entity row, yet it
+is the usual shape of unfinished business. `legacy._event_only_thread` gives such
+a thread an entity-shaped view — named and summarised by the latest `known` event
+that touched it — so `candidates` offers it and `build_bridge_record` mints it as
+a `thread` entity with app-stamped `inheritsFrom` in the heir's turn-0 record. A
+thread touched only by hidden events stays unoffered and refused. Pinned by
+`test_legacy.test_an_event_only_thread_is_offered_named_by_its_latest_known_event`
+and `test_an_event_only_thread_crosses_as_a_named_open_thread`.

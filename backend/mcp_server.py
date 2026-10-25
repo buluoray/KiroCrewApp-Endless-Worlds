@@ -101,7 +101,13 @@ from chapters import (  # noqa: E402
 )
 from compile import CLEANING_CONTRACT, COMPILER_BRIEF, accept_compiled_header, preview  # noqa: E402
 from drafts import DraftError, DraftStore  # noqa: E402
-from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
+from halo import (  # noqa: E402
+    attribution,
+    compose_restraint,
+    event_density,
+    gate_digest,
+    growth_quiet,
+)
 from perf import TurnPerf  # noqa: E402
 from phototrace import (  # noqa: E402
     TRACE_CANDIDATE_COUNT,
@@ -122,7 +128,7 @@ from scenes import (  # noqa: E402
 )
 from settings import SPARSE_GAP_TURNS, preferred_style, read_settings  # noqa: E402
 from store import RunStore, StoreError, brief_lane, rewrite_brief_style  # noqa: E402
-from systems import apply_systems  # noqa: E402
+from systems import apply_systems, gain_fields  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from view import always_panels_empty, resolve_ending, shape_panels  # noqa: E402
 from widget import scene_warnings  # noqa: E402
@@ -1631,6 +1637,17 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass  # an achievement is a reward, never a reason to block a committed turn
 
+    # The player closed this life with this turn. Read from the app's own
+    # in-flight record (written by turn.advance_turn before the narrator was
+    # asked), never from anything the narrator sent — so a narrator can neither
+    # close a life the player is still living nor keep open one the player ended.
+    # `retiredByPlayer` is the flagship's declared ending condition; a world that
+    # declares no such ending still closes, under the `retired` id below.
+    _asked = store.read_pending(run_id) or {}
+    closing = _asked.get("close") is True and int(_asked.get("turn") or 0) == turn
+    if closing:
+        state["retiredByPlayer"] = True
+
     # Load the world pack once (reused for the choices gate and the panel warnings).
     pack = None
     _wid = state.get("worldId")
@@ -1657,7 +1674,11 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         _earlier = []  # an unreadable history only loses the spacing, never the turn
     choices, fateful_drops = _space_fateful(choices, _earlier)
-    if not choices and pack is not None:
+    if closing:
+        # A closed life's last page offers nothing to press: the ending page
+        # (inheritance, live again, back to the shelf) is what comes next.
+        choices = []
+    if not choices and pack is not None and not closing:
         fired = any(e.when is not None and e.when.evaluate(state) for e in pack.template.endings)
         if args.get("ending") is not True and not fired:
             sent = args.get("choices")
@@ -1703,9 +1724,10 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
     fired_id = ""
     if pack is not None:
         fired_id = resolve_ending(pack.template, state)
-    if args.get("ending") is True or fired_id:
+    if args.get("ending") is True or fired_id or closing:
         flag = state.get("ended")
-        state["ended"] = flag if isinstance(flag, str) and flag else (fired_id or True)
+        default: str | bool = fired_id or ("retired" if closing else True)
+        state["ended"] = flag if isinstance(flag, str) and flag else default
     store.commit_state(run_id, state)
     # Provenance rides with the commit: leaves where the final state differs from
     # the narrator's declaration were backend-written (reserved-key carry,
@@ -2150,6 +2172,17 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
         if path.is_file():
             pack = read_world(path.read_text(encoding="utf-8"))
             out["world"] = summarize(pack)
+            # The growth reading needs the world's own gain names, which only
+            # the pack knows — so the restraint note is completed here, once the
+            # pack is read, on the same full reads that carry it.
+            restraint = out.get("restraint")
+            if isinstance(restraint, dict):
+                counted = [row["field"] for row in gain_fields(pack.template)]
+                if counted:
+                    restraint["growth"] = growth_quiet(lived, counted)
+                    restraint["note"] = compose_restraint(
+                        lived, state.get("language") or "en", gain_fields=counted
+                    )
             # The table of contents, but not on every turn.
             #
             # A narrator cannot ask for a chapter it was never told exists, so the

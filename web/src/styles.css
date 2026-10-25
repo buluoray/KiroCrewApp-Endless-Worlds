@@ -1273,6 +1273,7 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   animation: ew-rise .16s ease-out;
 }
 .ew-confirm-act { padding-left: 0; }
+.ew-close-life { margin-top: 14px; display: flex; justify-content: flex-end; }
 .ew-confirm-ask { font-size: 13px; color: var(--muted, #6b7280); margin-right: 2px; }
 .ew-btn-sm { min-height: 36px; padding: 0 14px; font-size: 13px; flex: 0 0 auto; }
 .ew-note-live { display: flex; align-items: center; margin-top: 10px; min-width: 0; }

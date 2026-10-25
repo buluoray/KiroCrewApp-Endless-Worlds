@@ -286,6 +286,26 @@ turn 200 as at turn 1.
   Pinned by `test_life_end.test_an_ending_marker_closes_the_life_for_every_reader`,
   `test_a_world_law_ending_names_itself_on_disk`, `test_a_narrator_ending_id_is_kept`
   and `test_a_living_turn_is_not_stamped`.
+
+- **The player can close a life, and only the app's record carries that ask.**
+  `POST /runs/{id}/turn` with `close: true` (a literal `true`; it drops any action
+  words) is refused 409 on a life that has had no month yet; otherwise it runs
+  the normal `advance_turn` with `close=True`. `store.mark_pending` writes
+  `close: true` into the in-flight record before dispatch, and `compose_prompt`
+  adds the app's own `turn.close` line asking for an epilogue (not the quoted
+  player-words block). At commit, `_advance_turn` reads the pending record for
+  THIS turn: when it carries `close`, the turn is terminal whatever the narrator
+  sent — `retiredByPlayer` is set, choices are dropped, and the ended stamp above
+  writes the narrator's ending id, else the fired world ending (the flagship's
+  `retired`), else `retired`. Nothing the narrator sends can close a life this way:
+  its tool has no such argument, and a close recorded for another turn is ignored.
+  Pinned by `test_close_life.test_a_close_asked_by_the_player_ends_the_life_at_commit`,
+  `test_without_the_players_close_a_living_turn_stays_alive`,
+  `test_the_close_rides_only_in_the_apps_pending_record`,
+  `test_a_narrator_ending_id_is_kept_on_a_closing_turn`,
+  `test_the_close_prompt_is_the_apps_line_not_quoted_player_words`,
+  `test_advance_turn_records_the_close_before_the_narrator_is_asked`, and
+  `test_a_life_that_has_not_begun_cannot_be_closed`.
  `_clean_choices` salvages before it judges: a caption under a
   plausible alias key (`text`, `title`, `caption`, `name`) is folded onto
   `label`, and a bare string entry IS a caption — the content decides, not the

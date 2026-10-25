@@ -36,6 +36,7 @@ from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from perf import TurnPerf
 from phototrace import CandidateStore, TraceStore
 from store import RunStore
+from systems import gain_fields
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ def compose_prompt(
     language: Any = "en",
     prose_length: str = "",
     backdrops_enabled: bool = True,
+    close: bool = False,
 ) -> str:
     """Everything the narrator needs to write the next turn, and nothing else.
 
@@ -251,6 +253,13 @@ def compose_prompt(
         parts += ["", shape]
 
     parts += ["", text("turn.ask", turn=turn + 1)]
+    if close:
+        # The player chose to close this life here. Said as the app's own line,
+        # never as the player's quoted words, because it is a request the app
+        # made on the player's behalf — the commit closes the life either way
+        # (mcp_server reads the app's pending record), so this only asks for the
+        # page that ends it well.
+        parts += ["", text("turn.close")]
     if action:
         # The player's own words go last and are quoted, so a line like "ignore the
         # rules above" reads as something a character said rather than as an
@@ -300,6 +309,21 @@ def declaration_shape(template: Any) -> str:
             text("shape.digest", categories=text("list.join").join(template.digest_categories))
         )
     lines.append(text("shape.reach"))
+    # The growth this world counts, by the gain name each ledger reads. Measured
+    # on four real lives: 2 gains in 111 turns, because the only place a gain
+    # name appeared was a world's prose (if at all) — the shape never said a
+    # world counted anything. The line says "declare when earned" and nothing
+    # more: totals and ranks stay the backend's (systems.apply_systems).
+    counted = gain_fields(template)
+    if counted:
+        sep = text("list.join")
+        fields = sep.join(
+            text("shape.gains.tiered", field=row["field"], tiers=sep.join(row["tiers"]))
+            if row["tiers"]
+            else text("shape.gains.field", field=row["field"])
+            for row in counted
+        )
+        lines.append(text("shape.gains", fields=fields))
     lines.append(text("shape.omission"))
     lines.append(text("shape.memory"))
     return "\n".join(lines)
@@ -446,6 +470,7 @@ async def advance_turn(
     prose_length: str = "",
     backdrops_enabled: bool = True,
     on_poll: Callable[[], None] | None = None,
+    close: bool = False,
 ) -> TurnOutcome:
     """Ask for one turn and wait, briefly, for the narrator to commit it.
 
@@ -629,6 +654,7 @@ async def advance_turn(
         language=language,
         prose_length=prose_length,
         backdrops_enabled=backdrops_enabled,
+        close=close,
     )
 
     # BEFORE dispatch, never after. The window this closes is the one between
@@ -638,7 +664,7 @@ async def advance_turn(
     # about. A test asserts this ordering, because reversing the two lines leaves
     # every symptom intact and reintroduces the whole bug.
     forget_unpublished_art(store, run_id, wanted)
-    store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action)
+    store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action, close=close)
     asked_at = float((store.read_pending(run_id) or {}).get("askedAt") or 0.0)
 
     def _settled() -> None:

@@ -26,6 +26,8 @@ const AWAITING_POLL_CAP = 110
  * free-text button's state.
  */
 const ACT = 'act'
+/** The arm/tap key for closing this life by choice — a sentinel like ACT. */
+const CLOSE = '__close__'
 const OPEN = 'open'
 const choiceTarget = (id: string) => `c:${id}`
 import { pick, t, useSetLanguage } from './strings'
@@ -271,7 +273,11 @@ export function PlayPage({
   const cancelAction = () => {
     const root = playRoot.current
     const target = root?.querySelector<HTMLElement>(
-      arm === ACT ? '#ew-free-action' : '.ew-choice-armed',
+      arm === ACT
+        ? '#ew-free-action'
+        : arm === CLOSE
+          ? '.ew-close-life button'
+          : '.ew-choice-armed',
     )
     setArm('')
     target?.focus()
@@ -600,7 +606,10 @@ export function PlayPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backdropSig, chron, onBackdrop])
 
-  const take = async (payload: { turn?: number; action?: string }, what: string) => {
+  const take = async (
+    payload: { turn?: number; action?: string; close?: boolean },
+    what: string,
+  ) => {
     const wanted = payload.turn ?? (v?.turn ?? 0) + 1
     setTapped(what)
     setPhrase(pick('play.waiting'))
@@ -918,6 +927,18 @@ export function PlayPage({
         </div>
       ) : null}
 
+      {(v.growth ?? []).length ? (
+        <div className="ew-milestone ew-growth" role="status" aria-live="polite">
+          {(v.growth ?? []).map((g, i) => (
+            <div className="ew-milestone-row" key={`${g.label}-${i}`}>
+              {g.tierChanged && g.tier
+                ? t('play.growthTier', { label: g.label, delta: g.delta, tier: g.tier })
+                : t('play.growth', { label: g.label, delta: g.delta })}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {shownDigest.length ? (
         <div className="ew-digest">
           {shownDigest.map((dg, i) => (
@@ -1189,6 +1210,44 @@ export function PlayPage({
           ) : null}
 
           {action.length > 400 ? <div className="ew-count">{`${action.length} / 500`}</div> : null}
+
+          {/* Closing a life is the player's call, and the one that cannot be undone,
+            so it takes the same second step as an action. The next page is the
+            life's last; the commit ends it from the app's own record. */}
+          <div className="ew-close-life">
+            <button
+              className="ew-btn ew-btn-sm"
+              type="button"
+              disabled={busy}
+              onClick={() => setArm(arm === CLOSE ? '' : CLOSE)}
+              aria-pressed={arm === CLOSE}
+            >
+              {t('play.closeLife')}
+            </button>
+          </div>
+          {arm === CLOSE && !busy ? (
+            <div className="ew-confirm ew-confirm-act">
+              <span className="ew-confirm-ask">{t('play.closeLifeConfirm')}</span>
+              <button
+                className="ew-btn ew-btn-go ew-btn-sm"
+                type="button"
+                onClick={() => {
+                  setArm('')
+                  void take({ turn: v.turn + 1, close: true }, CLOSE)
+                }}
+              >
+                {t('play.closeLifeYes')}
+              </button>
+              <button className="ew-btn ew-btn-sm" type="button" onClick={cancelAction}>
+                {t('play.closeLifeNo')}
+              </button>
+            </div>
+          ) : null}
+          {tapped === CLOSE ? (
+            <div className="ew-confirm ew-confirm-act">
+              <Waiting label={phrase} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
