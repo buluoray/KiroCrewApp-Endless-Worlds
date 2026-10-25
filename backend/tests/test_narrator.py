@@ -564,15 +564,17 @@ def test_backdrop_guidance_is_an_art_brief_not_a_rendering_recipe():
     trace_tool = OWN_SERVER_REF + "/endless_trace_reference"
     select_tool = OWN_SERVER_REF + "/endless_select_reference"
     draft_tool = OWN_SERVER_REF + "/endless_submit_backdrop_draft"
+    revise_tool = OWN_SERVER_REF + "/endless_revise_backdrop_draft"
     commit_tool = OWN_SERVER_REF + "/endless_commit_backdrop"
-    assert illustrator_agent["tools"] == [trace_tool, select_tool, draft_tool, commit_tool, "read"]
-    assert illustrator_agent["allowedTools"] == [
+    assert illustrator_agent["tools"] == [
         trace_tool,
         select_tool,
         draft_tool,
+        revise_tool,
         commit_tool,
         "read",
     ]
+    assert illustrator_agent["allowedTools"] == illustrator_agent["tools"]
     assert illustrator_agent["toolsSettings"]["read"]["allowedPaths"] == [
         "**/runs/*/backdrop-previews/backdrop-preview-*.png"
     ]

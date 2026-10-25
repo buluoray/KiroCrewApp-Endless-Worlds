@@ -371,7 +371,8 @@ def test_the_draft_source_never_reaches_the_submit_answer(data):
     own markup, and echoing it back would cost the very tokens this saves."""
     draft = _submit_draft(data, "8" * 32, 1, _svg("#111"), _svg("#112"))
     assert "source" not in draft
-    assert "#111" not in json.dumps(draft)
+    # The element outline names fills and boxes; it never carries the markup.
+    assert "<rect" not in json.dumps(draft) and "<svg" not in json.dumps(draft)
 
 
 def test_submit_backdrop_draft_refuses_non_svg_atomically(data):

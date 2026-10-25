@@ -395,6 +395,44 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_a_draft_recorded_without_its_source_still_needs_the_markup` and
   `test_the_draft_source_never_reaches_the_submit_answer`.
 
+- **A revision is element patches against the first draft, not a re-typed SVG.**
+  The model writes SVG at ~200 bytes/s, so a revision that re-sent both whole
+  documents cost about as long as the first draft. Now `endless_submit_backdrop_draft`
+  gives the draft's elements stable ids and answers with a compact `outline` per SVG
+  (`desktop`, `mobile`, `buttons`): one line per element with its id, tag, box or
+  path start, and fill/stroke/filter, never markup, capped at 3000 bytes per SVG
+  (`svgpatch.OUTLINE_MAX_BYTES`; past the cap it says how many it left out).
+  Top-level shapes and groups get ids; so do the children of a group over 600 bytes
+  and every primitive of a `<filter>`, because the style skills tune filter numbers.
+  Ids are `d…` (desktop), `m…` (mobile) and `b…` (buttons), so one call can patch
+  both frames. They live in the private draft source as `data-eid` attributes and are
+  stripped before anything is rendered, sanitized or published, so the art that ships
+  is the bytes the illustrator wrote; ids an illustrator typed itself are dropped.
+
+  `endless_revise_backdrop_draft` takes a `draftId` and `ops`: `replace` (one element,
+  which keeps the id), `insert_after` / `insert_before`, `remove`, and `set_attrs`
+  (null removes an attribute; values are XML-escaped). The ops apply in order to a
+  copy, all or nothing: an unknown id (including one removed earlier in the same
+  call), markup that is not whole elements, or a merged result the sanitizer refuses
+  changes nothing and names the problem. The merged SVGs then take exactly the first
+  draft's path (`_store_backdrop_draft`): underlay splice, the FULL `compile_backdrop`
+  sanitizer, preview render. `svgpatch` only splices text and is not a safety gate,
+  so a patch can never carry what a whole draft could not (script, `on…=`, a
+  namespace-prefixed script or foreignObject, an off-box href). The result is a new
+  draft version with its own `draftId`; the version it patched stays committable, so
+  an illustrator that judges the revision worse commits the first draft. A fresh
+  submit still replaces every version, and at most `MAX_DRAFT_VERSIONS` (4) are kept.
+
+  Measured on the same 8 briefs, one run each: a patch was a median 15% of the
+  draft's bytes and took 25 s (a whole-SVG revision took ~40 s). Making the patch
+  revision the default was measured and rejected: first draft only was median 83 s,
+  p90 134 s, 1.24 credits; first draft plus one patch revision was median 141 s, p90
+  225 s, 2.19 credits, and quality was about equal (3.5 vs 3.4; it helped some pages
+  and hurt others). So the first draft stays the default, and the `polished` tier
+  revises by patch. The `standard` tier keeps its own wording and does not name the
+  patch tool: when it did, the illustrator "fixed" 3 of 5 renders that were not
+  broken. Pinned by `backend/tests/test_svgpatch.py`.
+
 - **Cost: a source is asked once per subject, and only when it might answer.**
   Wikimedia rate-limits a burst — an unbounded probe earned a 429 inside about
   twenty calls — and every request also costs the player latency, so three
@@ -893,9 +931,10 @@ sees is produced locally from a closed, code-owned vocabulary.
   child's exit status. The illustrator reads every first-draft preview together as
   images and judges the coordinated set. MOTIF always treats that first render as
   diagnosis: it identifies the weakest or most generic artistic decision, makes one
-  structural revision, submits a replacement draft, reads the replacement previews
-  together, and commits only that reviewed second `draftId`. SCENE may keep a strong
-  first draft, but any revision must likewise be resubmitted and visually reviewed;
+  structural revision as element patches (`endless_revise_backdrop_draft`), reads
+  the revised previews together, and commits only that reviewed second `draftId`.
+  SCENE may keep a strong first draft, but any revision must likewise be rendered
+  and visually reviewed;
   unrendered final markup is never published. Draft submission neither clears the
   waiting request nor makes art visible to live play, history, or shelf surfaces;
   only the final atomic write does. Enforced by
