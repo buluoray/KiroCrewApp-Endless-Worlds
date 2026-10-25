@@ -84,6 +84,7 @@ except Exception as exc:  # noqa: BLE001
     if not _IMPORT_ERROR:
         _IMPORT_ERROR = f"cannot import kiro_crew.apps.app_storage: {exc}"
 
+import limits  # noqa: E402
 import memory_graph  # noqa: E402
 from backdrop import (  # noqa: E402
     BackdropDraftStore,
@@ -2014,10 +2015,10 @@ _PAST_CHOICE_FIELDS = ("label", "fateful")
 #: plus eight summaries keep a year of reach at about half that.
 FULL_MONTHS = 4
 
-#: The size a full read is held under, in characters of the tool result. The
-#: harness spills a result over 30,000 characters to a file and shows the narrator
-#: only a preview, so the read must land well short of that, not just under it.
-READ_CEILING = 26_000
+#: The size a full read is held under, in characters of the tool result. Owned by
+#: `limits`, so any other read built for the narrator holds the same line; bound
+#: here as a module name so `_fit_read` reads it at call time.
+READ_CEILING = limits.READ_CEILING
 
 #: How long a summary's one line, and its action, may run.
 _LINE_CHARS = 160
@@ -2531,9 +2532,14 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
     if full_read:
         window = lived[-recent:] if recent else []
         cut = max(0, len(window) - FULL_MONTHS)
-        out["recentTurns"] = [_month_summary(e) for e in window[:cut]] + [
-            _narrator_month(e) for e in window[cut:]
-        ]
+        whole = [_narrator_month(e) for e in window[cut:]]
+        # The choices a month offered matter only on the newest one, which the
+        # player is answering now. On an older month the player already chose:
+        # its `action` says what they did, and the options they passed over were
+        # about 300-550 characters a month on the live lives.
+        for month in whole[:-1]:
+            month.pop("choices", None)
+        out["recentTurns"] = [_month_summary(e) for e in window[:cut]] + whole
     else:
         out["recentTurns"] = []
     # The app's own readings of its recent behaviour (R7). A measurement, not an
@@ -2633,6 +2639,12 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 # in state.opening, is why a choice like sex went unhonoured. A
                 # blank/world-decided group carries no value; the narrator settles
                 # those itself.
+                #
+                # Past the first page the questions are settled. Only the answers
+                # still bind, so only answered groups come, without `worldDecides`;
+                # a world-settled group the narrator already settled lives on in
+                # the state and the prose it wrote.
+                first_page = int(state.get("turn") or 0) == 0
                 answers = state.get("opening")
                 answers = answers if isinstance(answers, dict) else {}
                 opening_out: list[dict[str, Any]] = []
@@ -2640,18 +2652,23 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                     entry: dict[str, Any] = {"id": g.id, "label": g.label}
                     # Sent only when true: most groups are the player's, and the
                     # read's description says a missing flag is false.
-                    if g.random:
+                    if first_page and g.random:
                         entry["worldDecides"] = True
                     val = answers.get(g.id)
                     if isinstance(val, (str, int, float)) and str(val).strip():
                         entry["value"] = str(val)
+                    elif not first_page:
+                        continue
                     opening_out.append(entry)
                 out["opening"] = opening_out
                 # What the world hands the narrator at the opening: the lore/systems/
                 # roles it named in `handToAgent`. Turn 1 has no prior prose for
                 # keyword injection to match, so this is how the opening's setting and
                 # mechanics reach the narrator; a chosen role's grants seed the state.
-                handoff = _resolve_handoff(pack.template)
+                # Only on the first page (design world-as-data §3.4): later pages
+                # have prose for `lore` to match, and the grants are in the state.
+                # On the live lives it was 1.0-2.7K of every later full read.
+                handoff = _resolve_handoff(pack.template) if first_page else None
                 if handoff:
                     out["handToAgent"] = handoff
                     out["handToAgentNote"] = (

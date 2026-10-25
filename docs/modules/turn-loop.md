@@ -19,6 +19,7 @@ turn 200 as at turn 1.
 | `backend/opening.py` | `compose_opening_prompt()` — the opening turn's prompt, passed to the same `advance_turn()` via `prompt_override` so the wait and idempotence are not forked |
 | `backend/store.py` | the commit + pending record + delta baseline: `mark_pending` / `read_pending` / `clear_pending`, `note_runtime_read`, and `fingerprint()` / `diff()` / `baseline_for()` |
 | `backend/mcp_server.py` | `_advance_turn` — the commit gate the narrator calls; enforces read-runtime-first, requires `choices` on a living turn, stamps the turn number itself, and recovers/drops a malformed `memory` rather than failing the call |
+| `backend/limits.py` | `TOOL_RESULT_LIMIT` (the harness's 30,000-char tool-result limit) and `READ_CEILING` (26,000), the one size every narrator read is held under |
 | `backend/memory_graph.py` | repairs the structured `memory` block — a mis-spelled id/vocabulary/key is fixed, only an unrepairable piece is dropped and warned, never blocking the commit |
 | `content/{en,zh}.json` | every line the prompt and the read's notes are built from (`addressing`, `turn.read`, `turn.action.*`, `opening.new`, `turn.style`/`turn.length.*`/`turn.noart`/`turn.close`, `shape.*`) — see [narrator-and-i18n](narrator-and-i18n.md) |
 
@@ -229,14 +230,21 @@ turn 200 as at turn 1.
   of its prose, and `eventIds` to ask `memoryEvents` with). A whole month also
   leaves out each choice's `art` and keeps only the ids and names in its
   `memory`, because the summaries there retell the prose beside them and the
-  graph still holds them. `_fit_read` then measures the WHOLE reply through the
+  graph still holds them; only the newest month keeps its `choices`, since on an
+  older one the `action` already says what the player picked. Past the first
+  page a full read also leaves out `handToAgent` (the opening hand-off; its
+  grants are in the state and `lore` has prose to match) and sends `opening` as
+  the answered groups only, without `worldDecides` (no `opening` at all when
+  none was answered). The ceiling is `limits.READ_CEILING` (26,000, under
+  `limits.TOOL_RESULT_LIMIT` of 30,000), the one constant any other read built
+  for the narrator holds to. `_fit_read` then measures the WHOLE reply through the
   same encoder `call_tool` uses, on every read (a delta read carries no months
   but can carry a rulebook and recall bodies), and while it is over
   `READ_CEILING` (26,000) cuts in this order: the `rulebook` an `includeProse`
   asked for (the whole book never fits beside a read; chapters are asked for by
   id); the oldest short rows; the older whole months, shortened to short rows;
-  past the opening, `handToAgent` (with its note) and `opening` (the answers live
-  in the state); the lowest-ranked `lore` bodies (the entry stays, `trimmed:
+  past the opening, `opening` (the answers live in the state) and any
+  `handToAgent` still on the read; the lowest-ranked `lore` bodies (the entry stays, `trimmed:
   true`), `memoryCandidates` and `people` cards, each taken off the recall-sent
   record so a later read sends it again; and last the newest month, its prose
   kept from its end (`proseClipped`, `_NEWEST_TAIL_CHARS`) and then as a short
@@ -245,8 +253,13 @@ turn 200 as at turn 1.
   never-cut blocks alone are larger stays over. Measured on a real pod before
   this: full reads of 28.2-29.9K characters on lives of 10-16 turns once every
   month was cut, and 33.2K / 45.2K with `recentTurns: 2` / `includeProse`, both
-  cut by the host; the 29.2K one fits at 25.9K. Pinned by
+  cut by the host; the 29.2K one fits at 25.9K. With the field drops above, the
+  four live lives' default full reads went from 25.9K / 14.4K / 21.9K / 12.9K
+  characters to 25.6K / 12.4K / 20.0K / 11.5K. Pinned by
   `test_a_begun_lifes_full_read_sheds_its_opening_hand_off_to_fit`,
+  `test_the_ceiling_is_one_shared_constant_under_the_harness_limit`,
+  `test_the_opening_hand_off_rides_only_on_the_first_page`,
+  `test_an_unanswered_opening_group_is_left_out_after_the_first_page`,
   `test_the_opening_read_keeps_its_hand_off`,
   `test_a_read_under_the_ceiling_keeps_everything`, `test_a_long_lifes_full_read_stays_under_the_ceiling`,
   `test_a_long_lifes_whole_read_fits_under_the_ceiling`,
