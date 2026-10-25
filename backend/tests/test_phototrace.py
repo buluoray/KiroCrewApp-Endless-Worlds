@@ -1309,7 +1309,8 @@ def test_trace_tool_falls_back_to_a_procedural_base_when_search_is_empty(data, m
     run_id = "b" * 32
     _request_backdrop(data, run_id, 2)
     out = _call("endless_trace_reference", runId=run_id, turn=2, query="zombies")
-    assert out["ok"] is True and out["underlay"] == "base" and out["source"] is None
+    # A base has no source; a null is left out of the reply.
+    assert out["ok"] is True and out["underlay"] == "base" and "source" not in out
 
     plain = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
     missing = _call(
@@ -1818,7 +1819,7 @@ def test_every_candidate_can_be_declined_for_a_hand_drawn_scene(data, monkeypatc
 
     declined = _call("endless_select_reference", runId=run_id, turn=1, index=-1)
     assert declined["ok"] is True and declined["underlay"] == "base"
-    assert declined["source"] is None
+    assert "source" not in declined  # no source, and a null is left out
     assert "hand-drawn" in declined["next"] and "declined" in declined["next"]
     assert CandidateStore(data, run_id).load(1) is None, "the declined photos are gone"
     active = TraceStore(data, run_id).load(1)

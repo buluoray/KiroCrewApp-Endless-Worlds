@@ -37,6 +37,7 @@ sys.path.insert(0, str(_BACKEND))
 
 from narrator import APP_NAME  # noqa: E402
 from store import RunStore  # noqa: E402
+from world import read_world  # noqa: E402
 
 
 @pytest.fixture()
@@ -301,9 +302,15 @@ def test_a_fresh_pull_serves_what_the_opening_prompt_stopped_pushing(store, tmp_
 
     assert out["brief"], "the world's rules must reach a narrator that was sent only an id"
     assert out["shape"], "how to record state must be pullable, not pushed"
-    assert out["opening"] and "worldDecides" in out["opening"][0], (
+    # The world-settled groups are flagged; a player's group carries no flag,
+    # which the read's description defines as false.
+    pack = read_world(flagship.read_text(encoding="utf-8"))
+    settled = {g.id for g in pack.template.opening if g.random}
+    assert settled, "the flagship settles at least one group itself"
+    assert {g["id"] for g in out["opening"] if g.get("worldDecides") is True} == settled, (
         "the narrator must be able to tell a player's choice from one the world settled"
     )
+    assert all(g.get("worldDecides", True) is True for g in out["opening"])
 
 
 def test_recent_turns_ride_only_on_a_full_read(store, run):

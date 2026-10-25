@@ -169,41 +169,32 @@ _RUN_ID = {
     "type": "string",
     "pattern": "^[0-9a-f]{32}$",
     "maxLength": 32,
-    "description": (
-        "The run id EXACTLY as the message addressed to you gives it — 32 lowercase "
-        "hex characters, copied verbatim. Do not prefix, wrap, quote or re-case it."
-    ),
+    # Repeated in every tool's schema, so it is held to one line: the pattern
+    # above already states the shape, this only says where the value comes from.
+    "description": "The run id exactly as your message gives it, copied verbatim.",
 }
 
 _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_advance_turn",
+        # Tool descriptions sit in the prefix of EVERY model call, so each says only
+        # what the narrator needs to call the tool right; how to write a turn lives
+        # in the narrator's own prompt. `test_narrator_tool_specs_fit_their_budget`
+        # pins the total.
         "description": (
-            "Commit one turn: the prose the player reads, the state that follows, "
-            "and the choices offered. THE ONLY call that changes a life. A living "
-            "turn MUST include `choices` — each an object whose `label` is the "
-            "button text the player reads (optional: `id`, `fateful`, `art`, and — "
-            "for a moment that earns motion — `effect`: one of "
-            "shimmer|aura|embers|ripple, with an optional `tint` hex color); omit "
-            "them only on a terminal turn, marked "
-            "`ending: true` or via state that fires a world ending. Declare "
-            "state in full — a field you leave out reads to the player as a fact "
-            "that vanished; the exceptions are `digest` and `relations`, which merge "
-            "forward, so there you declare only what changed this turn (a null value "
-            "retires one entry) instead of re-sending the whole block. Idempotent "
-            "per (runId, turn): re-sending a turn you "
-            "already committed changes nothing. The optional `memory` block is how "
-            "this world REMEMBERS: declare the people/places/things this turn "
-            "introduced, the events that happened, and any relation changes. When "
-            "a new event answers an old one, name the old event's canonical id in "
-            "`echoes` — that is the only thing that makes the world's memory of it "
-            "real. To open a NEW thread, list it under an event's `threads` with "
-            'effect "opened" — that declares it, no separate entity needed; only '
-            "`advanced`/`resolved` need a thread opened before. Memory is REPAIRED, "
-            "not rejected: a namespaced id, a synonym for a closed vocabulary, a "
-            "reused key or a missing title are all read and fixed server-side, and "
-            "only a reference to something never declared is dropped and warned. "
-            "Facts are never extracted from your prose."
+            "Commit one turn: the prose, the state that follows, and the choices. "
+            "THE ONLY call that changes a life; re-sending a committed (runId, turn) "
+            "changes nothing. A living turn MUST include `choices`; only a terminal "
+            "turn (`ending: true`, or state that fires a world ending) omits them. "
+            "Send `statePatch` + `basedOn` while you hold this turn's fingerprint, "
+            "else the full `state`. The optional `memory` block is how this world "
+            "REMEMBERS: the people/places/things this turn introduced, the events, "
+            "and relation changes. When a new event answers an old one, name the old "
+            "event's id in `echoes` — only that makes the memory of it real. Open a "
+            'NEW thread under an event\'s `threads` with effect "opened"; '
+            "`advanced`/`resolved` need one opened before. Memory is repaired, not "
+            "refused: only a reference to something never declared is dropped and "
+            "warned. Facts are never extracted from your prose."
         ),
         "inputSchema": {
             "type": "object",
@@ -216,38 +207,25 @@ _TOOLS: list[dict[str, Any]] = [
                 "state": {
                     "type": "object",
                     "description": (
-                        "The panels this world declares, as endless_read_runtime hands "
-                        "them to you — the field ids come from the world, not from "
-                        "here. Declare it IN FULL: a field you leave out reads to the "
-                        "player as a fact that vanished. `digest` and `relations` are "
-                        "the exceptions and merge forward, so there you declare only "
-                        "what changed (a null value retires one entry). PREFER "
-                        "`statePatch` when you still hold the fingerprint you read — "
-                        "it says the same thing in a fraction of the tokens."
+                        "The whole state, keyed by the field ids the read's `shape` "
+                        "gives. A field left out reads to the player as a fact that "
+                        "vanished. `digest` and `relations` merge forward: send only "
+                        "what changed (null retires an entry)."
                     ),
                 },
                 "statePatch": {
                     "type": "object",
                     "description": (
-                        "Only what changed this turn, merged onto the state named by "
-                        "`basedOn`: a nested object where a leaf you send replaces "
-                        "that leaf, a null retires it, and everything you do not "
-                        "mention stays exactly as you read it. Requires `basedOn` "
-                        "(the fingerprint from your endless_read_runtime call this "
-                        "turn); if the fingerprint no longer matches, the commit is "
-                        "refused and you re-read, then resend. Use `state` instead "
-                        "when you have lost the fingerprint."
+                        "Only what changed, merged onto the state `basedOn` names: a "
+                        "leaf you send replaces that leaf, a null retires it, the rest "
+                        "stays as you read it. A stale `basedOn` is refused: re-read, "
+                        "then resend."
                     ),
                 },
                 "basedOn": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": (
-                        "The `fingerprint` your statePatch is built on. Same "
-                        "self-certification as read_runtime's `since`: if you can "
-                        "still produce it, the state you are patching is the state "
-                        "on file."
-                    ),
+                    "description": "The `fingerprint` from this turn's endless_read_runtime.",
                 },
                 # Terminal marker. A living turn MUST include `choices`; only a
                 # terminal turn may omit them, and it says so with `ending: true`
@@ -374,9 +352,8 @@ _TOOLS: list[dict[str, Any]] = [
                 "events": {
                     "type": "array",
                     "description": (
-                        "Up to 12 short strings, one per notable thing that happened "
-                        "this turn (not the whole prose — the line a later turn would "
-                        "need to know it happened)."
+                        "Up to 12 short lines, one per notable thing this turn: what "
+                        "a later turn needs to know happened."
                     ),
                 },
                 # Enrichment (per-turn gains the systems engine reads): relaxed to
@@ -386,10 +363,8 @@ _TOOLS: list[dict[str, Any]] = [
                 "gains": {
                     "type": "array",
                     "description": (
-                        "Up to 12 objects, each naming what this turn credited: "
-                        "`field` (required, the state field that grew), `amount`, and "
-                        "`source` (where it came from — how the anti-halo reading is "
-                        "made measurable). An entry naming no `field` is dropped."
+                        "Up to 12 {`field` (required: the state field that grew), "
+                        "`amount`, `source` (where it came from)}."
                     ),
                 },
                 # Player-facing, but SALVAGED rather than schema-refused:
@@ -401,15 +376,11 @@ _TOOLS: list[dict[str, Any]] = [
                 "choices": {
                     "type": "array",
                     "description": (
-                        "Up to 8 objects, one per button the player can press: "
-                        "`label` (REQUIRED — the text they read; `text`/`title`/"
-                        "`caption`/`name` are accepted and folded onto it, and a bare "
-                        "string entry is read as a label), `id` (optional, "
-                        "synthesized when absent), `fateful` (bool), `art` (a small "
-                        "self-contained SVG), `effect` (one of shimmer, aura, embers, "
-                        "ripple) and `tint` (#rrggbb). An entry with no usable label "
-                        "is dropped, and a living turn left with none is refused — so "
-                        "the label is the one part that must be right."
+                        "Up to 8 buttons: {`label` (REQUIRED, the text the player "
+                        "reads; a bare string or `text` is read as it), `id`?, "
+                        "`fateful`?, `art`? (small SVG), `effect`? (shimmer|aura|"
+                        "embers|ripple), `tint`? (#rrggbb)}. A living turn left with "
+                        "no usable label is refused."
                     ),
                 },
             },
@@ -418,22 +389,16 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_read_runtime",
         "description": (
-            "Read everything you need to narrate the next turn: the world's own "
-            "rulebook, the state as it stands, and the recent turns. Read-only. "
-            "Call this FIRST every turn — the prompt carries only the player's own "
-            "words, and nothing else about the life reaches you any other way. "
-            "Pass the `fingerprint` you were given last turn as `since` and you get "
-            "only what changed, with the rest named as unchanged; omit it and you "
-            "get the whole state. A `since` read also stops re-sending what you are "
-            "already holding: the months you wrote come back empty, and a `lore` "
-            "entry or `memoryCandidates` event whose body reached you earlier in "
-            "this conversation comes back marked `held: true` with the body left "
-            "out. A held entry is still being surfaced BECAUSE it bears on this "
-            "month — read it from where it was first given rather than asking "
-            "again. Whole blocks you already hold unchanged (`world`, `scenes`, or "
-            "the `brief` and `shape` this turn's prompt itself carried) are left "
-            "out and named in `held`: use the copy you were given. Lose your "
-            "baseline (a compaction) and everything arrives whole."
+            "Call this FIRST every turn: the world's rulebook (`brief`), the `shape` "
+            "of the state to declare, the state, and the recent months. Read-only. "
+            "Pass last turn's `fingerprint` as `since` to get only what changed, the "
+            "rest named in `unchanged`. On a `since` read the months you wrote are "
+            "not re-sent, whole blocks this conversation already holds unchanged are "
+            "named in `held`, and a `lore` or `memoryCandidates` entry already given "
+            "comes back `held: true` without its body: it still bears on this month, "
+            "so use the copy you were given. Lose your baseline and everything "
+            "arrives whole. Empty fields are left out: a missing list is empty, a "
+            "missing text blank, a missing flag false."
         ),
         "inputSchema": {
             "type": "object",
@@ -446,13 +411,10 @@ _TOOLS: list[dict[str, Any]] = [
                     "minimum": 0,
                     "maximum": 50,
                     "description": (
-                        "How many recent months to re-read. Applies to a FULL read "
-                        "only — on a `since` read you wrote those months and they "
-                        "are not sent back at any depth. The newest four come as "
-                        "you wrote them; older ones come as `short` rows naming "
-                        "their `eventIds`. A read cut to fit says so in "
-                        "`recentTrimmed`. To reach one specific older month, name "
-                        "its event in `memoryEvents`."
+                        "Months to re-read on a full read (none on a `since` read). "
+                        "The newest four come whole, older ones as `short` rows with "
+                        "their `eventIds`; a read cut to fit says so in "
+                        "`recentTrimmed`."
                     ),
                 },
                 "includeProse": {"type": "boolean"},
@@ -461,25 +423,18 @@ _TOOLS: list[dict[str, Any]] = [
                     "maxItems": 8,
                     "items": {"type": "string", "maxLength": 64},
                     "description": (
-                        "Chapter ids from the table of contents whose text you want "
-                        "now. One that this world does not disclose yet comes back "
-                        "refused, with the condition that would open it."
+                        "Chapter ids from `chapters` to read now; one not open yet is "
+                        "refused with its condition."
                     ),
                 },
                 "since": {
                     "type": "string",
                     "maxLength": 64,
                     "description": (
-                        "A `fingerprint` from an earlier call. If you can still "
-                        "produce one you still hold the state it named, so only the "
-                        "difference is sent — and of the difference, only what the "
-                        "APP computed (system-derived values, merged panels, "
-                        "milestones). Panels that changed only because of your own "
-                        "declaration are NAMED in `yours` rather than re-sent: you "
-                        "wrote them this turn and still hold them. If you have lost "
-                        "the fingerprint, leave this out — asking with a baseline "
-                        "you no longer hold is how a turn ends up inventing the "
-                        "parts it cannot see."
+                        "A `fingerprint` from an earlier call. Only what the app "
+                        "changed comes back in `changed`; panels you changed yourself "
+                        "are named in `yours`. Leave it out once you no longer hold "
+                        "the state it named."
                     ),
                 },
                 "memoryEvents": {
@@ -487,10 +442,8 @@ _TOOLS: list[dict[str, Any]] = [
                     "maxItems": 6,
                     "items": {"type": "string", "maxLength": 96},
                     "description": (
-                        "Canonical event ids (from `memoryCandidates` or an earlier "
-                        "turn's memory) whose full record you want now, with the "
-                        "entities they involve. A bounded look, never the whole "
-                        "graph."
+                        "Event ids (from `memoryCandidates` or a month's memory) to "
+                        "read in full, with the entities they involve."
                     ),
                 },
             },
@@ -499,24 +452,17 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_mount_scene",
         "description": (
-            "Put a purpose-built scene in front of the player — a region map, a "
-            "relationship web, a family or skill tree, a ledger, a choice laid out "
-            "as something other than a list. `spec` is {title?, elements:[...]}, and "
-            "each element is one of these kinds: heading, text, note, stat, bar, "
-            "keyvalue, list, table, choice, divider, grid, links, tree. For a map use "
-            "`grid` ({columns, cells:[{label, note?, mark?}]} — a cell's `mark` is "
-            "either one short symbol shown as its badge, which is how cells of a map "
-            "are told apart, or `true` to tint the whole cell; a symbol does not also "
-            "tint, so marking every cell still leaves each one distinct); for a "
-            "relationship web "
-            "use `links` ({nodes:[{id, label}], edges:[{from, to, label?}]}); for a "
-            "hierarchy use `tree` ({nodes:[{id, label, parent?, note?}]}). You give the "
-            "STRUCTURE — cells, nodes, edges, parents — and NEVER any coordinates or "
-            "markup; the app computes every position and draws it. Optionally set "
-            "`region` to group this scene under a system tab on a phone — one of "
-            "`status` (the person), `world` (the world around them), `pack` (what "
-            "they carry), `tasks` (what is open), or your own word for anything else "
-            "— and `label` for that tab's short name; both are optional."
+            "Put a purpose-built scene in front of the player: a map, a relationship "
+            "web, a tree, a ledger, a choice laid out as more than a list. `spec` is "
+            "{title?, elements:[...]}; element kinds: heading, text, note, stat, bar, "
+            "keyvalue, list, table, choice, divider, grid, links, tree. Map: `grid` "
+            "{columns, cells:[{label, note?, mark?}]}, where `mark` is one short badge "
+            "symbol that tells cells apart, or `true` to tint the cell. Web: `links` "
+            "{nodes:[{id, label}], edges:[{from, to, label?}]}. Hierarchy: `tree` "
+            "{nodes:[{id, label, parent?, note?}]}. Give the STRUCTURE, NEVER "
+            "coordinates or markup; the app draws it. Optional `region` (status, "
+            "world, pack, tasks, or your own word) groups it under a phone tab named "
+            "by `label`."
         ),
         "inputSchema": {
             "type": "object",
@@ -578,20 +524,14 @@ _TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "endless_paint_backdrop",
+        # How to write the brief (LANE, THESIS, REFERENCE, STYLE, PALETTE) lives in
+        # the narrator's prompt; repeating it here cost every model call.
         "description": (
-            "Ask for background art behind the story — you do NOT draw it. Pass a "
-            "short BRIEF and a separate illustrator paints the SVG and hangs it "
-            "behind this page while you move on; call this BEFORE endless_advance_turn "
-            "and never wait for it. The brief is the art direction, in a few lines: "
-            "the turn's irreversible change or mood, one dominant image, a small "
-            "palette, at most one motion verb (or none), and how it should differ "
-            "from the previous backdrop — plus, if you want one, the common motif for "
-            "the choice buttons. An optional `STYLE:` line picks the painting style — "
-            "photo (traced photograph, the scene default), watercolor, oil, or "
-            "minimal. Describe the picture; never write SVG here. Setting a "
-            "new one replaces the old, so ask for a fresh backdrop at a major turning "
-            "point or a real jump in time or place, and simply omit this call when the "
-            "current background still fits."
+            "Ask for background art behind this page; you do NOT draw it. A separate "
+            "illustrator paints it from your short `brief` (art direction in words, "
+            "never SVG) while you move on: call this BEFORE endless_advance_turn and "
+            "never wait for it. A new backdrop replaces the old; omit the call while "
+            "the current one still fits."
         ),
         "inputSchema": {
             "type": "object",
@@ -736,12 +676,10 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "name": "endless_commit_fallback_backdrop",
         "description": (
-            "Emergency page-art recovery for the NARRATOR only. Use this solely "
-            "when an internal recovery prompt says illustrator attempts failed. "
-            "Commit one safe backdrop set for the exact runId and turn in that "
-            "prompt: required desktop `markup`, plus optional coordinated portrait "
-            "`mobile` and choice motif `buttons`. The server refuses this tool unless "
-            "that page's persisted fallback gate is open."
+            "Recovery only, when an internal page-art recovery message says the "
+            "illustrators failed: commit one safe backdrop (desktop `markup`, "
+            "optional portrait `mobile` and choice motif `buttons`) for that exact "
+            "runId and turn. Refused unless that page's recovery gate is open."
         ),
         "inputSchema": {
             "type": "object",
@@ -1982,11 +1920,18 @@ def _narrator_month(entry: dict[str, Any]) -> dict[str, Any]:
         month["memory"] = _memory_names(int(entry.get("turn") or 0), memory)
     choices = month.get("choices")
     if isinstance(choices, list):
+        # Only what was OFFERED: the label, and whether it was weighty. The id,
+        # `effect` and `tint` are how the page drew a past button, which nothing
+        # written now can use; the player's pick is the month's `action`.
         month["choices"] = [
-            {k: v for k, v in c.items() if k != "art"} if isinstance(c, dict) else c
+            {k: v for k, v in c.items() if k in _PAST_CHOICE_FIELDS} if isinstance(c, dict) else c
             for c in choices
         ]
     return month
+
+
+#: The parts of a past month's choice a re-read keeps.
+_PAST_CHOICE_FIELDS = ("label", "fateful")
 
 
 #: How many of the newest months in the window a full read gives as whole prose.
@@ -2060,9 +2005,28 @@ def _memory_names(turn: int, memory: dict[str, Any]) -> dict[str, Any]:
     return named
 
 
+#: The fields of a world's Library row the narrator writes by. The rest of the row
+#: (the shelf card's promise and possibilities, panel and pack counts, the
+#: staleness and improvement markers) is for the Library page and was resent on
+#: every full read for nothing.
+_NARRATOR_WORLD_FIELDS = ("worldId", "title", "language", "lineage", "clockUnit", "styles")
+
+
+def _narrator_world(row: dict[str, Any]) -> dict[str, Any]:
+    """A world's summary row reduced to what narrating in it needs."""
+    return {k: row[k] for k in _NARRATOR_WORLD_FIELDS if k in row}
+
+
+def _flag_when_true(row: dict[str, Any], key: str) -> dict[str, Any]:
+    """``row`` with boolean ``key`` kept only when true (a missing flag reads false)."""
+    if row.get(key) is False:
+        return {k: v for k, v in row.items() if k != key}
+    return row
+
+
 def _result_chars(out: dict[str, Any]) -> int:
     """The size of ``out`` as `call_tool` will send it."""
-    return len(json.dumps({"ok": True, **out}, ensure_ascii=False))
+    return len(_encode({"ok": True, **out}))
 
 
 def _fit_recent(out: dict[str, Any], lived: list[dict[str, Any]]) -> None:
@@ -2090,9 +2054,8 @@ def _fit_recent(out: dict[str, Any], lived: list[dict[str, Any]]) -> None:
             "dropped": list(dropped),
             "shortened": list(shortened),
             "note": (
-                "This read was cut to fit. The months in `dropped` were left out "
-                "and those in `shortened` come as summaries instead of prose. Ask "
-                "for one of their events by id with `memoryEvents`."
+                "Cut to fit: `dropped` months are left out, `shortened` ones come as "
+                "summaries. Ask for their events by id with `memoryEvents`."
             ),
         }
 
@@ -2480,7 +2443,7 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             pack = read_world(path.read_text(encoding="utf-8"))
             # Static per pack, so once per conversation: a delta read names it as
             # held. A pack edited mid-life is a new tag and goes out again.
-            once("world", summarize(pack))
+            once("world", _narrator_world(summarize(pack)))
             # The growth reading needs the world's own gain names, which only
             # the pack knows — so the restraint note is completed here, once the
             # pack is read, on the same full reads that carry it.
@@ -2514,7 +2477,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
             # and self-healing for the same reason — a narrator that lost its baseline
             # gets no delta and therefore gets the contents again.
             if baseline is None:
-                out["chapters"] = contents(pack.template, state)
+                out["chapters"] = [
+                    _flag_when_true(row, "brief") for row in contents(pack.template, state)
+                ]
                 # A fresh pull is what the opening turn makes, and what a compacted
                 # narrator falls back to. It carries everything that used to be
                 # pushed into the opening prompt, so that prompt can be just the run
@@ -2533,11 +2498,11 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 answers = answers if isinstance(answers, dict) else {}
                 opening_out: list[dict[str, Any]] = []
                 for g in pack.template.opening:
-                    entry: dict[str, Any] = {
-                        "id": g.id,
-                        "label": g.label,
-                        "worldDecides": g.random,
-                    }
+                    entry: dict[str, Any] = {"id": g.id, "label": g.label}
+                    # Sent only when true: most groups are the player's, and the
+                    # read's description says a missing flag is false.
+                    if g.random:
+                        entry["worldDecides"] = True
                     val = answers.get(g.id)
                     if isinstance(val, (str, int, float)) and str(val).strip():
                         entry["value"] = str(val)
@@ -2551,10 +2516,9 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                 if handoff:
                     out["handToAgent"] = handoff
                     out["handToAgentNote"] = (
-                        "What this world hands you to open with — its key setting, the "
-                        "systems the app runs for you, and the starting archetypes. Weave "
-                        "the setting in as it becomes relevant; if the player took a role, "
-                        "honour its grants in the state you declare."
+                        "This world's opening setting, app-run systems and starting "
+                        "roles: weave the setting in as it matters, and honour a taken "
+                        "role's grants in the state you declare."
                     )
             else:
                 newly = opened_since(pack.template, baseline, state)
@@ -3755,6 +3719,41 @@ def _record_backdrop_timing(run_id: Any, name: str, args: dict[str, Any], t0: fl
         pass
 
 
+#: Blocks sent exactly as stored. A null inside the state is the narrator's own
+#: "retire this" marker and an empty panel is still a panel it declared, so the
+#: state (full, or the delta's `changed` slice of it) is never thinned.
+_VERBATIM_KEYS = frozenset({"state", "changed"})
+
+
+def _lean(value: Any) -> Any:
+    """``value`` without the dict entries that say nothing: null, "", [] and {}.
+
+    Every byte a tool returns is resent on every later model call of the
+    conversation, and an empty field carries no fact the narrator can use. The
+    read's description says what an omitted field means (empty, blank). List
+    items are kept as they are, empty or not, because their position can matter.
+    """
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _VERBATIM_KEYS:
+                out[key] = item
+                continue
+            item = _lean(item)
+            if item is None or (isinstance(item, (str, list, dict)) and not item):
+                continue
+            out[key] = item
+        return out
+    if isinstance(value, list):
+        return [_lean(item) for item in value]
+    return value
+
+
+def _encode(payload: dict[str, Any]) -> str:
+    """A tool reply as the narrator reads it: lean, and with no padding whitespace."""
+    return json.dumps(_lean(payload), ensure_ascii=False, separators=(",", ":"))
+
+
 def call_tool(name: str, args: dict[str, Any]) -> str:
     """Validate, dispatch, and answer as JSON text.
 
@@ -3815,14 +3814,13 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
                 args.pop(_key, None)
         _validate(name, args)
     except ToolInputError as exc:
-        return json.dumps(
-            {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False},
-            ensure_ascii=False,
+        return _encode(
+            {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False}
         )
 
     handler = _HANDLERS.get(name)
     if handler is None:  # unreachable: _validate rejects unknown names first
-        return json.dumps({"ok": False, "error": "unknown tool", "applied": False})
+        return _encode({"ok": False, "error": "unknown tool", "applied": False})
 
     # Count this call as a unit of in-flight progress, so the play page advances a
     # cell per tool call. Best-effort and before dispatch (the call is happening
@@ -3845,15 +3843,14 @@ def call_tool(name: str, args: dict[str, Any]) -> str:
         result = handler(call_args)
     except ToolInputError as exc:
         _record_backdrop_timing(run_id, name, args, _timer_start)
-        return json.dumps(
-            {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False},
-            ensure_ascii=False,
+        return _encode(
+            {"ok": False, "field": exc.field, "expected": exc.expected, "applied": False}
         )
     except (StoreError, WorldError, SceneLedgerError, BackdropError, DraftError) as exc:
         _record_backdrop_timing(run_id, name, args, _timer_start)
-        return json.dumps({"ok": False, "error": str(exc), "applied": False}, ensure_ascii=False)
+        return _encode({"ok": False, "error": str(exc), "applied": False})
     _record_backdrop_timing(run_id, name, args, _timer_start)
-    return json.dumps({"ok": True, **result}, ensure_ascii=False)
+    return _encode({"ok": True, **result})
 
 
 def main() -> None:  # pragma: no cover — process entry point
