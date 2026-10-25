@@ -670,6 +670,50 @@ def test_art_for_an_abandoned_attempt_cannot_reach_the_retry(data):
     assert BackdropStore(data, run_id).exact(2) is None
 
 
+def test_the_retry_does_not_inherit_the_abandoned_attempts_trace_or_draft(data):
+    """An illustrator started early traces a photograph (and may draft) for the
+    page its narrator is writing. When that attempt is abandoned (the gateway
+    restarted mid-turn) and a retry writes the same page from different words, the
+    old underlay and draft are bound to the TURN only, so they used to survive:
+    the retry's motif draft was refused for lacking the old photo's placeholder,
+    and the server's timeout fallback then published the old photo on the new page.
+    """
+    from phototrace import CandidateStore, TraceStore
+    from turn import forget_unpublished_art
+
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: scene\nREFERENCE: ship")
+    old = store.read_backdrop_request(run_id)["briefId"]
+    TraceStore(data, run_id).save(
+        turn=2, desktop="<g/>", mobile="<g/>", source=None, kind="base", query="ship"
+    )
+    CandidateStore(data, run_id).save(turn=2, query="ship", candidates=[])
+    placed = _svg("#111").replace("</svg>", '<g id="etr-underlay"/></svg>')
+    assert _early_draft(run_id, 2, old, color="#111")["ok"] is False  # needs the slot
+    stale = _call(
+        "endless_submit_backdrop_draft",
+        runId=run_id,
+        turn=2,
+        briefId=old,
+        markup=placed,
+        mobile=placed,
+    )
+    assert stale["ok"] is True
+
+    # The retry: its dispatch forgets what the abandoned attempt left for page 2.
+    forget_unpublished_art(store, run_id, 2)
+    store.mark_pending(run_id, turn=2, slot="endless-run-x")
+    assert TraceStore(data, run_id).load(2) is None, "the old photo outlived its attempt"
+    assert CandidateStore(data, run_id).load(2) is None
+    assert not BackdropDraftStore(data, run_id).has_draft(2), "the old draft survived"
+
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a library")
+    new = store.read_backdrop_request(run_id)["briefId"]
+    assert _early_draft(run_id, 2, new)["ok"] is True, "a motif retry was refused"
+    assert srv.commit_underlay_only(data, store, run_id, 2) is False
+    assert BackdropStore(data, run_id).exact(2) is None
+
+
 def test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_briefs_art(data):
     """After the server's underlay fallback publishes, the same brief's late
     commit still replaces it (unchanged behaviour); a commit drawn for another
