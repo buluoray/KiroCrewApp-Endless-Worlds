@@ -321,8 +321,10 @@ guarantee.
   width it leaves and draws fewer numbers. There is no card behind the numbers: they
   sit straight on the reading row in the canvas ink — the centre `--text`, held to
   AA over the worst art, its neighbours `--muted` fading out, turning away on a drum
-  (inline `rotateY`/`scale`/`opacity` from `wheelLook`) under a mask — with the
-  ribbon tab over the centre number. No action line is drawn under it. A swipe
+  (inline `rotateY`/`scale`/`opacity` from `wheelLook`) under a mask. The centre
+  number alone, larger and in full ink, marks the page: no ribbon, bookmark or
+  underline is drawn over or under it (the desktop slider keeps its ribbon thumb,
+  which is its drag handle). A swipe
   follows the finger; on release the drum coasts to where a decaying throw would stop
   (`flickVelocity`, `wheelTarget`, `WHEEL_TAU_MS`) and snaps to that page, ticking
   the centre number as each page crosses; a tap on a neighbour turns to it. Only the
