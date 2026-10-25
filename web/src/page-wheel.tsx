@@ -361,3 +361,43 @@ export function PageWheel({
     </div>
   )
 }
+
+/**
+ * The `>|` mark at the wheel's end: back to the live page.
+ *
+ * On the live page it has nowhere to go, so it is hidden — but it keeps its 44px
+ * slot (`visibility: hidden`), so the wheel and the back link never shift. Hidden
+ * also means out of the tab order and out of the accessibility tree. It reads the
+ * wheel's flip preview, so it appears the moment a swipe leaves the latest page,
+ * not only once the page lands. Its own subscription: the story does not re-render.
+ */
+export function WheelLatest({
+  shown,
+  latest,
+  store,
+  onLatest,
+  children,
+}: {
+  shown: number
+  latest: number
+  store: ScrubStore
+  onLatest: () => void
+  children?: ReactNode
+}) {
+  const preview = useScrubPreview(store)
+  const atLatest = (preview ?? shown) >= latest
+  return (
+    <button
+      className="ew-wheel-latest"
+      type="button"
+      disabled={atLatest}
+      aria-hidden={atLatest ? true : undefined}
+      tabIndex={atLatest ? -1 : undefined}
+      aria-label={t('play.latestTurn')}
+      title={atLatest ? undefined : t('play.latestTurn')}
+      onClick={onLatest}
+    >
+      {children}
+    </button>
+  )
+}

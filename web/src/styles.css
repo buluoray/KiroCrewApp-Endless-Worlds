@@ -1308,7 +1308,8 @@ button.ew-pager-turn:focus-visible {
   background: transparent; color: var(--ew-accent-ink, #c4b5fd);
   -webkit-tap-highlight-color: transparent;
 }
-.ew-wheel-latest:disabled { color: var(--muted, #c3c8d3); opacity: .35; cursor: default; }
+/* On the live page it has nowhere to go: hidden, but its slot stays, so nothing shifts. */
+.ew-wheel-latest:disabled { visibility: hidden; cursor: default; }
 .ew-wheel-latest:focus-visible { outline: 2px solid var(--ew-accent-ink, #c4b5fd); outline-offset: -2px; }
 .ew-wheel-bar .ew-pager-recap { flex: none; padding: 0 8px; }
 @media (prefers-reduced-motion: reduce) {
