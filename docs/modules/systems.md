@@ -142,3 +142,25 @@ There are two different changes; do not mix them:
    brief and salvage behavior, behavior/parser tests, bundled examples if any, and
    this spec in the same commit. Follow
    [add-game-system-kind](../../skills/add-game-system-kind/SKILL.md).
+
+## Telling the narrator what counts
+
+A ledger only moves when the narrator declares a matching gain, so the narrator
+must know the gain names. `systems.gain_fields` lists one row per gain-fed system
+(the gain `field` and, for a tiered ledger, its tier names in threshold order), and
+`turn.declaration_shape` adds a `gains` line built from it: declare a gain only when
+the story earns progress, a span that earned nothing declares none, and totals and
+ranks are the app's. A world with no gain-fed system gets no such line. Pinned by
+`test_growth.test_the_shape_names_each_counted_gain_and_its_ranks_in_order` and
+`test_growth.test_a_world_that_counts_nothing_gets_no_gains_line`.
+
+The app never declares a gain itself. A month with no declared gain leaves every
+ledger at its prior value, whatever total the narrator echoes and whether or not
+the growth reading (see [character-creation.md](character-creation.md)) has fired.
+Pinned by
+`test_growth.test_a_month_that_earned_nothing_gains_nothing_even_after_the_reading_fires`
+and `test_growth.test_an_earned_gain_still_counts_and_clears_the_reading`.
+
+`systems.growth` reports how far each gain-fed ledger moved between two committed
+states, with its derived tier and whether the tier changed; the play view reads it
+through `view.growth_rows` ([view-and-packs.md](view-and-packs.md)).

@@ -298,3 +298,77 @@ def test_the_players_page_history_never_shows_turn_zero(app):
     store.append_turn(heir, bridge(["elin"]))
     lived = [e for e in store.read_chronicle(heir) if int(e.get("turn") or 0) >= 1]
     assert lived == []
+
+
+def _event_only_thread_chronicle():
+    """A thread opened and later touched only through events' ``threads``
+    effects (the documented path) — it never gets an entity row — plus one
+    thread the player only ever met in a hidden event."""
+    return [
+        turn_entry(
+            1,
+            {
+                "events": [
+                    {
+                        "key": "oath",
+                        "title": "An oath at the well",
+                        "summary": "first words",
+                        "participants": ["player"],
+                        "threads": [{"id": "find-sister", "effect": "opened"}],
+                        "disclosure": "known",
+                    },
+                    {
+                        "key": "plot",
+                        "title": "A plot in the dark",
+                        "summary": "never seen",
+                        "participants": ["player"],
+                        "threads": [{"id": "secret-plot", "effect": "opened"}],
+                        "disclosure": "hidden",
+                    },
+                ]
+            },
+        ),
+        turn_entry(
+            2,
+            {
+                "events": [
+                    {
+                        "key": "trail",
+                        "title": "Her trail goes north",
+                        "summary": "a letter from the north",
+                        "participants": ["player"],
+                        "threads": [{"id": "find-sister", "effect": "advanced"}],
+                        "disclosure": "known",
+                    }
+                ]
+            },
+        ),
+    ]
+
+
+def test_an_event_only_thread_is_offered_named_by_its_latest_known_event():
+    index = mg.build_index(_event_only_thread_chronicle())
+    assert "find-sister" not in index["entities"]  # the case this pins
+    threads = lg.candidates(index)["threads"]
+    by_id = {row["id"]: row for row in threads}
+    assert by_id["find-sister"]["name"] == "Her trail goes north"
+    assert by_id["find-sister"]["summary"] == "a letter from the north"
+    assert by_id["find-sister"]["open"] is True
+    # A thread seen only in a hidden event stays off the ending screen.
+    assert "secret-plot" not in by_id
+
+
+def test_an_event_only_thread_crosses_as_a_named_open_thread():
+    index = mg.build_index(_event_only_thread_chronicle())
+    record = lg.build_bridge_record(index, source_run_id="a" * 32, selected=["find-sister"])
+    heir = mg.build_index([record])
+    ent = heir["entities"]["find-sister"]
+    assert ent["kind"] == "thread"
+    assert ent["name"] == "Her trail goes north"
+    assert ent["inheritsFrom"]["nodeId"] == "find-sister"
+    assert heir["threads"]["find-sister"]["resolved"] is None
+    summary = lg.narrator_summary(heir)
+    assert summary is not None
+    assert [e["name"] for e in summary["entities"]] == ["Her trail goes north"]
+    with pytest.raises(lg.LegacyError):
+        lg.build_bridge_record(index, source_run_id="a" * 32, selected=["secret-plot"])

@@ -63,6 +63,36 @@ class LegacyError(ValueError):
 # ── what the ending screen offers (§9 step 1) ────────────────────────────
 
 
+def _event_only_thread(index: dict[str, Any], tid: str) -> dict[str, Any] | None:
+    """An entity-shaped view of a thread that was only ever named on events.
+
+    The documented way to open a thread is an event's ``threads`` effect, which
+    needs no entity — so most unfinished business in a real life has no entity
+    row and would never reach the ending screen. Its name and one-liner come
+    from the latest KNOWN event that touched it: what the player last saw of it,
+    never a hidden event. ``None`` when no known event touches it.
+    """
+    if tid not in index["threads"]:
+        return None
+    latest: dict[str, Any] | None = None
+    for ev in index["events"].values():
+        if ev["disclosure"] != "known":
+            continue
+        if any(th["id"] == tid for th in ev["threads"]):
+            if latest is None or ev["turn"] >= latest["turn"]:
+                latest = ev
+    if latest is None:
+        return None
+    return {
+        "kind": "thread",
+        "name": latest["title"] or tid.replace("-", " "),
+        "aliases": [],
+        "summary": latest["summary"],
+        "firstTurn": index["threads"][tid].get("opened") or 0,
+    }
+
+
+
 def candidates(index: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     """The inheritable things of a finished life, grouped the way §9 names them.
 
@@ -116,7 +146,7 @@ def candidates(index: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
         "place": "places",
     }
     for eid in sorted(visible):
-        ent = index["entities"].get(eid)
+        ent = index["entities"].get(eid) or _event_only_thread(index, eid)
         if ent is None:
             continue
         row: dict[str, Any] = {
@@ -177,7 +207,10 @@ def build_bridge_record(
 
     entities: list[dict[str, Any]] = []
     for eid in picked:
-        src = source_index["entities"][eid]
+        # An event-only thread is minted as a thread entity here, so the heir's
+        # graph holds a named node for it and the narrator summary can name it.
+        src = source_index["entities"].get(eid) or _event_only_thread(source_index, eid)
+        assert src is not None  # ``visible`` only holds ids candidates() could name
         entities.append(
             {
                 "id": eid,

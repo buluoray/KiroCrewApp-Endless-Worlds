@@ -324,6 +324,8 @@
   "play.nextTurn": "Next turn",
   "play.unlocked": "A new chapter opens: {heading}",
   "play.milestone": "Milestone reached · {label}",
+  "play.growth": "{label} +{delta}",
+  "play.growthTier": "{label} +{delta} · now {tier}",
   "play.unlockedMeaning": "From now on, the people, rules, and consequences behind this chapter can enter this life.",
   "play.waiting.0": "your choice is set; what follows is being worked out…",
   "play.waiting.1": "the next step is taking shape out of sight…",

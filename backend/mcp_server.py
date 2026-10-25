@@ -101,7 +101,13 @@ from chapters import (  # noqa: E402
 )
 from compile import CLEANING_CONTRACT, COMPILER_BRIEF, accept_compiled_header, preview  # noqa: E402
 from drafts import DraftError, DraftStore  # noqa: E402
-from halo import attribution, compose_restraint, event_density, gate_digest  # noqa: E402
+from halo import (  # noqa: E402
+    attribution,
+    compose_restraint,
+    event_density,
+    gate_digest,
+    growth_quiet,
+)
 from perf import TurnPerf  # noqa: E402
 from phototrace import (  # noqa: E402
     TRACE_CANDIDATE_COUNT,
@@ -122,7 +128,7 @@ from scenes import (  # noqa: E402
 )
 from settings import SPARSE_GAP_TURNS, preferred_style, read_settings  # noqa: E402
 from store import RunStore, StoreError, brief_lane, rewrite_brief_style  # noqa: E402
-from systems import apply_systems  # noqa: E402
+from systems import apply_systems, gain_fields  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from view import always_panels_empty, resolve_ending, shape_panels  # noqa: E402
 from widget import scene_warnings  # noqa: E402
@@ -2150,6 +2156,17 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
         if path.is_file():
             pack = read_world(path.read_text(encoding="utf-8"))
             out["world"] = summarize(pack)
+            # The growth reading needs the world's own gain names, which only
+            # the pack knows — so the restraint note is completed here, once the
+            # pack is read, on the same full reads that carry it.
+            restraint = out.get("restraint")
+            if isinstance(restraint, dict):
+                counted = [row["field"] for row in gain_fields(pack.template)]
+                if counted:
+                    restraint["growth"] = growth_quiet(lived, counted)
+                    restraint["note"] = compose_restraint(
+                        lived, state.get("language") or "en", gain_fields=counted
+                    )
             # The table of contents, but not on every turn.
             #
             # A narrator cannot ask for a chapter it was never told exists, so the

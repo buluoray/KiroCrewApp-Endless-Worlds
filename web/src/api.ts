@@ -293,6 +293,8 @@ export interface PlayView {
   unlocked: string[]
   /** Milestones (achievement labels) reached THIS month — shown as a marker. */
   milestonesReached: string[]
+  /** Growth the last month earned, computed by the backend from committed state. */
+  growth?: { label: string; delta: number; tier: string | null; tierChanged: boolean }[]
   /** Every milestone reached so far, for the ending recap. */
   milestones: string[]
   /** Which declared ending this life reached, or the narrator's own marker. Empty

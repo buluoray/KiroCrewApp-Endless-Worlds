@@ -182,7 +182,7 @@ from turn import (  # noqa: E402
     make_dispatcher,
     unanswered,
 )
-from view import build_play_view, resolve_ending, world_detail  # noqa: E402
+from view import build_play_view, growth_rows, resolve_ending, world_detail  # noqa: E402
 from widget import CSP, SceneSpecError, bound_values, compile_cached  # noqa: E402
 from world import CONTRACT  # noqa: E402
 
@@ -2054,6 +2054,7 @@ async def get_run(request: web.Request, ctx: AppContext) -> web.Response:
         unlocked=unlocked,
         milestones_reached=milestones_reached,
         milestones=milestones_all,
+        growth=growth_rows(pack.template, state, prev),
         capability_packs=pack.capability_packs,
     )
     view["runId"] = run_id

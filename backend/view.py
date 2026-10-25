@@ -26,6 +26,7 @@ from typing import Any
 from halo import gate_digest
 from memory_graph import echo_markers
 from packs import render_pack_panels
+from systems import growth as ledger_growth
 from template import Template
 
 #: Box-drawing, block and geometric characters — the ones a template uses to
@@ -443,6 +444,41 @@ def shape_panels(
     return panels
 
 
+def growth_rows(
+    template: Template, state: dict[str, Any], prev: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """The growth the last committed month earned, in the world's own words.
+
+    One row per gain-fed ledger that ROSE (``systems.growth`` over the two
+    committed states, so the number is the backend's). Labelled by the panel
+    field the ledger — or its derived rank — is shown in; a ledger shown in no
+    panel has no player-facing name and is left out rather than named by its
+    path, so the machinery never reaches the page.
+    """
+    if not prev:
+        return []
+    labels: dict[str, str] = {}
+    for panel in template.panels:
+        for f in panel.fields:
+            labels[f"state.{panel.id}.{f.id}"] = f.label
+    rows: list[dict[str, Any]] = []
+    for row in ledger_growth(template, state, prev):
+        if not isinstance(row["delta"], (int, float)) or row["delta"] <= 0:
+            continue
+        label = labels.get(row.get("tierInto") or "") or labels.get(row["into"])
+        if not label:
+            continue
+        rows.append(
+            {
+                "label": label,
+                "delta": row["delta"],
+                "tier": row.get("tier"),
+                "tierChanged": bool(row.get("tierChanged")) and bool(row.get("tier")),
+            }
+        )
+    return rows
+
+
 def build_play_view(
     template: Template,
     state: dict[str, Any],
@@ -452,6 +488,7 @@ def build_play_view(
     unlocked: list[str] | None = None,
     milestones_reached: list[str] | None = None,
     milestones: list[str] | None = None,
+    growth: list[dict[str, Any]] | None = None,
     capability_packs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Everything the play page renders, with nothing left for it to decide."""
@@ -531,6 +568,10 @@ def build_play_view(
         # maps them to the world's own labels.
         "milestonesReached": list(milestones_reached or []),
         "milestones": list(milestones or []),
+        # Backend-computed growth this month (``growth_rows``), for a quiet
+        # toast beside the milestones. Computed by the route: it needs the prior
+        # committed state.
+        "growth": list(growth or []),
     }
 
 

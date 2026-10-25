@@ -45,6 +45,11 @@ ATTRIBUTION_WINDOW = 12
 #: world would give it. Not a cap — a reading the narrator is shown.
 BUSY_PER_TURN = 2.0
 
+#: Turns with no counted growth before the reading says so. Long enough that a
+#: stretch of ordinary months is not nagged about; short enough to land inside
+#: a real life (the measured 84-turn life recorded one gain).
+GROWTH_WINDOW = 8
+
 #: A source credited this many times inside the window has stopped being a reason
 #: and become a habit.
 REPEAT_PRESSURE = 3
@@ -252,7 +257,40 @@ def _gains(entry: dict[str, Any]) -> list[dict[str, Any]]:
     return [g for g in raw if isinstance(g, dict)] if isinstance(raw, list) else []
 
 
-def compose_restraint(chronicle: list[dict[str, Any]], language: Any = "en") -> str:
+def growth_quiet(
+    chronicle: list[dict[str, Any]],
+    fields: list[str],
+    window: int = GROWTH_WINDOW,
+) -> dict[str, Any]:
+    """Whether a world that counts growth has recorded none for a while.
+
+    ``fields`` are the gain names the world's systems read. ``quiet`` holds only
+    when the world counts something, a full window of turns has passed, and no
+    gain in it named any of those fields. Like ``event_density``'s quiet, this is
+    a gap in the record, not a fault — and nothing here adds a gain.
+    """
+    recent = chronicle[-window:] if window else []
+    counted = {f for f in fields if f}
+    matched = sum(
+        1
+        for entry in recent
+        for gain in _gains(entry)
+        if str(gain.get("field") or "").strip() in counted
+    )
+    return {
+        "turns": len(recent),
+        "fields": sorted(counted),
+        "gains": matched,
+        "quiet": bool(counted) and len(recent) >= window and matched == 0,
+    }
+
+
+def compose_restraint(
+    chronicle: list[dict[str, Any]],
+    language: Any = "en",
+    *,
+    gain_fields: list[str] | None = None,
+) -> str:
     """The reading handed to the narrator, in the world's own language.
 
     Phrased as observations, not orders. The rulebook already says what the world
@@ -283,6 +321,15 @@ def compose_restraint(chronicle: list[dict[str, Any]], language: Any = "en") -> 
     if credit["unsourced"]:
         fields = text("list.join").join(str(u.get("field") or "?") for u in credit["unsourced"][:4])
         lines.append(text("restraint.unsourced", fields=fields))
+    growth = growth_quiet(chronicle, gain_fields or [])
+    if growth["quiet"]:
+        lines.append(
+            text(
+                "restraint.growthQuiet",
+                fields=text("list.join").join(growth["fields"]),
+                turns=growth["turns"],
+            )
+        )
 
     if not lines:
         return ""

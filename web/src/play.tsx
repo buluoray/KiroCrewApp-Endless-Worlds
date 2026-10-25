@@ -918,6 +918,18 @@ export function PlayPage({
         </div>
       ) : null}
 
+      {(v.growth ?? []).length ? (
+        <div className="ew-milestone ew-growth" role="status" aria-live="polite">
+          {(v.growth ?? []).map((g, i) => (
+            <div className="ew-milestone-row" key={`${g.label}-${i}`}>
+              {g.tierChanged && g.tier
+                ? t('play.growthTier', { label: g.label, delta: g.delta, tier: g.tier })
+                : t('play.growth', { label: g.label, delta: g.delta })}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {shownDigest.length ? (
         <div className="ew-digest">
           {shownDigest.map((dg, i) => (

@@ -44,5 +44,9 @@
   "turn.style": "玩家选择的模拟风格：{style}",
   "turn.length.short": "玩家偏好短篇幅：正文控制在两三段以内，紧凑有力，不铺陈次要细节。",
   "turn.length.long": "玩家偏好长篇幅：正文可以从容展开到五段以上，铺陈细节与氛围。",
-  "turn.noart": "玩家已在设置中关闭页面配图：本回合不要调用 endless_paint_backdrop 或 endless_clear_backdrop，把全部笔墨留给正文。"
+  "turn.noart": "玩家已在设置中关闭页面配图：本回合不要调用 endless_paint_backdrop 或 endless_clear_backdrop，把全部笔墨留给正文。",
+  "shape.gains": "- gains：这个世界会替你记录 {fields} 的成长。只有本回合的故事真的挣到了进步——练习见了效、一次突破、吃亏换来的教训——才在 gains 里加一项，写明那个字段、数量和来源。没有挣到的回合就不申报任何增长。所有总数和等级都由应用维护，不要自己写。",
+  "shape.gains.field": "{field}",
+  "shape.gains.tiered": "{field}（等级：{tiers}）",
+  "restraint.growthQuiet": "最近 {turns} 个回合没有记录 {fields} 的任何进步。如果故事确实挣到了，要申报成 gains 才算数；如果没有挣到，什么都不报就是对的。"
 }

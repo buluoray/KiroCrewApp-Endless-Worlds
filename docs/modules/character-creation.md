@@ -150,3 +150,16 @@ property of the world, not a judgement about the prose.
   `test_halo.test_nothing_is_said_when_there_is_nothing_to_say`,
   `test_halo.test_the_reading_is_an_observation_not_an_order`, and
   `test_halo.test_the_reading_never_leaks_implementation_vocabulary`.
+
+- **A stalled ledger is read back, never filled in.** `halo.growth_quiet` reports
+  `quiet` when the world counts growth (gain names from `systems.gain_fields`), a
+  full `GROWTH_WINDOW` of turns has passed, and no gain in it named a counted
+  field. `compose_restraint(..., gain_fields=...)` then adds one observation that
+  says the progress only counts once declared and that declaring nothing is right
+  when nothing was earned. `endless_read_runtime` completes the restraint note
+  with the world's gain names once it has read the pack, on the same full reads
+  that carry the rest of the reading, and adds the measurement as
+  `restraint.growth`. Nothing here writes a gain. Enforced by `halo.growth_quiet`
+  + `mcp_server` (runtime read); pinned by
+  `test_growth.test_growth_is_quiet_only_after_a_full_window_with_no_counted_gain`
+  and `test_growth.test_the_growth_reading_is_an_observation_that_permits_declaring_nothing`.

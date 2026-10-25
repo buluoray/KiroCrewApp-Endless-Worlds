@@ -35,6 +35,7 @@ from content import Content
 from narrator import ensure_narrator_slot_ex, release_narrator_slot
 from perf import TurnPerf
 from store import RunStore
+from systems import gain_fields
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,21 @@ def declaration_shape(template: Any) -> str:
             text("shape.digest", categories=text("list.join").join(template.digest_categories))
         )
     lines.append(text("shape.reach"))
+    # The growth this world counts, by the gain name each ledger reads. Measured
+    # on four real lives: 2 gains in 111 turns, because the only place a gain
+    # name appeared was a world's prose (if at all) — the shape never said a
+    # world counted anything. The line says "declare when earned" and nothing
+    # more: totals and ranks stay the backend's (systems.apply_systems).
+    counted = gain_fields(template)
+    if counted:
+        sep = text("list.join")
+        fields = sep.join(
+            text("shape.gains.tiered", field=row["field"], tiers=sep.join(row["tiers"]))
+            if row["tiers"]
+            else text("shape.gains.field", field=row["field"])
+            for row in counted
+        )
+        lines.append(text("shape.gains", fields=fields))
     lines.append(text("shape.omission"))
     lines.append(text("shape.memory"))
     return "\n".join(lines)

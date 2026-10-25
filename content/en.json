@@ -44,5 +44,9 @@
   "turn.style": "Simulation style the player chose: {style}",
   "turn.length.short": "The player prefers short pages: keep the prose to two or three tight paragraphs and skip secondary detail.",
   "turn.length.long": "The player prefers long pages: let the prose breathe — five paragraphs or more, rich in detail and atmosphere.",
-  "turn.noart": "The player turned page art off in the settings: do not call endless_paint_backdrop or endless_clear_backdrop this turn — spend everything on the prose."
+  "turn.noart": "The player turned page art off in the settings: do not call endless_paint_backdrop or endless_clear_backdrop this turn — spend everything on the prose.",
+  "shape.gains": "- gains: this world counts growth for you in {fields}. When this span's story truly earns progress in one — practice that paid off, a breakthrough, a lesson learned the hard way — add an entry to gains naming that field, an amount, and its source. A span that earned nothing declares no gain. The app keeps every total and rank; do not write them yourself.",
+  "shape.gains.field": "{field}",
+  "shape.gains.tiered": "{field} (ranks: {tiers})",
+  "restraint.growthQuiet": "No progress in {fields} has been recorded in the last {turns} turns. If the story did earn some, it only counts once declared as a gain; if it earned none, declaring nothing is right."
 }
