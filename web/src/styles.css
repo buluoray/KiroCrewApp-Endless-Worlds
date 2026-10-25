@@ -1133,6 +1133,44 @@ button.ew-pager-turn:focus-visible {
   font-variant-numeric: tabular-nums; color: var(--muted, #6b7280);
 }
 .ew-pick-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The scrubber: a full-width second row of the top bar, one position per page.
+   The row is 24px of hit area around a 4px rail; the slot under a fixed bar grows by
+   that row and its 2px gap. `touch-action: none` is what keeps a finger dragging the
+   thumb from scrolling the page. The arrows take the same so a held press is a hold,
+   not a long-press menu. */
+.ew-topbar.ew-topbar-scrub { flex-wrap: wrap; row-gap: 2px; }
+.ew-topbar-slot.ew-topbar-slot-scrub { height: 96px; }
+.ew-pager-hold { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.ew-scrub { position: relative; flex: 1 0 100%; min-width: 0; }
+.ew-scrub-track {
+  position: relative; height: 24px; border-radius: 6px; cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent; outline: none;
+}
+.ew-scrub-track:focus-visible { outline: 2px solid var(--ew-accent-ink, #c4b5fd); outline-offset: 1px; }
+.ew-scrub-rail {
+  position: absolute; left: 8px; right: 8px; top: 50%; height: 4px; margin-top: -2px;
+  border-radius: 2px; background: var(--border, #2d2f3d); overflow: hidden;
+}
+.ew-scrub-fill { height: 100%; background: var(--accent, #7c3aed); }
+.ew-scrub-thumb {
+  position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
+  border-radius: 50%; background: var(--ew-accent-ink, #c4b5fd);
+  box-shadow: 0 0 0 2px var(--bg, #1a1b26); will-change: left;
+}
+.ew-scrub-on .ew-scrub-thumb { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
+/* Floats under the thumb. Shifted left by the same fraction it sits along the rail,
+   so it stays inside the bar at both ends. */
+.ew-scrub-tip {
+  position: absolute; top: calc(100% + 4px); z-index: 6; pointer-events: none;
+  display: flex; flex-direction: column; gap: 2px;
+  max-width: min(280px, calc(100vw - 32px)); padding: 6px 10px; border-radius: 8px;
+  background: var(--bg-elevated, #21222e); color: var(--text, #e2e8f0);
+  border: 1px solid var(--border, #2d2f3d); box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+  font-size: 12px; line-height: 1.35;
+}
+.ew-scrub-tip-n { font-variant-numeric: tabular-nums; color: var(--ew-accent-ink, #c4b5fd); white-space: nowrap; }
+.ew-scrub-tip-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The standing summary above the prose. It had no surface at all — 13px muted rows
    sitting directly on the page's backdrop art, which is where it became hard to

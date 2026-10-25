@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 
 import type { PageIndexRow } from './api'
 import { api } from './api'
+import { useScrubPreview, type ScrubStore } from './scrub-store'
 import { t } from './strings'
 
 /** One row's height. Fixed so the list can place any month without measuring it,
@@ -21,6 +22,23 @@ export function visibleRows(scrollTop: number, total: number): [number, number] 
   return [first, last]
 }
 
+/** The page hints, keyed by the life and its newest month, so a month written since
+ *  the last read is not missing. ONE read per key, shared by the picker and the
+ *  scrubber's label; a failed read is dropped so the next open asks again. */
+let indexCache: { key: string; rows: Promise<Map<number, string>> } | null = null
+export function loadPageIndex(runId: string, latest: number): Promise<Map<number, string>> {
+  const key = `${runId}|${latest}`
+  if (indexCache?.key === key) return indexCache.rows
+  const rows = api
+    .chronicleIndex(runId)
+    .then((r) => new Map(r.rows.map((row: PageIndexRow) => [row.turn, row.hint])))
+  indexCache = { key, rows }
+  rows.catch(() => {
+    if (indexCache?.rows === rows) indexCache = null
+  })
+  return rows
+}
+
 /**
  * The page indicator, and the month picker it opens. Paging one click at a time is
  * fine for last month and hopeless for month 3 of 84, so the indicator is a button:
@@ -37,13 +55,18 @@ export function PagePicker({
   shown,
   latest,
   onJump,
+  preview,
 }: {
   runId: string
   shown: number
   latest: number
   /** Show this month; `null` is the live page. */
   onJump: (turn: number | null) => void
+  /** The page being flipped to by the scrubber or a held arrow, shown live. */
+  preview?: ScrubStore
 }) {
+  const flipping = useScrubPreview(preview)
+  const label = flipping ?? shown
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const root = useRef<HTMLDivElement>(null)
@@ -55,20 +78,15 @@ export function PagePicker({
   useEffect(() => {
     if (!open || index?.key === indexKey) return undefined
     let alive = true
-    api
-      .chronicleIndex(runId)
-      .then((r) => {
-        if (!alive) return
-        setIndex({
-          key: indexKey,
-          rows: new Map(r.rows.map((row: PageIndexRow) => [row.turn, row.hint])),
-        })
+    loadPageIndex(runId, latest)
+      .then((rows) => {
+        if (alive) setIndex({ key: indexKey, rows })
       })
       .catch(() => {})
     return () => {
       alive = false
     }
-  }, [open, index?.key, indexKey, runId])
+  }, [open, index?.key, indexKey, runId, latest])
 
   // A click anywhere outside closes the picker without moving focus.
   useEffect(() => {
@@ -101,11 +119,11 @@ export function PagePicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        aria-label={t('play.jumpOpen', { n: shown, total: latest })}
+        aria-label={t('play.jumpOpen', { n: label, total: latest })}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="ew-pager-long">{t('play.pageOf', { n: shown, total: latest })}</span>
-        <span className="ew-pager-short">{t('play.pageShort', { n: shown, total: latest })}</span>
+        <span className="ew-pager-long">{t('play.pageOf', { n: label, total: latest })}</span>
+        <span className="ew-pager-short">{t('play.pageShort', { n: label, total: latest })}</span>
       </button>
       {open ? (
         <PickerPanel

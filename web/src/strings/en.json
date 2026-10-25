@@ -339,6 +339,8 @@
   "play.jumpGo": "Go",
   "play.jumpList": "Every page of this life",
   "play.jumpNow": "Now",
+  "play.scrubLabel": "Flip through pages",
+  "play.scrubValue": "Page {n} of {total}",
   "play.unlocked": "A new chapter opens: {heading}",
   "play.milestone": "Milestone reached · {label}",
   "play.growth": "{label} +{delta}",
