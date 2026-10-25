@@ -227,7 +227,16 @@ class RunStore:
         ``sort_keys`` because a dict's order is not part of its meaning, and two
         serialisations of one state must not read as two states.
         """
-        raw = json.dumps(state, sort_keys=True, separators=(",", ":"), default=str)
+        return RunStore.content_tag(state)
+
+    @staticmethod
+    def content_tag(value: Any) -> str:
+        """The same short stable name, for any JSON value (a text, a summary).
+
+        Used to record WHICH body a conversation was given, so a later read can
+        omit only a body that is byte-for-byte the one already delivered.
+        """
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
@@ -422,16 +431,68 @@ class RunStore:
     def _brief_key(run_id: str) -> str:
         return f"briefed-{run_id}"
 
-    def mark_briefed(self, run_id: str, *, slot: str) -> None:
+    def mark_briefed(
+        self,
+        run_id: str,
+        *,
+        slot: str,
+        turn: int = 0,
+        carried: dict[str, str] | None = None,
+    ) -> None:
         """Record that this run's rulebook has been read into ``slot``.
 
         Called AFTER the prompt carrying it is dispatched, never before. Marking
         first and failing to send would leave a life whose narrator never saw its
         world; marking after and crashing costs one redundant re-send, which is the
         safe direction to be wrong in.
+
+        ``turn`` and ``carried`` say what THIS attempt's prompt itself held:
+        ``carried`` maps a block name (``brief``, ``shape``) to the
+        ``content_tag`` of the exact text sent. ``endless_read_runtime`` reads it
+        (``prompt_carried``) so a full read in the same attempt does not hand the
+        narrator a second copy of text that is in the prompt in front of it. An
+        opening prompt that carries neither records ``{}`` and the read sends both.
         """
         _check_run_id(run_id)
-        self._kv.set(self._brief_key(run_id), {"slot": slot, "at": time.time()})
+        self._kv.set(
+            self._brief_key(run_id),
+            {
+                "slot": slot,
+                "at": time.time(),
+                "turn": int(turn),
+                "carried": dict(carried or {}),
+            },
+        )
+
+    def prompt_carried(self, run_id: str, turn: int) -> dict[str, str]:
+        """What the prompt of the attempt now writing ``turn`` carried, by tag.
+
+        Trusted only for that exact attempt: the marker must name ``turn``, the
+        in-flight record must be for ``turn``, and the marker must have been
+        written at or after that record's ``askedAt``. ``mark_pending`` runs
+        before dispatch and ``mark_briefed`` after it, so a retried attempt whose
+        prompt carried no rulebook has a newer ``askedAt`` than the old marker and
+        reads as carrying nothing — the read then sends the blocks whole.
+        """
+        _check_run_id(run_id)
+        raw = self._kv.get(self._brief_key(run_id))
+        if not isinstance(raw, dict):
+            return {}
+        try:
+            if int(raw.get("turn") or 0) != int(turn) or int(turn) <= 0:
+                return {}
+            pending = self.read_pending(run_id) or {}
+            if int(pending.get("turn") or 0) != int(turn):
+                return {}
+            asked = float(pending.get("askedAt") or 0.0)
+            if not asked or float(raw.get("at") or 0.0) < asked:
+                return {}
+        except (TypeError, ValueError):
+            return {}
+        carried = raw.get("carried")
+        if not isinstance(carried, dict):
+            return {}
+        return {str(k): str(v) for k, v in carried.items() if isinstance(v, str)}
 
     def briefed_slot(self, run_id: str) -> str:
         """Which slot holds this run's rulebook, or "" if none does."""

@@ -685,7 +685,18 @@ async def advance_turn(
 
     started = dispatch(state_obj, slot, prompt, on_settled=_settled)
     if brief_now:
-        store.mark_briefed(run_id, slot=slot_key)
+        # Which blocks THIS prompt itself carried, tagged by exact text, so the
+        # narrator's full read in the same attempt names them as held instead of
+        # sending a second copy (measured: brief + shape, ~8 KB, twice in one turn
+        # on every re-brief). An opening prompt carries neither, so its read still
+        # sends both.
+        carried: dict[str, str] = {}
+        if not prompt_override:
+            if rulebook.strip():
+                carried["brief"] = RunStore.content_tag(rulebook.strip())
+            if shape:
+                carried["shape"] = RunStore.content_tag(shape)
+        store.mark_briefed(run_id, slot=slot_key, turn=wanted, carried=carried)
     if not started:
         # Queued behind a turn already running. Waiting is still correct: the
         # queued prompt will run, and the store is the thing we are watching.

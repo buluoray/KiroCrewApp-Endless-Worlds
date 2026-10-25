@@ -105,7 +105,29 @@ turn 200 as at turn 1.
   panels are named rather than sent, and disappearances are reported
   (`test_the_diff_is_per_panel_not_per_leaf`, `test_unchanged_keys_are_named_not_sent`,
   `test_a_key_that_disappeared_is_reported`); recent chronicle rides only on a full
-  read (`test_recent_turns_ride_only_on_a_full_read`).
+  read (`test_recent_turns_ride_only_on_a_full_read`). A re-read month is the
+  story the narrator wrote (prose, action, choices, events, memory), never the
+  page snapshots the chronicle keeps for the reader (`panels`, `digest`, both
+  rendered from the state the same full read carries whole). Enforced by
+  `mcp_server._narrator_month`; pinned by
+  `test_a_full_read_re_reads_months_without_their_page_snapshots`.
+
+- **A whole block the conversation already holds is named in `held`, not
+  re-sent.** On a delta read the world summary and the mounted scenes are left
+  out when this conversation was given that exact body (tagged by
+  `RunStore.content_tag` in the recall-sent record, so a full read or a rotation
+  makes them unsent again, and a changed body is a new tag). On a full read the
+  `brief` and `shape` are left out when the prompt of the SAME attempt carried
+  byte-identical text: `advance_turn()` records the tags in the briefed marker
+  (`mark_briefed(turn=, carried=)`) after dispatch, and `RunStore.prompt_carried`
+  trusts them only for the in-flight turn and only when the marker is no older
+  than that attempt's `askedAt`. An opening prompt carries neither, so its read
+  sends both. Pinned by `test_the_world_summary_rides_once_per_conversation`,
+  `test_a_rotation_makes_the_world_summary_unsent_again`,
+  `test_unchanged_scenes_are_held_and_a_changed_ledger_is_sent`,
+  `test_a_full_read_omits_the_brief_and_shape_its_own_prompt_carried`,
+  `test_a_retried_attempt_without_the_brief_in_its_prompt_gets_it_whole`, and
+  `test_an_opening_prompt_records_that_it_carried_neither`.
 
 - **A turn is idempotent per `(runId, turn)`.** `advance_turn()` returns a landed
   turn without asking the narrator again, so a double-tap or a retry over a flaky

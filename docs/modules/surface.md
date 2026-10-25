@@ -279,7 +279,7 @@ processes self-locate the same data dir so routes and tools see one set of files
   | Tool | Facing | Purpose |
   |---|---|---|
   | `endless_advance_turn` | narrator | the one writer — commit prose + full state + choices (+ optional memory/events) |
-  | `endless_read_runtime` | narrator | read-only pull of rulebook + state + recent turns, with a `since`-fingerprint delta |
+  | `endless_read_runtime` | narrator | read-only pull of rulebook + state + recent turns, with a `since`-fingerprint delta; blocks the conversation already holds unchanged are named in `held` (see turn-loop.md) |
   | `endless_mount_scene` | narrator | mount a structured scene (map/tree/links/ledger/choice) from a spec; the app draws it |
   | `endless_update_scene` | narrator | change a mounted scene without remounting (a remount reloads its iframe) |
   | `endless_await_scene` | narrator | return the player's scene answer if present; never blocks |

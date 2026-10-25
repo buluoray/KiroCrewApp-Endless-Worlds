@@ -20,7 +20,7 @@ deletion.
 | `kv/run.<runId>.state.json` | current world state (whole-value `AppStorage` entry, atomic write) |
 | `kv/run.<runId>.prev.json` | last-known-good state — the rollback target |
 | `kv/index.json` | `{ "runs": [ …Lives-view rows… ] }`, the shelf |
-| `kv/briefed-<runId>.json` | `{ slot, at }` rulebook-delivery marker |
+| `kv/briefed-<runId>.json` | `{ slot, at, turn, carried }` rulebook-delivery marker; `carried` tags the exact brief/shape that turn's prompt held (`prompt_carried`) |
 | `kv/pending-<runId>.json` | in-flight-turn record (`turn`, `slot`, `askedAt`, `action`, `close?` — the player closing the life, see turn-loop — `readAt?`, `readTurn?`, …) |
 | `runs/<runId>/chronicle.jsonl` | append-only, one JSON line per committed turn (`turn`, `prose`, `action`, `choices`, `events`, `gains`, `memory?`, `picked?` (the offered choice the action was, observed by the app; see memory-graph.md), and the `digest?`/`panels?` snapshot of the standing that turn ended on) |
 | `mcp_server.py` (`_advance_turn`) | applies `RESERVED_STATE_KEYS` carry-forward, then the milestone rebuild and the systems engine, on each commit |
