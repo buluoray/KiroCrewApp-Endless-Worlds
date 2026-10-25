@@ -39,10 +39,33 @@ import { StarMap } from './memory'
 import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
 import { StoryPage } from './story-page'
+import { PagePicker } from './page-picker'
 import { buildTabs, tabIcon } from './tabbar'
 
-function Chevron({ dir }: { dir: 'l' | 'r' }) {
-  const d = dir === 'l' ? 'M11 4 L6 9 L11 14' : 'M7 4 L12 9 L7 14'
+/** Keys the pager answers when focus is on the page itself. */
+const PAGER_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End'])
+
+/** Whether a key pressed here belongs to something other than the pager: any text
+ *  field (the free-action box above all), a control with its own arrow keys, or a
+ *  dialog such as the month picker or a confirm. */
+function keyIsOwned(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return !!target.closest(
+    'input, textarea, select, [contenteditable]:not([contenteditable="false"]), ' +
+      '[role="tablist"], [role="listbox"], [role="menu"], [role="radiogroup"], ' +
+      '[role="slider"], [role="dialog"]',
+  )
+}
+
+function Chevron({ dir }: { dir: 'l' | 'r' | 'first' | 'last' }) {
+  const d =
+    dir === 'l'
+      ? 'M11 4 L6 9 L11 14'
+      : dir === 'r'
+        ? 'M7 4 L12 9 L7 14'
+        : dir === 'first'
+          ? 'M13 4 L8 9 L13 14 M5 4 L5 14'
+          : 'M5 4 L10 9 L5 14 M13 4 L13 14'
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <path
@@ -414,31 +437,50 @@ export function PlayPage({
   // a star-map/echo jump) to a month outside it must FETCH that page — without
   // this, the lookup below misses and the pager label says "Page 7" over the
   // latest month's prose. Fetched pages merge into `chron` so re-visits are free.
+  //
+  // ONE page read at a time. A jump from the picker asks for the month picked and
+  // nothing between; holding an arrow key past the window must not start a request
+  // per month it passes. While a read is out, later page changes wait; when it
+  // lands (`pageRead` ticks) this runs again for wherever the reader is by then.
+  // A read is never thrown away for a page change — what it brought is still this
+  // life's — only for a different life. A page whose read failed is not retried
+  // in a loop; paging away and back asks again.
   const pageFetchRef = useRef(0)
+  const pageFailRef = useRef(0)
+  const [pageRead, setPageRead] = useState(0)
+  const runRef = useRef(runId)
   useEffect(() => {
-    if (!v || viewTurn === null || viewTurn >= v.turn) return undefined
-    if (chron.some((c) => c.turn === viewTurn)) return undefined
-    if (pageFetchRef.current === viewTurn) return undefined
+    runRef.current = runId
+  }, [runId])
+  useEffect(() => {
+    if (pageFailRef.current !== viewTurn) pageFailRef.current = 0
+  }, [viewTurn])
+  useEffect(() => {
+    if (!v || viewTurn === null || viewTurn >= v.turn) return
+    if (chron.some((c) => c.turn === viewTurn)) return
+    if (pageFetchRef.current) return
+    if (pageFailRef.current === viewTurn) return
     pageFetchRef.current = viewTurn
-    let alive = true
+    const want = viewTurn
+    const forRun = runId
     // `before` is exclusive, so viewTurn+1 lands the page ON viewTurn.
     api
-      .chronicle(runId, viewTurn + 1)
+      .chronicle(runId, want + 1)
       .then((c) => {
-        if (!alive) return
+        if (runRef.current !== forRun) return
         setChron((have) => {
           const seen = new Set(have.map((p) => p.turn))
           return [...have, ...c.turns.filter((p) => !seen.has(p.turn))]
         })
       })
-      .catch(() => {})
+      .catch(() => {
+        pageFailRef.current = want
+      })
       .finally(() => {
         pageFetchRef.current = 0
+        setPageRead((n) => n + 1)
       })
-    return () => {
-      alive = false
-    }
-  }, [runId, v, viewTurn, chron])
+  }, [runId, v, viewTurn, chron, pageRead])
   // Advancing to a new turn, or paging to another one, returns to the top. Scroll
   // the app root (which starts at the "Endless Worlds" header) into view, NOT the
   // play column below it — aligning the column to the top scrolled the header out
@@ -448,6 +490,37 @@ export function PlayPage({
     document.querySelector('.ew-root')?.scrollIntoView({ block: 'start' })
     prevTurnRef.current = viewTurn ?? v?.turn ?? 0
   }, [viewTurn, v?.turn])
+
+  // Keyboard paging: Left/Right step a month, Home/End go to the first and the
+  // live page. Only while the pager is on screen and nothing else owns the key —
+  // the free-action box (and every other field) keeps its caret keys, a tab strip
+  // or picker keeps its own arrows, and a sheet over the column means the pages
+  // are not what the reader is looking at.
+  const pagerRef = useRef<HTMLDivElement>(null)
+  const liveTurn = v && !v.ended ? v.turn : 0
+  useEffect(() => {
+    if (liveTurn < 1) return undefined
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (!PAGER_KEYS.has(e.key)) return
+      if (sheetOpen || keyIsOwned(e.target)) return
+      const bar = pagerRef.current
+      if (!bar || !bar.getClientRects().length) return
+      const cur = viewTurn ?? liveTurn
+      const next =
+        e.key === 'ArrowLeft'
+          ? Math.max(1, cur - 1)
+          : e.key === 'ArrowRight'
+            ? cur + 1
+            : e.key === 'Home'
+              ? 1
+              : liveTurn
+      e.preventDefault()
+      if (next !== cur) setViewTurn(next >= liveTurn ? null : next)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [liveTurn, viewTurn, sheetOpen])
 
   const load = useCallback(async () => {
     try {
@@ -906,7 +979,17 @@ export function PlayPage({
   const pageDir = shownTurn >= prevTurnRef.current ? 'fwd' : 'back'
   const pager =
     latest >= 1 ? (
-      <div className="ew-pager">
+      <div className="ew-pager" ref={pagerRef}>
+        <button
+          className="ew-pager-arw ew-pager-end"
+          type="button"
+          disabled={shownTurn <= 1}
+          aria-label={t('play.firstTurn')}
+          title={t('play.firstTurn')}
+          onClick={() => setViewTurn(latest <= 1 ? null : 1)}
+        >
+          <Chevron dir="first" />
+        </button>
         <button
           className="ew-pager-arw"
           type="button"
@@ -916,7 +999,12 @@ export function PlayPage({
         >
           <Chevron dir="l" />
         </button>
-        <span className="ew-pager-turn">{t('play.page', { n: shownTurn })}</span>
+        <PagePicker
+          runId={runId}
+          shown={shownTurn}
+          latest={latest}
+          onJump={(n) => setViewTurn(n)}
+        />
         <button
           className="ew-pager-arw"
           type="button"
@@ -925,6 +1013,19 @@ export function PlayPage({
           onClick={() => setViewTurn(shownTurn + 1 >= latest ? null : shownTurn + 1)}
         >
           <Chevron dir="r" />
+        </button>
+        {/* Latest is always the LIVE page (null), never a past page that happens to
+            carry the newest number, so a turn in flight, the painting stage and the
+            recap all come back with it. */}
+        <button
+          className="ew-pager-arw ew-pager-end"
+          type="button"
+          disabled={isLive}
+          aria-label={t('play.latestTurn')}
+          title={t('play.latestTurn')}
+          onClick={() => setViewTurn(null)}
+        >
+          <Chevron dir="last" />
         </button>
         {/* Lit only once the reader has hidden the entry recap: on a long life
             it is the one place that says where they came back in. Live page

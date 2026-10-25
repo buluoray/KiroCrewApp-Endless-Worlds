@@ -17,6 +17,7 @@ guarantee.
 | `main.tsx` | app root — holds `view`, and independently holds selected-world and active-run; language state + persistence; routes a scene answer into a turn |
 | `api.ts` | typed HTTP helpers over `/api/apps/endless-worlds`; `ApiError` with a machine code; preconditions as body fields; `models()` field-drift tolerance |
 | `play.tsx` | the live reading view — server-driven generating state + poll, tool-call turn progress, retry, turn-number pager |
+| `page-picker.tsx` | the pager's page indicator and its jump-to-month picker (number field + windowed list of every month with a hint) |
 | `scene.tsx` | `SceneSlot` — the single scene iframe, created once and never moved |
 | `opening.tsx` | the opening form — sealed world-decided groups, 30-day draft TTL |
 | `create-world.tsx` | the world-creation surfaces, mirroring life creation |
@@ -253,6 +254,27 @@ guarantee.
   A failed turn preserves the player's input for retry; and the top-of-story pager
   addresses months by turn *number*, not an offset — an offset shifts under a turn
   committed mid-paging. `api.chronicle(before)` therefore takes a turn number.
+
+- **Any month is two moves away.** The pager reads First ‹ page › Latest. Latest
+  always sets the *live* page (`viewTurn = null`), never a past copy of the newest
+  number, so a turn in flight, the painting stage and the Recap button return with
+  it. The page indicator (`play.pageOf`, `play.pageShort` below 480px so five 44px
+  targets fit at 375px) is the button of `page-picker.tsx`: a labelled dialog with a
+  number field (type a month, Enter) over a list of every month, each row its number
+  plus a hint — the player's action, else how the page began. Escape or a click
+  outside closes it, Escape returning focus to the indicator; a jump hands focus to
+  `StoryPage`, which announces the new page once. The rows are a fixed 44px and
+  absolutely placed, so only those on screen plus a small overscan are drawn
+  (`visibleRows`) whatever the life's length. The hints are ONE read of
+  `GET /runs/{id}/chronicle/index` (number + ≤48-char hint per month, built from the
+  same `_lived_entries` filter as the chronicle so the two agree on which months
+  exist), made on first open and kept until a new month lands. The page picked is
+  fetched on its own, and `play.tsx` keeps at most one page read in flight: a held
+  arrow key or a second jump waits for it rather than starting a request per month,
+  a read is kept even if the reader moved on, and a failed read is not retried in a
+  loop. Left/Right/Home/End page while focus is on the page itself — never from a
+  field (the free-action box above all), a tab strip, a dialog, or while a sheet
+  covers the column or the pager is hidden. Pinned by `test_page_jump.py`.
 
 - **Opening groups the world decided are sealed, not offered; drafts expire in 30
   days.** `opening.tsx` renders a `worldDecides` group as a sealed note rather than

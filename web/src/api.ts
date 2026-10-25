@@ -484,6 +484,12 @@ export interface Chronicle {
   more: boolean
 }
 
+/** One lived month in the page picker: its number and a few words to find it by. */
+export interface PageIndexRow {
+  turn: number
+  hint: string
+}
+
 export interface SeedReport {
   installed: string[]
   alreadyPresent: string[]
@@ -867,6 +873,13 @@ export const api = {
     const qs = p.toString()
     return json<Chronicle>(`/runs/${encodeURIComponent(id)}/chronicle${qs ? `?${qs}` : ''}`)
   },
+
+  /** Every lived month as a number and a hint, in one small read, for the pager's
+   *  month picker. The prose of the month picked is fetched on its own. */
+  chronicleIndex: (id: string) =>
+    json<{ runId: string; rows: PageIndexRow[] }>(
+      `/runs/${encodeURIComponent(id)}/chronicle/index`,
+    ),
 
   createRun: (body: {
     worldId?: string
