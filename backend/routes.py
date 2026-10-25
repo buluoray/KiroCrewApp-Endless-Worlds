@@ -165,7 +165,12 @@ from narrator import (  # noqa: E402
     reset_narrator_conversation,
     worldsmith_slot_key,
 )
-from opening import OpeningError, build_initial_state, compose_opening_prompt  # noqa: E402
+from opening import (  # noqa: E402
+    VOICES,
+    OpeningError,
+    build_initial_state,
+    compose_opening_prompt,
+)
 from perf import TurnPerf, join_usage  # noqa: E402
 from perf import aggregate as perf_aggregate  # noqa: E402
 from scenes import AlreadyAnswered, SceneLedger, SceneLedgerError, StaleScene  # noqa: E402
@@ -1675,6 +1680,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
     answers = raw_answers if isinstance(raw_answers, dict) else {}
     style = str(body.get("style") or "")
     role = str(body.get("role") or "")
+    voice = str(body.get("voice") or "")[:16]
     language = body.get("language") if isinstance(body.get("language"), str) else None
 
     # "Live this again": copy a prior life's opening as the starting point. Only the
@@ -1699,6 +1705,9 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
             style = str(src.get("style") or "")
         if not role:
             role = str(src.get("role") or "")
+        if not voice:
+            src_voice = src.get("voice")
+            voice = src_voice if src_voice in VOICES else ""
         if not language:
             src_lang = src.get("language")
             if isinstance(src_lang, str) and src_lang:
@@ -1725,7 +1734,7 @@ async def create_run(request: web.Request, ctx: AppContext) -> web.Response:
         )
 
     try:
-        state = build_initial_state(pack.template, answers, style=style, role=role)
+        state = build_initial_state(pack.template, answers, style=style, role=role, voice=voice)
     except OpeningError as exc:
         return web.json_response({"field": exc.field, "expected": exc.expected}, status=400)
 

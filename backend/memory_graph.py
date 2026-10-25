@@ -188,6 +188,18 @@ MAX_CANDIDATES = 6
 #: An important event untouched for this many turns counts as dormant.
 DORMANT_AFTER_TURNS = 8
 
+#: The event key the APP mints for a fateful choice the player picked (see
+#: :func:`build_index`). Reserved: a narrator key spelled the same is suffixed.
+DECISION_KEY = "decision"
+
+#: ``origin`` of an event the app minted from the player's own pick, as opposed
+#: to one the narrator declared.
+DECISION_ORIGIN = "choice"
+
+#: How many people cards one runtime read carries, at most — the offstage one
+#: included.
+MAX_PEOPLE = 4
+
 
 def event_id(turn: int, key: str) -> str:
     """The canonical, run-scoped name of an event: ``event-12-saved-elin``.
@@ -244,7 +256,9 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
     for entry in chronicle:
         memory = entry.get("memory")
         if not isinstance(memory, dict):
-            continue
+            # Prose never becomes a fact, so a line with no memory block declares
+            # nothing — but the app's own record of a fateful pick still does.
+            memory = {}
         turn = int(entry.get("turn") or 0)
         action = str(entry.get("action") or "")
 
@@ -329,12 +343,55 @@ def build_index(chronicle: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             )
 
+        decision = _decision_event(entry, turn, action)
+        if decision is not None and decision["id"] not in events:
+            events[decision["id"]] = decision
+
     return {
         "entities": entities,
         "events": events,
         "threads": threads,
         "relations": relations,
         "echoedAt": echoed_at,
+    }
+
+
+def _decision_event(entry: dict[str, Any], turn: int, action: str) -> dict[str, Any] | None:
+    """The event the app mints when the player picked a FATEFUL choice.
+
+    The pick is a structured fact the app observed itself (``picked`` on the
+    chronicle line, written at commit), not something read out of prose, and the
+    narrator cannot write it. On saved lives most fateful picks were never
+    answered again: 10 of 32 on an 84-turn life. As a ``major``, ``known`` event
+    the pick goes through the same recall as any other memory — dormant ones come
+    back as candidates, an ``echoes`` of it becomes a player-facing marker.
+
+    No participants: the decision is the player's, but naming ``player`` here
+    would make the graph reference it and flip :func:`life_centre` on a life the
+    narrator wrote under the protagonist's own id.
+    """
+    picked = entry.get("picked")
+    if not isinstance(picked, dict) or picked.get("fateful") is not True:
+        return None
+    label = str(picked.get("label") or "").strip()
+    if not label:
+        return None
+    cid = event_id(turn, DECISION_KEY)
+    return {
+        "id": cid,
+        "turn": turn,
+        "key": DECISION_KEY,
+        "title": label[:120],
+        "summary": label[:300],
+        "importance": "major",
+        "participants": [],
+        "place": "",
+        "threads": [],
+        "echoes": [],
+        "corrects": "",
+        "disclosure": "known",
+        "action": action,
+        "origin": DECISION_ORIGIN,
     }
 
 
@@ -683,7 +740,9 @@ def sanitize_memory(
         # A key only has to be unique inside its own turn, so a collision is
         # answered by a free neighbour rather than by losing the event.
         base, n = key, 2
-        while key in kept_keys or event_id(turn, key) in index["events"]:
+        # DECISION_KEY belongs to the app's own decision event (see
+        # build_index), so a narrator key spelled the same steps aside too.
+        while key in kept_keys or key == DECISION_KEY or event_id(turn, key) in index["events"]:
             key, n = f"{base}-{n}", n + 1
         if key != base:
             renamed_keys[base] = key
@@ -989,21 +1048,23 @@ def recall_candidates(
 
     out: list[dict[str, Any]] = []
     for _, _, cid, ev, reasons in picked:
-        out.append(
-            {
-                "id": cid,
-                "turn": ev["turn"],
-                "title": ev["title"],
-                "summary": ev["summary"],
-                "entities": sorted(
-                    (set(ev["participants"]) | ({ev["place"]} if ev["place"] else set())) - {PLAYER}
-                ),
-                "threads": [th["id"] for th in ev["threads"]],
-                "action": ev["action"],
-                "reasons": reasons,
-                "lastEchoedTurn": last_echo(cid),
-            }
-        )
+        row: dict[str, Any] = {
+            "id": cid,
+            "turn": ev["turn"],
+            "title": ev["title"],
+            "summary": ev["summary"],
+            "entities": sorted(
+                (set(ev["participants"]) | ({ev["place"]} if ev["place"] else set())) - {PLAYER}
+            ),
+            "threads": [th["id"] for th in ev["threads"]],
+            "action": ev["action"],
+            "reasons": reasons,
+            "lastEchoedTurn": last_echo(cid),
+        }
+        if ev.get("origin"):
+            # The player's own decision, not a month the narrator declared.
+            row["origin"] = ev["origin"]
+        out.append(row)
     return out
 
 
@@ -1079,10 +1140,13 @@ def life_centre(index: dict[str, Any]) -> dict[str, Any]:
         PLAYER in (rec["from"], rec["to"]) for rec in index["relations"]
     )
 
+    # The app's own decision events are not narrated months, so they must not
+    # dilute the protagonist's share below the majority it really holds.
+    narrated = [ev for ev in events.values() if ev.get("origin") != DECISION_ORIGIN]
     chosen = PLAYER
-    if not referenced and events:
+    if not referenced and narrated:
         present: dict[str, int] = {}
-        for ev in events.values():
+        for ev in narrated:
             for pid in set(ev["participants"]):
                 if (entities.get(pid) or {}).get("kind") == "character":
                     present[pid] = present.get(pid, 0) + 1
@@ -1090,7 +1154,7 @@ def life_centre(index: dict[str, Any]) -> dict[str, Any]:
         # majority, but ordering the scan anyway keeps a rebuild byte-identical
         # regardless of dict insertion order (the Phase 0 determinism bar).
         for count, eid in sorted(((n, i) for i, n in present.items()), reverse=True):
-            if count > len(events) * CENTRE_EVENT_SHARE:
+            if count > len(narrated) * CENTRE_EVENT_SHARE:
                 chosen = eid
             break
 
@@ -1098,6 +1162,99 @@ def life_centre(index: dict[str, Any]) -> dict[str, Any]:
     # build_index seeds the implicit player's name with its own id; that is a
     # placeholder, not a thing to show a player.
     return {"id": chosen, "name": "" if name == PLAYER else name}
+
+
+def people_cards(
+    index: dict[str, Any],
+    *,
+    turn: int,
+    action: str = "",
+    limit: int = MAX_PEOPLE,
+) -> list[dict[str, Any]]:
+    """Short cards on the people this month is about, for the narrator.
+
+    The graph already records how each person stands with the protagonist, but
+    nothing handed that standing back: on an 84-turn life, a survivor in 25
+    events carried one relation, set at turn 55. A card names the person, their
+    current standing toward the protagonist (and the protagonist's toward them),
+    and when they were last seen, so the narrator can let them remember.
+
+    Picked deterministically: characters the player's action names first, then
+    those in the last two turns' events, most recently seen first. One slot is
+    kept for an OFFSTAGE person — unseen for :data:`DORMANT_AFTER_TURNS` turns
+    but still standing in a relation with the protagonist — so the world off the
+    page has a face too. Derived from the index only; nothing is written.
+    Narrator-side like :func:`recall_candidates`, so hidden appearances count.
+    """
+    entities = index["entities"]
+    centre = life_centre(index)["id"]
+    selves = {PLAYER, centre}
+
+    last_seen: dict[str, tuple[int, str]] = {}
+    for cid, ev in index["events"].items():
+        for pid in ev["participants"]:
+            seen = last_seen.get(pid)
+            if seen is None or ev["turn"] >= seen[0]:
+                last_seen[pid] = (ev["turn"], cid)
+
+    stances: dict[str, list[dict[str, Any]]] = {}
+    weight: dict[str, int] = {}
+    for slot in project_relations(index).values():
+        if not slot["active"]:
+            continue
+        ends = (slot["from"], slot["to"])
+        other = [e for e in ends if e not in selves]
+        if len(other) != 1 or not any(e in selves for e in ends):
+            continue
+        stances.setdefault(other[0], []).append(
+            {
+                "from": slot["from"],
+                "type": slot["type"],
+                "to": slot["to"],
+                "value": slot["value"],
+                "level": slot["level"],
+            }
+        )
+        weight[other[0]] = weight.get(other[0], 0) + len(slot["changes"])
+
+    action_lower = action.lower()
+
+    def named(eid: str) -> bool:
+        ent = entities[eid]
+        names = [ent["name"], *ent["aliases"]]
+        return bool(action_lower) and any(n and n.lower() in action_lower for n in names)
+
+    people = [
+        eid for eid, ent in entities.items() if ent.get("kind") == "character" and eid not in selves
+    ]
+    present = [eid for eid in people if named(eid) or (last_seen.get(eid, (-1, ""))[0] >= turn - 2)]
+    present.sort(key=lambda e: (not named(e), -last_seen.get(e, (-1, ""))[0], e))
+
+    away = [
+        eid
+        for eid in people
+        if eid not in present
+        and eid in stances
+        and eid in last_seen
+        and turn - last_seen[eid][0] >= DORMANT_AFTER_TURNS
+    ]
+    away.sort(key=lambda e: (-weight.get(e, 0), last_seen[e][0], e))
+
+    def card(eid: str) -> dict[str, Any]:
+        ent = entities[eid]
+        row: dict[str, Any] = {"id": eid, "name": ent["name"]}
+        if ent["summary"]:
+            row["summary"] = ent["summary"]
+        if eid in last_seen:
+            row["lastSeen"], row["lastEvent"] = last_seen[eid]
+        row["stance"] = stances.get(eid, [])
+        return row
+
+    room = max(0, limit - (1 if away else 0))
+    cards = [card(eid) for eid in present[:room]]
+    if away and limit > 0:
+        cards.append(dict(card(away[0]), offstage=True))
+    return cards
 
 
 def star_payload(

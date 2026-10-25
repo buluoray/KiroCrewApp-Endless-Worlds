@@ -34,6 +34,22 @@ class OpeningError(ValueError):
         self.expected = expected
 
 
+#: The person a life is told in, picked by the player at birth: "you", "I", or
+#: the character's own name. Fixed for the whole life (a reserved state key).
+VOICES = ("second", "first", "third")
+
+#: The voice of a life whose player did not pick one, and of every life born
+#: before voices existed — "you", the voice the play page already speaks in.
+DEFAULT_VOICE = "second"
+
+
+def voice_of(state: dict[str, Any]) -> str:
+    """The voice this life is told in. Stable: the same answer on every read,
+    including for a life created before the player could pick one."""
+    voice = state.get("voice")
+    return voice if voice in VOICES else DEFAULT_VOICE
+
+
 #: What an unanswered group becomes. Stored rather than omitted so the narrator
 #: can tell "the player left this to me" from "this world never asks it".
 WORLD_DECIDES = None
@@ -63,6 +79,7 @@ def build_initial_state(
     *,
     style: str = "",
     role: str = "",
+    voice: str = "",
     rng: random.Random | None = None,
 ) -> dict[str, Any]:
     """Validate the player's answers and produce the state a run starts from.
@@ -77,6 +94,11 @@ def build_initial_state(
         raise OpeningError("answers", "an object keyed by opening group")
 
     known = {g.id: g for g in template.opening}
+
+    # The player's own pick, so an unknown value is refused rather than quietly
+    # replaced: the default stands only for "I did not pick".
+    if voice and voice not in VOICES:
+        raise OpeningError("voice", "one of " + ", ".join(VOICES))
 
     role_id = ""
     granted_extra: dict[str, Any] = {}
@@ -124,6 +146,7 @@ def build_initial_state(
         "style": _resolve_style(template, style),
         "language": template.language,
         "opening": resolved,
+        "voice": voice or DEFAULT_VOICE,
         # The run exists before its first turn does, so a failed opening turn
         # leaves something to retry rather than a half-created life (R2.9).
         "status": "awaiting-opening",

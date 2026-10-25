@@ -6,6 +6,15 @@ import { t } from './strings'
 
 const PER_PAGE = 4
 
+/** The person a life is told in, picked once at birth (`VOICES` in opening.py).
+ *  Second person is preselected: the voice the play page already speaks in. */
+const VOICES: { id: string; label: string }[] = [
+  { id: 'second', label: 'opening.voice.second' },
+  { id: 'first', label: 'opening.voice.first' },
+  { id: 'third', label: 'opening.voice.third' },
+]
+const DEFAULT_VOICE = 'second'
+
 /** Sentinel for "I want to type my own", never a real option value. */
 const CUSTOM = '\u0000custom'
 
@@ -22,6 +31,7 @@ interface Draft {
   answers?: Record<string, string>
   customs?: Record<string, string>
   style?: string
+  voice?: string
   role?: string
   page?: number
   run?: string | null
@@ -151,6 +161,9 @@ export function OpeningScreen({
   const [style, setStyle] = useState<string>(
     draft.style ?? (styleRows.find((s) => s.default) ?? styleRows[0])?.id ?? '',
   )
+  const [voice, setVoice] = useState<string>(
+    VOICES.some((v) => v.id === draft.voice) ? (draft.voice as string) : DEFAULT_VOICE,
+  )
   const [role, setRole] = useState<string>(draft.role ?? '')
   const [page, setPage] = useState(draft.page ?? 0)
   const [busy, setBusy] = useState<'' | 'creating'>('')
@@ -173,12 +186,12 @@ export function OpeningScreen({
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ answers, customs, style, role, page, run, savedAt: Date.now() }),
+        JSON.stringify({ answers, customs, style, voice, role, page, run, savedAt: Date.now() }),
       )
     } catch {
       /* private mode: a draft is a convenience, not the life */
     }
-  }, [draftKey, answers, customs, style, role, page, run])
+  }, [draftKey, answers, customs, style, voice, role, page, run])
 
   const clearDraft = () => {
     try {
@@ -194,6 +207,7 @@ export function OpeningScreen({
     setAnswers({})
     setCustoms({})
     setStyle(defaultStyle)
+    setVoice(DEFAULT_VOICE)
     setRole('')
     setPage(0)
     setRestored(false)
@@ -262,6 +276,7 @@ export function OpeningScreen({
       const created = await api.createRun({
         worldId: world.worldId,
         style,
+        voice,
         answers: payload(),
         language: world.language,
         role: role || undefined,
@@ -374,6 +389,26 @@ export function OpeningScreen({
         </div>
       ) : null}
 
+      {last ? (
+        <div className="ew-group">
+          <div className="ew-glabel">{t('opening.voiceLabel')}</div>
+          <div className="ew-ghint">{t('opening.voiceHint')}</div>
+          <div className="ew-chips">
+            {VOICES.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className={`ew-opt${voice === v.id ? ' ew-opt-on' : ''}`}
+                aria-pressed={voice === v.id}
+                onClick={() => setVoice(v.id)}
+              >
+                {t(v.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {failed && !run ? <div className="ew-note">{failed}</div> : null}
 
       {/* The whole of this life's opening on one screen before it is committed —
@@ -403,6 +438,12 @@ export function OpeningScreen({
             <span className="ew-summary-label">{t('opening.styleLabel')}</span>
             <span className="ew-summary-value">
               {styleRows.find((s) => s.id === style)?.label ?? style}
+            </span>
+          </div>
+          <div className="ew-summary-row">
+            <span className="ew-summary-label">{t('opening.voiceLabel')}</span>
+            <span className="ew-summary-value">
+              {t(VOICES.find((v) => v.id === voice)?.label ?? 'opening.voice.second')}
             </span>
           </div>
         </div>

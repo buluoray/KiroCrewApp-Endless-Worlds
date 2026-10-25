@@ -37,6 +37,16 @@ argument.
   `test_full_runtime_read_delivers_memory_density_without_rewriting_history`, and
   `test_readings_leave_story_and_declarations_untouched`.
 
+- **Every runtime read names the life's voice and its rule.** The player picks the
+  voice at birth (see [character-creation](character-creation.md)); `_read_runtime`
+  returns `voice` (from `opening.voice_of`, so a life born before the pick reads
+  the stable default) and `voiceRule`, the `voice.<voice>` line of the world's
+  content table, on full AND delta reads. Live lives drifted between "you", "I"
+  and "he" within three turns, and a delta read is exactly the read a long
+  conversation makes, so the voice cannot ride only on full reads. The narrator
+  cannot change it: `voice` is a reserved state key. Pinned by
+  `test_story_memory.test_every_read_carries_the_voice_and_its_own_rule`.
+
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
   This is the R26 control: the narrator must not read or write the player's memory,

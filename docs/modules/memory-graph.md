@@ -176,6 +176,44 @@ meaning half (keepsakes, story cards, star lenses) is in
   and their directly involved entities, never the whole graph, and silently omits
   unknown ids (`test_read_runtime_serves_a_bounded_neighbourhood_by_id`).
 
+- **A fateful pick is a decision event the app mints; the narrator never writes
+  it.** When a committed turn's action is exactly a label on the page just before
+  it, `mcp_server._picked_choice` records `picked: {id, label, fateful}` on the
+  chronicle line — an app-observed fact, not prose. For a fateful pick
+  `build_index` (via `_decision_event`) derives `event-<turn>-decision`
+  (`DECISION_KEY`): `major`, `known`, no participants, `origin: "choice"`. It goes
+  through the ordinary recall path: once dormant it is a `recall_candidates` row
+  (carrying `origin`, held on a delta read like any candidate), an `echoes` of it
+  is an echo marker, and the star payload shows it. Saved lives showed why: on an
+  84-turn life only 10 of 32 fateful picks were ever answered again. A narrator
+  event keyed `decision` is suffixed by `sanitize_memory`, so both survive.
+  Decision events are excluded from `life_centre`'s denominator and name no
+  participant, so they never move the centre. Free text and an older page's
+  labels record no pick. Pinned by
+  `test_story_memory.test_a_fateful_pick_is_recorded_and_becomes_a_decision_event`,
+  `test_free_text_records_no_pick_and_a_plain_pick_no_event`,
+  `test_only_the_page_just_before_counts`,
+  `test_a_dormant_decision_comes_back_through_recall`,
+  `test_a_narrator_key_named_decision_steps_aside`,
+  `test_a_retried_pick_mints_one_event_and_rebuilds_byte_stable`, and
+  `test_decision_events_do_not_move_the_life_centre`.
+
+- **People cards: how each person stands with the protagonist, derived, never
+  written.** `people_cards(index, *, turn, action)` returns at most `MAX_PEOPLE`
+  cards (`id`, `name`, `summary?`, `lastSeen`, `lastEvent`, `stance`) for the
+  characters the player's action names, then those in the last two turns'
+  events, plus one `offstage` card for a character unseen for
+  `DORMANT_AFTER_TURNS` who still stands in an active relation with the centre.
+  `stance` is the `project_relations` reading between that person and `player` or
+  the life centre, both directions. `_read_runtime` sends them as `people`; each
+  card's recall-sent mark includes a digest of its body, so an unchanged card is
+  named as `held` on a delta read and a card whose standing moved is sent again in
+  full. Pinned by
+  `test_story_memory.test_a_named_person_carries_their_standing_and_when_they_were_last_seen`,
+  `test_one_offstage_person_is_someone_still_tied_to_the_protagonist`,
+  `test_the_cards_are_capped_with_the_offstage_slot_kept`, and
+  `test_an_unchanged_card_is_held_and_a_changed_one_is_sent_again`.
+
 ## Disclosure is enforced server-side
 
 `star_payload(index, keepsakes=None)` admits only `known` events, so a
