@@ -48,12 +48,26 @@ SPARSE_GAP_TURNS = 5
 #: world's own pacing.
 PROSE_LENGTHS: tuple[str, ...] = ("", "short", "long")
 
-#: How much model time a page's art may spend. ``standard`` keeps the full
-#: pipeline (two illustrator attempts, a preview review pass); ``fast`` caps it at
-#: ONE attempt and tells the illustrator to publish its first competent draft —
-#: the review pass ran ~3 minutes against ~60s of prose on measured pages, and a
-#: player who wants the story over the gallery can trade polish for pace.
-ART_QUALITIES: tuple[str, ...] = ("standard", "fast")
+#: How much model time a page's art may spend. ``standard`` (the default) ships
+#: the illustrator's first competent draft: the preview is still read, but only to
+#: catch a structurally broken render. ``polished`` adds ONE revision pass for a
+#: player who wants polish and accepts the wait. Measured in a pod on the same 8
+#: briefs (n=8 each): with the revision pass, median 141 s and 5 of 8 pages over
+#: 120 s; without it, median 62 s, max 105 s, quality judged equal page by page.
+ART_QUALITIES: tuple[str, ...] = ("standard", "polished")
+
+#: Values an older build wrote, read as what they now mean. ``fast`` was the
+#: opt-in "first draft ships" mode — which is today's ``standard``.
+_LEGACY_ART_QUALITIES: dict[str, str] = {"fast": "standard"}
+
+
+def _clean_art_quality(raw: Any) -> str:
+    if raw in ART_QUALITIES:
+        return str(raw)
+    if isinstance(raw, str) and raw in _LEGACY_ART_QUALITIES:
+        return _LEGACY_ART_QUALITIES[raw]
+    return "standard"
+
 
 _DEFAULT: dict[str, Any] = {
     "model": "",
@@ -127,9 +141,7 @@ def read_settings(data_dir: Path) -> dict[str, Any]:
         "proseLength": (length if isinstance(length, str) and length in PROSE_LENGTHS else ""),
         # Motion stays ON until the player turns it off, mirroring backdrops.
         "reducedMotion": raw.get("reducedMotion") is True,
-        "artQuality": (
-            raw.get("artQuality") if raw.get("artQuality") in ART_QUALITIES else "standard"
-        ),
+        "artQuality": _clean_art_quality(raw.get("artQuality")),
     }
 
 
@@ -168,7 +180,7 @@ def write_settings(
         "choiceEffects": bool(choice_effects),
         "proseLength": prose_length if prose_length in PROSE_LENGTHS else "",
         "reducedMotion": bool(reduced_motion),
-        "artQuality": art_quality if art_quality in ART_QUALITIES else "standard",
+        "artQuality": _clean_art_quality(art_quality),
     }
     data_dir.mkdir(parents=True, exist_ok=True)
     tmp = _path(data_dir).with_suffix(".json.tmp")

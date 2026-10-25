@@ -3456,26 +3456,39 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
             "buttons": args.get("buttons") or "",
         },
     )
-    # The player's art-quality tier decides what the review pass owes: standard
-    # keeps the lane's full review contract; fast turns it into a structural
-    # sanity glance so the first competent draft ships.
-    fast = read_settings(_DATA)["artQuality"] == "fast"
     return {
         "backdrop": "drafted",
         "draftId": draft["draftId"],
         "turn": turn,
         "previews": draft["previews"],
-        "next": (
-            (
-                "fast art mode: glance at the previews only to confirm nothing is "
-                "structurally broken (blank frame, unreadable composition), then "
-                "commit THIS draft with endless_commit_backdrop — do not spend a "
-                "revision pass."
-            )
-            if fast
-            else "read every preview together, then follow the lane's review-pass contract"
-        ),
+        "next": _draft_next(read_settings(_DATA)["artQuality"]),
     }
+
+
+def _draft_next(art_quality: str) -> str:
+    """What the draft answer tells the illustrator to do with its previews.
+
+    The player's art-quality tier decides what the review pass owes. ``standard``
+    (the default) is a structural sanity glance so the first competent draft
+    ships: measured, the polish revision cost ~40 s a page for no visible gain.
+    ``polished`` keeps the lane's full review contract with its one revision.
+    """
+    commit = (
+        "commit with endless_commit_backdrop passing only runId, turn and THIS "
+        "draftId — never the markup."
+    )
+    if art_quality == "polished":
+        return (
+            "polished art mode: read every preview together and follow the lane's "
+            "review-pass contract (at most one revision, as a new draft, reviewed "
+            "before you commit its draftId); then " + commit
+        )
+    return (
+        "standard art mode: read the previews together only to confirm nothing is "
+        "structurally broken (blank frame, clipped subject, unreadable composition). "
+        "Do not spend a revision pass on polish — only a broken render earns one "
+        "corrected draft. Then " + commit
+    )
 
 
 def _require_commit_brief(run_id: str, turn: int, draft: dict[str, Any]) -> str:

@@ -297,7 +297,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             }}
           >
             <option value="standard">{t('settings.artQuality.standard')}</option>
-            <option value="fast">{t('settings.artQuality.fast')}</option>
+            <option value="polished">{t('settings.artQuality.polished')}</option>
           </select>
         </label>
       </div>

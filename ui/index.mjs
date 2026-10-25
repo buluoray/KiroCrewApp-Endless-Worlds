@@ -282,8 +282,8 @@ var TABLES$1 = {
 		"settings.choiceEffects": "选项特效",
 		"settings.choiceEffects.hint": "微光、余烬等命运时刻的动效",
 		"settings.artQuality": "出图速度",
-		"settings.artQuality.standard": "标准（画师复查一轮）",
-		"settings.artQuality.fast": "快（一稿即发，省时省费）",
+		"settings.artQuality.standard": "标准（一稿即发）",
+		"settings.artQuality.polished": "精修（画师多改一轮，更慢）",
 		"settings.reducedMotion": "减少动效",
 		"settings.reducedMotion.hint": "静止呈现所有背景与徽章，立即生效",
 		"delete.cancel": "不删了",
@@ -712,8 +712,8 @@ var TABLES$1 = {
 		"settings.choiceEffects": "Choice effects",
 		"settings.choiceEffects.hint": "Shimmer, embers and other fateful motion",
 		"settings.artQuality": "Art speed",
-		"settings.artQuality.standard": "Standard (one review pass)",
-		"settings.artQuality.fast": "Fast (first draft ships)",
+		"settings.artQuality.standard": "Standard (first draft ships)",
+		"settings.artQuality.polished": "Polished (one revision pass, slower)",
 		"settings.reducedMotion": "Reduce motion",
 		"settings.reducedMotion.hint": "Backdrops and emblems render still, effective immediately",
 		"delete.cancel": "Keep it",
@@ -8589,8 +8589,8 @@ function SettingsPanel({ onClose }) {
 								value: "standard",
 								children: t("settings.artQuality.standard")
 							}), /* @__PURE__ */ jsx("option", {
-								value: "fast",
-								children: t("settings.artQuality.fast")
+								value: "polished",
+								children: t("settings.artQuality.polished")
 							})]
 						})]
 					})

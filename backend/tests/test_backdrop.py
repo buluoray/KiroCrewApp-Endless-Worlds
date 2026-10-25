@@ -347,6 +347,25 @@ def test_a_draft_recorded_without_its_source_still_needs_the_markup(data):
     assert out["ok"] is True
 
 
+def test_the_draft_answer_skips_the_revision_by_default_and_keeps_it_when_polished(data):
+    """The draft tool's `next` is the illustrator's last word on the review pass.
+    With no saved settings (the default tier) it forbids a polish revision; the
+    polished tier hands back the lane's revision contract."""
+    from settings import write_settings
+
+    default = _submit_draft(data, "7" * 32, 1, _svg("#111"), _svg("#112"))
+    assert "standard art mode" in default["next"]
+    assert "Do not spend a revision pass on polish" in default["next"]
+
+    write_settings(data, model="", reasoning_effort="", art_quality="polished")
+    polished = _submit_draft(data, "6" * 32, 1, _svg("#111"), _svg("#112"))
+    assert "polished art mode" in polished["next"]
+    assert "at most one revision" in polished["next"]
+    assert "Do not spend a revision pass" not in polished["next"]
+    for answer in (default, polished):
+        assert "never the markup" in answer["next"]
+
+
 def test_the_draft_source_never_reaches_the_submit_answer(data):
     """The stored source is private to the draft record: the model already has its
     own markup, and echoing it back would cost the very tokens this saves."""
