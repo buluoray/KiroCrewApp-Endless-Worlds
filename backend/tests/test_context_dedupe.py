@@ -604,3 +604,16 @@ def test_a_cut_recall_body_is_not_recorded_as_held(app):
             assert row["id"] not in delivered, "a body never sent must be sent next time"
     for eid in out["recentTrimmed"].get("memoryCandidates") or []:
         assert eid not in delivered
+
+
+def test_lore_bodies_go_before_the_newest_month(app):
+    out = _measured_read()
+    out.pop("memoryCandidates")
+    out.pop("people")
+    out["lore"] = [{"id": f"lore-{i}", "name": f"L{i}", "text": "l" * 1_500} for i in range(4)]
+    srv._fit_read(out, [{"turn": 9, "prose": "x"}, {"turn": 10, "prose": "p" * 6_200}])
+    assert srv._result_chars(out) <= srv.READ_CEILING
+    assert out["recentTrimmed"]["lore"], "the lowest-ranked lore bodies are cut"
+    assert out["lore"][-1] == {"id": "lore-3", "name": "L3", "trimmed": True}
+    assert "newest" not in out["recentTrimmed"], "the newest month outranks lore"
+    assert out["recentTurns"][-1]["prose"] == "p" * 6_200

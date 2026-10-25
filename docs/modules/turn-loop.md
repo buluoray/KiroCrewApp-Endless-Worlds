@@ -252,6 +252,7 @@ turn 200 as at turn 1.
   `test_a_long_lifes_whole_read_fits_under_the_ceiling`,
   `test_an_include_prose_read_drops_the_book_before_anything_else`,
   `test_a_cut_recall_body_is_not_recorded_as_held`,
+  `test_lore_bodies_go_before_the_newest_month`,
   `test_the_newest_months_keep_their_whole_prose`,
   `test_a_re_read_month_leaves_out_the_choice_art`,
   `test_trimming_drops_the_oldest_summaries_first_and_says_so`,
