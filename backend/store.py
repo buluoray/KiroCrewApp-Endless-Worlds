@@ -322,6 +322,26 @@ class RunStore:
             return 0, []
         return turn, [str(p) for p in paths]
 
+    def committed_at(self, run_id: str, turn: int) -> float | None:
+        """When ``turn`` was committed, or ``None`` when that is not known.
+
+        Read from the provenance record every commit writes, and trusted only when
+        it names ``turn``: an older record (a commit whose provenance write failed,
+        a life from before the record) would date the gap from the wrong month.
+        Unknown answers ``None`` so a caller keyed on idleness does nothing.
+        """
+        _check_run_id(run_id)
+        raw = self._kv.get(self._provenance_key(run_id))
+        if not isinstance(raw, dict):
+            return None
+        try:
+            if int(raw.get("turn") or 0) != int(turn):
+                return None
+            at = float(raw.get("at") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        return at or None
+
     def baseline_for(self, run_id: str, fingerprint: str) -> dict[str, Any] | None:
         """The state that ``fingerprint`` names, if this store still holds it.
 

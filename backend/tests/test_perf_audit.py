@@ -103,3 +103,21 @@ def test_nothing_on_disk_is_an_empty_report_not_a_crash(tmp_path):
     assert summary["runs"] == 0
     assert summary["story"]["storyMs"]["median"] is None
     assert perf_audit.render(summary)
+
+
+def test_turns_are_grouped_by_how_their_conversation_began(tmp_path):
+    run = tmp_path / "data" / "runs" / "r1"
+    run.mkdir(parents=True)
+    rows = [
+        {"turn": 4, "step": "rotation", "reason": "idle", "at": 1.0},
+        {"turn": 4, "step": "commit", "at": 2.0, "storyMs": 60000, "declaredBytes": 900},
+        {"turn": 4, "step": "context", "usedTokens": 40000},
+        {"turn": 5, "step": "commit", "at": 3.0, "storyMs": 50000, "declaredBytes": 800},
+        {"turn": 5, "step": "context", "usedTokens": 52000},
+    ]
+    (run / "perf.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    summary = perf_audit.summarise(perf_audit.collect(tmp_path / "data", tmp_path / "none"))
+    conv = summary["conversation"]
+    assert conv["fresh:idle"]["usedTokens"]["median"] == 40000
+    assert conv["continued"]["usedTokens"]["median"] == 52000
+    assert "fresh:idle" in perf_audit.render(summary)

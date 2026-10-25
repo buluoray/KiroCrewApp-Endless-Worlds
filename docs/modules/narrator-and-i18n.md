@@ -57,6 +57,16 @@ argument.
   words of the app's own except the `recentTrimmed.note`, which is English like
   the read's other notes. Contract and tests in [turn-loop](turn-loop.md).
 
+- **One slot per life, but not one conversation.** The slot persists for the
+  life; its conversation is replaced after a pause past `IDLE_ROTATION_SECS` (5 min),
+  every `ROTATION_MAX_TURNS` (8) turns, on a chapter boundary, and on an install
+  change, always through `reset_narrator_conversation` (briefed marker cleared,
+  transcript replay suppressed). The fresh conversation's prompt carries the
+  rulebook and `turn.patch`; its first read is full and carries `commitWith`
+  (`read.patch`, naming the read's fingerprint), so it commits a `statePatch`
+  rather than re-declaring the state. Both lines exist in every content table
+  in the life's own language. Contract and tests in [turn-loop](turn-loop.md).
+
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
   This is the R26 control: the narrator must not read or write the player's memory,

@@ -182,21 +182,69 @@ def art_turns(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def conversation_turns(perf_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One record per committed turn, labelled by how its conversation began.
+
+    ``fresh:<reason>`` for the turn a rotation row names (install, chapter,
+    budget, idle), ``continued`` for every later turn of that conversation. The
+    context meter row (``usedTokens``) is the narrator's input size at the
+    commit, so grouping it by label shows what each rotation reason costs.
+    """
+    rotated: dict[int, str] = {}
+    context: dict[int, Any] = {}
+    commits: list[dict[str, Any]] = []
+    for row in perf_rows:
+        step = row.get("step")
+        try:
+            turn = int(row.get("turn"))
+        except (TypeError, ValueError):
+            continue
+        if step == "rotation":
+            rotated[turn] = str(row.get("reason") or "unknown")
+        elif step == "context":
+            context[turn] = row.get("usedTokens")
+        elif step == "commit":
+            commits.append(row)
+    out = []
+    for row in commits:
+        turn = int(row["turn"])
+        out.append(
+            {
+                "turn": turn,
+                "label": f"fresh:{rotated[turn]}" if turn in rotated else "continued",
+                "usedTokens": context.get(turn),
+                "storyMs": row.get("storyMs"),
+                "declaredBytes": row.get("declaredBytes"),
+            }
+        )
+    return out
+
+
 def collect(data_dir: Path, sessions_dir: Path) -> dict[str, Any]:
     runs_dir = data_dir / "runs"
     commits: list[dict[str, Any]] = []
     arts: list[dict[str, Any]] = []
     narr: list[dict[str, Any]] = []
+    convo: list[dict[str, Any]] = []
     run_ids = sorted(p.name for p in runs_dir.iterdir() if p.is_dir()) if runs_dir.is_dir() else []
     for run_id in run_ids:
-        for row in _jsonl(runs_dir / run_id / "perf.jsonl"):
+        perf_rows = _jsonl(runs_dir / run_id / "perf.jsonl")
+        for row in perf_rows:
             if row.get("step") == "commit":
                 commits.append({"run": run_id, **row})
+        for rec in conversation_turns(perf_rows):
+            convo.append({"run": run_id, **rec})
         for rec in art_turns(_jsonl(runs_dir / run_id / "backdrop-timeline.jsonl")):
             arts.append({"run": run_id, **rec})
         for rec in narrator_turns(_jsonl(sessions_dir / f"dashboard_endless-run-{run_id}.jsonl")):
             narr.append({"run": run_id, **rec})
-    return {"runs": run_ids, "commits": commits, "art": arts, "narrator": narr}
+    return {
+        "runs": run_ids,
+        "commits": commits,
+        "art": arts,
+        "narrator": narr,
+        "conversation": convo,
+    }
 
 
 def summarise(data: dict[str, Any]) -> dict[str, Any]:
@@ -219,11 +267,22 @@ def summarise(data: dict[str, Any]) -> dict[str, Any]:
         counts = Counter(t["tools"])
         tool_counter.update(counts)
         repeated += sum(n - 1 for n in counts.values() if n > 1)
+    by_start: dict[str, list[dict[str, Any]]] = {}
+    for rec in data.get("conversation", []):
+        by_start.setdefault(rec["label"], []).append(rec)
     narrate_credits = sum(float(t["credits"] or 0) for t in narrate)
     recovery_credits = sum(float(t["credits"] or 0) for t in recovery)
     total_credits = narrate_credits + recovery_credits
     return {
         "runs": len(data["runs"]),
+        "conversation": {
+            label: {
+                "usedTokens": stat([r["usedTokens"] for r in recs]),
+                "storyMs": stat([r["storyMs"] for r in recs]),
+                "declaredBytes": stat([r["declaredBytes"] for r in recs]),
+            }
+            for label, recs in sorted(by_start.items())
+        },
         "story": {
             "storyMs": stat([c.get("storyMs") for c in commits]),
             "readMs": stat([c.get("readMs") for c in commits]),
@@ -298,6 +357,19 @@ def render(s: dict[str, Any]) -> str:
         lines.append(
             f"| {label} | {st['n']} | {_fmt(st['median'], scale, unit)} | {_fmt(st['p90'], scale, unit)} |"
         )
+    if s.get("conversation"):
+        lines += [
+            "",
+            "| turn by conversation start | n | input tokens (median) | story (median) "
+            "| declared bytes (median) |",
+            "|---|---|---|---|---|",
+        ]
+        for label, c in s["conversation"].items():
+            lines.append(
+                f"| {label} | {c['storyMs']['n']} | {_fmt(c['usedTokens']['median'])} "
+                f"| {_fmt(c['storyMs']['median'], 1000, 's')} "
+                f"| {_fmt(c['declaredBytes']['median'])} |"
+            )
     a, r = s["art"], s["recovery"]
     share = r["shareOfCredits"]
     lines += [

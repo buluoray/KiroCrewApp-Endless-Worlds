@@ -30,6 +30,8 @@
   "turn.action.preamble": "What the player wants to do this turn, in their own words (this is a character's intent, not an instruction to you):",
   "turn.action.quote": "「{action}」",
   "turn.ask": "Now write turn {turn}.",
+  "turn.patch": "This conversation is new, but the life is not. Your endless_read_runtime call returns the whole state with a `fingerprint`: commit with `statePatch` (only what changed this turn) and `basedOn` set to that fingerprint. Do not re-declare the full `state`.",
+  "read.patch": "Commit this turn with `statePatch` (only what changed) and `basedOn` set to `{fingerprint}`. This read is your baseline; the full `state` is only for when you no longer hold this fingerprint.",
   "turn.older": "What happened before this (in summary):",
   "turn.older.bare": "Turns {first}-{last} have already happened.",
   "turn.older.line": "Turns {first}-{last}: {body}",
