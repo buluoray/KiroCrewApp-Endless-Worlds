@@ -215,12 +215,27 @@ def test_the_phone_wheel_draws_no_bookmark():
 
 def test_the_mark_at_the_wheels_end_goes_back_to_the_live_page():
     bar = _phone_bar()
-    at = bar.index('className="ew-wheel-latest"')
-    btn = bar[at : bar.index("</button>", at)]
-    assert "aria-label={t('play.latestTurn')}" in btn, "named for a screen reader"
-    assert "disabled={isLive}" in btn
-    assert "onClick={() => setViewTurn(null)}" in btn, "Latest is the LIVE page"
+    at = bar.index("<WheelLatest")
+    use = bar[at : bar.index("</WheelLatest>", at)]
+    assert "onLatest={() => setViewTurn(null)}" in use, "Latest is the LIVE page"
+    assert "store={scrub}" in use, "follows the swipe, not only the landed page"
     assert bar.index("</PageWheel>") < at, "at the wheel's end"
+    w = _src()
+    mark = w[w.index("export function WheelLatest(") :]
+    btn = mark[mark.index('className="ew-wheel-latest"') : mark.index("</button>")]
+    assert "const atLatest = (preview ?? shown) >= latest" in mark
+    assert "aria-label={t('play.latestTurn')}" in btn, "named for a screen reader"
+    assert "disabled={atLatest}" in btn
+    assert "aria-hidden={atLatest ? true : undefined}" in btn, "hidden from a screen reader"
+    assert "tabIndex={atLatest ? -1 : undefined}" in btn, "out of the tab order"
+
+
+def test_the_spent_latest_mark_is_hidden_but_keeps_its_slot():
+    """On the live page the mark hides without moving the wheel or the back link."""
+    css = styles()
+    rule = re.search(r"\.ew-wheel-latest:disabled \{([^}]*)\}", css)
+    assert rule and "visibility: hidden" in rule.group(1)
+    assert "display: none" not in rule.group(1)
 
 
 def test_a_tap_on_the_centre_number_opens_the_type_a_number_picker():

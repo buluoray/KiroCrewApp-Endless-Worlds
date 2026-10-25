@@ -1,5 +1,8 @@
 /** The phone's top row lines up: the back link, the wheel's centre number and the
  * `>|` latest mark share one vertical centre.
+ * On the latest page the mark is hidden (not drawn, not focusable, aria-hidden) in
+ * its own slot; one step back (mid-flip, then landed) it is shown and focusable, and
+ * the link, the centre number and the mark's slot have not moved by more than 1px.
  * Run against a seeded disposable pod, never a player's live home.
  * EW_POD_URL + EW_POD_SESSION (Playwright storageState) are required; EW_SHOT_DIR,
  * when set, receives one top-row screenshot per width, theme and page.
@@ -183,71 +186,171 @@ for (const width of WIDTHS) {
               String(pages),
             );
             await page.waitForTimeout(1200);
-            await page
-              .locator(".ew-topbar")
-              .evaluate((e) => e.scrollIntoView({ block: "start" }));
-            await page.waitForTimeout(300);
-            const bar = await page.locator(".ew-topbar").boundingBox();
-            const clip = {
-              x: 0,
-              y: Math.max(0, bar.y),
-              width,
-              height: Math.ceil(bar.height),
-            };
-            const rel = (b) => ({
-              x: b.x,
-              y: b.y - clip.y,
-              width: b.width,
-              height: b.height,
-            });
-            // The centre number's own 44px slot, not its turned neighbours.
-            const centre = page.locator(".ew-wheel-c");
-            assert.equal(await centre.innerText(), String(pages));
-            const regions = {
-              link: rel(
-                await page.locator(".ew-topbar .ew-back").boundingBox(),
-              ),
-              centre: rel(await centre.boundingBox()),
-              latest: rel(await page.locator(".ew-wheel-latest").boundingBox()),
-            };
-            // The row stays compact: one 44px line.
-            const row = await page.locator(".ew-wheel-bar").boundingBox();
-            assert.equal(
-              Math.round(row.height),
-              44,
-              "the wheel row is one 44px line",
-            );
-            const png = await page.screenshot({ clip });
-            if (shots) {
-              const where = `${shots}/row-${width}-${theme}-${pages}.png`;
-              // From the top, so the dashboard's own header shows which theme this is.
-              await page.screenshot({
-                path: where,
-                clip: {
-                  x: 0,
-                  y: 0,
-                  width,
-                  height: Math.min(700, clip.y + clip.height + 80),
-                },
-              });
-            }
             const blank = await context.newPage();
-            const ink = await inkCentres(blank, png, 2, regions);
-            for (const [k, v] of Object.entries(ink))
-              assert.ok(v, `${k} has ink at ${width}px ${theme} page ${pages}`);
-            const mids = Object.values(ink).map((v) => v.mid);
-            const spread = Math.max(...mids) - Math.min(...mids);
-            const said = Object.entries(ink)
-              .map(([k, v]) => `${k}=${v.mid.toFixed(1)}`)
-              .join(" ");
-            if (process.env.EW_ALIGN_VERBOSE)
-              console.log(
-                `${width} ${theme} p${pages}: ${said} spread=${spread.toFixed(1)}`,
+            const mark = page.locator(".ew-wheel-latest");
+            // What a reader and a screen reader get from the `>|` mark.
+            const markState = () =>
+              mark.evaluate((e) => {
+                e.focus();
+                return {
+                  visibility: getComputedStyle(e).visibility,
+                  ariaHidden: e.getAttribute("aria-hidden"),
+                  tabIndex: e.tabIndex,
+                  focused: document.activeElement === e,
+                };
+              });
+            // One pass over the row: the boxes, the ink, and a screenshot.
+            const measure = async (shown, label) => {
+              await page
+                .locator(".ew-topbar")
+                .evaluate((e) => e.scrollIntoView({ block: "start" }));
+              await page.waitForTimeout(300);
+              const bar = await page.locator(".ew-topbar").boundingBox();
+              const clip = {
+                x: 0,
+                y: Math.max(0, bar.y),
+                width,
+                height: Math.ceil(bar.height),
+              };
+              const rel = (b) => ({
+                x: b.x,
+                y: b.y - clip.y,
+                width: b.width,
+                height: b.height,
+              });
+              // The centre number's own 44px slot, not its turned neighbours.
+              const centre = page.locator(".ew-wheel-c");
+              assert.equal(await centre.innerText(), String(shown));
+              const boxes = {
+                link: rel(
+                  await page.locator(".ew-topbar .ew-back").boundingBox(),
+                ),
+                centre: rel(await centre.boundingBox()),
+                // Read off the DOM: it holds its slot even while hidden.
+                latest: rel(
+                  await mark.evaluate((e) => {
+                    const r = e.getBoundingClientRect();
+                    return { x: r.x, y: r.y, width: r.width, height: r.height };
+                  }),
+                ),
+              };
+              // The row stays compact: one 44px line.
+              const row = await page.locator(".ew-wheel-bar").boundingBox();
+              assert.equal(
+                Math.round(row.height),
+                44,
+                "the wheel row is one 44px line",
               );
-            assert.ok(
-              spread <= TOLERANCE_PX,
-              `ink centres differ by ${spread.toFixed(1)}px (${said}) at ${width}px ${theme} page ${pages}`,
+              const png = await page.screenshot({ clip });
+              if (shots) {
+                const where = `${shots}/row-${width}-${theme}-${pages}-${label}.png`;
+                // From the top, so the dashboard's own header shows which theme this is.
+                await page.screenshot({
+                  path: where,
+                  clip: {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height: Math.min(700, clip.y + clip.height + 80),
+                  },
+                });
+              }
+              const ink = await inkCentres(blank, png, 2, boxes);
+              return { boxes, ink };
+            };
+            const where = `${width}px ${theme} page ${pages}`;
+            // The latest page: the mark is spent, so it is hidden in its own slot.
+            const atLatest = await markState();
+            assert.equal(
+              atLatest.visibility,
+              "hidden",
+              `mark hidden, ${where}`,
             );
+            assert.equal(
+              atLatest.ariaHidden,
+              "true",
+              `mark aria-hidden, ${where}`,
+            );
+            assert.equal(atLatest.tabIndex, -1, `mark not tabbable, ${where}`);
+            assert.equal(
+              atLatest.focused,
+              false,
+              `mark not focusable, ${where}`,
+            );
+            const newest = await measure(pages, "latest");
+            assert.equal(newest.ink.latest, null, `no mark drawn, ${where}`);
+            // Mid-flip: the mark is back as soon as the wheel leaves the latest
+            // page, two frames in, well before the settle loads a page.
+            const midFlip = await page
+              .locator('.ew-topbar .ew-wheel-track[role="slider"]')
+              .evaluate(async (track) => {
+                track.dispatchEvent(
+                  new KeyboardEvent("keydown", {
+                    key: "ArrowLeft",
+                    bubbles: true,
+                  }),
+                );
+                await new Promise((r) =>
+                  requestAnimationFrame(() => requestAnimationFrame(r)),
+                );
+                const m = document.querySelector(".ew-wheel-latest");
+                return {
+                  visibility: getComputedStyle(m).visibility,
+                  valuenow: track.getAttribute("aria-valuenow"),
+                };
+              });
+            assert.equal(midFlip.valuenow, String(pages - 1));
+            assert.equal(
+              midFlip.visibility,
+              "visible",
+              `mark back mid-flip, ${where}`,
+            );
+            // An older page, landed: visible, focusable, named.
+            await page.waitForFunction(
+              (n) =>
+                document.querySelector(".ew-wheel-c")?.textContent?.trim() ===
+                String(n),
+              pages - 1,
+            );
+            await page.waitForTimeout(800);
+            const atOlder = await markState();
+            assert.equal(atOlder.visibility, "visible", `mark shown, ${where}`);
+            assert.equal(atOlder.ariaHidden, null, `mark announced, ${where}`);
+            assert.equal(atOlder.focused, true, `mark focusable, ${where}`);
+            await page
+              .locator("body")
+              .evaluate(() => document.activeElement?.blur());
+            const older = await measure(pages - 1, "older");
+            // Appearing moves nothing: the link and the centre number keep their place.
+            for (const k of ["link", "centre", "latest"])
+              for (const d of ["x", "y", "width", "height"])
+                assert.ok(
+                  Math.abs(newest.boxes[k][d] - older.boxes[k][d]) <= 1,
+                  `${k}.${d} moved ${newest.boxes[k][d]} -> ${older.boxes[k][d]}, ${where}`,
+                );
+            for (const [label, { ink }] of [
+              [
+                "latest",
+                { ink: { link: newest.ink.link, centre: newest.ink.centre } },
+              ],
+              ["older", older],
+            ]) {
+              for (const [k, v] of Object.entries(ink))
+                assert.ok(v, `${k} has ink at ${where} (${label})`);
+              const mids = Object.values(ink).map((v) => v.mid);
+              const spread = Math.max(...mids) - Math.min(...mids);
+              const said = Object.entries(ink)
+                .map(([k, v]) => `${k}=${v.mid.toFixed(1)}`)
+                .join(" ");
+              if (process.env.EW_ALIGN_VERBOSE)
+                console.log(
+                  `${where} ${label}: ${said} spread=${spread.toFixed(1)}`,
+                );
+              assert.ok(
+                spread <= TOLERANCE_PX,
+                `ink centres differ by ${spread.toFixed(1)}px (${said}) at ${where} (${label})`,
+              );
+            }
             await context.close();
           }
         }

@@ -41,7 +41,7 @@ import { PanelBox, Prose, Waiting } from './ui'
 import { StoryPage } from './story-page'
 import { PagePicker } from './page-picker'
 import { HoldArrow, PageScrubber } from './page-scrubber'
-import { PageWheel, usePhoneLayout } from './page-wheel'
+import { PageWheel, usePhoneLayout, WheelLatest } from './page-wheel'
 import { createScrubStore } from './scrub-store'
 import { buildTabs, tabIcon } from './tabbar'
 
@@ -1044,17 +1044,16 @@ export function PlayPage({
               overWheel
             />
           </PageWheel>
-          {/* Latest is the LIVE page (null), as on the wide pager. */}
-          <button
-            className="ew-wheel-latest"
-            type="button"
-            disabled={isLive}
-            aria-label={t('play.latestTurn')}
-            title={t('play.latestTurn')}
-            onClick={() => setViewTurn(null)}
+          {/* Latest is the LIVE page (null), as on the wide pager. Hidden, in
+              its own slot, while the wheel rests on (or flips at) the latest page. */}
+          <WheelLatest
+            shown={shownTurn}
+            latest={latest}
+            store={scrub}
+            onLatest={() => setViewTurn(null)}
           >
             <Chevron dir="last" />
-          </button>
+          </WheelLatest>
         </>
       ) : null}
       {/* Lit only once the reader has hidden the entry recap: on a long life
