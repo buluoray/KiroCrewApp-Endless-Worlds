@@ -299,6 +299,21 @@ export default function EndlessWorlds() {
     void load()
   }, [load])
 
+  /** Re-read only the run list, for the rail beside an open life: the play page
+   *  calls this when its row's facts move. A failed read keeps the rows it has. */
+  const runsSeq = useRef(0)
+  const refreshRuns = useCallback(() => {
+    const seq = ++runsSeq.current
+    api
+      .runs()
+      .then((d) => {
+        // Only the newest read lands: an older list arriving late would put the
+        // row back to the state it just left.
+        if (seq === runsSeq.current) setRuns(d.runs)
+      })
+      .catch(() => {})
+  }, [])
+
   // A world draft being compiled converges on the server; poll the shelf while any
   // is in flight so a returning player watches it finish (main.tsx has no other
   // interval — mirrors play.tsx's generating poll).
@@ -722,6 +737,7 @@ export default function EndlessWorlds() {
         onStarClose={() => setTab('reading')}
         onSheetOpen={setSheetOpen}
         onLiveTurn={setLiveTurn}
+        onRowState={refreshRuns}
         narrow={narrowLive}
         readerBar={narrowLive && !hideBody}
         onPanels={setPanels}

@@ -1930,6 +1930,10 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 .ew-action-label { display: block; margin-top: 16px; font-size: 14px; }
+/* The shared .ew-hint pulls itself up 10px for the call sites it was tuned for;
+   under the first page it follows the prose, so that pull laid it over the last
+   line of the story. */
+.ew-hint.ew-first-turn-hint { margin-top: 12px; }
 .ew-action-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
 /* A scroll-hidden bar must return as soon as a keyboard user reaches it. */
 .ew-topbar-hidden:focus-within { transform: none; opacity: 1; pointer-events: auto; }

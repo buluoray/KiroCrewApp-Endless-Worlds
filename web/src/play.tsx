@@ -217,6 +217,7 @@ export function PlayPage({
   onStarClose,
   onSheetOpen,
   onLiveTurn,
+  onRowState,
   narrow,
   onPanels,
   turnPending = false,
@@ -252,6 +253,9 @@ export function PlayPage({
   /** Report the live turn upward so the bottom bar can dot 书页 on a new month
    *  while the player is reading a system tab. */
   onLiveTurn?: (turn: number) => void
+  /** Report a change in what this life's shelf row shows (turn, unborn, ended,
+   *  being written) so the rail beside the story can re-read its run list. */
+  onRowState?: (sig: string) => void
   /** Narrow viewport: the phone bottom bar owns the system panels (grouped into
    *  region tabs), so the in-column drawer and star button are suppressed here. */
   narrow?: boolean
@@ -330,6 +334,8 @@ export function PlayPage({
   // A recap belongs to entering a life, not to every poll or newly written turn.
   // The ref distinguishes the first load of this run from subsequent refreshes.
   const loadedRun = useRef<string | null>(null)
+  /** The turn the recap was opened for; a newer month closes it. */
+  const recapTurn = useRef(0)
   const [recapOpen, setRecapOpen] = useState(false)
   // The same scroll signal the phone tab bar rides, so the two move together —
   // including the 70px pin, without which the bar flickers on small swipes near
@@ -409,8 +415,16 @@ export function PlayPage({
       // one dropped request during generation leaves the error page up for good,
       // since the render checks `error` first. (M0.5)
       setError(null)
+      if (loadedRun.current === runId && next.turn > recapTurn.current) {
+        // A page written while the reader is here is not "where this life left
+        // off": the recap would now summarise the month they just watched arrive,
+        // and push that very page down below it.
+        recapTurn.current = next.turn
+        setRecapOpen(false)
+      }
       if (loadedRun.current !== runId) {
         loadedRun.current = runId
+        recapTurn.current = next.turn
         const recap = next.recap
         // choices are no longer shown here (they duplicate the bottom choice list),
         // so they no longer justify opening the recap on their own.
@@ -553,6 +567,17 @@ export function PlayPage({
   useEffect(() => {
     if (v && v.turn) onLiveTurn?.(v.turn)
   }, [v?.turn, onLiveTurn])
+
+  // The rail's row for THIS life reads the shelf's run list, which is fetched once
+  // when the shelf loads. Without this the row kept saying "not begun" through the
+  // birth and "Turn 1" while the reader was on page 4. Report only the facts the
+  // row shows, so the list is re-read when one of them moves and not on every poll.
+  const rowSig = v
+    ? `${v.turn}|${v.awaitingOpening ? 1 : 0}|${v.ended ? 1 : 0}|${v.generating ? 1 : 0}`
+    : ''
+  useEffect(() => {
+    if (rowSig) onRowState?.(rowSig)
+  }, [rowSig, onRowState])
 
   // Report panels upward so the phone bar can build region tabs from them —
   // content-keyed for the same reason as the scenes report above.
@@ -1029,7 +1054,7 @@ export function PlayPage({
       ) : null}
 
       {isLive && v.turn === 1 && !busy ? (
-        <p className="ew-hint">{t('play.firstTurnHint')}</p>
+        <p className="ew-hint ew-first-turn-hint">{t('play.firstTurnHint')}</p>
       ) : null}
 
       {isLive && (v.choices ?? []).length ? (
