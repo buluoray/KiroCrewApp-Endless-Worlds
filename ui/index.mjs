@@ -444,6 +444,11 @@ var TABLES$1 = {
 		"opening.silent": "这一世没能开始。",
 		"opening.styleHint": "会影响这个世界怎样对待你。",
 		"opening.styleLabel": "这一世怎么讲给你听",
+		"opening.voiceLabel": "用什么人称讲",
+		"opening.voiceHint": "这一世开始后就不再改变。",
+		"opening.voice.second": "你 ——「你在雨声里醒来」",
+		"opening.voice.first": "我 ——「我在雨声里醒来」",
+		"opening.voice.third": "名字 ——「她在雨声里醒来」",
 		"opening.summaryTitle": "这一世的样子",
 		"opening.summaryWorld": "交给世界决定",
 		"opening.waiting.0": "来处渐渐有了轮廓…",
@@ -855,6 +860,11 @@ var TABLES$1 = {
 		"opening.silent": "This life could not begin.",
 		"opening.styleHint": "This shapes how the world treats you.",
 		"opening.styleLabel": "How this life is told",
+		"opening.voiceLabel": "Who tells it",
+		"opening.voiceHint": "Fixed for the whole life once it begins.",
+		"opening.voice.second": "You — “you wake to rain”",
+		"opening.voice.first": "I — “I wake to rain”",
+		"opening.voice.third": "By name — “she wakes to rain”",
 		"opening.summaryTitle": "This life, before it begins",
 		"opening.summaryWorld": "left to the world",
 		"opening.waiting.0": "where you came from is taking shape…",
@@ -3077,6 +3087,23 @@ function PerfPage({ runId, name, onBack }) {
 //#endregion
 //#region src/opening.tsx
 var PER_PAGE = 4;
+/** The person a life is told in, picked once at birth (`VOICES` in opening.py).
+*  Second person is preselected: the voice the play page already speaks in. */
+var VOICES = [
+	{
+		id: "second",
+		label: "opening.voice.second"
+	},
+	{
+		id: "first",
+		label: "opening.voice.first"
+	},
+	{
+		id: "third",
+		label: "opening.voice.third"
+	}
+];
+var DEFAULT_VOICE = "second";
 /** Sentinel for "I want to type my own", never a real option value. */
 var CUSTOM = "\0custom";
 /** Where a half-finished opening is kept. Prefixed: this app shares the
@@ -3167,6 +3194,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 	const [answers, setAnswers] = useState(draft.answers ?? {});
 	const [customs, setCustoms] = useState(draft.customs ?? {});
 	const [style, setStyle] = useState(draft.style ?? (styleRows.find((s) => s.default) ?? styleRows[0])?.id ?? "");
+	const [voice, setVoice] = useState(VOICES.some((v) => v.id === draft.voice) ? draft.voice : DEFAULT_VOICE);
 	const [role, setRole] = useState(draft.role ?? "");
 	const [page, setPage] = useState(draft.page ?? 0);
 	const [busy, setBusy] = useState("");
@@ -3179,6 +3207,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 				answers,
 				customs,
 				style,
+				voice,
 				role,
 				page,
 				run,
@@ -3190,6 +3219,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 		answers,
 		customs,
 		style,
+		voice,
 		role,
 		page,
 		run
@@ -3205,6 +3235,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 		setAnswers({});
 		setCustoms({});
 		setStyle(defaultStyle);
+		setVoice(DEFAULT_VOICE);
 		setRole("");
 		setPage(0);
 		setRestored(false);
@@ -3261,6 +3292,7 @@ function OpeningScreen({ world, onBack, onLive }) {
 			const created = await api.createRun({
 				worldId: world.worldId,
 				style,
+				voice,
 				answers: payload(),
 				language: world.language,
 				role: role || void 0
@@ -3389,6 +3421,29 @@ function OpeningScreen({ world, onBack, onLive }) {
 				})
 			]
 		}) : null,
+		last ? /* @__PURE__ */ jsxs("div", {
+			className: "ew-group",
+			children: [
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-glabel",
+					children: t("opening.voiceLabel")
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-ghint",
+					children: t("opening.voiceHint")
+				}),
+				/* @__PURE__ */ jsx("div", {
+					className: "ew-chips",
+					children: VOICES.map((v) => /* @__PURE__ */ jsx("button", {
+						type: "button",
+						className: `ew-opt${voice === v.id ? " ew-opt-on" : ""}`,
+						"aria-pressed": voice === v.id,
+						onClick: () => setVoice(v.id),
+						children: t(v.label)
+					}, v.id))
+				})
+			]
+		}) : null,
 		failed && !run ? /* @__PURE__ */ jsx("div", {
 			className: "ew-note",
 			children: failed
@@ -3422,6 +3477,16 @@ function OpeningScreen({ world, onBack, onLive }) {
 					}), /* @__PURE__ */ jsx("span", {
 						className: "ew-summary-value",
 						children: styleRows.find((s) => s.id === style)?.label ?? style
+					})]
+				}),
+				/* @__PURE__ */ jsxs("div", {
+					className: "ew-summary-row",
+					children: [/* @__PURE__ */ jsx("span", {
+						className: "ew-summary-label",
+						children: t("opening.voiceLabel")
+					}), /* @__PURE__ */ jsx("span", {
+						className: "ew-summary-value",
+						children: t(VOICES.find((v) => v.id === voice)?.label ?? "opening.voice.second")
 					})]
 				})
 			]

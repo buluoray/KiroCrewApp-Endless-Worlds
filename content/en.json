@@ -49,5 +49,8 @@
   "shape.gains.field": "{field}",
   "shape.gains.tiered": "{field} (ranks: {tiers})",
   "restraint.growthQuiet": "No progress in {fields} has been recorded in the last {turns} turns. If the story did earn some, it only counts once declared as a gain; if it earned none, declaring nothing is right.",
-  "turn.close": "The player has chosen to close this life here. Write its last page: an epilogue that lets the life come to rest from where it now stands — what this person became, who remains beside them, what is left unfinished for whoever comes after. Do not invent a death, a rescue, or a sudden turn the story has not earned. Commit it with `ending: true` and no choices."
+  "turn.close": "The player has chosen to close this life here. Write its last page: an epilogue that lets the life come to rest from where it now stands — what this person became, who remains beside them, what is left unfinished for whoever comes after. Do not invent a death, a rescue, or a sudden turn the story has not earned. Commit it with `ending: true` and no choices.",
+  "voice.second": "The player chose, at birth, to have this life told in the second person: address the character as \"you\" in every turn's prose, never as \"I\" and never by name alone. Keep it for the whole life.",
+  "voice.first": "The player chose, at birth, to have this life told in the first person: the character tells it as \"I\" in every turn's prose, never \"you\" and never \"he\" or \"she\". Keep it for the whole life.",
+  "voice.third": "The player chose, at birth, to have this life told in the third person: name the character and say \"he\", \"she\" or \"they\" in every turn's prose, never \"you\" and never \"I\". Keep it for the whole life."
 }

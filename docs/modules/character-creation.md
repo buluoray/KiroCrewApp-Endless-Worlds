@@ -80,6 +80,22 @@ player's own choices.
   `test_opening.test_the_opening_prompt_names_the_run`, and
   `test_opening.test_the_opening_prompt_tells_the_narrator_not_to_name_the_settings`.
 
+- **The voice is the player's pick at birth, and it never changes.** The last
+  opening page offers who tells the life — second person ("you"), first person
+  ("I"), or third person (the character's name) — with second person preselected
+  and shown. `build_initial_state(voice=...)` stores it as the reserved state key
+  `voice` (`opening.VOICES`); blank means `DEFAULT_VOICE`, and an unknown value is
+  refused with `OpeningError(field="voice")` rather than replaced, since it is the
+  player's own input. "Live again" copies the source life's voice. Because `voice`
+  is in `mcp_server.RESERVED_STATE_KEYS`, every commit restores it from the prior
+  state, so a narrator that declares another voice changes nothing, and no route
+  edits it mid-life. A life born before the pick existed has no key and reads as
+  `opening.voice_of(state)` = `DEFAULT_VOICE` on every read. How the narrator
+  receives it is in [narrator-and-i18n](narrator-and-i18n.md). Pinned by
+  `test_story_memory.test_the_voice_is_the_players_pick_with_a_default`,
+  `test_the_voice_is_carried_forward_and_the_narrator_cannot_change_it`, and
+  `test_a_life_born_before_voices_reads_a_stable_default`.
+
 - **Style resolves to a real style and a new run always has a turn to retry.**
   `_resolve_style` falls back through the world default to the first style on an
   unknown or blank input; language defaults to the world's; a new run is

@@ -871,6 +871,9 @@ export const api = {
   createRun: (body: {
     worldId?: string
     style?: string
+    /** The person this life is told in: `second` | `first` | `third`. Fixed at
+     *  birth; the server refuses any other value. */
+    voice?: string
     answers?: Record<string, string>
     /** A chosen starting archetype (`WorldDetail.roles[].id`); presets the
      *  opening and seeds initial state from its grants, server-side. */

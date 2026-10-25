@@ -25,6 +25,7 @@ data dir would be one more absolute path to keep in sync.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -100,6 +101,7 @@ from chapters import (  # noqa: E402
     read_chapter,
 )
 from compile import CLEANING_CONTRACT, COMPILER_BRIEF, accept_compiled_header, preview  # noqa: E402
+from content import Content  # noqa: E402
 from drafts import DraftError, DraftStore  # noqa: E402
 from halo import (  # noqa: E402
     attribution,
@@ -108,6 +110,7 @@ from halo import (  # noqa: E402
     gate_digest,
     growth_quiet,
 )
+from opening import voice_of  # noqa: E402
 from perf import TurnPerf  # noqa: E402
 from phototrace import (  # noqa: E402
     TRACE_CANDIDATE_COUNT,
@@ -1316,6 +1319,8 @@ RESERVED_STATE_KEYS = (
     "role",
     "granted",
     "milestones",
+    # The player's pick at birth of the person the life is told in.
+    "voice",
 )
 
 #: State keys that MERGE forward at the sub-key level instead of replacing wholesale.
@@ -1470,6 +1475,31 @@ def _resolve_handoff(template: Any) -> dict[str, Any]:
     if roles:
         out["roles"] = roles
     return out
+
+
+def _picked_choice(action: str, earlier: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The previous page's choice the player's action IS, or ``None``.
+
+    The play page sends a pressed button's label verbatim as the action, so an
+    exact match (after trimming) is the pick; anything else is the player's own
+    words and records no pick. Measured on saved lives: 80 of 83 actions were a
+    label. Only the page just before this turn is consulted — an older page's
+    buttons were never on screen for this action.
+    """
+    said = action.strip()
+    if not said or not earlier:
+        return None
+    for choice in earlier[-1].get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        label = str(choice.get("label") or "").strip()
+        if label and label == said:
+            return {
+                "id": str(choice.get("id") or ""),
+                "label": label,
+                "fateful": choice.get("fateful") is True,
+            }
+    return None
 
 
 def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
@@ -1785,6 +1815,12 @@ def _advance_turn(args: dict[str, Any]) -> dict[str, Any]:
         "events": events,
         "gains": gains,
     }
+    picked = _picked_choice(action, _earlier)
+    if picked is not None:
+        # Which offered choice the player pressed, observed by the app itself — the
+        # action is the button's own label. A fateful pick becomes the decision
+        # event the memory graph recalls later (memory_graph._decision_event).
+        entry["picked"] = picked
     if memory is not None:
         # Same JSON record as the prose (design §6.2): the fact delta and the
         # story it narrates commit together or not at all, and every index over
@@ -2060,6 +2096,42 @@ def _read_runtime(args: dict[str, Any]) -> dict[str, Any]:
                         delivered.append(cid)
                 rows.append(row)
             out["memoryCandidates"] = rows
+    # The people this month is about: how each stands with the protagonist and
+    # when they were last seen, plus one offstage person still tied to them.
+    # A card's identity in the recall-sent record includes a digest of its body,
+    # so an UNCHANGED card is named as held, and one whose standing moved is sent
+    # again in full — the narrator never trusts a stale stance.
+    if graph["entities"]:
+        pending = store.read_pending(run_id) or {}
+        cards = memory_graph.people_cards(
+            graph,
+            turn=int(state.get("turn") or 0) + 1,
+            action=str(pending.get("action") or ""),
+        )
+        rows = []
+        for card in cards:
+            body = json.dumps(card, sort_keys=True, ensure_ascii=False)
+            mark = f"person:{card['id']}:{hashlib.sha1(body.encode('utf-8')).hexdigest()[:12]}"
+            if mark in held:
+                row = {"id": card["id"], "name": card["name"], "held": True}
+                if card.get("offstage"):
+                    row["offstage"] = True
+            else:
+                row = card
+                delivered.append(mark)
+            rows.append(row)
+        if rows:
+            out["people"] = rows
+    # The person this life is told in: the player's pick at birth, a reserved key
+    # the narrator cannot change. Sent on every read, delta included, because it
+    # is the one line that keeps a narrator from drifting between "you", "I" and
+    # "he" — a drift live lives showed within three turns. A life born before the
+    # pick existed reads the stable default.
+    voice = voice_of(state)
+    lang = state.get("language")
+    out["voice"] = voice
+    out["voiceRule"] = Content(lang if isinstance(lang, str) else "en")(f"voice.{voice}")
+
     wanted_events = args.get("memoryEvents") or []
     if wanted_events:
         out["memoryEvents"] = memory_graph.event_neighbourhood(
