@@ -33,11 +33,17 @@ for (const width of [1280, 375]) {
       })
       const page = await context.newPage()
       const api = '/api/apps/endless-worlds'
-      const rows = await (await context.request.get(url + api + '/runs')).json()
+      // Read through the page, not context.request: the gateway binds its session to
+      // the client address, and Node's own client can reach localhost over the other
+      // IP family, which the gateway refuses as an IP mismatch.
+      await page.goto(url + '/apps/endless-worlds', { waitUntil: 'load' })
+      const get = (path) =>
+        page.evaluate(async (u) => (await fetch(u, { credentials: 'include' })).json(), url + api + path)
+      const rows = await get('/runs')
       const life = rows.runs.find((r) => !r.ended && r.turn >= 2) ?? rows.runs[0]
       assert.ok(life, 'seed devtools fixtures into this pod first')
       const id = life.runId
-      const live = await (await context.request.get(url + api + '/runs/' + id)).json()
+      const live = await get('/runs/' + id)
       const view = { ...live, turn: PAGES, ended: false, generating: null }
       const turn = (n) => ({
         turn: n,
@@ -65,7 +71,6 @@ for (const width of [1280, 375]) {
         const turns = [top, top - 1, top - 2].filter((n) => n >= 1).map(turn)
         return r.fulfill({ json: { runId: id, turns, more: top > 3 } })
       })
-      await page.goto(url + '/apps/endless-worlds', { waitUntil: 'load' })
       await page.locator('button:visible').filter({ hasText: life.label }).first().click()
       const region = page.locator('.ew-play-root [role="region"]').first()
       await region.waitFor()
@@ -108,6 +113,20 @@ for (const width of [1280, 375]) {
         // Only the numbers on screen are drawn, not one per page.
         const drawn = await page.locator('.ew-wheel-n').count()
         assert.ok(drawn > 3 && drawn <= 14, `${drawn} numbers drawn for ${PAGES} pages`)
+        // No pager buttons on a phone: the wheel sits in their row, beside the back link.
+        assert.equal(await page.locator('.ew-pager, .ew-pager-hold, .ew-pager-arw').count(), 0, 'no pager buttons')
+        const back = page.locator('.ew-topbar .ew-back')
+        const bb = await back.boundingBox()
+        const wb = await page.locator('.ew-wheel').boundingBox()
+        assert.equal(Math.round(bb.y), Math.round(wb.y), 'the wheel shares the back link\'s row')
+        assert.equal(Math.round(bb.height), 44, 'the back link is one line')
+        assert.ok(await back.evaluate((e) => e.scrollWidth <= e.clientWidth), 'the back link is not clipped')
+        // No action line, and no card behind the numbers.
+        assert.equal(await page.locator('.ew-wheel-hint').count(), 0, 'no action line')
+        for (const sel of ['.ew-wheel', '.ew-wheel-track'])
+          assert.equal(await page.locator(sel).evaluate((e) => getComputedStyle(e).backgroundColor), 'rgba(0, 0, 0, 0)', sel)
+        // On the live page the way back to it is spent.
+        assert.equal(await page.locator('.ew-wheel-latest').isDisabled(), true)
         const cdp = await context.newCDPSession(page)
         const touch = (type, x) =>
           cdp.send('Input.dispatchTouchEvent', {
@@ -115,19 +134,18 @@ for (const width of [1280, 375]) {
             touchPoints: type === 'touchEnd' ? [] : [{ x, y }],
           })
         const cx = box.x + box.width / 2
-        // A slow drag right by ~5 items: the numbers follow the finger.
-        await touch('touchStart', cx - 110)
-        for (let i = 1; i <= 22; i++) await touch('touchMove', cx - 110 + i * 10)
+        // A slow drag right by ~4 items: the numbers follow the finger.
+        await touch('touchStart', cx - 90)
+        for (let i = 1; i <= 22; i++) await touch('touchMove', cx - 90 + i * 8)
         await page.waitForTimeout(150)
         const mid = await now()
-        assert.ok(mid >= PAGES - 6 && mid <= PAGES - 4, `the wheel follows the finger: ${mid}`)
+        assert.ok(mid >= PAGES - 5 && mid <= PAGES - 3, `the wheel follows the finger: ${mid}`)
         assert.equal(await barY(), scrollBefore, 'a finger on the wheel does not scroll the page')
         assert.equal(reads.length, 0, 'no page read while swiping')
-        assert.match(await page.locator('.ew-wheel-hint').innerText(), new RegExp(`Action of page ${mid}\\b`))
-        assert.match(await indicator.innerText(), new RegExp(`\\b${mid}\\b`), 'the indicator follows')
+        assert.match(await indicator.getAttribute('aria-label'), new RegExp(`\\b${mid}\\b`), 'the indicator follows')
         if (shots) await page.screenshot({ path: `${shots}/scrub-mid-drag-${width}.png`, clip: await shotClip() })
         // Then a flick: the drum coasts past where the finger left it, still no read.
-        for (let i = 1; i <= 4; i++) await touch('touchMove', cx + 110 + i * 30)
+        for (let i = 1; i <= 4; i++) await touch('touchMove', cx + 86 + i * 30)
         await touch('touchEnd', 0)
         await page.waitForTimeout(60)
         assert.equal(reads.length, 0, 'no page read while the wheel coasts')
@@ -162,6 +180,8 @@ for (const width of [1280, 375]) {
       assert.deepEqual(reads, [10], 'release reads exactly the one page landed on')
       assert.equal(await page.locator('.ew-scrub-tip').count(), 0, 'the label goes on release')
 
+      let held = 10
+      if (width >= 500) {
       // ── hold Next: keeps flipping, faster the longer, one read on release
       reads.length = 0
       const next = page.locator('.ew-pager-hold').nth(1)
@@ -177,7 +197,7 @@ for (const width of [1280, 375]) {
       assert.ok(later - early > early - 10, `faster later: 10 → ${early} → ${later}`)
       // A step can land between the last look and the release: read where it stopped.
       await page.locator('.ew-scrub-tip').waitFor({ state: 'detached' })
-      const held = await now()
+      held = await now()
       assert.ok(held >= later && held <= later + 1)
       await landed(held)
       assert.deepEqual(reads, [held], 'a hold reads only the final page')
@@ -187,6 +207,14 @@ for (const width of [1280, 375]) {
       await next.click()
       await landed(held + 1)
       assert.ok(reads.length <= 1)
+      } else {
+        // The phone has no arrows: one tap on the next number is one page.
+        reads.length = 0
+        const tb0 = await track.boundingBox()
+        await page.mouse.click(tb0.x + tb0.width / 2 + 44, tb0.y + tb0.height / 2)
+        await landed(held + 1)
+        assert.deepEqual(reads, [held + 1])
+      }
 
       // ── the wheel: one page per notch, read on settle
       const at = held + 1
@@ -219,10 +247,29 @@ for (const width of [1280, 375]) {
       assert.deepEqual(reads, [at + 13])
       assert.ok(await track.evaluate((e) => e === document.activeElement), 'focus stays on the slider')
       assert.match(await page.locator('.ew-sr-only[role="status"]').first().innerText(), new RegExp(String(at + 13)))
+      if (width < 500) {
+        // A tap on the centre number opens the type-a-number picker; a page typed
+        // there is read once; the mark at the wheel's end goes back to the live page.
+        const tc = await track.boundingBox()
+        await page.mouse.click(tc.x + tc.width / 2, tc.y + tc.height / 2)
+        const input = page.locator('.ew-pick-input')
+        await input.waitFor()
+        await input.fill('7')
+        await page.keyboard.press('Enter')
+        await landed(7)
+        assert.deepEqual(reads, [at + 13, 7])
+        const toLive = page.locator('.ew-wheel-latest')
+        assert.match(await toLive.getAttribute('aria-label'), /Latest|最新/)
+        await toLive.click()
+        await landed(PAGES)
+        assert.equal(await toLive.isDisabled(), true)
+        assert.deepEqual(reads, [at + 13, 7])
+      } else {
       // End is the LIVE page: the newest page, no read.
       await page.keyboard.press('End')
       await landed(PAGES)
       assert.deepEqual(reads, [at + 13])
+      }
       // The bar still fits, with the scrubber's row under it.
       assert.equal(await page.locator('.ew-topbar').evaluate((e) => e.scrollWidth <= e.clientWidth), true)
     } finally {

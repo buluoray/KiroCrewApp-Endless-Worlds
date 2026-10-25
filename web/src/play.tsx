@@ -421,6 +421,9 @@ export function PlayPage({
   // which way the book was leafed: the story draws one soft fold over that page.
   // State, not derived from the previous turn, so a later re-render cannot replay it.
   const [leaf, setLeaf] = useState<{ turn: number; dir: 'fwd' | 'back' } | null>(null)
+  // The phone's type-a-number picker, opened by a tap on the wheel's centre number.
+  // Held here because the wheel (the tap) and the picker (the panel) are siblings.
+  const [pickOpen, setPickOpen] = useState(false)
 
   const [chron, setChron] = useState<PastTurn[]>([])
   useEffect(() => {
@@ -801,7 +804,7 @@ export function PlayPage({
   if (error && !v) {
     return (
       <div>
-        <button className="ew-back" type="button" onClick={onBack}>
+        <button className="ew-back" type="button" aria-label={t('play.backLabel')} onClick={onBack}>
           {t('play.back')}
         </button>
         <div className="ew-meta">{t('world.unreadableDetail', { error })}</div>
@@ -833,7 +836,7 @@ export function PlayPage({
   if (v.awaitingOpening) {
     return (
       <div>
-        <button className="ew-back" type="button" onClick={onBack}>
+        <button className="ew-back" type="button" aria-label={t('play.backLabel')} onClick={onBack}>
           {t('play.back')}
         </button>
         <h3 className="ew-detail-title">{v.title}</h3>
@@ -925,7 +928,7 @@ export function PlayPage({
             }}
           />
         ) : null}
-        <button className="ew-back" type="button" onClick={onBack}>
+        <button className="ew-back" type="button" aria-label={t('play.backLabel')} onClick={onBack}>
           {t('play.back')}
         </button>
         <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
@@ -1001,31 +1004,80 @@ export function PlayPage({
     )
     goPage(n)
   }
-  // The scrubber: one position per page, a second row of the top bar — the book's
-  // fore-edge on a wide screen, the sideways page wheel on a phone. Only for a life
-  // with pages to flip between.
+  // The scrubber: a second row of the top bar on a wide screen, the book's fore-edge.
+  // Only for a life with pages to flip between.
   const scrubber =
-    latest >= 2 ? (
-      phone ? (
-        <PageWheel
-          runId={runId}
-          shown={shownTurn}
-          latest={latest}
-          store={scrub}
-          onCommit={leafTo}
-        />
-      ) : (
-        <PageScrubber
-          runId={runId}
-          shown={shownTurn}
-          latest={latest}
-          store={scrub}
-          onCommit={leafTo}
-        />
-      )
+    latest >= 2 && !phone ? (
+      <PageScrubber
+        runId={runId}
+        shown={shownTurn}
+        latest={latest}
+        store={scrub}
+        onCommit={leafTo}
+      />
     ) : null
+  // On a phone there are no pager buttons: the sideways page wheel sits in the top
+  // row beside the back link. A tap on its centre number (or Enter) opens the
+  // type-a-number picker; the mark at its end goes back to the live page.
+  const phoneBar = phone ? (
+    <div className="ew-wheel-bar" ref={pagerRef}>
+      {latest >= 2 ? (
+        <>
+          <PageWheel
+            shown={shownTurn}
+            latest={latest}
+            store={scrub}
+            onCommit={(n) => {
+              setPickOpen(false)
+              leafTo(n)
+            }}
+            onCentreTap={() => setPickOpen((o) => !o)}
+          >
+            <PagePicker
+              runId={runId}
+              shown={shownTurn}
+              latest={latest}
+              preview={scrub}
+              onJump={(n) => setViewTurn(n)}
+              open={pickOpen}
+              onOpenChange={setPickOpen}
+              overWheel
+            />
+          </PageWheel>
+          {/* Latest is the LIVE page (null), as on the wide pager. */}
+          <button
+            className="ew-wheel-latest"
+            type="button"
+            disabled={isLive}
+            aria-label={t('play.latestTurn')}
+            title={t('play.latestTurn')}
+            onClick={() => setViewTurn(null)}
+          >
+            <Chevron dir="last" />
+          </button>
+        </>
+      ) : null}
+      {/* Lit only once the reader has hidden the entry recap: on a long life
+            it is the one place that says where they came back in. Live page
+            only, where the recap renders. */}
+      {isLive && recapHidden && !recapOpen ? (
+        <button
+          ref={recapReopenRef}
+          className="ew-pager-recap"
+          type="button"
+          onClick={() => {
+            recapFocus.current = 'close'
+            setRecapOpen(true)
+            setRecapHidden(false)
+          }}
+        >
+          {t('play.recapReopen')}
+        </button>
+      ) : null}
+    </div>
+  ) : null
   const pager =
-    latest >= 1 ? (
+    latest >= 1 && !phone ? (
       <div className="ew-pager" ref={pagerRef}>
         <button
           className="ew-pager-arw ew-pager-end"
@@ -1609,26 +1661,23 @@ export function PlayPage({
           resolves against the shell, which spans the window, so the offset means what
           it says. */}
       {readerBar ? (
-        <div
-          className={
-            'ew-topbar-slot' +
-            (scrubber ? (phone ? ' ew-topbar-slot-wheel' : ' ew-topbar-slot-scrub') : '')
-          }
-        />
+        <div className={'ew-topbar-slot' + (scrubber ? ' ew-topbar-slot-scrub' : '')} />
       ) : null}
       <div
         className={
           'ew-topbar' +
           (scrubber ? ' ew-topbar-scrub' : '') +
+          (phoneBar ? ' ew-topbar-wheel' : '') +
           (readerBar ? ' ew-topbar-fixed' : '') +
           (readerBar && barHidden ? ' ew-topbar-hidden' : '')
         }
       >
-        <button className="ew-back" type="button" onClick={onBack}>
+        <button className="ew-back" type="button" aria-label={t('play.backLabel')} onClick={onBack}>
           {t('play.back')}
         </button>
         {pager}
         {scrubber}
+        {phoneBar}
       </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
