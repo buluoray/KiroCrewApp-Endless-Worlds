@@ -276,7 +276,8 @@ def _style_directive(style: str) -> str:
         f"\nSTYLE: {style} — before drawing, read {skill} with the read tool. "
         "It teaches the technique and parameter RANGES, not fixed values: after "
         "endless_submit_backdrop_draft, judge the painterly texture in the preview "
-        "PNGs and tune your filter numbers in your one revision.\n"
+        "PNGs and tune your filter numbers in your one revision (set_attrs on "
+        "the filter primitives' ids from the draft outline).\n"
     )
 
 
@@ -456,7 +457,9 @@ async def _recover_backdrop(
                 review_clause = (
                     (
                         "with EXACTLY this runId and turn, read every returned preview "
-                        "PNG together as images, revise at most once (as a new draft), "
+                        "PNG together as images, revise at most once (as element "
+                        "patches with endless_revise_backdrop_draft, never re-typing "
+                        "the SVGs), "
                         "and publish with endless_commit_backdrop passing only runId, "
                         "turn and the latest reviewed draftId — never the markup. "
                         "Polished art mode: the one revision pass is wanted. "
@@ -466,7 +469,8 @@ async def _recover_backdrop(
                         "with EXACTLY this runId and turn, read the returned preview "
                         "PNGs together only to confirm nothing is structurally broken "
                         "(blank frame, clipped subject, unreadable composition) — "
-                        "only a broken render earns a corrected second draft — and "
+                        "only a broken render earns one correction, made as element "
+                        "patches with endless_revise_backdrop_draft — and "
                         "publish with endless_commit_backdrop passing only runId, "
                         "turn and the latest draftId (never the markup). Standard art "
                         "mode: no revision pass for polish. "

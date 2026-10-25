@@ -138,6 +138,9 @@ from store import (  # noqa: E402
     brief_lane,
     rewrite_brief_style,
 )
+from svgpatch import MAX_OPS as _PATCH_MAX_OPS  # noqa: E402
+from svgpatch import OPS as _PATCH_OPS  # noqa: E402
+from svgpatch import annotate, apply_ops, outline, patch_bytes, strip_eids  # noqa: E402
 from systems import apply_systems, gain_fields  # noqa: E402
 from turn import _in_flight as turn_in_flight  # noqa: E402
 from turn import declaration_shape  # noqa: E402
@@ -640,8 +643,12 @@ _TOOLS: list[dict[str, Any]] = [
             "and returns their local paths plus an opaque `draftId`. This does NOT "
             "publish art or clear the waiting page. Read every returned PNG together "
             "with the built-in `read` tool in Image mode before making at most one "
-            "revision and calling endless_commit_backdrop. Pass the `briefId` from "
-            "your task exactly; a draft for a brief that was replaced is refused."
+            "revision and calling endless_commit_backdrop. The answer's `outline` "
+            "names each element of each SVG by a stable id (`d…` desktop, `m…` "
+            "mobile, `b…` buttons); a revision patches those ids with "
+            "endless_revise_backdrop_draft instead of re-sending the SVGs. Pass the "
+            "`briefId` from your task exactly; a draft for a brief that was replaced "
+            "is refused."
         ),
         "inputSchema": {
             "type": "object",
@@ -654,6 +661,52 @@ _TOOLS: list[dict[str, Any]] = [
                 "markup": {"type": "string", "maxLength": 24000},
                 "mobile": {"type": "string", "maxLength": 24000},
                 "buttons": {"type": "string", "maxLength": 8000},
+            },
+        },
+    },
+    {
+        "name": "endless_revise_backdrop_draft",
+        "description": (
+            "Revise a submitted backdrop draft by ELEMENT PATCHES instead of re-typing "
+            "its SVGs. Pass the `draftId` you reviewed and `ops`, applied in order to "
+            "the ids from that draft's `outline`: `replace` (id, markup: exactly one "
+            "element, which keeps the id), `insert_after` / `insert_before` (id, "
+            "markup: one or more elements), `remove` (id), `set_attrs` (id, attrs: "
+            "{name: value}, a null value removes the attribute). Ids start with `d` "
+            "(desktop), `m` (mobile) or `b` (buttons), so one call can patch both "
+            "frames. All or nothing: an unknown id or markup the SVG safety rules "
+            "refuse changes nothing. The server re-renders the previews and returns a "
+            "NEW draftId and outline; the draft you patched stays committable."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["runId", "turn", "draftId", "ops"],
+            "additionalProperties": False,
+            "properties": {
+                "runId": _RUN_ID,
+                "turn": {"type": "integer", "minimum": 0},
+                "briefId": {"type": "string", "maxLength": 64},
+                "draftId": {"type": "string", "minLength": 24, "maxLength": 24},
+                "ops": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": _PATCH_MAX_OPS,
+                    "items": {
+                        "type": "object",
+                        "required": ["op", "id"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "op": {"type": "string", "enum": list(_PATCH_OPS)},
+                            "id": {"type": "string", "maxLength": 8},
+                            "markup": {"type": "string", "maxLength": 24000},
+                            "attrs": {
+                                "type": "object",
+                                "description": "set_attrs only: attribute name -> "
+                                "string value, or null to remove it",
+                            },
+                        },
+                    },
+                },
             },
         },
     },
@@ -3442,26 +3495,105 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     _require_wanted_page(run_id, turn)
     _require_live_brief(run_id, turn, request, brief_id)
     _require_scene_underlay(run_id, turn, request)
-    markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
-    mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
-    draft = _backdrop_draft_store(run_id).submit(
-        markup,
-        mobile,
-        turn=turn,
-        buttons=args.get("buttons"),
-        brief_id=brief_id,
-        source={
+    # The stored source carries the server's element ids (``data-eid``) so a
+    # revision can patch by id; everything rendered or published is the source
+    # with those ids stripped, i.e. exactly the bytes the illustrator wrote.
+    source = annotate(
+        {
             "markup": args["markup"],
             "mobile": args["mobile"],
             "buttons": args.get("buttons") or "",
-        },
+        }
     )
+    draft = _store_backdrop_draft(run_id, turn, brief_id, source)
     return {
         "backdrop": "drafted",
         "draftId": draft["draftId"],
         "turn": turn,
         "previews": draft["previews"],
+        "outline": _draft_outline(source),
         "next": _draft_next(read_settings(_DATA)["artQuality"]),
+    }
+
+
+def _store_backdrop_draft(
+    run_id: str, turn: int, brief_id: str, source: dict[str, str], revision_of: str = ""
+) -> dict[str, Any]:
+    """Splice the underlay into a draft's stripped source, validate, render, store.
+
+    The one path both a first draft and a patch revision take, so a revision is
+    sanitized (``compile_backdrop`` inside ``submit``) on its MERGED result exactly
+    as a whole draft is.
+    """
+    markup = _apply_underlay(run_id, turn, strip_eids(source.get("markup", "")), "desktop")
+    mobile = _apply_underlay(run_id, turn, strip_eids(source.get("mobile", "")), "mobile")
+    buttons = strip_eids(source.get("buttons", "")) or None
+    return _backdrop_draft_store(run_id).submit(
+        markup,
+        mobile,
+        turn=turn,
+        buttons=buttons,
+        brief_id=brief_id,
+        source=source,
+        revision_of=revision_of,
+    )
+
+
+def _draft_outline(source: dict[str, str]) -> dict[str, str]:
+    """The element outline per SVG (desktop, mobile, buttons), never the markup."""
+    names = {"markup": "desktop", "mobile": "mobile", "buttons": "buttons"}
+    return {names[k]: outline(v) for k, v in source.items() if k in names and v}
+
+
+def _revise_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
+    """Apply element patches to a stored draft and store the result as a new version.
+
+    The same gates as a first draft (live brief, page still wanted, scene
+    underlay), then the ops are applied all-or-nothing to the patched draft's
+    source, and the merged SVGs go through the same underlay splice, full
+    sanitizer and preview render. A refused op or a merged result the sanitizer
+    refuses stores nothing; the draft that was patched stays as it was, and
+    stays committable after a successful revision too.
+    """
+    run_id = args["runId"]
+    turn = int(args["turn"])
+    request = _store().read_backdrop_request(run_id)
+    if not request or int(request.get("turn") or 0) != turn:
+        raise BackdropError("no backdrop is waiting for this run and turn")
+    brief_id = str(args.get("briefId") or "")
+    _require_wanted_page(run_id, turn)
+    _require_live_brief(run_id, turn, request, brief_id)
+    _require_scene_underlay(run_id, turn, request)
+    base_id = args["draftId"]
+    base = _backdrop_draft_store(run_id).require(base_id, turn)
+    source = base.get("source") if isinstance(base.get("source"), dict) else {}
+    if not source:
+        raise BackdropError(
+            "this draft predates element patches; submit the revision as a whole new "
+            "draft with endless_submit_backdrop_draft"
+        )
+    patched = apply_ops({k: str(v) for k, v in source.items()}, args["ops"], base_id)
+    draft = _store_backdrop_draft(
+        run_id, turn, brief_id or str(base.get("briefId") or ""), patched, revision_of=base_id
+    )
+    sent = patch_bytes(args["ops"])
+    whole = sum(len(strip_eids(v).encode("utf-8")) for v in patched.values())
+    return {
+        "backdrop": "revised",
+        "draftId": draft["draftId"],
+        "revisionOf": base_id,
+        "version": draft.get("version"),
+        "turn": turn,
+        "previews": draft["previews"],
+        "outline": _draft_outline(patched),
+        "patchBytes": sent,
+        "draftBytes": whole,
+        "next": (
+            "read every new preview together. Commit with endless_commit_backdrop "
+            "passing only runId, turn and the draftId you judge better: this "
+            f"revision's, or {base_id} if the revision made the page worse. Never "
+            "a third draft."
+        ),
     }
 
 
@@ -3477,17 +3609,22 @@ def _draft_next(art_quality: str) -> str:
         "commit with endless_commit_backdrop passing only runId, turn and THIS "
         "draftId — never the markup."
     )
+    patch = (
+        "make it as element patches with endless_revise_backdrop_draft (this "
+        "draftId plus ops on the ids in `outline`: replace, insert_after, "
+        "insert_before, remove, set_attrs) — never re-type the whole SVG"
+    )
     if art_quality == "polished":
         return (
             "polished art mode: read every preview together and follow the lane's "
-            "review-pass contract (at most one revision, as a new draft, reviewed "
-            "before you commit its draftId); then " + commit
+            "review-pass contract (at most one revision, reviewed before you commit "
+            "its draftId); " + patch + ". Then " + commit
         )
     return (
         "standard art mode: read the previews together only to confirm nothing is "
         "structurally broken (blank frame, clipped subject, unreadable composition). "
         "Do not spend a revision pass on polish — only a broken render earns one "
-        "corrected draft. Then " + commit
+        "correction; " + patch + ". Then " + commit
     )
 
 
@@ -3550,19 +3687,18 @@ def _reviewed_draft_markup(
                 "endless_submit_backdrop_draft, then commit the new draftId"
             )
         return sent["markup"], sent["mobile"], sent["buttons"]
+    # The stored source carries the server's element ids; what is published (and
+    # what an echoed markup is compared with) is the source without them.
+    clean = {k: strip_eids(str(source.get(k) or "")) for k in ("markup", "mobile", "buttons")}
     for key in ("markup", "mobile", "buttons"):
         given = sent[key]
-        if isinstance(given, str) and given.strip() and given != source.get(key, ""):
+        if isinstance(given, str) and given.strip() and given != clean[key]:
             raise BackdropError(
                 f"`{key}` differs from the reviewed draft; commit publishes the draft "
                 "by its draftId — pass only runId, turn and draftId, or submit the "
                 "change as a new draft and review it first"
             )
-    return (
-        str(source.get("markup") or ""),
-        str(source.get("mobile") or ""),
-        source.get("buttons") or None,
-    )
+    return clean["markup"], clean["mobile"], clean["buttons"] or None
 
 
 def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
@@ -3828,6 +3964,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "endless_trace_reference": _trace_reference,
     "endless_select_reference": _select_reference,
     "endless_submit_backdrop_draft": _submit_backdrop_draft,
+    "endless_revise_backdrop_draft": _revise_backdrop_draft,
     "endless_commit_backdrop": _commit_backdrop,
     "endless_commit_fallback_backdrop": _commit_fallback_backdrop,
     "endless_clear_backdrop": _clear_backdrop,
@@ -3903,6 +4040,7 @@ _BACKDROP_TIMED_TOOLS = frozenset(
         "endless_trace_reference",
         "endless_select_reference",
         "endless_submit_backdrop_draft",
+        "endless_revise_backdrop_draft",
         "endless_commit_backdrop",
         "endless_commit_fallback_backdrop",
     }

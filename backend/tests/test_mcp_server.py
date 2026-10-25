@@ -70,6 +70,7 @@ def test_the_surface_is_exactly_the_declared_tools():
         "endless_trace_reference",
         "endless_select_reference",
         "endless_submit_backdrop_draft",
+        "endless_revise_backdrop_draft",
         "endless_commit_backdrop",
         "endless_commit_fallback_backdrop",
         "endless_clear_backdrop",

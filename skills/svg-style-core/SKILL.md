@@ -87,7 +87,10 @@ Filter numbers in the style skills are RANGES, not constants. The loop is:
 3. Judge like a painter, not a validator: Is the texture visible but serving the
    scene? Are edges painterly without objects dissolving? Did any face/figure or
    load-bearing silhouette get destroyed by displacement?
-4. Tune within the ranges in your ONE revision — texture too weak: raise the
+4. Tune within the ranges in your ONE revision, made as element patches with
+   `endless_revise_backdrop_draft` (`set_attrs` on the filter primitives' ids from
+   the draft's `outline`, `replace` on a weak group) rather than a re-typed SVG —
+   texture too weak: raise the
    displacement scale or grain alpha; objects dissolving: lower scale, raise
    detail frequency; too dark/muddy: lighten the underlying fills, not the filter.
 5. Commit. Do not spend the revision on microscopic differences — one decisive

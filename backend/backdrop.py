@@ -503,14 +503,25 @@ def _render_svg_thumbnail(svg: str, target: Path, width: int, height: int) -> No
         tmp.unlink(missing_ok=True)
 
 
+#: How many versions of one page's draft are kept: the first draft and its patch
+#: revisions. Any kept version is committable; the oldest falls off first.
+MAX_DRAFT_VERSIONS = 4
+
+
+def _version_record(draft: dict[str, Any]) -> dict[str, Any]:
+    """One stored draft version without the nested history it may carry."""
+    return {k: v for k, v in draft.items() if k != "history"}
+
+
 class BackdropDraftStore:
     """One unpublished Illustrator draft and its safe raster thumbnails.
 
     Drafts live beside but never inside ``backdrop.json``. Runtime routes read only
     :class:`BackdropStore`, so a draft cannot leak into live play, chronicle history,
-    or shelf thumbnails. A reviewed revision or newer recovery attempt replaces the
-    stale draft. The opaque id binds the eventual final commit to the latest preview
-    the Illustrator was asked to inspect.
+    or shelf thumbnails. A newly submitted draft or newer recovery attempt replaces
+    every stale version; an element-patch revision adds a version beside the one it
+    patched (up to :data:`MAX_DRAFT_VERSIONS`). The opaque id binds the eventual
+    final commit to a preview the Illustrator was asked to inspect.
     """
 
     def __init__(self, data_dir: Path, run_id: str) -> None:
@@ -567,6 +578,7 @@ class BackdropDraftStore:
         buttons: str | None = None,
         brief_id: str = "",
         source: dict[str, str] | None = None,
+        revision_of: str = "",
     ) -> dict[str, Any]:
         """Validate all draft SVGs, then atomically expose only raster previews.
 
@@ -578,6 +590,11 @@ class BackdropDraftStore:
         publish exactly the reviewed draft by its id, sparing the model from
         re-typing SVGs the server already holds. It never leaves this file except
         through the commit, which validates it again.
+
+        A fresh draft replaces every earlier version. A ``revision_of`` draft (an
+        element-patch revision) is stored as a NEW version and keeps the versions
+        before it, so the illustrator can still commit the draft it patched when
+        the revision came out worse.
         """
         clean_markup = compile_backdrop(markup)
         clean_mobile = compile_backdrop(mobile)
@@ -600,7 +617,7 @@ class BackdropDraftStore:
                 _render_svg_thumbnail(svg, path, width, height)
                 created.append(path)
                 previews[label] = str(path.resolve())
-            draft = {"draftId": draft_id, "turn": int(turn), "previews": previews}
+            draft: dict[str, Any] = {"draftId": draft_id, "turn": int(turn), "previews": previews}
             if brief_id:
                 draft["briefId"] = str(brief_id)
             if source:
@@ -608,21 +625,48 @@ class BackdropDraftStore:
                     k: str(v) for k, v in source.items() if isinstance(v, str) and v.strip()
                 }
             old = self._load()
+            dropped: list[dict[str, Any]] = []
+            if revision_of:
+                base = self.require(revision_of, turn)
+                earlier = [
+                    _version_record(v)
+                    for v in self._versions(old)
+                    if v.get("draftId") != base.get("draftId")
+                ]
+                kept = earlier + [_version_record(base)]
+                dropped = kept[: max(0, len(kept) - MAX_DRAFT_VERSIONS + 1)]
+                draft["history"] = kept[len(dropped) :]
+                draft["version"] = int(base.get("version") or 1) + 1
+                draft["revisionOf"] = revision_of
+            else:
+                draft["version"] = 1
+                dropped = self._versions(old)
             self._save(draft)
-            self._remove_previews(old)
+            for gone in dropped:
+                self._remove_previews(gone)
             return draft
         except Exception:
             for path in created:
                 path.unlink(missing_ok=True)
             raise
 
+    @staticmethod
+    def _versions(draft: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Every stored version, oldest first, ending with the current draft."""
+        if not draft:
+            return []
+        history = draft.get("history")
+        older = [h for h in history if isinstance(h, dict)] if isinstance(history, list) else []
+        return older + [draft]
+
     def require(self, draft_id: str, turn: int) -> dict[str, Any]:
         draft = self._load()
         if not draft:
             raise BackdropError("submit and visually review a backdrop draft before publishing")
-        if draft.get("draftId") != draft_id or int(draft.get("turn") or 0) != int(turn):
-            raise BackdropError("this final backdrop does not match the current reviewed draft")
-        return draft
+        for version in self._versions(draft):
+            if version.get("draftId") == draft_id and int(version.get("turn") or 0) == int(turn):
+                return version
+        raise BackdropError("this final backdrop does not match the current reviewed draft")
 
     def has_draft(self, turn: int) -> bool:
         """Whether an unpublished draft for exactly ``turn`` is waiting.
@@ -636,8 +680,9 @@ class BackdropDraftStore:
         return int(draft.get("turn") or 0) == int(turn)
 
     def discard(self, draft_id: str, turn: int) -> None:
-        draft = self.require(draft_id, turn)
-        self._remove_previews(draft)
+        self.require(draft_id, turn)
+        for version in self._versions(self._load()):
+            self._remove_previews(version)
         self._path.unlink(missing_ok=True)
 
     def discard_from(self, turn: int) -> None:
@@ -649,7 +694,8 @@ class BackdropDraftStore:
         """
         draft = self._load()
         if draft is not None and int(draft.get("turn") or 0) >= int(turn):
-            self._remove_previews(draft)
+            for version in self._versions(draft):
+                self._remove_previews(version)
             self._path.unlink(missing_ok=True)
 
 
