@@ -471,6 +471,7 @@ async def advance_turn(
     backdrops_enabled: bool = True,
     on_poll: Callable[[], None] | None = None,
     close: bool = False,
+    on_art_forgotten: Callable[[], None] | None = None,
 ) -> TurnOutcome:
     """Ask for one turn and wait, briefly, for the narrator to commit it.
 
@@ -664,6 +665,10 @@ async def advance_turn(
     # about. A test asserts this ordering, because reversing the two lines leaves
     # every symptom intact and reintroduces the whole bug.
     forget_unpublished_art(store, run_id, wanted)
+    if on_art_forgotten is not None:
+        # The abandoned attempt's brief is gone: the caller stops the recovery
+        # that was serving it, so it dispatches no further illustrator for it.
+        on_art_forgotten()
     store.mark_pending(run_id, turn=wanted, slot=slot_key, action=action, close=close)
     asked_at = float((store.read_pending(run_id) or {}).get("askedAt") or 0.0)
 

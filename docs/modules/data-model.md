@@ -153,7 +153,10 @@ status, milestones)`, which `mcp_server._advance_turn` carries forward.
   `runs/<id>/` tree all go. Load-bearing
   because a leaked `pending-` makes `turn.generating` report a turn in flight for
   a life that no longer exists, and a leaked `briefed-` misreports rulebook
-  delivery for a reused id. Enforced by `store.delete_run`; pinned by
+  delivery for a reused id. The delete routes then cancel the life's backdrop
+  recovery task, and the art tools refuse a still-running illustrator's late
+  calls without writing, so nothing recreates the tree afterwards
+  (scenes-and-backdrop.md, early-illustrator rule 6). Enforced by `store.delete_run`; pinned by
   `test_store.test_delete_removes_state_index_row_and_chronicle` and
   `test_store.test_delete_leaves_no_kv_record_naming_the_life` (every per-life
   writer exercised once, then no `kv/` file may name the life), with the cascade

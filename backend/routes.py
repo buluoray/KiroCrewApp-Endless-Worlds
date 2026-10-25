@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -476,7 +477,8 @@ async def _recover_backdrop(
                     f"{_style_directive(str(request.get('style') or ''))}"
                     f"runId: {run_id}\nturn: {turn}\n"
                     f"briefId: {str(request.get('briefId') or '')}\n"
-                    "(pass this briefId to endless_submit_backdrop_draft)\n\nBrief:\n"
+                    "(pass this briefId to endless_trace_reference, "
+                    "endless_select_reference and endless_submit_backdrop_draft)\n\nBrief:\n"
                     f"{str(request.get('brief') or '')}"
                 )
                 try:
@@ -654,6 +656,36 @@ def _ensure_backdrop_recovery(
             _BACKDROP_RECOVERY_TASKS.pop(run_id, None)
 
     task.add_done_callback(_forget)
+
+
+def _stop_backdrop_recovery(run_id: str) -> None:
+    """Cancel this run's recovery task and forget it. Safe to call any number of times.
+
+    Called when the life is deleted, and when a new narrator attempt drops the art
+    its abandoned attempt left (``turn.advance_turn``'s ``on_art_forgotten``). After
+    either, the brief the task serves is gone, so no further illustrator may be
+    dispatched for it. The illustrator already running is NOT stopped: the app SDK
+    has no way to cancel a spawn, so it finishes its own turn, and the MCP tools
+    refuse what it sends after this point (``mcp_server._require_wanted_page``).
+    """
+    task = _BACKDROP_RECOVERY_TASKS.pop(run_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def _art_forgotten(store: RunStore, run_id: str) -> Callable[[], None]:
+    """The ``on_art_forgotten`` hook for ``advance_turn``.
+
+    ``forget_unpublished_art`` drops only a brief at or after the page being
+    retried. A brief for an EARLIER page (a committed page still waiting for its
+    art) survives it, and its recovery is still wanted, so the task is kept then.
+    """
+
+    def _hook() -> None:
+        if store.read_backdrop_request(run_id) is None:
+            _stop_backdrop_recovery(run_id)
+
+    return _hook
 
 
 #: Seeds ship in the install tree, one level up from backend/.
@@ -1134,6 +1166,8 @@ async def delete_world(request: web.Request, ctx: AppContext) -> web.Response:
         try:
             store.delete_run(str(life["runId"]))
             removed.append(str(life["runId"]))
+            # Nothing may paint for a life that no longer exists.
+            _stop_backdrop_recovery(str(life["runId"]))
             # Release the deleted life's narrator slot and delete its persisted
             # conversation so nothing lingers for a run that no longer exists.
             # Best-effort by design.
@@ -1432,6 +1466,10 @@ async def delete_life(request: web.Request, ctx: AppContext) -> web.Response:
             {"error": "this life could not be erased", "detail": str(exc)}, status=500
         )
 
+    # Nothing may paint for a life that no longer exists: no further illustrator is
+    # dispatched, and the one already running is refused by the art tools.
+    _stop_backdrop_recovery(run_id)
+
     # Release the narrator slot and delete its persisted conversation so a deleted
     # life leaves nothing behind — in memory or on disk.
     _app = getattr(request, "app", None)
@@ -1620,6 +1658,7 @@ async def advance_run_turn(request: web.Request, ctx: AppContext) -> web.Respons
         backdrops_enabled=bool(_cfg["backdrops"]),
         on_poll=lambda: _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg),
         close=close,
+        on_art_forgotten=_art_forgotten(store, run_id),
     )
 
     # The prose may be committed, but requested art is the other half of this page.
@@ -1881,6 +1920,7 @@ async def open_run(request: web.Request, ctx: AppContext) -> web.Response:
         reasoning_effort=_cfg["reasoningEffort"],
         budget_secs=OPENING_DEADLINE_SECS,
         on_poll=lambda: _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg),
+        on_art_forgotten=_art_forgotten(store, run_id),
     )
     if outcome.advanced:
         _ensure_backdrop_recovery(ctx, store, state_obj, run_id, _cfg)

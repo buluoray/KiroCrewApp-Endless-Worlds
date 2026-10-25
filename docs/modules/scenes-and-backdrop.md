@@ -590,6 +590,24 @@ sees is produced locally from a closed, code-owned vocabulary.
      turn, once an illustrator has started, is declined with `queued` and the first
      brief stands, rather than racing a second illustrator. A recovery re-brief
      (`fallbackAllowed`) still replaces it.
+  6. **Abandoning the page or deleting the life stops its art.** The recovery task
+     is cancelled and dropped from `_BACKDROP_RECOVERY_TASKS`
+     (`_stop_backdrop_recovery`, idempotent) when the life is deleted (both
+     `delete_life` and `delete_world`, after `delete_run` succeeds) and when a new
+     attempt's `forget_unpublished_art` drops the abandoned brief
+     (`advance_turn(on_art_forgotten=...)`). That hook keeps the task when a brief
+     for an earlier committed page survives the forget, since that page still
+     wants its art. So no further illustrator is dispatched. The illustrator
+     already running is NOT stopped: the app SDK has no way to cancel a spawn
+     (`SpawnSDK` offers `run` and `is_done` only), so it finishes its own turn.
+     What it sends after that is refused by `mcp_server._require_wanted_page` in
+     trace, select, draft, commit and the narrator fallback, on entry and again
+     before the first write (a trace spends seconds on the network): a deleted
+     life (no state and no brief, `_run_gone`), an abandoned page (uncommitted
+     and no live in-flight attempt, `_page_abandoned`), or a `briefId` that is not
+     the live brief's (trace and select now take it too). A refused call writes
+     nothing, not even its timeline line, so it never recreates the run directory
+     or a kv key.
 
   Art off and sparse-cadence declines record no request, so nothing starts early.
   Pinned by `test_a_brief_for_the_page_being_written_starts_its_illustrator_at_once`,
@@ -606,6 +624,20 @@ sees is produced locally from a closed, code-owned vocabulary.
   `test_art_for_an_abandoned_attempt_cannot_reach_the_retry`,
   `test_the_retry_does_not_inherit_the_abandoned_attempts_trace_or_draft`, and
   `test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_briefs_art`
+  (`test_backdrop.py`). Rule 6 is pinned by
+  `test_deleting_a_life_mid_art_stops_its_recovery_and_leaves_nothing`,
+  `test_a_retry_stops_the_abandoned_briefs_recovery`,
+  `test_a_retry_keeps_the_recovery_of_a_committed_page_still_waiting_for_art`
+  (`test_delete_world.py`),
+  `test_the_forget_hook_runs_once_after_the_old_brief_is_gone_and_before_dispatch`
+  (`test_turn.py`),
+  `test_a_late_commit_after_the_life_was_deleted_is_refused_and_recreates_nothing`,
+  `test_every_illustrator_tool_is_refused_for_a_deleted_life`,
+  `test_a_life_deleted_while_the_trace_searches_gets_nothing_written`,
+  `test_a_life_deleted_while_the_commit_composes_gets_no_art_written`,
+  `test_an_abandoned_pages_illustrator_can_draw_nothing_more`,
+  `test_a_stale_illustrator_cannot_trace_or_select_for_the_retrys_brief` and
+  `test_the_live_pages_illustrator_and_a_committed_pages_repair_are_still_served`
   (`test_backdrop.py`).
 
 - **A base's degradation depends on WHY the photo search missed.** When the trace
