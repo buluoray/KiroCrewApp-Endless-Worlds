@@ -117,8 +117,11 @@ def test_the_world_block_carries_only_what_narrating_needs(app):
     # The Library card is the shelf's, not the story's.
     assert "A promise for the shelf." not in json.dumps(full)
     # Flags are sent only when true: the world-settled group says so, the
-    # player's does not carry a false.
-    assert full["opening"] == [
+    # player's does not carry a false. The groups ride on the first page, where
+    # the questions are still open.
+    first = srv._store().create_run({"turn": 0, "worldId": "w"}, {"runId": "r2"})
+    opening = json.loads(_raw("endless_read_runtime", runId=first))["opening"]
+    assert opening == [
         {"id": "name", "label": "Name"},
         {"id": "fate", "label": "Fate", "worldDecides": True},
     ]

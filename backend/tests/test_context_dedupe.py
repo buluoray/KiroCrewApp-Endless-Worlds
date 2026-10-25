@@ -81,8 +81,8 @@ def test_a_full_read_re_reads_months_without_their_page_snapshots(app):
     months = call("endless_read_runtime", runId=run)["recentTurns"]
     assert [m["prose"] for m in months] == ["month 1", "month 2"]
     assert all("panels" not in m and "digest" not in m for m in months)
-    # The story fields stay: what was written, and what was offered.
-    assert all("choices" in m for m in months)
+    # The story fields stay: what was written, and what the newest month offered.
+    assert "choices" in months[-1]
 
 
 # -- a full read fits the harness's tool-result limit -----------------------
@@ -142,9 +142,13 @@ def test_the_newest_months_keep_their_whole_prose(app):
     assert [m["turn"] for m in whole] == [11, 12, 13, 14]
     for m in whole:
         assert m["prose"].endswith(_LONG) and "short" not in m
-        # What was offered, by label; a past button's id and look are the page's.
-        assert [c["label"] for c in m["choices"]] == ["go", "stay"]
-        assert all(set(c) <= {"label", "fateful"} for c in m["choices"])
+        # Only the month the player is answering now keeps what it offered: by
+        # label, since a past button's id and look are the page's.
+        if m["turn"] == 14:
+            assert [c["label"] for c in m["choices"]] == ["go", "stay"]
+            assert all(set(c) <= {"label", "fateful"} for c in m["choices"])
+        else:
+            assert "choices" not in m and m["action"]
         # The memory a month declared is named, not retold beside its own prose.
         assert m["memory"] == {
             "events": [
@@ -161,6 +165,44 @@ def test_the_newest_months_keep_their_whole_prose(app):
             "line": f"Month {n} opens on the flood.",
             "eventIds": [f"event-{n}-crack-{n}"],
         }
+
+
+def test_the_ceiling_is_one_shared_constant_under_the_harness_limit():
+    import limits
+
+    assert srv.READ_CEILING == limits.READ_CEILING < limits.TOOL_RESULT_LIMIT == 30_000
+
+
+_HANDOFF = {"lore": [{"id": "keep", "name": "Keep", "summary": "s", "text": "t" * 500}]}
+
+
+def test_the_opening_hand_off_rides_only_on_the_first_page(app, monkeypatch):
+    monkeypatch.setattr(srv, "_resolve_handoff", lambda template: _HANDOFF)
+    store = srv._store()
+    run = store.create_run(
+        {"turn": 0, "worldId": "w", "opening": {"name": "Aria"}}, {"runId": "r1"}
+    )
+    first = call("endless_read_runtime", runId=run)
+    assert first["handToAgent"] == _HANDOFF and first["handToAgentNote"]
+    assert first["opening"] == [{"id": "name", "label": "Name", "value": "Aria"}]
+    out = call(
+        "endless_advance_turn",
+        runId=run,
+        turn=1,
+        prose="month 1",
+        choices=[{"id": "go", "label": "go"}],
+        state={"status": {"age": 1}},
+    )
+    assert out.get("committed") is True, out
+    later = call("endless_read_runtime", runId=run)
+    assert "handToAgent" not in later and "handToAgentNote" not in later
+    # The player's answer still binds; the question it answered does not.
+    assert later["opening"] == [{"id": "name", "label": "Name", "value": "Aria"}]
+
+
+def test_an_unanswered_opening_group_is_left_out_after_the_first_page(app):
+    store, run = _life()
+    assert "opening" not in call("endless_read_runtime", runId=run)
 
 
 def test_a_re_read_month_keeps_only_what_each_choice_offered():

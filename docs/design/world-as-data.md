@@ -83,7 +83,7 @@ top-level key rather than nesting `opening` into a dict (less churn, same intent
 ```yaml
 handToAgent: [lore.the-cold-omen, lore.greywing-keep, systems.xp, roles.*]
 ```
-At the opening turn (`endless_read_runtime` with baseline=None), alongside the existing brief / shape / opening, the named lore entries (name+summary+text), system overviews, and roles (with their `grants`) are handed over as `out.handToAgent` — **fixing today's gap where turn 1 has no prior prose for keyword injection to match against**. `<kind>.*` takes all of a kind. Absent = nothing extra handed over, preserving current behaviour. A ref that resolves to nothing simply contributes nothing.
+At the opening turn (`endless_read_runtime` with baseline=None), alongside the existing brief / shape / opening, the named lore entries (name+summary+text), system overviews, and roles (with their `grants`) are handed over as `out.handToAgent` — **fixing today's gap where turn 1 has no prior prose for keyword injection to match against**. `<kind>.*` takes all of a kind. Absent = nothing extra handed over, preserving current behaviour. A ref that resolves to nothing simply contributes nothing. Only the first page's full read carries it (state turn 0); a later full read has prose for `lore` to match and the grants already in the state (see [turn-loop](../modules/turn-loop.md)).
 
 ## 4. Validation boundary (structure, not concept)
 
