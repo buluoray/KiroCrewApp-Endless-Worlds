@@ -49,6 +49,13 @@ export function loadPageIndex(runId: string, latest: number): Promise<Map<number
  * The hints come from ONE small read of the chronicle index, made when the picker
  * first opens and kept until a new month lands. Jumping fetches nothing here: the
  * play page fetches only the page picked.
+ *
+ * On a phone (`overWheel`) the indicator has no box of its own: the page wheel shows
+ * the number, a tap on the wheel's centre opens the picker (`open`/`onOpenChange`,
+ * held by the play page), and the button here is a transparent square laid over that
+ * centre number. A finger passes through it to the wheel; a keyboard or a screen
+ * reader still reaches it as the picker's own named button, with its focus ring
+ * drawn round the centre number.
  */
 export function PagePicker({
   runId,
@@ -56,6 +63,9 @@ export function PagePicker({
   latest,
   onJump,
   preview,
+  open: openProp,
+  onOpenChange,
+  overWheel = false,
 }: {
   runId: string
   shown: number
@@ -64,10 +74,17 @@ export function PagePicker({
   onJump: (turn: number | null) => void
   /** The page being flipped to by the scrubber or a held arrow, shown live. */
   preview?: ScrubStore
+  /** Held by the caller when something else opens the picker (the phone's wheel). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Phone: the button is laid, unseen, over the page wheel's centre number. */
+  overWheel?: boolean
 }) {
   const flipping = useScrubPreview(preview)
   const label = flipping ?? shown
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const open = openProp ?? ownOpen
+  const setOpen = (o: boolean) => (onOpenChange ? onOpenChange(o) : setOwnOpen(o))
   const trigger = useRef<HTMLButtonElement>(null)
   const root = useRef<HTMLDivElement>(null)
   const panelId = useId()
@@ -88,11 +105,18 @@ export function PagePicker({
     }
   }, [open, index?.key, indexKey, runId, latest])
 
-  // A click anywhere outside closes the picker without moving focus.
+  // A click anywhere outside closes the picker without moving focus. The phone
+  // wheel's own tap toggles it, so a press there is not "outside".
+  const setOpenLive = useRef(setOpen)
+  useEffect(() => {
+    setOpenLive.current = setOpen
+  })
   useEffect(() => {
     if (!open) return undefined
     const away = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false)
+      const at = e.target as Element | null
+      if (root.current?.contains(at) || at?.closest?.('[data-ew-pick-toggle]')) return
+      setOpenLive.current(false)
     }
     document.addEventListener('pointerdown', away)
     return () => document.removeEventListener('pointerdown', away)
@@ -111,7 +135,7 @@ export function PagePicker({
   }
 
   return (
-    <div className="ew-pager-pick" ref={root}>
+    <div className={'ew-pager-pick' + (overWheel ? ' ew-pager-pick-wheel' : '')} ref={root}>
       <button
         ref={trigger}
         className="ew-pager-turn"
@@ -120,10 +144,16 @@ export function PagePicker({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-label={t('play.jumpOpen', { n: label, total: latest })}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
       >
-        <span className="ew-pager-long">{t('play.pageOf', { n: label, total: latest })}</span>
-        <span className="ew-pager-short">{t('play.pageShort', { n: label, total: latest })}</span>
+        {overWheel ? null : (
+          <>
+            <span className="ew-pager-long">{t('play.pageOf', { n: label, total: latest })}</span>
+            <span className="ew-pager-short">
+              {t('play.pageShort', { n: label, total: latest })}
+            </span>
+          </>
+        )}
       </button>
       {open ? (
         <PickerPanel

@@ -19,7 +19,7 @@ guarantee.
 | `play.tsx` | the live reading view — server-driven generating state + poll, tool-call turn progress, retry, turn-number pager |
 | `page-picker.tsx` | the pager's page indicator and its jump-to-month picker (number field + windowed list of every month with a hint) |
 | `page-scrubber.tsx` | the press-and-drag page scrubber, hold-to-repeat Prev/Next, wheel and slider keys |
-| `page-wheel.tsx` | the phone's sideways page wheel that replaces the scrubber under 600px |
+| `page-wheel.tsx` | the phone's sideways page wheel: replaces the pager buttons and the scrubber under 600px, beside the back link |
 | `scrub-store.ts` | the page being flipped to, outside React state so a step re-renders only what shows it |
 | `scene.tsx` | `SceneSlot` — the single scene iframe, created once and never moved |
 | `opening.tsx` | the opening form — sealed world-decided groups, 30-day draft TTL |
@@ -312,21 +312,42 @@ guarantee.
   are not drawn: the page index carries neither. Pinned by `test_page_scrubber.py`;
   the folio's contrast by `test_theme_contrast.py`.
 
-- **On a phone the scrubber is a sideways page wheel.** Under `PHONE_QUERY`
-  (`max-width: 600px`) `page-wheel.tsx` replaces the slider: a row of page numbers
-  on the same folio paper, the centre one full size and full ink, its neighbours
-  turning away on a drum (inline `rotateY`/`scale`/`opacity` from `wheelLook`) and
-  fading under a mask, the ribbon as a tab over the centre, and the centred page's
-  action in italic under it (the shared index read, made on mount here because the
-  line is always shown). A swipe follows the finger; on release the drum coasts to
-  where a decaying throw would stop (`flickVelocity`, `wheelTarget`,
-  `WHEEL_TAU_MS`) and snaps to that page, ticking the centre number as each page
-  crosses; a tap on a neighbour turns to it. Only the numbers on screen are drawn
-  (`visiblePages`). The page number lives in the scrub store while it turns and the
-  ONE page loads when it rests. Same `role="slider"` values, keys and settle rule as
-  the desktop track; reduced motion snaps without the glide or the tick. Pinned by
-  `test_page_wheel.py`; the swipe, coast, snap and one read run in
+- **On a phone the pager is a sideways page wheel beside the back link.** Under
+  `PHONE_QUERY` (`max-width: 600px`) there are no pager buttons (First, Prev, the
+  `N / M` indicator, Next, Latest) and no fore-edge slider: `play.tsx` renders
+  `phoneBar` instead, and `page-wheel.tsx` puts a row of page numbers in the top row,
+  one line with the back link (`.ew-topbar-wheel`, `flex-wrap: nowrap`). The link
+  never wraps or shrinks (`white-space: nowrap`, `flex: none`); the wheel takes the
+  width it leaves and draws fewer numbers. There is no card behind the numbers: they
+  sit straight on the reading row in the canvas ink — the centre `--text`, held to
+  AA over the worst art, its neighbours `--muted` fading out, turning away on a drum
+  (inline `rotateY`/`scale`/`opacity` from `wheelLook`) under a mask — with the
+  ribbon tab over the centre number. No action line is drawn under it. A swipe
+  follows the finger; on release the drum coasts to where a decaying throw would stop
+  (`flickVelocity`, `wheelTarget`, `WHEEL_TAU_MS`) and snaps to that page, ticking
+  the centre number as each page crosses; a tap on a neighbour turns to it. Only the
+  numbers on screen are drawn (`visiblePages`). The page number lives in the scrub
+  store while it turns and the ONE page loads when it rests. Same `role="slider"`
+  values, keys and settle rule as the desktop track; reduced motion snaps without the
+  glide or the tick.
+
+  A tap on the centre number (or Enter on the wheel) opens the #127 type-a-number
+  picker: `PagePicker` with `overWheel`, its open state held by the play page. Its
+  button is a transparent 44px square laid over the centre number with
+  `pointer-events: none`, so a finger reaches the wheel while a keyboard or screen
+  reader still finds the named picker button, its focus ring round the centre
+  number. The wheel's track carries `data-ew-pick-toggle`, so its own tap toggles the
+  picker instead of counting as an outside press. The way back to the live page is
+  the small mark at the wheel's end (`.ew-wheel-latest`, named `play.latestTurn`,
+  disabled on the live page). The hidden-recap button stays in the same row. The bar
+  is one 44px row, so the fixed bar's slot does not grow. Pinned by
+  `test_page_wheel.py` and `test_theme_contrast.py`; the swipe, coast, snap, one read,
+  no pager buttons, the one-line back link, the picker and the way back run in
   `devtools/scrub.test.mjs` at 375px.
+
+- **The back link reads `← 书架` / `← Shelf`.** `play.back` is the short visible
+  text everywhere; `play.backLabel` (`回到书架` / `Back to the shelf`) is its
+  accessible name.
 
 - **Opening groups the world decided are sealed, not offered; drafts expire in 30
   days.** `opening.tsx` renders a `worldDecides` group as a sealed note rather than

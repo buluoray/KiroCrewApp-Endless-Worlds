@@ -6,9 +6,9 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from 'react'
 
-import { loadPageIndex } from './page-picker'
 import { clampPage, SCRUB_SETTLE_MS, scrubKey, wheelSteps } from './page-scrubber'
 import { useScrubPreview, type ScrubStore } from './scrub-store'
 import { t } from './strings'
@@ -91,29 +91,37 @@ export function usePhoneLayout(): boolean {
 }
 
 /**
- * The phone's page picker: a row of page numbers on a strip of folio paper, turned
- * like a drum — the iOS time wheel laid on its side. The centre number is the page;
- * the reader swipes, the numbers follow the finger, coast and snap to the nearest
- * page, and only when the wheel comes to rest is that ONE page loaded. While it
- * turns, the page number lives in the scrub store (as for the slider), so the story
- * does not re-render; only this wheel and the page indicator do.
+ * The phone's page picker: a row of page numbers printed straight on the top bar, no
+ * card behind them, turned like a drum — the iOS time wheel laid on its side. It
+ * sits in the top row beside the back link and takes whatever width the link leaves.
+ * The centre number is the page; the reader swipes, the numbers follow the finger,
+ * coast and snap to the nearest page, and only when the wheel comes to rest is that
+ * ONE page loaded. While it turns, the page number lives in the scrub store (as for
+ * the slider), so the story does not re-render; only this wheel does.
+ *
+ * A tap on the centre number (or Enter) calls `onCentreTap`: the play page opens the
+ * type-a-number picker, passed in as `children` and laid over that number.
  *
  * Same slider semantics as the desktop scrubber — role, values, keys, one
  * announcement on settle — so a keyboard attached to a phone still works.
  */
 export function PageWheel({
-  runId,
   shown,
   latest,
   store,
   onCommit,
+  onCentreTap,
+  children,
 }: {
-  runId: string
   shown: number
   latest: number
   store: ScrubStore
   /** Load this page; the newest one is the live page. */
   onCommit: (n: number) => void
+  /** A tap on the centre number, or Enter: open the type-a-number picker. */
+  onCentreTap?: () => void
+  /** The picker, drawn over the centre number. */
+  children?: ReactNode
 }) {
   const preview = useScrubPreview(store)
   const value = preview ?? shown
@@ -134,9 +142,9 @@ export function PageWheel({
   const anim = useRef<number | undefined>(undefined)
   const settle = useRef<number | undefined>(undefined)
   const wheelAcc = useRef(0)
-  const live = useRef({ shown, latest, onCommit })
+  const live = useRef({ shown, latest, onCommit, onCentreTap })
   useEffect(() => {
-    live.current = { shown, latest, onCommit }
+    live.current = { shown, latest, onCommit, onCentreTap }
   })
 
   // At rest the drum shows the page on screen, including after a page lands.
@@ -156,23 +164,6 @@ export function PageWheel({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-
-  // The line under the centre number: the same one small index read the picker and
-  // the slider share. Read on mount here, because on a phone the line is always shown.
-  const [hints, setHints] = useState<{ key: string; rows: Map<number, string> } | null>(null)
-  const hintKey = `${runId}|${latest}`
-  useEffect(() => {
-    if (hints?.key === hintKey) return undefined
-    let alive = true
-    loadPageIndex(runId, latest)
-      .then((rows) => {
-        if (alive) setHints({ key: hintKey, rows })
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [hints?.key, hintKey, runId, latest])
 
   const place = useCallback(
     (p: number) => {
@@ -269,11 +260,16 @@ export function PageWheel({
     drag.current = null
     const last = live.current.latest
     if (!d.moved) {
-      // A tap on a neighbour turns the wheel to it; a tap on the centre is a no-op.
+      // A tap on a neighbour turns the wheel to it; a tap on the centre number opens
+      // the type-a-number picker.
       const r = e.currentTarget.getBoundingClientRect()
-      glideTo(
-        clampPage(posRef.current + (e.clientX - (r.left + r.width / 2)) / WHEEL_ITEM_PX, last),
-      )
+      const off = (e.clientX - (r.left + r.width / 2)) / WHEEL_ITEM_PX
+      if (Math.abs(off) < 0.5 && e.type === 'pointerup') {
+        store.set(null)
+        live.current.onCentreTap?.()
+        return
+      }
+      glideTo(clampPage(posRef.current + off, last))
       return
     }
     const velocity = e.type === 'pointercancel' ? 0 : flickVelocity(d.trail, performance.now())
@@ -281,6 +277,11 @@ export function PageWheel({
   }
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return
+    if (e.key === 'Enter' && onCentreTap) {
+      e.preventDefault()
+      onCentreTap()
+      return
+    }
     const next = scrubKey(e.key, store.get() ?? shown, latest)
     if (next === null) return
     e.preventDefault()
@@ -331,12 +332,12 @@ export function PageWheel({
       </span>,
     )
   }
-  const hint = hints?.key === hintKey ? (hints.rows.get(centre) ?? '') : ''
   return (
     <div className="ew-wheel">
       <div
         ref={track}
         className={'ew-wheel-track' + (active ? ' ew-wheel-on' : '')}
+        data-ew-pick-toggle=""
         role="slider"
         tabIndex={0}
         aria-label={t('play.scrubLabel')}
@@ -357,9 +358,7 @@ export function PageWheel({
           {nums}
         </div>
       </div>
-      <div className="ew-wheel-hint" aria-hidden="true">
-        {hint}
-      </div>
+      {children}
     </div>
   )
 }

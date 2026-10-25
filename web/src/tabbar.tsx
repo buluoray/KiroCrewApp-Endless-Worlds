@@ -242,7 +242,7 @@ export function WorldTabBar({
           <button
             className="ew-tabmore-scrim"
             type="button"
-            aria-label={t('play.back')}
+            aria-label={t('play.backLabel')}
             onClick={() => setMoreOpen(false)}
           />
           <div className="ew-tabmore" role="menu">

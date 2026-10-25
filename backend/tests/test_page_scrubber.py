@@ -45,16 +45,18 @@ def test_the_scrubber_sits_in_the_top_bar_for_a_life_with_pages():
     play = module("play.tsx")
     assert "import { HoldArrow, PageScrubber } from './page-scrubber'" in play
     pager = _pager()
-    assert "latest >= 2 ? (\n      phone ? (\n        <PageWheel" in pager
-    assert pager.index("<PageWheel") < pager.index("<PageScrubber"), "the wheel on a phone"
-    assert pager.count("onCommit={leafTo}") == 4, "both scrubbers and both held arrows"
+    # The fore-edge on a wide screen only; a phone gets the wheel in its own row.
+    assert "latest >= 2 && !phone ? (\n      <PageScrubber" in pager
+    assert "latest >= 1 && !phone ? (" in pager, "no pager buttons on a phone"
+    assert pager.count("onCommit={leafTo}") == 3, "the scrubber and both held arrows"
+    assert "leafTo(n)" in pager[pager.index("<PageWheel") :], "the wheel lands the same way"
     assert "onCommit={leafTo}" in pager
     assert "goPage(n)" in pager[pager.index("const leafTo =") :]
     # The newest page is the LIVE page, like Latest.
     assert "const goPage = (n: number) => setViewTurn(n >= latest ? null : Math.max(1, n))" in pager
     start = play.index("'ew-topbar' +")
     bar = play[start : play.index("{t('play.back')}", start) + 400]
-    assert "{pager}\n        {scrubber}" in bar
+    assert "{pager}\n        {scrubber}\n        {phoneBar}" in bar
     assert "(scrubber ? ' ew-topbar-scrub' : '')" in bar
 
 
@@ -121,6 +123,7 @@ def test_a_step_does_not_re_render_the_story():
 
 def test_holding_an_arrow_repeats_faster_and_loads_once_on_release():
     pager = _pager()
+    pager = pager[pager.index("const pager =") :]
     assert pager.count("<HoldArrow") == 2
     assert "dir={-1}" in pager and "dir={1}" in pager
     # The order First ‹ page › Latest still holds (test_page_jump pins it too).

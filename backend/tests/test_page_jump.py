@@ -78,7 +78,9 @@ def test_the_page_indicator_opens_a_keyboard_reachable_picker():
     trigger = picker[picker.index("<button\n        ref={trigger}") : picker.index("{open ? (")]
     assert 'aria-haspopup="dialog"' in trigger and "aria-expanded={open}" in trigger
     assert "t('play.jumpOpen'" in trigger, "the indicator must say it opens a picker"
-    assert "onClick={() => setOpen((o) => !o)}" in trigger
+    assert "onClick={() => setOpen(!open)}" in trigger
+    # The phone wheel can hold the open state; the button still toggles it.
+    assert "const open = openProp ?? ownOpen" in picker
     assert 'role="dialog"' in picker and "t('play.jumpTitle')" in picker
     # Type a month and press Enter: a real form, a labelled numeric field.
     assert "<form" in picker and "onSubmit" in picker and "if (valid) onJump(typed)" in picker
