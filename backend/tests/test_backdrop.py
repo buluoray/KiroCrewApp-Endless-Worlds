@@ -756,3 +756,163 @@ def test_a_late_commit_may_replace_its_own_briefs_fallback_but_not_another_brief
     )
     assert refused["ok"] is False
     assert "#999" in BackdropStore(data, run_id).exact(2)["markup"]
+
+
+# -- a deleted life or an abandoned page takes no more art -----------------------
+#
+# The app SDK cannot cancel a spawn, so an illustrator keeps running after its
+# page is abandoned or its life is erased. What it sends then must be refused and
+# must write nothing: every art write lands under runs/<id>/, and a write after
+# the delete recreated the directory of a life that no longer exists.
+
+
+def _leftovers(data, run_id):
+    return sorted(str(p) for p in data.rglob("*") if run_id in p.name)
+
+
+def _painting(data):
+    """A committed page 1 waiting for its art, with an illustrator draft submitted."""
+    store = srv._store()
+    run_id = store.create_run({"turn": 1, "worldId": "w"}, {"runId": "r1"})
+    store.request_backdrop(run_id, turn=1, brief="LANE: motif\nTHESIS: a gate")
+    brief_id = store.read_backdrop_request(run_id)["briefId"]
+    draft = _early_draft(run_id, 1, brief_id)
+    assert draft["ok"] is True
+    return store, run_id, brief_id, draft["draftId"]
+
+
+def _illustrator_calls(run_id, turn, brief_id, draft_id):
+    svg = _svg("#123")
+    return [
+        ("endless_trace_reference", {"runId": run_id, "turn": turn, "briefId": brief_id}),
+        ("endless_select_reference", {"runId": run_id, "turn": turn, "index": 0}),
+        (
+            "endless_submit_backdrop_draft",
+            {"runId": run_id, "turn": turn, "briefId": brief_id, "markup": svg, "mobile": svg},
+        ),
+        (
+            "endless_commit_backdrop",
+            {"runId": run_id, "turn": turn, "draftId": draft_id, "markup": svg, "mobile": svg},
+        ),
+        (
+            "endless_commit_fallback_backdrop",
+            {"runId": run_id, "turn": turn, "markup": svg, "mobile": svg},
+        ),
+    ]
+
+
+def test_a_late_commit_after_the_life_was_deleted_is_refused_and_recreates_nothing(data):
+    store, run_id, _brief, draft_id = _painting(data)
+    store.delete_run(run_id)
+    assert _leftovers(data, run_id) == []
+
+    out = _call(
+        "endless_commit_backdrop",
+        runId=run_id,
+        turn=1,
+        draftId=draft_id,
+        markup=_svg("#123"),
+        mobile=_svg("#123"),
+    )
+
+    assert out["ok"] is False and out["applied"] is False
+    assert _leftovers(data, run_id) == [], "the late commit recreated the deleted life"
+
+
+def test_every_illustrator_tool_is_refused_for_a_deleted_life(data):
+    """Trace, select, draft, commit and the narrator fallback: each refused, and
+    none leaves a directory, a timeline line or a kv key behind."""
+    store, run_id, brief_id, draft_id = _painting(data)
+    store.delete_run(run_id)
+
+    for name, args in _illustrator_calls(run_id, 1, brief_id, draft_id):
+        out = _call(name, **args)
+        assert out["ok"] is False, f"{name} accepted a call for a deleted life"
+        assert _leftovers(data, run_id) == [], f"{name} recreated the deleted life"
+
+
+def test_a_life_deleted_while_the_trace_searches_gets_nothing_written(data, monkeypatch):
+    """A trace spends seconds on the network. The life erased in that window must
+    not get a traced underlay, candidates or previews written for it."""
+    store, run_id, brief_id, _draft = _painting(data)
+    store.update_backdrop_request(run_id, lane="scene")
+
+    def search(query, lane, misses=None):
+        store.delete_run(run_id)
+        return [], {"reason": "no-candidates", "matched": "", "attempts": []}
+
+    monkeypatch.setattr(srv, "search_candidates", search)
+
+    out = _call("endless_trace_reference", runId=run_id, turn=1, briefId=brief_id, query="gate")
+
+    assert out["ok"] is False
+    assert "deleted" in out["error"]
+    assert _leftovers(data, run_id) == []
+
+
+def test_an_abandoned_pages_illustrator_can_draw_nothing_more(data):
+    """The narrator writing page 2 ended without a month while its early
+    illustrator kept drawing. Its brief is still on file, but the page has no words
+    to sit behind: trace, draft and commit are all refused and nothing is kept."""
+    from phototrace import TraceStore
+
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a gate")
+    brief_id = store.read_backdrop_request(run_id)["briefId"]
+    draft = _early_draft(run_id, 2, brief_id)
+    assert draft["ok"] is True
+    store.mark_pending_ended(run_id)
+
+    for name, args in _illustrator_calls(run_id, 2, brief_id, draft["draftId"]):
+        if name == "endless_commit_fallback_backdrop":
+            continue  # its gate opens only for a committed page; covered elsewhere
+        out = _call(name, **args)
+        assert out["ok"] is False, f"{name} accepted art for an abandoned page"
+    assert BackdropStore(data, run_id).exact(2) is None
+    assert TraceStore(data, run_id).load(2) is None
+    assert BackdropDraftStore(data, run_id).has_draft(2), "only the pre-abandon draft is left"
+
+
+def test_a_stale_illustrator_cannot_trace_or_select_for_the_retrys_brief(data):
+    """The retry wrote a new brief for the same page. The old illustrator names
+    its own briefId and is refused at trace and select; the new one is served."""
+    from phototrace import CandidateStore, TraceStore
+
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: old")
+    old = store.read_backdrop_request(run_id)["briefId"]
+    store.clear_backdrop_request(run_id)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: new")
+    new = store.read_backdrop_request(run_id)["briefId"]
+    assert old != new
+    CandidateStore(data, run_id).save(turn=2, query="gate", candidates=[])
+
+    stale_trace = _call("endless_trace_reference", runId=run_id, turn=2, briefId=old)
+    stale_select = _call("endless_select_reference", runId=run_id, turn=2, index=-1, briefId=old)
+
+    assert stale_trace["ok"] is False and "replaced" in stale_trace["error"]
+    assert stale_select["ok"] is False and "replaced" in stale_select["error"]
+    assert TraceStore(data, run_id).load(2) is None
+    live = _call("endless_trace_reference", runId=run_id, turn=2, briefId=new)
+    assert live["ok"] is True and live["underlay"] == "base"
+
+
+def test_the_live_pages_illustrator_and_a_committed_pages_repair_are_still_served(data):
+    """The fence is for the deleted and the abandoned only. A page still being
+    written takes its brief's trace, and a committed page's recovery commits."""
+    store, run_id = _writing(data)
+    _call("endless_paint_backdrop", runId=run_id, brief="LANE: motif\nTHESIS: a gate")
+    brief_id = store.read_backdrop_request(run_id)["briefId"]
+    assert _call("endless_trace_reference", runId=run_id, turn=2, briefId=brief_id)["ok"] is True
+    assert _call("endless_trace_reference", runId=run_id, turn=2)["ok"] is True
+
+    store, painted, brief_id, draft_id = _painting(data)
+    out = _call(
+        "endless_commit_backdrop",
+        runId=painted,
+        turn=1,
+        draftId=draft_id,
+        markup=_svg("#111"),
+        mobile=_svg("#111"),
+    )
+    assert out["ok"] is True

@@ -979,3 +979,120 @@ def test_the_illustrator_budget_runs_from_its_dispatch_not_the_prose_commit(worl
     started = asyncio.run(main())
     assert len(seen) == 1
     assert seen[0][1] - started < 1.15, "the budget restarted at the prose commit"
+
+
+# -- abandoning the page or deleting the life stops its recovery -----------------
+
+
+def _painting_page_one(world):
+    """A life whose committed page 1 is waiting for its art, past the ceiling that
+    lets it be deleted while the illustrator is still drawing."""
+    store = world["store"]
+    run_id = a_life(world, turn=1)
+    store.request_backdrop(run_id, turn=1, brief="LANE: motif\nTHESIS: a gate closes")
+    return run_id
+
+
+def _age_brief(store, run_id):
+    from turn import BACKDROP_STALE_SECS
+
+    store.update_backdrop_request(run_id, askedAt=time.time() - BACKDROP_STALE_SECS - 10)
+
+
+def _leftovers(world, run_id):
+    """Every file or directory anywhere under the data dir that names this life."""
+    return sorted(str(p) for p in world["data"].rglob("*") if run_id in p.name)
+
+
+def _delete_life(world, run_id):
+    return routes_mod.delete_life(
+        FakeRequest(match={"run_id": run_id}, body={"confirm": run_id, "turn": 1}),
+        world["ctx"],
+    )
+
+
+def _delete_world(world):
+    return routes_mod.delete_world(
+        FakeRequest(match={"world_id": "test-world"}, body={"confirm": "test-world", "lives": 1}),
+        world["ctx"],
+    )
+
+
+@pytest.mark.parametrize("route", ["life", "world"])
+def test_deleting_a_life_mid_art_stops_its_recovery_and_leaves_nothing(world, route):
+    """The illustrator is still drawing when the player erases the life. Its
+    recovery task is cancelled and forgotten on the spot, no second illustrator is
+    dispatched, and nothing for the life is left on disk or in the kv store."""
+    run_id = _painting_page_one(world)
+    spawn = _with_spawn(world, run_id, _Recorder())
+    store = world["store"]
+
+    async def main():
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        await asyncio.sleep(0.05)
+        task = routes_mod._BACKDROP_RECOVERY_TASKS[run_id]
+        assert len(spawn.tasks) == 1, "no illustrator was drawing"
+        _age_brief(store, run_id)
+        res = await (_delete_life(world, run_id) if route == "life" else _delete_world(world))
+        assert res.status == 200, body_of(res)
+        assert run_id not in routes_mod._BACKDROP_RECOVERY_TASKS, "recovery outlived the life"
+        await asyncio.sleep(0.05)
+        assert task.cancelled(), "the recovery task was not cancelled"
+        # A polling GET or a second delete may still ask; neither starts anything.
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        routes_mod._stop_backdrop_recovery(run_id)
+        routes_mod._stop_backdrop_recovery(run_id)
+        await asyncio.sleep(0.6)
+
+    asyncio.run(main())
+
+    assert len(spawn.tasks) == 1, "an illustrator was dispatched for a deleted life"
+    assert run_id not in routes_mod._BACKDROP_RECOVERY_TASKS
+    assert _leftovers(world, run_id) == []
+
+
+def test_a_retry_stops_the_abandoned_briefs_recovery(world):
+    """A new attempt for page 2 drops the brief its abandoned attempt left. The
+    recovery serving that brief is cancelled then, before the retry can brief."""
+    from turn import forget_unpublished_art
+
+    run_id = _writing_page_two(world)
+    spawn = _with_spawn(world, run_id, _Recorder())
+    store = world["store"]
+
+    async def main():
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        await asyncio.sleep(0.05)
+        task = routes_mod._BACKDROP_RECOVERY_TASKS[run_id]
+        forget_unpublished_art(store, run_id, 2)
+        routes_mod._art_forgotten(store, run_id)()
+        assert run_id not in routes_mod._BACKDROP_RECOVERY_TASKS
+        await asyncio.sleep(0.05)
+        assert task.cancelled()
+
+    asyncio.run(main())
+    assert len(spawn.tasks) == 1
+
+
+def test_a_retry_keeps_the_recovery_of_a_committed_page_still_waiting_for_art(world):
+    """A still-wanted recovery is never cancelled: the retry of page 3 does not
+    drop page 2's brief, so the task painting page 2 keeps running."""
+    from turn import forget_unpublished_art
+
+    store = world["store"]
+    run_id = a_life(world, turn=2)
+    store.request_backdrop(run_id, turn=2, brief="LANE: motif\nTHESIS: a gate closes")
+    _with_spawn(world, run_id, _Recorder())
+
+    async def main():
+        routes_mod._ensure_backdrop_recovery(world["ctx"], store, None, run_id, {})
+        await asyncio.sleep(0.05)
+        task = routes_mod._BACKDROP_RECOVERY_TASKS[run_id]
+        forget_unpublished_art(store, run_id, 3)
+        routes_mod._art_forgotten(store, run_id)()
+        await asyncio.sleep(0.05)
+        alive = routes_mod._BACKDROP_RECOVERY_TASKS.get(run_id) is task and not task.done()
+        _stop_recovery(run_id)
+        return alive
+
+    assert asyncio.run(main()), "the committed page's recovery was cancelled"

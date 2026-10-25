@@ -130,8 +130,15 @@ from scenes import (  # noqa: E402
     slugify_scene_id,
 )
 from settings import SPARSE_GAP_TURNS, preferred_style, read_settings  # noqa: E402
-from store import RunStore, StoreError, brief_lane, rewrite_brief_style  # noqa: E402
+from store import (  # noqa: E402
+    CorruptRunState,
+    RunStore,
+    StoreError,
+    brief_lane,
+    rewrite_brief_style,
+)
 from systems import apply_systems, gain_fields  # noqa: E402
+from turn import _in_flight as turn_in_flight  # noqa: E402
 from turn import declaration_shape  # noqa: E402
 from view import always_panels_empty, resolve_ending, shape_panels  # noqa: E402
 from widget import scene_warnings  # noqa: E402
@@ -618,7 +625,8 @@ _TOOLS: list[dict[str, Any]] = [
             "subject misses while its head noun hits). Only after that retry, a "
             "single-word miss, or a transient error does it return a procedural "
             "tonal base (`underlay: base`) that is already active, with nothing to "
-            "select."
+            "select. Pass the `briefId` from your task; a call for a brief that was "
+            "replaced, a page that was abandoned or a life that was deleted is refused."
         ),
         "inputSchema": {
             "type": "object",
@@ -627,6 +635,7 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
+                "briefId": {"type": "string", "maxLength": 64},
                 "query": {"type": "string", "maxLength": 200},
                 "source": {"type": "string", "enum": ["photo", "art"]},
                 "opacity": {"type": "number", "minimum": 0.2, "maximum": 0.8},
@@ -664,6 +673,7 @@ _TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "runId": _RUN_ID,
                 "turn": {"type": "integer", "minimum": 0},
+                "briefId": {"type": "string", "maxLength": 64},
                 "index": {"type": "integer", "minimum": -1},
             },
         },
@@ -2678,6 +2688,8 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
     request = _store().read_backdrop_request(run_id)
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
+    brief_id = str(args.get("briefId") or "")
+    _require_wanted_page(run_id, turn, brief_id)
     # 0.65, not 0.5: the fragment sits over a dark sky, so opacity is a
     # brightness dial for the whole composition — at 0.5 every traced tone is
     # pulled halfway to near-black and pages read darker than intended.
@@ -2772,6 +2784,9 @@ def _trace_reference(args: dict[str, Any]) -> dict[str, Any]:
             else:
                 search_audit = {**search_audit, "reason": "fetch-failed"}
 
+    # The search and fetches took seconds; the life may have been deleted or the
+    # page abandoned meanwhile. Nothing below may write for it then.
+    _require_wanted_page(run_id, turn, brief_id)
     if traced:
         # Offer the choice: stash candidates and clear any stale active underlay so a
         # leftover from an earlier trace cannot be spliced before the Illustrator picks.
@@ -2917,6 +2932,7 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
     run_id = args["runId"]
     turn = int(args["turn"])
     index = int(args["index"])
+    _require_wanted_page(run_id, turn, str(args.get("briefId") or ""))
     candidates = _candidate_store(run_id).load(turn)
     if not candidates:
         raise BackdropError(
@@ -2955,6 +2971,74 @@ def _select_reference(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _run_gone(run_id: str) -> bool:
+    """Whether this life was deleted: it has no state and no art brief.
+
+    ``RunStore.delete_run`` drops both, along with the run directory. An
+    illustrator can still be running then: the app SDK cannot cancel a spawn, so
+    it finishes its own turn and its late calls land here. Every write an art tool
+    makes goes under ``runs/<id>/`` and would recreate that directory, so each one
+    asks this first. Requiring BOTH to be absent keeps isolated tooling working,
+    where a brief is recorded for a run id that never had state.
+    """
+    try:
+        store = _store()
+        if store.read_backdrop_request(run_id) is not None:
+            return False
+        store.read_state(run_id)
+    except CorruptRunState:
+        return False  # damaged, but still there
+    except StoreError:
+        return True
+    return False
+
+
+def _page_abandoned(run_id: str, turn: int) -> bool:
+    """Whether ``turn`` is an uncommitted page that no narrator is writing any more.
+
+    The same test the backend's recovery uses to stop (``routes._page_abandoned``):
+    the page is ahead of the committed one and no live in-flight attempt is writing
+    it (the attempt ended, went stale, or was never there). Art for such a page has
+    no words to sit behind. A committed page is never abandoned, so the narrator's
+    recovery of a page already shown is untouched.
+    """
+    try:
+        store = _store()
+        committed = int((store.read_state(run_id) or {}).get("turn") or 0)
+    except StoreError:
+        return False
+    if int(turn) <= committed:
+        return False
+    return turn_in_flight(store, run_id, int(turn)) is None
+
+
+def _require_wanted_page(run_id: str, turn: int, brief_id: str = "") -> None:
+    """Refuse an illustrator call whose life was deleted or whose page was abandoned.
+
+    Checked on entry AND again just before a handler's first write: a trace spends
+    seconds on the network, and the life can be deleted in between. A ``brief_id``
+    that is not the live brief's is refused too (unless the narrator's recovery
+    gate is open), so an illustrator left over from an abandoned attempt cannot
+    trace or select for the retry's brief.
+    """
+    if _run_gone(run_id):
+        raise BackdropError("this life was deleted; stop")
+    if _page_abandoned(run_id, turn):
+        raise BackdropError("this page was abandoned before its words were written; stop")
+    if brief_id:
+        try:
+            live = _store().read_backdrop_request(run_id)
+        except StoreError:
+            live = None
+        if live and int(live.get("turn") or 0) == int(turn) and not live.get("fallbackAllowed"):
+            live_id = str(live.get("briefId") or "")
+            if live_id and live_id != brief_id:
+                raise BackdropError(
+                    "this page's brief was replaced; stop — the current brief has its own "
+                    "illustrator"
+                )
+
+
 def _require_live_brief(run_id: str, turn: int, request: dict[str, Any], brief_id: str) -> None:
     """Refuse a draft drawn for a brief that is not this page's live brief.
 
@@ -2985,6 +3069,7 @@ def _submit_backdrop_draft(args: dict[str, Any]) -> dict[str, Any]:
     if not request or int(request.get("turn") or 0) != turn:
         raise BackdropError("no backdrop is waiting for this run and turn")
     brief_id = str(args.get("briefId") or "")
+    _require_wanted_page(run_id, turn)
     _require_live_brief(run_id, turn, request, brief_id)
     _require_scene_underlay(run_id, turn, request)
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
@@ -3059,7 +3144,9 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
     turn = int(args["turn"])
     draft_id = args["draftId"]
     drafts = _backdrop_draft_store(run_id)
-    drawn_for = _require_commit_brief(run_id, turn, drafts.require(draft_id, turn))
+    draft = drafts.require(draft_id, turn)
+    _require_wanted_page(run_id, turn)
+    drawn_for = _require_commit_brief(run_id, turn, draft)
     # Enforced at publication too, not only at draft: the draft store survives a
     # gateway restart, so a draft accepted before this gate existed must not walk
     # through it. `endless_commit_fallback_backdrop` is deliberately NOT gated — it
@@ -3101,6 +3188,7 @@ def _commit_backdrop(args: dict[str, Any]) -> dict[str, Any]:
                 trace_audit["matched"] = str(search.get("matched"))
     markup = _apply_underlay(run_id, turn, args["markup"], "desktop")
     mobile = _apply_underlay(run_id, turn, args["mobile"], "mobile")
+    _require_wanted_page(run_id, turn)
     version = _backdrop_store(run_id).set(
         markup,
         args.get("buttons"),
@@ -3218,6 +3306,7 @@ def _commit_fallback_backdrop(args: dict[str, Any]) -> dict[str, Any]:
             "direct narrator backdrop commit is available only for the page "
             "whose illustrator recovery failed"
         )
+    _require_wanted_page(run_id, turn)
     version = _backdrop_store(run_id).set(
         args["markup"], args.get("buttons"), turn, args.get("mobile")
     )
@@ -3402,6 +3491,10 @@ def _record_backdrop_timing(run_id: Any, name: str, args: dict[str, Any], t0: fl
     if name not in _BACKDROP_TIMED_TOOLS or not isinstance(run_id, str) or not run_id:
         return
     try:
+        # A deleted life's timeline would recreate its run directory: a late call
+        # from an illustrator still running after the delete records nothing.
+        if _run_gone(run_id):
+            return
         raw_turn = args.get("turn")
         turn = (
             int(raw_turn)

@@ -792,6 +792,41 @@ def test_a_new_attempt_drops_the_art_and_brief_its_abandoned_attempt_left(store)
     assert art.at(2)["version"] == 1, "the committed page lost its art"
 
 
+def test_the_forget_hook_runs_once_after_the_old_brief_is_gone_and_before_dispatch(store):
+    """The route stops the abandoned brief's recovery from this hook, so it must
+    run after ``forget_unpublished_art`` dropped that brief (the route decides from
+    what is left) and before the new narrator can brief again."""
+    state = FakeState()
+    run = store.create_run({"turn": 1}, {"runId": "r1"})
+    store.mark_pending(run, turn=2, slot="endless-run-r1")
+    store.request_backdrop(
+        run, turn=2, brief="LANE: motif\nold", pending_at=store.read_pending(run)["askedAt"]
+    )
+    store.mark_pending_ended(run)
+    order = []
+
+    def hook():
+        order.append(("hook", store.read_backdrop_request(run)))
+
+    def dispatch(st, slot, prompt, **_kw):
+        order.append(("dispatch", None))
+        return True
+
+    asyncio.run(
+        advance_turn(
+            state_obj=state,
+            store=store,
+            run_id=run,
+            rulebook="r",
+            dispatch=dispatch,
+            inline_wait_secs=0.3,
+            on_art_forgotten=hook,
+        )
+    )
+
+    assert order == [("hook", None), ("dispatch", None)]
+
+
 def test_the_inline_wait_runs_its_poll_hook_and_survives_one_that_fails(store):
     """The route starts backdrop recovery from this hook, so a brief recorded while
     the request is still holding starts its illustrator then. A failing hook is a
