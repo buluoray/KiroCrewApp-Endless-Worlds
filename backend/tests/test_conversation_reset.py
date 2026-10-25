@@ -16,10 +16,10 @@ line by which call site fires: ``notify_slot_closed`` runs for a deliberate
 dismissal and deliberately not for the sweep. So the app registers a hook and is
 TOLD, rather than inferring.
 
-Manual: one seam, ``reset_narrator_conversation``, discards the conversation
-through the LIVE manager and clears the legacy briefed marker in the same call.
-The fresh conversation holds no fingerprint, so its first read is full and
-carries the rulebook again.
+Manual: one seam, ``reset_narrator_conversation``, moves the life to a new
+conversation key and removes the old conversation's slot, session and
+transcript. A new key is what makes the conversation new: core keys its resume
+pointer, transcript and history replay by the slot key.
 """
 
 from __future__ import annotations
@@ -220,13 +220,7 @@ def test_the_hook_is_registered_under_this_app(store, run, monkeypatch):
     )
 
 
-def test_a_dismissal_delivered_by_core_resets_the_conversation(store, run, monkeypatch):
-    import types
-
-    chat_utils = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    chat_utils._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", chat_utils)
-
+def test_a_dismissal_delivered_by_core_moves_the_life_to_a_new_key(store, run, monkeypatch):
     state = FakeState()
     ensure_narrator_slot_ex(state, run)
     key = narrator_slot_key(run)
@@ -236,12 +230,28 @@ def test_a_dismissal_delivered_by_core_resets_the_conversation(store, run, monke
     hook = _register_hook(state, store, monkeypatch)[APP_NAME]
     asyncio.run(hook(key))
 
-    assert state.sessions.discarded == [key]
+    assert store.conversation_number(run) == 1, "the next turn must open a new key"
+    assert store.stale_conversations(run) == [0], "the dismissed one is removed next turn"
+    assert state.sessions.discarded == [], (
+        "core is closing this very slot while the hook runs; touching its session "
+        "from inside the hook would race that close"
+    )
     assert store.briefed_slot(run) == "", "the fresh conversation must re-brief"
     assert store.rotation_turn(run) == 7, (
         "the rotation marker must record this turn, or the next turn's planned "
         "rotation discards the conversation this just created"
     )
+
+
+def test_closing_an_old_conversation_does_not_move_the_life_again(store, run, monkeypatch):
+    """Retiring an old key goes through core's close, which calls this same hook."""
+    state = FakeState()
+    store.begin_conversation(run)
+    hook = _register_hook(state, store, monkeypatch)[APP_NAME]
+
+    asyncio.run(hook(narrator_slot_key(run, 0)))
+
+    assert store.conversation_number(run) == 1
 
 
 def test_a_foreign_slot_name_is_ignored(store, run, monkeypatch):
@@ -267,14 +277,13 @@ def test_a_foreign_slot_name_is_ignored(store, run, monkeypatch):
 
 def test_a_failing_reset_does_not_block_the_dismissal(store, run, monkeypatch):
     """Core refuses a close whose hook raises. That is right for an app whose hook
-    pauses a worker and wrong for ours: the player wants the tab gone, and a stale
-    pointer is the behaviour that shipped before this existed."""
+    pauses a worker and wrong for ours: the player wants the tab gone."""
     state = FakeState()
 
-    async def boom(*_a, **_kw):
-        raise RuntimeError("session store is wedged")
+    def boom(*_a, **_kw):
+        raise RuntimeError("store is wedged")
 
-    monkeypatch.setattr(narrator, "reset_narrator_conversation", boom)
+    monkeypatch.setattr(narrator, "start_new_conversation", boom)
     hook = _register_hook(state, store, monkeypatch)[APP_NAME]
 
     asyncio.run(hook(narrator_slot_key(run)))  # must not raise
@@ -289,53 +298,33 @@ def test_no_dashboard_runtime_is_a_no_op(store, monkeypatch):
 # ── the reset seam: live manager, and the briefed marker dies with it ───────
 
 
-def test_reset_discards_through_the_live_manager(store, run, monkeypatch):
-    # ``chat_utils`` transitively imports messaging SDKs this test environment
-    # does not ship, so the seam's import is satisfied from ``sys.modules`` with
-    # a module exposing the one name it needs. The transform is identity — what
-    # is under test is the seam's contract, not core's filename sanitiser.
-    import types
-
-    fake = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    fake._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", fake)
-
+def test_reset_opens_a_new_key_and_closes_the_old_slot(store, run, monkeypatch):
+    unlinked = _fake_core(monkeypatch)
     state = FakeState()
+    state.sessions = PurgeFakeSessions(sid="sid-old")
     ensure_narrator_slot_ex(state, run)
     key = narrator_slot_key(run)
     store.mark_briefed(run, slot=key)
+
     done = asyncio.run(reset_narrator_conversation(state, store, run))
+
     assert done
-    assert state.sessions.discarded == [key]
-    assert store.briefed_slot(run) == "", "a discarded conversation must re-brief"
-    assert key in state.slots, "the tab (slot) survives a conversation reset"
-    assert state.sessions.replays == [False], (
-        "replay must be suppressed: clearing the resume pointer is exactly what "
-        "makes core's next cold start rebuild the discarded transcript as a "
-        "[CONVERSATION HISTORY] block, so a reset that leaves replay on hands the "
-        "fresh narrator a reconstruction of the pages it just forgot"
-    )
+    assert store.conversation_number(run) == 1
+    assert key not in state.slots, "the old conversation's slot must be closed"
+    assert unlinked == ["sid-old"], "the old kiro-cli session must be removed"
+    assert store.stale_conversations(run) == []
+    assert store.briefed_slot(run) == "", "a new conversation must re-brief"
 
 
 def test_reset_still_runs_on_a_core_without_the_replay_knob(store, run, monkeypatch):
-    """``replay`` only exists on core builds carrying the conversation-reset knob.
-
-    On an older one the reset must still happen — with replay, which is the old
-    behaviour — rather than raising a TypeError the caller reads as a failed reset.
-    """
-    import types
-
-    fake = types.ModuleType("kiro_crew.dashboard.chat_utils")
-    fake._history_key_for = lambda key: key
-    monkeypatch.setitem(sys.modules, "kiro_crew.dashboard.chat_utils", fake)
-
+    """``replay`` only exists on newer core. The reset no longer depends on it at
+    all: the new key has no history to replay whatever core does."""
+    _fake_core(monkeypatch)
     state = FakeState()
-    state.sessions = LegacyFakeSessions()
+    state.sessions = LegacyPurgeFakeSessions(sid="sid-legacy")
     ensure_narrator_slot_ex(state, run)
-    key = narrator_slot_key(run)
-    done = asyncio.run(reset_narrator_conversation(state, store, run))
-    assert done, "a core without the knob must still get its conversation reset"
-    assert state.sessions.discarded == [key]
+    assert asyncio.run(reset_narrator_conversation(state, store, run))
+    assert store.conversation_number(run) == 1
 
 
 def test_a_kwargs_forwarding_manager_is_offered_the_knob():
@@ -356,10 +345,13 @@ def test_a_kwargs_forwarding_manager_is_offered_the_knob():
 
 
 def test_reset_survives_a_missing_runtime(store, run):
+    """No session runtime still moves the life: the new key is what makes it fresh."""
+
     class NoSessions:
         _slots: dict = {}
 
-    assert not asyncio.run(reset_narrator_conversation(NoSessions(), store, run))
+    assert asyncio.run(reset_narrator_conversation(NoSessions(), store, run))
+    assert store.conversation_number(run) == 1
 
 
 def test_reset_refuses_a_bad_run_id(store):
@@ -424,17 +416,18 @@ def test_a_dismissed_tab_gets_a_fresh_conversation_on_the_next_turn(store, run, 
     key = narrator_slot_key(run)
     asyncio.run(registry[APP_NAME](key))
     state.slots.pop(key)
-    assert state.sessions.discarded == [key], "a dismissal must discard the conversation"
 
     advance()
     assert len(sent) == 2 and run in sent[1], "the fresh conversation is asked the month"
+    assert narrator_slot_key(run, 1) in state.slots, "the turn must run on the new key"
+    assert store.stale_conversations(run) == [], "the dismissed conversation is removed"
 
-    # A third turn on the SAME (reopened) tab must not rotate again: the dismissal
-    # recorded its turn, so the planned rotation sees the boundary already spent.
+    # A third turn on the SAME tab must not rotate again: the dismissal recorded
+    # its turn, so the planned rotation sees the boundary already spent.
     store.commit_state(run, {**store.read_state(run), "turn": 2})
     store.append_turn(run, {"turn": 2, "prose": "spring"})
     advance()
-    assert len(state.sessions.discarded) == 1, "one dismissal, one reset"
+    assert store.conversation_number(run) == 1, "one dismissal, one new conversation"
 
 
 def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
@@ -485,6 +478,7 @@ def test_the_idle_archive_sweep_costs_no_conversation(store, run, monkeypatch):
         "a tidied-away tab is not a dismissal; discarding here would lose a "
         "conversation the player never asked to end"
     )
+    assert store.conversation_number(run) == 0, "the same conversation resumes"
 
 
 # ── the purge seam: a build swap must also start empty ──────────────────────

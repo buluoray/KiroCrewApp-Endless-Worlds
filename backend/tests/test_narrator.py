@@ -8,6 +8,7 @@ importable, and skips otherwise.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -130,30 +131,21 @@ def test_install_generation_changes_on_update_and_same_content_reinstall(tmp_pat
     )
 
 
-@pytest.mark.parametrize(
-    ("app", "mode", "error"),
-    [
-        ("some-other-app", MEMORY_MODE, SlotOwnedByAnother),
-        (APP_NAME, "persistent", MemoryModeConflict),
-    ],
-)
-def test_stale_install_release_keeps_foreign_or_unsealed_slots(app, mode, error):
+def test_retiring_an_old_conversation_never_touches_a_foreign_slot():
     state = FakeState()
-    slot = FakeSlot(narrator_slot_key("run-1"), app=app, memory_mode=mode)
+    slot = FakeSlot(narrator_slot_key("run-1"), app="some-other-app", memory_mode=MEMORY_MODE)
     state.slots[slot.key] = slot
 
-    with pytest.raises(error):
-        narrator.release_stale_narrator_slot(state, "run-1")
-
+    assert asyncio.run(narrator.retire_narrator_conversation(state, "run-1", 0)) is False
     assert state.slots[slot.key] is slot
 
 
-def test_stale_install_release_removes_only_the_app_owned_sealed_slot():
+def test_retiring_an_old_conversation_removes_the_app_owned_slot():
     state = FakeState()
-    slot = FakeSlot(narrator_slot_key("run-1"), app=APP_NAME, memory_mode=MEMORY_MODE)
+    slot = FakeSlot(narrator_slot_key("run-1", 3), app=APP_NAME, memory_mode=MEMORY_MODE)
     state.slots[slot.key] = slot
 
-    assert narrator.release_stale_narrator_slot(state, "run-1") is True
+    assert asyncio.run(narrator.retire_narrator_conversation(state, "run-1", 3)) is True
     assert slot.key not in state.slots
 
 

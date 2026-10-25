@@ -139,8 +139,8 @@ def test_a_turn_message_has_no_channel_for_a_rulebook():
 def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monkeypatch):
     purged: list[str] = []
 
-    async def record_purge(_state, run_id):
-        purged.append(run_id)
+    async def record_purge(_state, run_id, conversation=0):
+        purged.append(narrator.narrator_slot_key(run_id, conversation))
         return True
 
     state_obj = FakeState()
@@ -157,9 +157,12 @@ def test_app_update_replaces_the_slot_but_keeps_the_saved_life(store, run, monke
     monkeypatch.setattr(narrator, "app_install_generation", lambda: "updated-install")
     _advance(state_obj, store, run, _prompts(sent))
 
-    new_slot = state_obj.slots[narrator.narrator_slot_key(run)]
+    new_slot = state_obj.slots[narrator.narrator_slot_key(run, 1)]
     assert new_slot is not old_slot, "the pre-update conversation was reused"
-    assert purged == [run], "the pre-update persisted conversation was not purged"
+    assert narrator.narrator_slot_key(run) not in state_obj.slots, "the old slot was left open"
+    assert purged == [narrator.narrator_slot_key(run)], (
+        "the pre-update persisted conversation was not purged"
+    )
     assert store.narrator_generation(run) == "updated-install"
     _assert_thin(sent[1], run)
     assert store.read_state(run) == saved, "slot replacement changed the save"

@@ -32,7 +32,7 @@ from typing import Any
 import narrator
 from backdrop import BackdropDraftStore, BackdropStore
 from content import Content
-from narrator import ensure_narrator_slot_ex, release_narrator_slot
+from narrator import ensure_narrator_slot_ex
 from perf import TurnPerf
 from phototrace import CandidateStore, TraceStore
 from store import RunStore
@@ -133,6 +133,22 @@ def _should_rotate(
         return ""
     clock = time.time() if now is None else now
     return "idle" if clock - committed > IDLE_ROTATION_SECS else ""
+
+
+def _conversation_used(state_obj: Any, store: RunStore, run_id: str, baseline: int) -> bool:
+    """Whether the current conversation has ever been spoken to.
+
+    An install change replaces a conversation only when there is one: a life on
+    its very first turn has no generation marker either, and moving it to a new
+    number would leave nothing behind but a skipped key.
+    """
+    if store.narrator_generation(run_id) or baseline > 0 or store.briefed_slot(run_id):
+        return True
+    try:
+        key = narrator.current_slot_key(store, run_id)
+    except narrator.BadRunId:
+        return False
+    return hasattr(state_obj, "get_slot") and state_obj.get_slot(key) is not None
 
 
 #: One fresh conversation per stuck turn. A SECOND zero-contact expiry on a
@@ -541,8 +557,16 @@ async def advance_turn(
         # the very next turn against a conversation this just replaced, and a
         # failed write after the replace would leave exactly that.
         store.mark_rotation(run_id, turn=baseline)
-        narrator.release_stale_narrator_slot(state_obj, run_id)
-        await narrator.purge_narrator_session(state_obj, run_id)
+        # New conversation number and generation marker in one synchronous step,
+        # before anything awaits: a second request arriving while the old
+        # conversation is being removed sees the generation already current and
+        # the new key already chosen, so it cannot start a second new one. Safe to
+        # mark before the slot exists because the new key has no conversation
+        # behind it whatever happens next.
+        if _conversation_used(state_obj, store, run_id, baseline):
+            narrator.start_new_conversation(store, run_id)
+        store.mark_narrator_generation(run_id, install_generation)
+        await narrator.retire_stale_conversations(state_obj, store, run_id)
         TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason="install")
     elif rotate_reason := _should_rotate(store, run_id, baseline, chapter_crossed):
         # Planned rotation: the conversation restarts at a narratively clean point
@@ -561,13 +585,19 @@ async def advance_turn(
         await narrator.reset_narrator_conversation(state_obj, store, run_id)
         TurnPerf(store.data_dir, run_id).mark(wanted, "rotation", reason=rotate_reason)
 
+    elif store.stale_conversations(run_id):
+        # An earlier removal did not finish (core refused a close, or the
+        # dismissal hook left the closed tab's session for this turn to remove).
+        await narrator.retire_stale_conversations(state_obj, store, run_id)
+
     slot, fresh_slot = ensure_narrator_slot_ex(
-        state_obj, run_id, project=project, model=model, reasoning_effort=reasoning_effort
+        state_obj,
+        run_id,
+        project=project,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        conversation=store.conversation_number(run_id),
     )
-    if install_changed:
-        # Mark only after creation. If replacement fails, the old marker remains
-        # and the next request safely retries the invalidation instead of reusing.
-        store.mark_narrator_generation(run_id, install_generation)
     slot_key = str(getattr(slot, "key", "") or "")
 
     # -- slot health: a narrator that never touched the world is not ours --
@@ -589,23 +619,27 @@ async def advance_turn(
     if not fresh_slot and _slot_never_touched_world(
         store.read_pending(run_id), wanted, budget_secs
     ):
-        if store.count_slot_heals(run_id, wanted) < _MAX_SLOT_HEALS_PER_TURN and (
-            release_narrator_slot(state_obj, run_id)
-        ):
+        if store.count_slot_heals(run_id, wanted) < _MAX_SLOT_HEALS_PER_TURN:
+            # A NEW conversation, not the same key rebuilt: a recreated slot under
+            # the old key resumes the old session through core's resume pointer,
+            # binding and all, which is the one thing this heal exists to escape.
             store.note_slot_heal(run_id, wanted)
             store.clear_pending(run_id)
+            narrator.start_new_conversation(store, run_id)
             logger.warning(
                 "endless-worlds: narrator slot for %s never touched the world "
-                "within its turn %s deadline; dropped and recreated",
+                "within its turn %s deadline; replaced with a new conversation",
                 run_id,
                 wanted,
             )
+            await narrator.retire_stale_conversations(state_obj, store, run_id)
             slot, fresh_slot = ensure_narrator_slot_ex(
                 state_obj,
                 run_id,
                 project=project,
                 model=model,
                 reasoning_effort=reasoning_effort,
+                conversation=store.conversation_number(run_id),
             )
             slot_key = str(getattr(slot, "key", "") or "")
 

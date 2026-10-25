@@ -71,3 +71,19 @@ def _ensure_gateway_importable() -> None:
 
 
 _ensure_gateway_importable()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_core_slot_close(monkeypatch):
+    """Retire old narrator slots without core's ``close_slot`` by default.
+
+    The real one is importable here but needs a whole dashboard state, which the
+    stand-in states these tests build do not have. Tests about the close itself
+    install their own stand-in over this.
+    """
+    import narrator
+
+    monkeypatch.setattr(narrator, "_core_close_slot", lambda: None)

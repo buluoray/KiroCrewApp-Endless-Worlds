@@ -15,7 +15,7 @@ argument.
 | Path | What it is |
 |---|---|
 | `agents/narrator.json` | the packaged agent: `name` `endless-narrator`, `model` `auto`, `tools` == `allowedTools` == the eight per-tool refs it uses under `@endless-worlds:endless-mcp/…` (its own tools only), and no `mcpServers` of its own |
-| `backend/narrator.py` | slot lifecycle + the seal: `ensure_narrator_slot_ex()` (ownership and memory-mode guards), `_installation_generation()`, `release_stale_narrator_slot()`, `_apply_choice()`, and the constants `NARRATOR_AGENT`, `OWN_SERVER_REF`, `MEMORY_MODE` |
+| `backend/narrator.py` | slot lifecycle + the seal: `ensure_narrator_slot_ex()` (ownership and memory-mode guards), `_installation_generation()`, `narrator_slot_key(runId, n)`, `start_new_conversation()`, `retire_stale_conversations()` / `retire_all_conversations()`, `_apply_choice()`, and the constants `NARRATOR_AGENT`, `OWN_SERVER_REF`, `MEMORY_MODE` |
 | `backend/content.py` | `Content(language)` — one language's text with English behind it: `resolve()`, `__call__()`, `_table()` |
 | `content/{en,zh}.json` | the text tables themselves (prompt lines, shape descriptions, separators) |
 | `backend/settings.py` | `read_settings()` / `write_settings()` over `<data>/settings.json`, and `REASONING_EFFORTS` |
@@ -57,15 +57,20 @@ argument.
   words of the app's own except the `recentTrimmed.note`, which is English like
   the read's other notes. Contract and tests in [turn-loop](turn-loop.md).
 
-- **One slot per life, but not one conversation.** The slot persists for the
-  life; its conversation is replaced after a pause past `IDLE_ROTATION_SECS` (5 min),
-  every `ROTATION_MAX_TURNS` (8) turns, on a chapter boundary, and on an install
-  change, always through `reset_narrator_conversation` (legacy briefed marker
-  cleared, transcript replay suppressed). The fresh conversation's prompt is the
-  same few lines as any turn's; its first read is full, carries the `brief` and
-  `shape`, and carries `commitWith` (`read.patch`, naming the read's
-  fingerprint), so it commits a `statePatch` rather than re-declaring the state.
-  `read.patch` exists in every content table in the life's own language. Contract and tests in [turn-loop](turn-loop.md).
+- **One slot per conversation, many conversations per life.** A life's
+  conversation is replaced after a pause past `IDLE_ROTATION_SECS` (5 min), every
+  `ROTATION_MAX_TURNS` (8) turns, on a chapter boundary, on an install change, on
+  the reset control and on a dismissed tab. Each replacement moves the life to a
+  new conversation number and so a new slot key (`endless-run-<runId>-c<n>`; the
+  bare `endless-run-<runId>` is conversation 0), because core finds an old
+  conversation again by its key: resume pointer, transcript, history replay. The
+  old slot is closed through core's `close_slot`, its resume pointer forgotten,
+  kiro-cli's files unlinked and core's transcript deleted. The fresh
+  conversation's prompt is the same few lines as any turn's; its first read is
+  full, carries the `brief` and `shape`, and carries `commitWith` (`read.patch`,
+  naming the read's fingerprint), so it commits a `statePatch` rather than
+  re-declaring the state. `read.patch` exists in every content table in the
+  life's own language. Contract and tests in [turn-loop](turn-loop.md).
 
 - **The agent can reach this app's own tools and nothing else.** `narrator.json`
   declares no filesystem, shell, network, or other MCP server — only its own tools.
@@ -130,15 +135,15 @@ argument.
   without deleting the life.** `_installation_generation()` hashes the installed
   app's runtime files and their filesystem identity. `RunStore` records which
   generation owns each life's conversation; a missing legacy marker or a mismatch
-  makes `advance_turn()` validate and release the app-owned slot, purge its persisted
-  conversation, and create the replacement before composing the prompt. Content
+  makes `advance_turn()` move a used conversation to a new number, remove the old
+  one, and create the new key's slot before composing the prompt. Content
   detects an update even when timestamps are preserved, while inode/ctime identity
   detects a same-content reinstall. An unchanged install keeps its slot. The
   replacement is fresh, so its first read is full and carries the world's
   rulebook again, and the turn loop treats any old pending writer as gone. Generation is separate bookkeeping, not world
   state: state, rollback, chronicle, worlds, and shelf rows are untouched. Pinned by
   `test_install_generation_changes_on_update_and_same_content_reinstall`,
-  `test_stale_install_release_keeps_foreign_or_unsealed_slots`, and
+  `test_retiring_an_old_conversation_never_touches_a_foreign_slot`, and
   `test_app_update_replaces_the_slot_but_keeps_the_saved_life`.
 
 - **The model is `auto`; the concrete choice is applied per slot at dispatch.**

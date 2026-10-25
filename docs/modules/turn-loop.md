@@ -26,11 +26,14 @@ turn 200 as at turn 1.
 
 - **Turn start never reuses a slot from another app installation.** Before prompt
   composition, `advance_turn()` compares the generation persisted in `RunStore`
-  with the currently loaded app. A missing legacy marker or mismatch validates and
-  releases only the app-owned, memory-sealed slot, purges its persisted conversation,
-  and creates a replacement; the existing fresh-slot path clears a stale pending
-  writer, and the new conversation's first full read hands it the rulebook. The generation marker is written only after the
-  replacement exists, so a failed replacement is retried safely. The life remains
+  with the currently loaded app. A missing legacy marker or mismatch on a life whose
+  conversation has been used moves the life to a new conversation number
+  (`start_new_conversation`) and writes the generation marker in the same
+  synchronous step, so a second request cannot start a second one; then the old
+  conversation is removed (`retire_stale_conversations`) and the new key's slot is
+  created, which clears a stale pending writer; the new conversation's first full
+  read hands it the rulebook. A life on its very first turn just gets the marker.
+  The life remains
   at the same turn with the same state, rollback, chronicle, worlds, and shelf row.
   This is deterministic update/reinstall invalidation, separate from the behavioural
   timeout self-heal below.
@@ -43,9 +46,11 @@ turn 200 as at turn 1.
   expired with the pending record's `steps` counter still at zero (the MCP
   server stamps every `endless_*` call via `note_tool_call`, and a healthy
   narrator opens every turn with `endless_read_runtime`). `advance_turn` then
-  drops the conversation (`release_narrator_slot`), clears the pending record,
-  and rebuilds the slot in the same call — the fresh conversation reads the
-  rulebook back on its first full read. Capped at one heal per turn
+  clears the pending record, moves the life to a new conversation number, removes
+  the old one, and creates the new key's slot in the same call — the new
+  conversation reads the rulebook back on its first full read. Rebuilding the
+  SAME key would resume the poisoned session through core's resume pointer.
+  Capped at one heal per turn
   (`_MAX_SLOT_HEALS_PER_TURN`, per-turn counter in the store) so a fresh slot
   that also fails surfaces as a failure instead of churning a new conversation
   every budget. One endless_* call is proof of the right narrator: slow is
@@ -66,11 +71,10 @@ turn 200 as at turn 1.
   exists for the next month, because a second ask five minutes after a first one
   that did not rotate would otherwise discard the narrator still writing it; an
   unknown commit time never rotates. Every reason goes through the same seam:
-  `mark_rotation(turn=baseline)` before `reset_narrator_conversation` (which
-  clears the legacy briefed marker and suppresses the transcript replay), so a retry or
-  double tap sees the marker at `baseline` and never rotates twice, and the
+  `mark_rotation(turn=baseline)` before `reset_narrator_conversation`, so a retry
+  or double tap sees the marker at `baseline` and never rotates twice, and the
   recall-sent record (lore, recall candidates, people cards, held blocks) is
-  stamped with the old rotation and reads as empty. The perf ledger records the
+  stamped with the old rotation and conversation number and reads as empty. The perf ledger records the
   reason; `tools/perf_audit.py` groups turns by it. Pinned by
   `test_a_pause_past_the_threshold_rotates_and_a_short_one_does_not`,
   `test_an_idle_boundary_rotates_exactly_once`,
@@ -79,6 +83,25 @@ turn 200 as at turn 1.
   `test_a_commit_time_for_another_month_is_not_trusted`,
   `test_the_budget_caps_a_conversation_at_eight_turns`, and
   `test_the_turn_after_a_pause_starts_fresh_and_forgets_what_was_sent`.
+
+- **A new conversation is a new slot key; the old key is removed.** Core keys a
+  conversation's resume pointer, its transcript and its cold-start
+  `[CONVERSATION HISTORY]` replay by the slot key, so a "fresh" conversation on a
+  reused key could be handed the old one back (measured before this: every
+  narrator session after a life's first one opened with 30-93 KB of the previous
+  conversation replayed). Conversation `n` of a life runs at
+  `narrator_slot_key(runId, n)`: `endless-run-<runId>` for `n = 0` (the key every
+  life used before numbering, so an existing life moves on its next rotation),
+  `endless-run-<runId>-c<n>` after. `start_new_conversation` clears the legacy
+  briefed marker and bumps `n` synchronously, before any await, so concurrent or retried
+  requests find the same new key; `retire_stale_conversations` then closes each
+  earlier slot through core's `close_slot` (what the App Kit's `deleteSlot` runs),
+  forgets its resume pointer, unlinks kiro-cli's files and deletes core's
+  transcript. A removal that fails stays on the `stale` list and is retried at the
+  start of the next turn. Every rotation reason, the reset control, a dismissed
+  tab, the heal and the install change all take this path; a slot core archived
+  for idleness is NOT a new conversation and resumes under its own key. Pinned by
+  `test_conversation_keys.py`.
 
 - **A fresh conversation commits a patch, not the whole state.** Its first read
   is full (it holds no `since`), and that read's `fingerprint` names exactly the
