@@ -73,21 +73,23 @@ test('keyboard, page arrival, narrow layout and first life', {
     assert.equal(sends[1].action, 'Wait at the well')
     assert.match(await page.locator('.ew-sr-only').innerText(), /5/)
     // Real chronicle reads exercise keyboard paging without starting a turn.
-    await page.locator('.ew-pager-arw').first().focus()
-    await page.keyboard.press('Enter')
-    await page.locator('.ew-pager-arw').first().focus()
-    await page.keyboard.press('Enter')
-    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label')?.includes('3'))
+    const wheel = page.locator('.ew-topbar .ew-wheel-track[role="slider"]')
+    await wheel.focus()
+    await page.keyboard.press('ArrowLeft')
+    await page.keyboard.press('ArrowLeft')
+    await page.waitForFunction(() =>
+      document.querySelector('.ew-play-root [role="region"]')?.getAttribute('aria-label')?.includes('3'),
+    )
     for (const width of [320, 375, 480]) {
       await page.setViewportSize({ width, height: 900 })
       await page.waitForTimeout(150)
       // A scroll-hidden bar has the same geometry as a keyboard-focused one.
       await page.locator('.ew-topbar').evaluate(e => e.classList.add('ew-topbar-hidden'))
-      await page.locator('.ew-pager-arw').first().focus()
+      await wheel.focus()
       assert.equal(await page.locator('.ew-topbar').evaluate(e => getComputedStyle(e).opacity), '1')
       const fits = await page.locator('.ew-topbar').evaluate(e => e.scrollWidth <= e.clientWidth)
-      assert.equal(fits, true, `pager reflows at ${width}px`)
-      const box = await page.locator('.ew-pager-arw').first().boundingBox()
+      assert.equal(fits, true, `top row reflows at ${width}px`)
+      const box = await wheel.boundingBox()
       assert.ok(box.width >= 44 && box.height >= 44)
     }
     // Empty lives and worlds are read fixtures, not deleted pod records.

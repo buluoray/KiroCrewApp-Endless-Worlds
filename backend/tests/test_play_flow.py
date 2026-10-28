@@ -77,7 +77,7 @@ def test_a_hidden_recap_can_be_reopened_from_the_pager():
     close = play.split('className="ew-story-moment-close"', 1)[1].split("</button>", 1)[0]
     assert "setRecapHidden(true)" in close, "hiding the recap must light the Recap button"
     assert "recapFocus.current = 'reopen'" in close
-    pager = play.split("const pager =", 1)[1].split("const main =", 1)[0]
+    pager = play.split("const wheelBar = (", 1)[1].split("const main =", 1)[0]
     assert "isLive && recapHidden && !recapOpen ?" in pager
     reopen = pager.split('className="ew-pager-recap"', 1)[1].split("</button>", 1)[0]
     assert "setRecapOpen(true)" in reopen and "t('play.recapReopen')" in reopen

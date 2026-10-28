@@ -40,8 +40,7 @@ import { mt } from './memory-state'
 import { PanelBox, Prose, Waiting } from './ui'
 import { StoryPage } from './story-page'
 import { PagePicker } from './page-picker'
-import { HoldArrow, PageScrubber } from './page-scrubber'
-import { PageWheel, usePhoneLayout, WheelLatest } from './page-wheel'
+import { PageWheel, WheelLatest } from './page-wheel'
 import { createScrubStore } from './scrub-store'
 import { buildTabs, tabIcon } from './tabbar'
 
@@ -60,15 +59,9 @@ function keyIsOwned(target: EventTarget | null): boolean {
   )
 }
 
-function Chevron({ dir }: { dir: 'l' | 'r' | 'first' | 'last' }) {
-  const d =
-    dir === 'l'
-      ? 'M11 4 L6 9 L11 14'
-      : dir === 'r'
-        ? 'M7 4 L12 9 L7 14'
-        : dir === 'first'
-          ? 'M13 4 L8 9 L13 14 M5 4 L5 14'
-          : 'M5 4 L10 9 L5 14 M13 4 L13 14'
+/** The `>|` glyph of the wheel's back-to-the-live-page mark. */
+function Chevron() {
+  const d = 'M5 4 L10 9 L5 14 M13 4 L13 14'
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
       <path
@@ -412,16 +405,14 @@ export function PlayPage({
   // The turn pager at the top of the story: which past turn is being read (null =
   // the live, latest turn), and this life's turns so an arrow can page to one.
   const [viewTurn, setViewTurn] = useState<number | null>(null)
-  // The page being flipped to while the reader drags the scrubber or holds an arrow.
+  // The page being flipped to while the reader spins the page wheel.
   // Outside this component's state on purpose: a step must not re-render the story.
   const [scrub] = useState(createScrubStore)
-  // On a phone the scrubber is a sideways page wheel instead of the fore-edge slider.
-  const phone = usePhoneLayout()
   // The page a scrub or a held arrow just landed on from several pages away, and
   // which way the book was leafed: the story draws one soft fold over that page.
   // State, not derived from the previous turn, so a later re-render cannot replay it.
   const [leaf, setLeaf] = useState<{ turn: number; dir: 'fwd' | 'back' } | null>(null)
-  // The phone's type-a-number picker, opened by a tap on the wheel's centre number.
+  // The type-a-number picker, opened by a tap on the wheel's centre number.
   // Held here because the wheel (the tap) and the picker (the panel) are siblings.
   const [pickOpen, setPickOpen] = useState(false)
 
@@ -992,11 +983,11 @@ export function PlayPage({
   const pastAction = isLive ? '' : (shownEntry?.action ?? '')
   // Forward when the turn number grew (a new page or a step right), back otherwise.
   const pageDir = shownTurn >= prevTurnRef.current ? 'fwd' : 'back'
-  // A scrub, a held arrow or one click lands here, once: the newest page is the
-  // LIVE page, like Latest.
+  // A spin of the wheel lands here, once: the newest page is the LIVE page, like
+  // Latest.
   const goPage = (n: number) => setViewTurn(n >= latest ? null : Math.max(1, n))
-  // The scrubber's and the held arrows' landing: the same jump, plus the leafing
-  // fold when it passed more than one page. One click stays a plain page turn.
+  // The wheel's landing: the same jump, plus the leafing fold when it passed more
+  // than one page. One step stays a plain page turn.
   const leafTo = (n: number) => {
     const to = Math.min(latest, Math.max(1, n))
     setLeaf(
@@ -1004,22 +995,7 @@ export function PlayPage({
     )
     goPage(n)
   }
-  // The scrubber: a second row of the top bar on a wide screen, the book's fore-edge.
-  // Only for a life with pages to flip between.
-  const scrubber =
-    latest >= 2 && !phone ? (
-      <PageScrubber
-        runId={runId}
-        shown={shownTurn}
-        latest={latest}
-        store={scrub}
-        onCommit={leafTo}
-      />
-    ) : null
-  // On a phone there are no pager buttons: the sideways page wheel sits in the top
-  // row beside the back link. A tap on its centre number (or Enter) opens the
-  // type-a-number picker; the mark at its end goes back to the live page.
-  const phoneBar = phone ? (
+  const wheelBar = (
     <div className="ew-wheel-bar" ref={pagerRef}>
       {latest >= 2 ? (
         <>
@@ -1052,7 +1028,7 @@ export function PlayPage({
             store={scrub}
             onLatest={() => setViewTurn(null)}
           >
-            <Chevron dir="last" />
+            <Chevron />
           </WheelLatest>
         </>
       ) : null}
@@ -1074,82 +1050,7 @@ export function PlayPage({
         </button>
       ) : null}
     </div>
-  ) : null
-  const pager =
-    latest >= 1 && !phone ? (
-      <div className="ew-pager" ref={pagerRef}>
-        <button
-          className="ew-pager-arw ew-pager-end"
-          type="button"
-          disabled={shownTurn <= 1}
-          aria-label={t('play.firstTurn')}
-          title={t('play.firstTurn')}
-          onClick={() => setViewTurn(latest <= 1 ? null : 1)}
-        >
-          <Chevron dir="first" />
-        </button>
-        <HoldArrow
-          dir={-1}
-          shown={shownTurn}
-          latest={latest}
-          store={scrub}
-          onCommit={leafTo}
-          disabled={shownTurn <= 1}
-          label={t('play.prevTurn')}
-        >
-          <Chevron dir="l" />
-        </HoldArrow>
-        <PagePicker
-          runId={runId}
-          shown={shownTurn}
-          latest={latest}
-          preview={scrub}
-          onJump={(n) => setViewTurn(n)}
-        />
-        <HoldArrow
-          dir={1}
-          shown={shownTurn}
-          latest={latest}
-          store={scrub}
-          onCommit={leafTo}
-          disabled={shownTurn >= latest}
-          label={t('play.nextTurn')}
-        >
-          <Chevron dir="r" />
-        </HoldArrow>
-        {/* Latest is always the LIVE page (null), never a past page that happens to
-            carry the newest number, so a turn in flight, the painting stage and the
-            recap all come back with it. */}
-        <button
-          className="ew-pager-arw ew-pager-end"
-          type="button"
-          disabled={isLive}
-          aria-label={t('play.latestTurn')}
-          title={t('play.latestTurn')}
-          onClick={() => setViewTurn(null)}
-        >
-          <Chevron dir="last" />
-        </button>
-        {/* Lit only once the reader has hidden the entry recap: on a long life
-            it is the one place that says where they came back in. Live page
-            only, where the recap renders. */}
-        {isLive && recapHidden && !recapOpen ? (
-          <button
-            ref={recapReopenRef}
-            className="ew-pager-recap"
-            type="button"
-            onClick={() => {
-              recapFocus.current = 'close'
-              setRecapOpen(true)
-              setRecapHidden(false)
-            }}
-          >
-            {t('play.recapReopen')}
-          </button>
-        ) : null}
-      </div>
-    ) : null
-
+  )
   const main = (
     <div>
       {isLive && recapOpen ? (
@@ -1659,14 +1560,10 @@ export function PlayPage({
           `z-index: 2` is enough to clear the story it floats over. `fixed` still
           resolves against the shell, which spans the window, so the offset means what
           it says. */}
-      {readerBar ? (
-        <div className={'ew-topbar-slot' + (scrubber ? ' ew-topbar-slot-scrub' : '')} />
-      ) : null}
+      {readerBar ? <div className="ew-topbar-slot" /> : null}
       <div
         className={
-          'ew-topbar' +
-          (scrubber ? ' ew-topbar-scrub' : '') +
-          (phoneBar ? ' ew-topbar-wheel' : '') +
+          'ew-topbar ew-topbar-wheel' +
           (readerBar ? ' ew-topbar-fixed' : '') +
           (readerBar && barHidden ? ' ew-topbar-hidden' : '')
         }
@@ -1674,9 +1571,7 @@ export function PlayPage({
         <button className="ew-back" type="button" aria-label={t('play.backLabel')} onClick={onBack}>
           {t('play.back')}
         </button>
-        {pager}
-        {scrubber}
-        {phoneBar}
+        {wheelBar}
       </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep
