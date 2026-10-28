@@ -202,10 +202,12 @@ def _column_rules() -> list[str]:
     return [f"{sel.strip()} {{{body}}}" for sel, body in found if ".ew-backdrop" in sel]
 
 
-def test_the_story_column_has_no_glow_and_a_crisp_edge() -> None:
+def test_the_story_column_has_no_glow_and_no_drawn_edge() -> None:
     """The owner's second report: a text-shadow halo and a feathered veil edge looked
-    smeared on a desktop. The column is a plain panel like the others: no text-shadow,
-    no mask, no filter, and every shadow it casts is a zero-blur spread."""
+    smeared on a desktop. The column is a plain panel: no text-shadow, no mask, no
+    filter, and every shadow it casts is a zero-blur spread. The third report: a
+    hairline round the glass made the text read as pressed against it, so the glass
+    has no drawn edge either -- one spread of the glass itself, no border, no outline."""
     rules = [r for r in _column_rules() if "text-shadow: var(--ew-ink-edge)" not in r]
     assert rules, "no veil rule found for the story column"
     for rule in rules:
@@ -219,8 +221,23 @@ def test_the_story_column_has_no_glow_and_a_crisp_edge() -> None:
             assert len(lengths) >= 4 and float(lengths[2]) == 0, (
                 f"a blurred shadow feathers the column's edge: {layer.strip()!r}"
             )
-    assert "--ew-veil-edge" in _veil_rule(), "the column lost its hairline edge"
-    assert _decl(_veil_rule(), "box-shadow").startswith("0 0 0 12px var(--ew-veil)")
+    veil = _veil_rule()
+    assert _decl(veil, "box-shadow") == "0 0 0 12px var(--ew-veil)", (
+        "the veil's only shadow is its own glass spread; a second layer draws an edge"
+    )
+    for drawn in ("border:", "outline", "--ew-veil-edge"):
+        assert drawn not in veil, f"{drawn!r} draws an edge round the reading veil"
+    aside = _decl(_rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-aside"), "box-shadow")
+    assert aside == "0 0 0 8px var(--ew-side-glass)", f"the status aside has an edge: {aside!r}"
+
+
+def test_cards_on_the_veil_draw_no_outline() -> None:
+    """The recap and the world digest sit on the column's glass; their ring read as a
+    box pressed against the column. The border keeps its width, so nothing moves."""
+    rule = _rule(
+        r"\.ew-root:has\(> \.ew-backdrop\) \.ew-main :is\(\.ew-story-moment, \.ew-digest\)"
+    )
+    assert _decl(rule, "border-color") == "transparent"
 
 
 def _side_inks() -> dict[str, tuple[float, float, float]]:

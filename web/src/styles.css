@@ -1001,17 +1001,17 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
    under the reading column (and the shelf drawer beside it), so on a wide screen the
    art is untouched around it.
 
-   A plain panel, drawn like every other glass panel in the app: one flat glass, a crisp
-   hairline edge and a 10px corner. No glow and no feathered edge -- both read as a haze
-   smeared over the page. The glass is kept thin (.45) so the art reads through it, and
+   A plain panel: one flat glass and a 10px corner, with no drawn edge at all. No glow
+   and no feathered edge -- both read as a haze smeared over the page -- and no hairline
+   either: a line round the glass made the text read as pressed against it. The glass is kept thin (.45) so the art reads through it, and
    the column's body ink is pure white, the one ink that reaches AA on that glass alone
    over a white drawing. Muted and accent labels cannot (they top out near 3:1 there),
    so they carry a crisp 1px zero-blur shadow -- a hard edge under each stroke, not a
    glow -- in the rule below.
 
    Only when a backdrop is painted: on a plain page there is no art to defend against.
-   Two zero-blur spread shadows carry the glass and its hairline a little past the
-   column's edge instead of padding, so no geometry moves; a spread shadow grows its
+   A zero-blur spread shadow carries the glass a little past the column's edge instead
+   of padding, so no geometry moves; a spread shadow grows its
    corner from the element's own radius, so 3px here draws a 10px corner at 12px out.
    Background only, never backdrop-filter: a filter would become the containing block of
    the fixed phone reading row and the star-map sheet inside this column. Measured by
@@ -1019,11 +1019,10 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 .ew-root:has(> .ew-backdrop) .ew-main,
 .ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
   --ew-veil: rgba(9, 10, 14, .45);
-  --ew-veil-edge: rgba(255, 255, 255, .09);
   --ew-ink-edge: 0 1px 0 rgba(5, 6, 10, .85);
   --text: #ffffff;
   background: var(--ew-veil);
-  box-shadow: 0 0 0 12px var(--ew-veil), 0 0 0 13px var(--ew-veil-edge);
+  box-shadow: 0 0 0 12px var(--ew-veil);
   border-radius: 3px;
 }
 /* The crisp edge for every label painted in the muted or the accent ink. The list is
@@ -1113,15 +1112,21 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
    columns of small muted labels, not prose, so they gain little from seeing the art
    and lose the most when it is bright. The drawer gets the full glass outright; the
    status aside already sits on the column's glass, so it adds the share that brings
-   the two layers to the same .72 (1 - .55 x .5). Same crisp edge as the column. */
+   the two layers to the same .72 (1 - .55 x .5). No drawn edge, like the column. */
 .ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
   --ew-veil: rgba(9, 10, 14, .72);
 }
 .ew-root:has(> .ew-backdrop) .ew-aside {
   --ew-side-glass: rgba(9, 10, 14, .5);
   background: var(--ew-side-glass);
-  box-shadow: 0 0 0 8px var(--ew-side-glass), 0 0 0 9px rgba(255, 255, 255, .09);
+  box-shadow: 0 0 0 8px var(--ew-side-glass);
   border-radius: 4px;
+}
+/* The cards on the glass drop their outline too: a ring inside the veil read as a
+   box pressed against the column. Their tint still marks them. The border keeps its
+   width (transparent), so nothing inside them moves. */
+.ew-root:has(> .ew-backdrop) .ew-main :is(.ew-story-moment, .ew-digest) {
+  border-color: transparent;
 }
 
 .ew-play { display: block; }.ew-aside { display: none; }
