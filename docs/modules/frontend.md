@@ -153,12 +153,13 @@ guarantee.
   `html[data-mode="light"]` re-declare the dark surface set (`--card`, `--bg`,
   `--border`, …) a light dashboard would otherwise hand them. Where a backdrop is
   painted, the reading column and the shelf drawer sit on a reading veil drawn like
-  every other glass panel: one flat glass, a crisp hairline edge, no text-shadow halo
-  and no feathered or blurred edge. Its alpha is the lowest at which every ink in the
-  column reaches WCAG AA on the bare glass over white and black art (.58, with the
-  canvas ink lifted to meet it), and the phone reading row uses the same glass. Held
-  by `test_theme_contrast.py`
+  every other glass panel: one flat .45 glass, a crisp hairline edge, no glow and no
+  feathered or blurred edge. The column's body ink is pure white, which reaches WCAG AA
+  on that bare glass over white and black art; muted and accent labels hold 3:1 on it
+  and carry a crisp 1px zero-blur shadow for the rest. The phone reading row uses the
+  same glass. Held by `test_theme_contrast.py`
   (`test_text_on_the_bare_reading_veil_holds_over_any_drawing`,
+  `test_muted_and_accent_labels_carry_a_crisp_edge`,
   `test_the_story_column_has_no_glow_and_a_crisp_edge`,
   `test_the_phone_reading_row_matches_the_veil`, `test_the_veil_lets_the_art_through`,
   `test_a_life_card_over_its_own_backdrop_stays_legible`,

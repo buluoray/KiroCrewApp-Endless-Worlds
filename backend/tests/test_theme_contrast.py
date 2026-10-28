@@ -28,6 +28,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 _STYLES = _ROOT / "web" / "src" / "styles.css"
 
 BODY_FLOOR = 4.5
+#: Muted and accent labels on the bare reading veil. They cannot reach AA on a glass thin
+#: enough to show the art; a crisp 1px zero-blur shadow under each stroke carries them,
+#: and this floor pins the bare glass so the veil cannot thin further under them.
+LABEL_FLOOR = 3.0
 WHITE = (255.0, 255.0, 255.0)
 BLACK = (0.0, 0.0, 0.0)
 
@@ -131,23 +135,65 @@ def test_the_canvas_ink_does_not_follow_the_dashboard() -> None:
     assert "--card" in _light_surfaces(), "a light dashboard would hand the canvas white cards"
 
 
-def test_text_on_the_bare_reading_veil_holds_over_any_drawing() -> None:
-    """Every ink in the column reaches AA on the glass alone: there is no halo to lean on."""
-    veil = _veil_rule()
-    assert _decl(veil, "background") == "var(--ew-veil)"
-    grounds = _veil_grounds(_decl(veil, "--ew-veil"))
-    for name, ink in _inks().items():
+def _column_inks() -> dict[str, tuple[float, float, float]]:
+    """The canvas inks as the column re-declares them: its body ink is its own."""
+    inks = dict(_inks())
+    inks["text"] = _rgb(_decl(_veil_rule(), "--text"))
+    return inks
+
+
+def _assert_column_inks(grounds: list[tuple[float, float, float]], where: str) -> None:
+    for name, ink in _column_inks().items():
+        floor = BODY_FLOOR if name == "text" else LABEL_FLOOR
         got = _worst(ink, grounds)
-        assert got >= BODY_FLOOR, (
-            f"{name} ink on the bare veil is {got:.2f}:1 over the worst drawing, under "
-            f"{BODY_FLOOR}:1"
+        assert got >= floor, (
+            f"{name} ink {where} is {got:.2f}:1 over the worst drawing, under {floor}:1"
         )
 
 
+def test_text_on_the_bare_reading_veil_holds_over_any_drawing() -> None:
+    """Body text reaches AA on the glass alone; muted and accent labels hold their floor
+    on it, and the crisp shadow in the next test carries them the rest of the way."""
+    veil = _veil_rule()
+    assert _decl(veil, "background") == "var(--ew-veil)"
+    _assert_column_inks(_veil_grounds(_decl(veil, "--ew-veil")), "on the bare veil")
+
+
 def test_the_veil_lets_the_art_through() -> None:
-    """The owner's report: a glass dark enough to carry text alone hid the art (.72)."""
+    """The owner's report: a glass dark enough to carry every ink alone hid the art."""
     _, alpha = _parse_colour(_decl(_veil_rule(), "--ew-veil"))
-    assert alpha <= 0.6, f"the reading glass is {alpha:.2f} opaque; the art goes dark under it"
+    assert alpha <= 0.45, f"the reading glass is {alpha:.2f} opaque; the art goes dark under it"
+
+
+def _ink_rules() -> set[str]:
+    """Every selector whose colour is the muted or the accent ink."""
+    found: set[str] = set()
+    for sel, body in re.findall(r"([^{}]+)\{([^}]*)\}", _css()):
+        if re.search(r"(?<![-\w])color:\s*var\((?:--muted|--ew-accent-ink)", body):
+            found |= {one.strip() for one in sel.split(",") if one.strip()}
+    return found
+
+
+def test_muted_and_accent_labels_carry_a_crisp_edge() -> None:
+    """The shadow that carries the labels is a hard 1px edge, never a glow, and it reaches
+    every rule painted in those inks."""
+    edge = _decl(_veil_rule(), "--ew-ink-edge")
+    lengths = re.findall(r"(-?[\d.]+)(?:px)?(?=\s)", edge + " ")
+    assert lengths[:3] == ["0", "1", "0"], f"the label edge must be 0 1px 0, not {edge!r}"
+    found = re.search(
+        r"\.ew-root:has\(> \.ew-backdrop\) \.ew-main :is\((.*?)\)\s*,(.*?)\{\s*"
+        r"text-shadow: var\(--ew-ink-edge\);",
+        _css(),
+        re.S,
+    )
+    assert found, "the muted/accent label edge rule is gone"
+    listed = {one.strip() for one in found.group(1).split(",")}
+    listed |= {
+        one.strip().removeprefix(".ew-root:has(> .ew-backdrop) .ew-main ").strip()
+        for one in found.group(2).split(",")
+    }
+    missing = sorted(_ink_rules() - listed)
+    assert not missing, f"labels in the muted/accent ink without their edge: {missing}"
 
 
 def _column_rules() -> list[str]:
@@ -160,7 +206,7 @@ def test_the_story_column_has_no_glow_and_a_crisp_edge() -> None:
     """The owner's second report: a text-shadow halo and a feathered veil edge looked
     smeared on a desktop. The column is a plain panel like the others: no text-shadow,
     no mask, no filter, and every shadow it casts is a zero-blur spread."""
-    rules = _column_rules()
+    rules = [r for r in _column_rules() if "text-shadow: var(--ew-ink-edge)" not in r]
     assert rules, "no veil rule found for the story column"
     for rule in rules:
         for banned in ("text-shadow", "mask", "filter:", "backdrop-filter"):
@@ -205,14 +251,12 @@ def test_the_status_aside_adds_its_glass_to_the_column() -> None:
 
 
 def test_the_phone_reading_row_matches_the_veil() -> None:
-    """The phone's reading row is the column's glass: same alpha, AA with no halo."""
+    """The phone's reading row is the column's glass, inside the column: same alpha,
+    same inks, no glow."""
     row = _decl(_rule(r"\.ew-topbar-fixed"), "background")
     assert _parse_colour(row)[1] == _parse_colour(_decl(_veil_rule(), "--ew-veil"))[1]
     assert "text-shadow" not in _rule(r"\.ew-topbar-fixed")
-    grounds = _veil_grounds(row)
-    for name, ink in _inks().items():
-        got = _worst(ink, grounds)
-        assert got >= BODY_FLOOR, f"{name} on the phone reading row is {got:.2f}:1"
+    _assert_column_inks(_veil_grounds(row), "on the phone reading row")
 
 
 def test_a_choice_on_the_veil_stays_legible() -> None:
@@ -223,7 +267,7 @@ def test_a_choice_on_the_veil_stays_legible() -> None:
     )
     assert share, ".ew-choice is no longer a card mix"
     cards = (_decl(_light_surfaces(), "--card"),) + HOST_DARK_CARDS
-    text = _inks()["text"]
+    text = _column_inks()["text"]
     for card in cards:
         grounds = [_over(_rgb(card), int(share.group(1)) / 100, g) for g in veil]
         got = _worst(text, grounds)
@@ -298,7 +342,7 @@ def _canvas_var(value: str) -> tuple[float, float, float]:
     """`var(--text, …)` / `var(--muted, …)` resolved to the canvas ink it names."""
     found = re.fullmatch(r"var\((--text|--muted), #[0-9a-fA-F]{6}\)", value)
     assert found, f"the wheel's ink must be the canvas ink, not {value!r}"
-    return _inks()[found.group(1)[2:]]
+    return _column_inks()[found.group(1)[2:]]
 
 
 def test_the_phone_page_wheel_has_no_card_and_reads_on_the_reading_row() -> None:
@@ -313,5 +357,5 @@ def test_the_phone_page_wheel_has_no_card_and_reads_on_the_reading_row() -> None
     centre = _canvas_var(_decl(_rule(r"\.ew-wheel-c"), "color"))
     got = _worst(centre, grounds)
     assert got >= BODY_FLOOR, f"the wheel's centre number is {got:.2f}:1 on the reading row"
-    # The neighbours start from the muted ink, which is itself AA there.
-    assert _worst(_canvas_var(_decl(_rule(r"\.ew-wheel-n"), "color")), grounds) >= BODY_FLOOR
+    # The neighbours start from the muted ink: its floor there, with the crisp label edge.
+    assert _worst(_canvas_var(_decl(_rule(r"\.ew-wheel-n"), "color")), grounds) >= LABEL_FLOOR
