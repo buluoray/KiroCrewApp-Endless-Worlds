@@ -28,6 +28,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 _STYLES = _ROOT / "web" / "src" / "styles.css"
 
 BODY_FLOOR = 4.5
+#: The bare glass, read without its halo: WCAG's floor for large text and UI.
+GLASS_FLOOR = 3.0
 WHITE = (255.0, 255.0, 255.0)
 BLACK = (0.0, 0.0, 0.0)
 
@@ -100,9 +102,30 @@ def _worst(ink: tuple[float, float, float], grounds: list[tuple[float, float, fl
     return min(_contrast(ink, g) for g in grounds)
 
 
+def _veil_rule() -> str:
+    return _rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-main,[^{]*")
+
+
+def _page_scrim_top() -> tuple[tuple[float, float, float], float]:
+    """The page scrim's LIGHTEST stop: the art is never seen without at least this."""
+    found = re.search(
+        r"color-mix\(in srgb, var\(--ew-bg, (#[0-9a-fA-F]{6})\) (\d+)%, transparent\)",
+        _decl(_rule(r"\.ew-backdrop-scrim"), "background"),
+    )
+    assert found, ".ew-backdrop-scrim is no longer a --ew-bg gradient"
+    return _rgb(found.group(1)), int(found.group(2)) / 100
+
+
 def _veil_grounds(veil: str) -> list[tuple[float, float, float]]:
     rgb, alpha = _parse_colour(veil)
-    return [_over(rgb, alpha, art) for art in (WHITE, BLACK)]
+    scrim, share = _page_scrim_top()
+    return [_over(rgb, alpha, _over(scrim, share, art)) for art in (WHITE, BLACK)]
+
+
+def _halo_grounds(grounds: list[tuple[float, float, float]]) -> list[tuple[float, float, float]]:
+    """The glyph's own surround: the halo's working layer laid over the glass."""
+    rgb, alpha = _parse_colour(_decl(_veil_rule(), "--ew-halo"))
+    return [_over(rgb, alpha, g) for g in grounds]
 
 
 def test_the_canvas_ink_does_not_follow_the_dashboard() -> None:
@@ -117,31 +140,71 @@ def test_the_canvas_ink_does_not_follow_the_dashboard() -> None:
 
 
 def test_text_on_the_reading_veil_holds_over_any_drawing() -> None:
-    veil = _rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-main,[^{]*")
-    grounds = _veil_grounds(_decl(veil, "background"))
-    assert _decl(veil, "box-shadow").endswith(_decl(veil, "background")), (
-        "the veil's spread must be the same glass as its body, or its edge reads as a seam"
+    veil = _veil_rule()
+    glass = _decl(veil, "--ew-veil")
+    assert _decl(veil, "background") == "var(--ew-veil)"
+    assert _decl(veil, "box-shadow").endswith("var(--ew-veil)"), (
+        "the veil's feather must be the same glass as its body, or its edge reads as a seam"
     )
+    assert "var(--ew-halo)" in _decl(veil, "text-shadow"), "the column's text lost its halo"
+    grounds = _veil_grounds(glass)
     for name, ink in _inks().items():
-        got = _worst(ink, grounds)
+        got = _worst(ink, _halo_grounds(grounds))
         assert got >= BODY_FLOOR, (
-            f"{name} ink on the reading veil is {got:.2f}:1 over the worst drawing, "
-            f"under {BODY_FLOOR}:1"
+            f"{name} ink on its halo is {got:.2f}:1 over the worst drawing, under {BODY_FLOOR}:1"
         )
 
 
-def test_the_phone_reading_row_is_as_dark_as_the_veil() -> None:
-    grounds = _veil_grounds(_decl(_rule(r"\.ew-topbar-fixed"), "background"))
-    for name, ink in _inks().items():
+def test_the_veil_alone_keeps_body_text_readable() -> None:
+    """Without the halo (a glyph's interior, a shadow a browser drops), body text holds 3:1."""
+    got = _worst(_inks()["text"], _veil_grounds(_decl(_veil_rule(), "--ew-veil")))
+    assert got >= GLASS_FLOOR, f"body text on the bare glass is {got:.2f}:1, under {GLASS_FLOOR}:1"
+
+
+def test_the_veil_lets_the_art_through() -> None:
+    """The owner's report: a glass dark enough to carry text alone hid the art."""
+    _, alpha = _parse_colour(_decl(_veil_rule(), "--ew-veil"))
+    assert alpha <= 0.5, f"the reading glass is {alpha:.2f} opaque; the art goes dark under it"
+
+
+def _side_inks() -> dict[str, tuple[float, float, float]]:
+    return {k: v for k, v in _inks().items() if k in ("text", "muted")}
+
+
+def test_the_shelf_drawer_keeps_the_full_glass() -> None:
+    """The drawer's subtitles (the turn, "ended") are muted small type: AA with no halo."""
+    rail = _rule(
+        # Its own rule, not the column's shared one (where the drawer is a second selector).
+        r"\}\s*\.ew-root\.ew-view-live:has\(> \.ew-backdrop\) \.ew-shell-open \.ew-rail"
+    )
+    grounds = _veil_grounds(_decl(rail, "--ew-veil"))
+    for name, ink in _side_inks().items():
         got = _worst(ink, grounds)
+        assert got >= BODY_FLOOR, f"{name} in the shelf drawer is {got:.2f}:1 without its halo"
+
+
+def test_the_status_aside_adds_its_glass_to_the_column() -> None:
+    """The aside's labels sit on the column's glass AND the aside's own: AA with no halo."""
+    side = _parse_colour(_decl(_rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-aside"),
+                               "--ew-side-glass"))
+    grounds = [_over(side[0], side[1], g) for g in _veil_grounds(_decl(_veil_rule(), "--ew-veil"))]
+    for name, ink in _side_inks().items():
+        got = _worst(ink, grounds)
+        assert got >= BODY_FLOOR, f"{name} in the status aside is {got:.2f}:1 without its halo"
+
+
+def test_the_phone_reading_row_is_as_light_as_the_veil() -> None:
+    row = _decl(_rule(r"\.ew-topbar-fixed"), "background")
+    grounds = _veil_grounds(row)
+    assert _parse_colour(row)[1] <= _parse_colour(_decl(_veil_rule(), "--ew-veil"))[1]
+    for name, ink in _inks().items():
+        got = _worst(ink, _halo_grounds(grounds))
         assert got >= BODY_FLOOR, f"{name} on the phone reading row is {got:.2f}:1"
 
 
 def test_a_choice_on_the_veil_stays_legible() -> None:
     """A choice is a translucent card ON the veil, in either dashboard polarity."""
-    veil = _veil_grounds(
-        _decl(_rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-main,[^{]*"), "background")
-    )
+    veil = _veil_grounds(_decl(_veil_rule(), "--ew-veil"))
     share = re.search(
         r"var\(--card, #[0-9a-f]+\) (\d+)%", _decl(_rule(r"\.ew-choice"), "background")
     )
@@ -233,7 +296,8 @@ def test_the_phone_page_wheel_has_no_card_and_reads_on_the_reading_row() -> None
         body = _rule(sel)
         assert not re.search(r"(?:^|[;\s])background(?:-color)?:", body), f"{sel} has a background"
         assert "box-shadow:" not in body and "border:" not in body, f"{sel} is drawn as a card"
-    grounds = _veil_grounds(_decl(_rule(r"\.ew-topbar-fixed"), "background"))
+    # The row sits inside .ew-main, so its numbers carry the column's inherited halo.
+    grounds = _halo_grounds(_veil_grounds(_decl(_rule(r"\.ew-topbar-fixed"), "background")))
     centre = _canvas_var(_decl(_rule(r"\.ew-wheel-c"), "color"))
     got = _worst(centre, grounds)
     assert got >= BODY_FLOOR, f"the wheel's centre number is {got:.2f}:1 on the reading row"
