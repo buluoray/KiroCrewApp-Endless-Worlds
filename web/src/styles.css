@@ -1874,14 +1874,17 @@ button.ew-pager-turn:focus-visible {
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   transition: transform .28s ease, opacity .28s ease;
 }
-/* While the wheel turns, the row drops its blur and keeps its veil. A blurred
+/* While the wheel turns, the row trades its blur for a denser veil. A blurred
    backdrop is recomputed under every frame the numbers move (measured: the
-   compositor's draw cost per frame of a phone swipe fell from ~2.0ms to ~0.6ms
-   without it, devtools/switcher-perf.mjs with EW_PERF_GPU=1), and the art behind a
-   44px row is not what the reader is looking at mid-spin. The veil's alpha is the
-   same, so the ink's contrast is what test_theme_contrast.py measures either way.
-   One style change when the spin starts and one when it rests, nothing per frame. */
-.ew-topbar-fixed:has(.ew-wheel-on) { -webkit-backdrop-filter: none; backdrop-filter: none; }
+   compositor's draw cost per frame of a phone swipe fell from ~2.0ms to ~0.5ms
+   without it, devtools/switcher-perf.mjs with EW_PERF_GPU=1). The blur is there so
+   the prose scrolled under the row does not read through it; for the second the
+   wheel spins, the denser veil does that job instead. One style change when the
+   spin starts and one when it rests, nothing per frame. */
+.ew-topbar-fixed:has(.ew-wheel-on) {
+  background: rgba(8, 9, 18, .82);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
 /* Holds the row's place now that it is out of the flow: its own footprint, stated —
    44px of controls, 8px of padding twice, and the 10px it holds above the title. */
 .ew-topbar-slot { flex: none; height: 70px; }
