@@ -94,7 +94,9 @@ def test_only_the_numbers_on_screen_are_drawn():
     assert "const [first, last] = visiblePages(p, widthRef.current, latest)" in w
     assert "new ResizeObserver(measure)" in w
     # A fixed set of slots, enough for any window visiblePages can ask for.
-    slots = _src()[_src().index("export function wheelSlots(") : _src().index("export function slotOf(")]
+    slots = _src()[
+        _src().index("export function wheelSlots(") : _src().index("export function slotOf(")
+    ]
     assert "return 2 * (Math.ceil(widthPx / 2 / WHEEL_ITEM_PX) + 1) + 1" in slots
     assert "const count = wheelSlots(width)" in w
     assert "for (let i = 0; i < count; i++)" in w
@@ -193,7 +195,9 @@ def test_every_screen_gets_the_wheel_and_dragging_it_does_not_scroll_the_page():
         assert "height: 44px;" in body, sel
     # On a wide screen a bounded stretch at the row's end, not thirty numbers.
     wide = re.search(r"@media \(min-width: 601px\) \{([^}]*\})", css).group(1)
-    assert ".ew-topbar.ew-topbar-wheel .ew-wheel-bar { flex: 0 1 520px; margin-left: auto; }" in wide
+    assert (
+        ".ew-topbar.ew-topbar-wheel .ew-wheel-bar { flex: 0 1 520px; margin-left: auto; }" in wide
+    )
 
 
 def test_the_slider_and_the_pager_buttons_are_gone():
@@ -214,7 +218,9 @@ def test_the_wheel_flips_one_page_per_notch_and_loads_on_settle():
     assert "return { steps: 0, rest: acc }" in steps, "small deltas accumulate"
     w = _wheel()
     assert "el.addEventListener('wheel', onWheel, { passive: false })" in w
-    wheel = w[w.index("const onWheel = (e: WheelEvent) =>") : w.index("el.addEventListener('wheel'")]
+    wheel = w[
+        w.index("const onWheel = (e: WheelEvent) =>") : w.index("el.addEventListener('wheel'")
+    ]
     assert "e.preventDefault()" in wheel, "the page must not scroll under the wheel"
     assert "wheelSteps(wheelAcc.current + d)" in wheel
     assert "settleSoon()" in wheel and "onCommit" not in wheel

@@ -41,7 +41,9 @@ def _pager() -> str:
 def test_the_wheel_reaches_the_first_and_the_newest_month():
     """First and Latest are the wheel's own ends: Home and End, and the `>|` mark."""
     wheel = code_only(module("page-wheel.tsx"))
-    keys = wheel[wheel.index("export function scrubKey(") : wheel.index("export function wheelSteps(")]
+    keys = wheel[
+        wheel.index("export function scrubKey(") : wheel.index("export function wheelSteps(")
+    ]
     assert "if (key === 'Home') return 1" in keys and "if (key === 'End') return latest" in keys
     pager = _pager()
     assert "<PageWheel" in pager and "<WheelLatest" in pager
