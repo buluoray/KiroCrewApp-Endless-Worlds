@@ -23,8 +23,8 @@ export function visibleRows(scrollTop: number, total: number): [number, number] 
 }
 
 /** The page hints, keyed by the life and its newest month, so a month written since
- *  the last read is not missing. ONE read per key, shared by the picker and the
- *  scrubber's label; a failed read is dropped so the next open asks again. */
+ *  the last read is not missing. ONE read per key, reused by every open; a failed
+ *  read is dropped so the next open asks again. */
 let indexCache: { key: string; rows: Promise<Map<number, string>> } | null = null
 export function loadPageIndex(runId: string, latest: number): Promise<Map<number, string>> {
   const key = `${runId}|${latest}`
@@ -72,7 +72,7 @@ export function PagePicker({
   latest: number
   /** Show this month; `null` is the live page. */
   onJump: (turn: number | null) => void
-  /** The page being flipped to by the scrubber or a held arrow, shown live. */
+  /** The page being flipped to by the page wheel, shown live. */
   preview?: ScrubStore
   /** Held by the caller when something else opens the picker (the phone's wheel). */
   open?: boolean

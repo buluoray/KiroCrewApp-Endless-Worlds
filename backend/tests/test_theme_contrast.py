@@ -324,20 +324,6 @@ def test_the_world_title_field_takes_its_ink_from_its_own_theme() -> None:
         assert got >= BODY_FLOOR, f"the world title field in {theme} is {got:.2f}:1"
 
 
-def test_the_scrubber_folio_reads_on_its_own_paper_in_every_theme() -> None:
-    """The drag label is an opaque paper slip with fixed ink, so neither the dashboard
-    theme nor the page art behind it can take its contrast away."""
-    tip = _rule(r"\.ew-scrub-tip")
-    paper = _decl(tip, "background")
-    assert re.fullmatch(r"#[0-9a-fA-F]{6}", paper), f"the folio paper must be opaque, not {paper!r}"
-    ground = _rgb(paper)
-    for sel in (r"\.ew-scrub-tip", r"\.ew-scrub-tip-n", r"\.ew-scrub-tip-hint"):
-        ink = _decl(_rule(sel), "color")
-        assert ink.startswith("#"), f"{sel} ink must be the folio's own, not {ink!r}"
-        got = _contrast(_rgb(ink), ground)
-        assert got >= BODY_FLOOR, f"{sel} on the folio is {got:.2f}:1"
-
-
 def _canvas_var(value: str) -> tuple[float, float, float]:
     """`var(--text, …)` / `var(--muted, …)` resolved to the canvas ink it names."""
     found = re.fullmatch(r"var\((--text|--muted), #[0-9a-fA-F]{6}\)", value)
@@ -345,8 +331,8 @@ def _canvas_var(value: str) -> tuple[float, float, float]:
     return _column_inks()[found.group(1)[2:]]
 
 
-def test_the_phone_page_wheel_has_no_card_and_reads_on_the_reading_row() -> None:
-    """The wheel's numbers sit straight on the phone's reading row: no paper of their
+def test_the_page_wheel_has_no_card_and_reads_on_the_reading_row() -> None:
+    """The wheel's numbers sit straight on the reading row: no paper of their
     own, the canvas ink the row is measured for, in a light and a dark dashboard. The
     centre number is held to AA over the worst art; its fading neighbours may fall."""
     for sel in (r"\.ew-wheel", r"\.ew-wheel-track", r"\.ew-wheel-n", r"\.ew-wheel-c"):

@@ -1,7 +1,8 @@
-"""Fast page navigation on the play page: First/Latest, the month picker, keys.
+"""Fast page navigation on the play page: the wheel's ends, the month picker, keys.
 
 Paging a long life one click at a time is too slow — month 3 of 84 is 81 clicks.
-The pager gains First and Latest, its page indicator opens a picker (type a month
+The page wheel's Home and End reach the first and the newest month, its `>|` mark
+goes back to the live page, a tap on its centre number opens a picker (type a month
 or pick a row that says what happened in it), and Left/Right/Home/End page while
 focus is on the page. The guards below each fail if their behaviour is removed.
 
@@ -31,25 +32,21 @@ from store import RunStore  # noqa: E402
 
 def _pager() -> str:
     src = module("play.tsx")
-    return src[src.index("const pager =") : src.index("const main = (")]
+    return src[src.index("const wheelBar = (") : src.index("const main = (")]
 
 
 # ── First and Latest ─────────────────────────────────────────────────────────
 
 
-def test_first_and_latest_sit_beside_prev_and_next_with_labels():
+def test_the_wheel_reaches_the_first_and_the_newest_month():
+    """First and Latest are the wheel's own ends: Home and End, and the `>|` mark."""
+    wheel = code_only(module("page-wheel.tsx"))
+    keys = wheel[wheel.index("export function scrubKey(") : wheel.index("export function wheelSteps(")]
+    assert "if (key === 'Home') return 1" in keys and "if (key === 'End') return latest" in keys
     pager = _pager()
-    assert "t('play.firstTurn')" in pager and "t('play.latestTurn')" in pager
-    order = [
-        pager.index("t('play.firstTurn')"),
-        pager.index("t('play.prevTurn')"),
-        pager.index("<PagePicker"),
-        pager.index("t('play.nextTurn')"),
-        pager.index("t('play.latestTurn')"),
-    ]
-    assert order == sorted(order), "the pager reads First ‹ page › Latest"
-    # First lands on month 1 — or on the live page when the life has one month.
-    assert "setViewTurn(latest <= 1 ? null : 1)" in pager
+    assert "<PageWheel" in pager and "<WheelLatest" in pager
+    assert pager.index("<PageWheel") < pager.index("<WheelLatest"), "the mark is at the wheel's end"
+    assert "aria-label={t('play.latestTurn')}" in wheel
 
 
 def test_latest_returns_to_the_live_page_not_a_past_copy_of_it():
@@ -57,11 +54,8 @@ def test_latest_returns_to_the_live_page_not_a_past_copy_of_it():
     painting stage and the recap render. Latest setting the newest NUMBER would show
     the newest month as a re-read page with none of them."""
     pager = _pager()
-    latest_btn = pager[
-        pager.index("t('play.latestTurn')") - 400 : pager.index('<Chevron dir="last"')
-    ]
-    assert "disabled={isLive}" in latest_btn
-    assert "onClick={() => setViewTurn(null)}" in latest_btn
+    latest_btn = pager[pager.index("<WheelLatest") : pager.index("</WheelLatest>")]
+    assert "onLatest={() => setViewTurn(null)}" in latest_btn
     # The picker routes its newest row the same way.
     picker = module("page-picker.tsx")
     assert "onJump(n >= latest ? null : n)" in picker
@@ -195,7 +189,6 @@ def test_every_pager_target_stays_44px_and_fits_375():
 
 def test_picker_copy_exists_in_both_languages():
     keys = [
-        "play.firstTurn",
         "play.latestTurn",
         "play.pageOf",
         "play.pageShort",

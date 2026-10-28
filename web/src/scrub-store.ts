@@ -3,10 +3,10 @@ import { useSyncExternalStore } from 'react'
 /**
  * The page the reader is flipping to, while they flip.
  *
- * Dragging the scrubber, holding an arrow or spinning the wheel passes many pages a
+ * Swiping, dragging or spinning the page wheel passes many pages a
  * second. Putting that number in the play page's state would re-render the whole
  * story on every step, so it lives here instead: only the parts that show it — the
- * scrubber's thumb and label, the page indicator — subscribe. `null` means nobody is
+ * wheel, its `>|` mark, the picker's button — subscribe. `null` means nobody is
  * flipping and the shown page is the real one. The play page reads it once, on
  * release, and loads that one page.
  */

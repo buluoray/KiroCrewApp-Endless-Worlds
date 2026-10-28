@@ -28,7 +28,7 @@ export function StoryPage({
       el.getClientRects().length &&
       getComputedStyle(el).visibility !== 'hidden' &&
       (active === document.body || (active && root?.contains(active))) &&
-      // A reader flipping with the scrubber's keys keeps it: the live region still
+      // A reader flipping with the page wheel's keys keeps it: the live region still
       // announces the page, once.
       !active?.closest('[role="slider"]')
     ) {

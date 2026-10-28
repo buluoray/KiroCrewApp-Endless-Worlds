@@ -1,5 +1,7 @@
-/** The phone's top row lines up: the back link, the wheel's centre number and the
- * `>|` latest mark share one vertical centre.
+/** The top row lines up, on a phone and on a wide screen: the back link, the
+ * wheel's centre number and the `>|` latest mark share one vertical centre. From
+ * 1100px the row draws no back link (the drawer's own is the way home), so there
+ * the centre number and the mark are measured against each other.
  * On the latest page the mark is hidden (not drawn, not focusable, aria-hidden) in
  * its own slot; one step back (mid-flip, then landed) it is shown and focusable, and
  * the link, the centre number and the mark's slot have not moved by more than 1px.
@@ -23,7 +25,7 @@ const session = process.env.EW_POD_SESSION;
 const shots = process.env.EW_SHOT_DIR;
 /** The most the three ink centres may differ, in CSS px. */
 const TOLERANCE_PX = 2;
-const WIDTHS = [320, 375, 480];
+const WIDTHS = [320, 375, 480, 1280];
 const THEMES = ["dark", "light"];
 const PAGES = [3, 38, 120];
 
@@ -136,7 +138,7 @@ async function settled(page, n, past = false) {
 
 for (const width of WIDTHS) {
   test(
-    `phone top row lines up at ${width}px`,
+    `top row lines up at ${width}px`,
     { skip: !url || !session, timeout: 240000 },
     async () => {
       assert.ok(
@@ -151,7 +153,7 @@ for (const width of WIDTHS) {
               storageState: session,
               viewport: { width, height: 700 },
               deviceScaleFactor: 2,
-              hasTouch: true,
+              hasTouch: width < 600,
               reducedMotion: "reduce",
             });
             await context.addInitScript((theme) => {
@@ -249,13 +251,29 @@ for (const width of WIDTHS) {
                   };
                 });
               // One pass over the row: the boxes, the ink, and a screenshot.
-              const measure = async (shown, label) => {
-                await page
-                  .locator(".ew-topbar")
-                  .evaluate((e) => e.scrollIntoView({ block: "start" }));
-                // The scroll can slide the bar; measure only once it is still.
-                await settled(page, shown, shown < pages);
-                const bar = await page.locator(".ew-topbar").boundingBox();
+              const measure = async (shown, label, attempt = 0) => {
+                // The page settles its own scroll once its scenes mount, which can
+                // take the in-flow (wide-screen) row back out of view: bring it in
+                // until it stays.
+                let bar = null;
+                for (let i = 0; i < 20; i++) {
+                  await page
+                    .locator(".ew-topbar")
+                    .evaluate((e) => e.scrollIntoView({ block: "start" }));
+                  // The scroll can slide the bar; measure only once it is still.
+                  await settled(page, shown, shown < pages);
+                  bar = await page.locator(".ew-topbar").boundingBox();
+                  // In view means below the dashboard's own header, not under it.
+                  const top = await page.evaluate(() =>
+                    Math.max(
+                      0,
+                      document.querySelector("main")?.getBoundingClientRect()
+                        .top ?? 0,
+                    ),
+                  );
+                  if (bar.y >= top - 1) break;
+                  await page.waitForTimeout(250);
+                }
                 const clip = {
                   x: 0,
                   y: Math.max(0, bar.y),
@@ -271,10 +289,16 @@ for (const width of WIDTHS) {
                 // The centre number's own 44px slot, not its turned neighbours.
                 const centre = page.locator(".ew-wheel-c");
                 assert.equal(await centre.innerText(), String(shown));
+                const linkBox = await page
+                  .locator(".ew-topbar .ew-back")
+                  .boundingBox();
+                assert.equal(
+                  linkBox === null,
+                  width >= 1100,
+                  "the row's back link is drawn below 1100px only",
+                );
                 const boxes = {
-                  link: rel(
-                    await page.locator(".ew-topbar .ew-back").boundingBox(),
-                  ),
+                  ...(linkBox ? { link: rel(linkBox) } : {}),
                   centre: rel(await centre.boundingBox()),
                   // Read off the DOM: it holds its slot even while hidden.
                   latest: rel(
@@ -297,6 +321,11 @@ for (const width of WIDTHS) {
                   "the wheel row is one 44px line",
                 );
                 const png = await page.screenshot({ clip });
+                // The page's own scroll can still move the in-flow row between the
+                // boxes and the picture: measure again rather than read stale ink.
+                const after = await page.locator(".ew-topbar").boundingBox();
+                if (Math.abs(after.y - bar.y) > 0.5 && attempt < 5)
+                  return measure(shown, label, attempt + 1);
                 if (shots) {
                   const where = `${shots}/row-${width}-${theme}-${pages}-${label}.png`;
                   // From the top, so the dashboard's own header shows which theme this is.
@@ -391,7 +420,7 @@ for (const width of WIDTHS) {
                 .evaluate(() => document.activeElement?.blur());
               const older = await measure(pages - 1, "older");
               // Appearing moves nothing: the link and the centre number keep their place.
-              for (const k of ["link", "centre", "latest"])
+              for (const k of Object.keys(newest.boxes))
                 for (const d of ["x", "y", "width", "height"])
                   assert.ok(
                     Math.abs(newest.boxes[k][d] - older.boxes[k][d]) <= 1,
@@ -400,7 +429,11 @@ for (const width of WIDTHS) {
               for (const [label, { ink }] of [
                 [
                   "latest",
-                  { ink: { link: newest.ink.link, centre: newest.ink.centre } },
+                  {
+                    ink: Object.fromEntries(
+                      Object.entries(newest.ink).filter(([k]) => k !== "latest"),
+                    ),
+                  },
                 ],
                 ["older", older],
               ]) {

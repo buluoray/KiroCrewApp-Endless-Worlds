@@ -18,8 +18,7 @@ guarantee.
 | `api.ts` | typed HTTP helpers over `/api/apps/endless-worlds`; `ApiError` with a machine code; preconditions as body fields; `models()` field-drift tolerance |
 | `play.tsx` | the live reading view — server-driven generating state + poll, tool-call turn progress, retry, turn-number pager |
 | `page-picker.tsx` | the pager's page indicator and its jump-to-month picker (number field + windowed list of every month with a hint) |
-| `page-scrubber.tsx` | the press-and-drag page scrubber, hold-to-repeat Prev/Next, wheel and slider keys |
-| `page-wheel.tsx` | the phone's sideways page wheel: replaces the pager buttons and the scrubber under 600px, beside the back link |
+| `page-wheel.tsx` | the page wheel, the one page control on every screen: drag, flick, mouse wheel, slider keys, beside the back link |
 | `scrub-store.ts` | the page being flipped to, outside React state so a step re-renders only what shows it |
 | `scene.tsx` | `SceneSlot` — the single scene iframe, created once and never moved |
 | `opening.tsx` | the opening form — sealed world-decided groups, 30-day draft TTL |
@@ -286,64 +285,55 @@ guarantee.
   field (the free-action box above all), a tab strip, a dialog, or while a sheet
   covers the column or the pager is hidden. Pinned by `test_page_jump.py`.
 
-- **Press and slide to flip fast.** `page-scrubber.tsx` adds a slim full-width track
-  as the top bar's second row (a life of 2+ pages; the fixed bar's slot grows by that
-  row). Drag it — mouse or finger, pointer capture, `touch-action: none` so the page
-  never scrolls — and the thumb, the page indicator and a floating label (page number
-  plus the same index hint the picker shows, from the one shared `loadPageIndex`
-  read) follow live; release loads that ONE page. Holding Prev/Next (`HoldArrow`)
-  keeps flipping after 300ms and speeds up the longer it is held (`holdInterval`);
-  a plain click is still one page, and release loads only the last. The wheel over
-  the track moves one page per notch (`wheelSteps` accumulates trackpad deltas) and
-  the keys follow the ARIA slider pattern (arrows ±1, PageUp/PageDown ±10,
-  Home/End); both load once the reader pauses (`SCRUB_SETTLE_MS`). While flipping,
-  the number lives in `scrub-store.ts` (a `useSyncExternalStore` store) that only
-  the thumb, label and indicator subscribe to, so the story does not re-render per
-  step. The track is `role="slider"` with `aria-valuetext` "Page 12 of 120";
-  `StoryPage` announces the landed page once and leaves focus on the slider. The
-  newest page lands on the live page, like Latest. Pinned by `test_page_scrubber.py`;
-  the pointer paths run for real in `devtools/scrub.test.mjs`.
+- **The page wheel is the one page control, on every screen.** There is no fore-edge
+  slider and no First/Prev/Next/Latest buttons. `play.tsx` renders `wheelBar`, and
+  `page-wheel.tsx` puts a row of page numbers in the top row, one line with the back
+  link (`.ew-topbar-wheel`, `flex-wrap: nowrap`): `← 书架`, the wheel, `>|`. The
+  link never wraps or shrinks (`white-space: nowrap`, `flex: none`). On a phone the
+  wheel takes the width the link leaves; on a wide screen (`min-width: 601px`) it is
+  a bounded stretch at the row's end (`flex: 0 1 520px; margin-left: auto`), so a
+  1280px row is not a wall of thirty numbers. There is no card behind the numbers:
+  they sit straight on the reading row in the canvas ink — the centre `--text`, held
+  to AA over the worst art, its neighbours `--muted` fading out, turning away on a
+  drum (`rotateY`/`scale`/`opacity` from `wheelLook`) under a mask. The centre number
+  alone, larger and in full ink, marks the page: no ribbon, bookmark or underline,
+  and no action line under it.
 
-- **The scrubber is drawn as a book.** On a wide screen the track is a book's
-  fore-edge: fine page lines (`repeating-linear-gradient`, CSS only) whose pitch
-  tightens for a longer life (`edgeGap`), the pages already read a warmer, thumbed
-  paper. The thumb is a cloth ribbon bookmark with a notched tail
-  (`.ew-scrub-ribbon`, `clip-path`), drawing only — the slider role, values and
-  focus stay on the track. The drag label is a folio slip: opaque paper with its own
-  ink in both dashboard themes, the page number in a serif reading face in small caps
-  with old-style figures, the action in italic under a hairline. The page indicator
-  uses the same face; the First/Prev/Next/Latest buttons are quiet hairline frames.
-  A jump of more than one page by the scrubber, the wheel or a held arrow (`leafTo`)
-  draws one short fold of shadow over the landed page (`.ew-leaf`), cleared on
-  `animationend`; `prefers-reduced-motion` draws none. Chapter tabs and fateful marks
-  are not drawn: the page index carries neither. Pinned by `test_page_scrubber.py`;
-  the folio's contrast by `test_theme_contrast.py`.
+  A swipe or a mouse drag follows the pointer (pointer capture, `touch-action: none`
+  so the page never scrolls); on release the drum coasts to where a decaying throw
+  would stop (`flickVelocity`, `wheelTarget`, `WHEEL_TAU_MS`) and snaps to that page,
+  ticking the centre number as each page crosses; a tap or click on a neighbour turns
+  to it. A mouse wheel or trackpad turns it one page per notch (`wheelSteps`
+  accumulates small deltas). The keys follow the ARIA slider pattern (arrows ±1,
+  PageUp/PageDown ±10, Home/End the first and the newest page). While it turns, the
+  number lives in `scrub-store.ts` (a `useSyncExternalStore` store) that only the
+  wheel, the `>|` mark and the picker's button subscribe to, so the story does not
+  re-render per step; the ONE page loads when the wheel rests, or once the reader
+  pauses (`SCRUB_SETTLE_MS`) for the wheel and the keys. The newest page lands on the
+  live page. The track is `role="slider"` with `aria-valuetext` "Page 12 of 120";
+  `StoryPage` announces the landed page once and leaves focus on the wheel. Reduced
+  motion snaps without the glide or the tick.
 
-- **On a phone the pager is a sideways page wheel beside the back link.** Under
-  `PHONE_QUERY` (`max-width: 600px`) there are no pager buttons (First, Prev, the
-  `N / M` indicator, Next, Latest) and no fore-edge slider: `play.tsx` renders
-  `phoneBar` instead, and `page-wheel.tsx` puts a row of page numbers in the top row,
-  one line with the back link (`.ew-topbar-wheel`, `flex-wrap: nowrap`). The link
-  never wraps or shrinks (`white-space: nowrap`, `flex: none`); the wheel takes the
-  width it leaves and draws fewer numbers. There is no card behind the numbers: they
-  sit straight on the reading row in the canvas ink — the centre `--text`, held to
-  AA over the worst art, its neighbours `--muted` fading out, turning away on a drum
-  (inline `rotateY`/`scale`/`opacity` from `wheelLook`) under a mask. The centre
-  number alone, larger and in full ink, marks the page: no ribbon, bookmark or
-  underline is drawn over or under it (the desktop slider keeps its ribbon thumb,
-  which is its drag handle). A swipe
-  follows the finger; on release the drum coasts to where a decaying throw would stop
-  (`flickVelocity`, `wheelTarget`, `WHEEL_TAU_MS`) and snaps to that page, ticking
-  the centre number as each page crosses; a tap on a neighbour turns to it. Only the
-  numbers on screen are drawn (`visiblePages`). The page number lives in the scrub
-  store while it turns and the ONE page loads when it rests. Same `role="slider"`
-  values, keys and settle rule as the desktop track; reduced motion snaps without the
-  glide or the tick.
+  A frame of a swipe costs no React render and no page layout. The drum's position is
+  a ref, and `draw` writes each number's `transform` and `opacity` straight onto a
+  fixed set of slots (`wheelSlots`, enough for any window `visiblePages` asks for),
+  re-labelled as a ring (`slotOf`) so a step of one page rewrites one text node in
+  place. React renders the wheel only when the centred page changes. Nothing mounts
+  or unmounts during a swipe: an inserted node re-checked the app's `:has()` rules
+  over the whole page on every page passed. Each slot is its own layer and its own
+  layout (`will-change: transform, opacity; contain: strict`). The frame cost is
+  measured by `devtools/switcher-perf.mjs` (a 120-page life, phone 375 swipe and
+  fling, desktop drag, mouse wheel and trackpad; p50/p95 frame time, frames over
+  budget, and Chrome's layout, style and script counters).
 
-  A tap on the centre number (or Enter on the wheel) opens the #127 type-a-number
-  picker: `PagePicker` with `overWheel`, its open state held by the play page. Its
-  button is a transparent 44px square laid over the centre number with
-  `pointer-events: none`, so a finger reaches the wheel while a keyboard or screen
+  A jump of more than one page (`leafTo`) draws one short fold of shadow over the
+  landed page (`.ew-leaf`), cleared on `animationend`; `prefers-reduced-motion`
+  draws none.
+
+  A tap or click on the centre number (or Enter on the wheel) opens the #127
+  type-a-number picker: `PagePicker` with `overWheel`, its open state held by the
+  play page. Its button is a transparent 44px square laid over the centre number with
+  `pointer-events: none`, so a pointer reaches the wheel while a keyboard or screen
   reader still finds the named picker button, its focus ring round the centre
   number. The wheel's track carries `data-ew-pick-toggle`, so its own tap toggles the
   picker instead of counting as an outside press. The way back to the live page is
@@ -353,21 +343,20 @@ guarantee.
   `visibility: hidden`, which keeps its 44px slot so the wheel and the back link do
   not shift when it comes and goes. It reads the wheel's flip preview, so it shows
   again the moment a swipe leaves the latest page, before the page lands. The
-  desktop pager's Latest button is unchanged. The hidden-recap button stays in the
-  same row. The bar
-  is one 44px row, so the fixed bar's slot does not grow. Each number's slot fills
-  that row (`.ew-wheel-n`, `top: 0; height: 44px`), so the back link, the centre
-  number and the `>|` mark share one vertical centre; `devtools/wheel-align.test.mjs`
-  measures their ink centres within 2px at 320, 375 and 480px, both themes, on a
-  1-, 2- and 3-digit page (same `EW_POD_URL` / `EW_POD_SESSION` contract). It also
-  checks the mark is hidden and unfocusable on the latest page, back mid-flip, shown
-  and focusable one page back, and that the link, the centre number and the mark's
-  slot stay within 1px between the two. It never waits a fixed delay: each
-  measurement waits for fonts, the wheel at rest on the page, and the row's boxes
-  still for 5 frames. Pinned by
-  `test_page_wheel.py` and `test_theme_contrast.py`; the swipe, coast, snap, one read,
-  no pager buttons, the one-line back link, the picker and the way back run in
-  `devtools/scrub.test.mjs` at 375px.
+  hidden-recap button stays in the same row. The bar is one 44px row, so the fixed
+  bar's slot does not grow. Each number's slot fills that row (`.ew-wheel-n`,
+  `top: 0; height: 44px`), so the back link, the centre number and the `>|` mark
+  share one vertical centre; `devtools/wheel-align.test.mjs` measures their ink
+  centres within 2px at 320, 375, 480 and 1280px, both themes, on a 1-, 2- and
+  3-digit page (same `EW_POD_URL` / `EW_POD_SESSION` contract). It also checks the
+  mark is hidden and unfocusable on the latest page, back mid-flip, shown and
+  focusable one page back, and that the link, the centre number and the mark's slot
+  stay within 1px between the two. It never waits a fixed delay: each measurement
+  waits for fonts, the wheel at rest on the page, and the row's boxes still for 5
+  frames. Pinned by `test_page_wheel.py` and `test_theme_contrast.py`; the swipe and
+  the mouse drag, coast, snap, one read, the mouse wheel and trackpad, the keys, no
+  slider or pager buttons, the one-line back link, the picker and the way back run
+  in `devtools/scrub.test.mjs` at 375px (a finger) and 1280px (a mouse).
 
 - **The back link reads `← 书架` / `← Shelf`.** `play.back` is the short visible
   text everywhere; `play.backLabel` (`回到书架` / `Back to the shelf`) is its

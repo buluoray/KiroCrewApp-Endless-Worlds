@@ -43,7 +43,7 @@ def test_phone_navigation_does_not_hide_the_keyboard_focus():
         r"\.ew-topbar-hidden:focus-within\s*\{[^}]*transform: none;[^}]*opacity: 1;", css
     )
     assert re.search(r"\.ew-tabbar-hidden:focus-within\s*\{[^}]*transform: none;", css)
-    assert re.search(r"\.ew-pager-arw\s*\{[^}]*width: 44px; height: 44px;", css)
+    assert re.search(r"\.ew-wheel-track \{[^}]*height: 44px;", css)
     assert re.search(r"\.ew-pager-turn\s*\{[^}]*min-width: 0;", css)
     assert ".ew-act { flex-direction: column; }" in css
 

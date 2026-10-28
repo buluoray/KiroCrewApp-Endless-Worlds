@@ -9,19 +9,52 @@ import {
   type ReactNode,
 } from 'react'
 
-import { clampPage, SCRUB_SETTLE_MS, scrubKey, wheelSteps } from './page-scrubber'
 import { useScrubPreview, type ScrubStore } from './scrub-store'
 import { t } from './strings'
+
+/** Wheel and keys have no release, so they load once the reader stops for this long. */
+export const SCRUB_SETTLE_MS = 350
+/** Mouse-wheel distance for one page. A notch is one page however far it reports. */
+export const WHEEL_STEP_PX = 50
+
+export function clampPage(n: number, latest: number): number {
+  return Math.min(latest, Math.max(1, Math.round(n)))
+}
+
+/** The wheel's keys (ARIA slider pattern): arrows ±1, PageUp/PageDown ±10,
+ *  Home/End the first and the newest page. `null` for any other key. */
+export function scrubKey(key: string, cur: number, latest: number): number | null {
+  const step: Record<string, number> = {
+    ArrowLeft: -1,
+    ArrowDown: -1,
+    ArrowRight: 1,
+    ArrowUp: 1,
+    PageDown: -10,
+    PageUp: 10,
+  }
+  if (key === 'Home') return 1
+  if (key === 'End') return latest
+  const d = step[key]
+  return d === undefined ? null : clampPage(cur + d, latest)
+}
+
+/** Fold a wheel delta into the running total: at most one page per event, so a
+ *  notch is one page, while a trackpad's small deltas add up to one. */
+export function wheelSteps(acc: number): { steps: number; rest: number } {
+  if (acc >= WHEEL_STEP_PX) return { steps: 1, rest: 0 }
+  if (acc <= -WHEEL_STEP_PX) return { steps: -1, rest: 0 }
+  return { steps: 0, rest: acc }
+}
 
 /** One page number's slot on the wheel. 44px is the touch-target floor (#105). */
 export const WHEEL_ITEM_PX = 44
 /** How long a flick keeps travelling: the wheel coasts as if its speed decayed with
  *  this time constant, so its resting place is known the moment the finger lifts. */
 export const WHEEL_TAU_MS = 325
+/** How long a notch or a key slides the drum to the next page. */
+export const WHEEL_SLIDE_MS = 140
 /** Numbers either side of the centre that are drawn shrinking and fading. */
 export const WHEEL_FADE_ITEMS = 4
-/** The phone layout, where the wheel replaces the fore-edge slider. */
-export const PHONE_QUERY = '(max-width: 600px)'
 
 /** Where a flick comes to rest: the position it would coast to, snapped to the
  *  nearest page and kept on the book. `velocity` is pages per millisecond. */
@@ -44,6 +77,19 @@ export function visiblePages(pos: number, widthPx: number, latest: number): [num
   const half = Math.ceil(widthPx / 2 / WHEEL_ITEM_PX) + 1
   const c = Math.round(pos)
   return [Math.max(1, c - half), Math.min(latest, c + half)]
+}
+
+/** How many number slots a wheel `widthPx` wide keeps: the most `visiblePages` can
+ *  ever ask for. The slots are made once and reused as the wheel turns, so a swipe
+ *  mounts and unmounts nothing. */
+export function wheelSlots(widthPx: number): number {
+  return 2 * (Math.ceil(widthPx / 2 / WHEEL_ITEM_PX) + 1) + 1
+}
+
+/** The slot page `n` is drawn in: a ring, so a step of one page re-labels the one
+ *  slot that wrapped around and leaves the other numbers' text alone. */
+export function slotOf(n: number, count: number): number {
+  return ((n % count) + count) % count
 }
 
 /** How a number `d` slots off centre looks: the centre full size and full ink, the
@@ -72,38 +118,27 @@ function reducedMotion(): boolean {
   )
 }
 
-/** Whether the play page is in its phone layout, followed live. */
-export function usePhoneLayout(): boolean {
-  const [phone, setPhone] = useState(
-    () =>
-      typeof window !== 'undefined' &&
-      !!window.matchMedia &&
-      window.matchMedia(PHONE_QUERY).matches,
-  )
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return undefined
-    const mq = window.matchMedia(PHONE_QUERY)
-    const on = () => setPhone(mq.matches)
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [])
-  return phone
-}
-
 /**
- * The phone's page picker: a row of page numbers printed straight on the top bar, no
- * card behind them, turned like a drum — the iOS time wheel laid on its side. It
- * sits in the top row beside the back link and takes whatever width the link leaves.
- * The centre number is the page; the reader swipes, the numbers follow the finger,
+ * The page picker, on every screen: a row of page numbers printed straight on the top
+ * bar, no card behind them, turned like a drum — the iOS time wheel laid on its side.
+ * It sits in the top row beside the back link; on a phone it takes whatever width
+ * the link leaves, on a wide screen a bounded stretch at the row's end. The centre
+ * number is the page; the reader swipes or drags, the numbers follow the pointer,
  * coast and snap to the nearest page, and only when the wheel comes to rest is that
- * ONE page loaded. While it turns, the page number lives in the scrub store (as for
- * the slider), so the story does not re-render; only this wheel does.
+ * ONE page loaded. A mouse wheel or trackpad turns it a page per notch. While it
+ * turns, the page number lives in the scrub store, so the story does not re-render.
+ *
+ * The turning itself is not React's: the drum's position is a ref, and every frame
+ * `draw` writes each number's transform and opacity straight onto a fixed set of slots
+ * (`wheelSlots`, re-labelled through `slotOf`). React renders the wheel only when the
+ * centred PAGE changes (its slider values), never per frame, and a swipe mounts no
+ * element, so it never invalidates the page's styles.
  *
  * A tap on the centre number (or Enter) calls `onCentreTap`: the play page opens the
  * type-a-number picker, passed in as `children` and laid over that number.
  *
- * Same slider semantics as the desktop scrubber — role, values, keys, one
- * announcement on settle — so a keyboard attached to a phone still works.
+ * It is a slider for a keyboard and a screen reader — role, values, the slider keys,
+ * one announcement on settle.
  */
 export function PageWheel({
   shown,
@@ -127,11 +162,13 @@ export function PageWheel({
   const value = preview ?? shown
   const active = preview !== null
   const track = useRef<HTMLDivElement>(null)
-  // The drum's fractional position, in pages. State so the numbers redraw as it
-  // turns; the ref is what the handlers read between renders.
-  const [pos, setPosState] = useState(shown)
+  // The drum's fractional position, in pages. A ref, not state: `draw` puts it on
+  // screen each frame without a render.
   const posRef = useRef(shown)
   const [width, setWidth] = useState(320)
+  const widthRef = useRef(320)
+  const slots = useRef<(HTMLSpanElement | null)[]>([])
+  const labels = useRef<number[]>([])
   const drag = useRef<{
     id: number
     x0: number
@@ -142,22 +179,64 @@ export function PageWheel({
   const anim = useRef<number | undefined>(undefined)
   const settle = useRef<number | undefined>(undefined)
   const wheelAcc = useRef(0)
+  const slideRef = useRef<(target: number) => void>(() => {})
   const live = useRef({ shown, latest, onCommit, onCentreTap })
   useEffect(() => {
     live.current = { shown, latest, onCommit, onCentreTap }
   })
 
+  // Put the drum at `p`: every slot's number, turn, size and ink, written directly.
+  const draw = useCallback((p: number) => {
+    const latest = live.current.latest
+    const els = slots.current
+    const count = els.length
+    const centre = clampPage(p, latest)
+    const [first, last] = visiblePages(p, widthRef.current, latest)
+    for (let i = 0; i < count; i++) {
+      const el = els[i]
+      if (!el) continue
+      // The page this slot holds in the window, if any: the one n in first..last
+      // with slotOf(n) === i.
+      const n = first + slotOf(i - first, count)
+      if (n > last) {
+        el.style.visibility = 'hidden'
+        el.classList.remove('ew-wheel-c')
+        continue
+      }
+      if (labels.current[i] !== n) {
+        labels.current[i] = n
+        // Rewrite the one text node in place: replacing it (textContent) would insert
+        // a node, and an insertion re-checks the page's `:has()` rules over the
+        // whole app on every page the wheel passes.
+        const face = el.firstChild
+        if (face) {
+          if (face.firstChild) face.firstChild.nodeValue = String(n)
+          else face.appendChild(document.createTextNode(String(n)))
+        }
+      }
+      const d = n - p
+      const look = wheelLook(d)
+      el.style.visibility = ''
+      el.style.transform = `translateX(${d * WHEEL_ITEM_PX}px) rotateY(${look.turn}deg) scale(${look.scale})`
+      el.style.opacity = String(look.opacity)
+      el.classList.toggle('ew-wheel-c', n === centre)
+    }
+  }, [])
+
   // At rest the drum shows the page on screen, including after a page lands.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (drag.current || anim.current !== undefined || store.get() !== null) return
     posRef.current = shown
-    setPosState(shown)
-  }, [shown, store])
+    draw(shown)
+  }, [shown, store, draw])
 
   useLayoutEffect(() => {
     const el = track.current
     if (!el) return undefined
-    const measure = () => setWidth(el.clientWidth || 320)
+    const measure = () => {
+      widthRef.current = el.clientWidth || 320
+      setWidth(widthRef.current)
+    }
     measure()
     if (typeof ResizeObserver === 'undefined') return undefined
     const ro = new ResizeObserver(measure)
@@ -168,10 +247,10 @@ export function PageWheel({
   const place = useCallback(
     (p: number) => {
       posRef.current = p
-      setPosState(p)
+      draw(p)
       store.set(clampPage(p, live.current.latest))
     },
-    [store],
+    [store, draw],
   )
   // The wheel came to rest: load the ONE page it rests on.
   const finish = useCallback(() => {
@@ -181,11 +260,11 @@ export function PageWheel({
     const n = store.get()
     if (n !== null) {
       posRef.current = n
-      setPosState(n)
+      draw(n)
     }
     if (n !== null && n !== live.current.shown) live.current.onCommit(n)
     store.set(null)
-  }, [store])
+  }, [store, draw])
   const settleSoon = useCallback(() => {
     window.clearTimeout(settle.current)
     settle.current = window.setTimeout(finish, SCRUB_SETTLE_MS)
@@ -219,6 +298,31 @@ export function PageWheel({
     }
     anim.current = requestAnimationFrame(step)
   }
+  // A notch or a key: the page is `target` at once (the slider's value, the `>|`
+  // mark), and the drum slides there over a few frames instead of jumping a whole
+  // number. Drawing only; the one load is still the settle's.
+  const slideTo = (target: number) => {
+    stopAnim()
+    store.set(target)
+    const from = posRef.current
+    if (reducedMotion() || Math.abs(target - from) < 0.001) {
+      posRef.current = target
+      draw(target)
+      return
+    }
+    const start = performance.now()
+    const step = (now: number) => {
+      const k = Math.min(1, (now - start) / WHEEL_SLIDE_MS)
+      const e = 1 - Math.pow(1 - k, 3)
+      posRef.current = from + (target - from) * e
+      draw(posRef.current)
+      anim.current = k < 1 ? requestAnimationFrame(step) : undefined
+    }
+    anim.current = requestAnimationFrame(step)
+  }
+  useEffect(() => {
+    slideRef.current = slideTo
+  })
   useEffect(
     () => () => {
       if (anim.current !== undefined) cancelAnimationFrame(anim.current)
@@ -231,6 +335,9 @@ export function PageWheel({
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.preventDefault()
+    // Focus taken by a press is a pointer's, not the keyboard's: the browser draws
+    // this script focus as :focus-visible, so the ring is held back until a key.
+    e.currentTarget.dataset.ewPointer = ''
     e.currentTarget.focus({ preventScroll: true })
     e.currentTarget.setPointerCapture(e.pointerId)
     stopAnim()
@@ -276,6 +383,7 @@ export function PageWheel({
     glideTo(wheelTarget(posRef.current, velocity, last))
   }
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    delete e.currentTarget.dataset.ewPointer
     if (e.altKey || e.ctrlKey || e.metaKey) return
     if (e.key === 'Enter' && onCentreTap) {
       e.preventDefault()
@@ -285,12 +393,11 @@ export function PageWheel({
     const next = scrubKey(e.key, store.get() ?? shown, latest)
     if (next === null) return
     e.preventDefault()
-    stopAnim()
-    place(next)
+    slideTo(next)
     settleSoon()
   }
 
-  // A mouse wheel or trackpad over it, for a phone-sized window on a desktop.
+  // A mouse wheel or trackpad over it: one page per notch, loaded on a pause.
   useEffect(() => {
     const el = track.current
     if (!el) return undefined
@@ -302,10 +409,7 @@ export function PageWheel({
       wheelAcc.current = rest
       if (steps) {
         const { shown: cur, latest: last } = live.current
-        const n = clampPage((store.get() ?? cur) + steps, last)
-        posRef.current = n
-        setPosState(n)
-        store.set(n)
+        slideRef.current(clampPage((store.get() ?? cur) + steps, last))
       }
       settleSoon()
     }
@@ -313,22 +417,25 @@ export function PageWheel({
     return () => el.removeEventListener('wheel', onWheel)
   }, [store, settleSoon])
 
-  const centre = clampPage(pos, latest)
-  const [first, last] = visiblePages(pos, width, latest)
+  // The slots, made once per width. They carry no number and no style from React:
+  // `draw` owns both, so a render (a new centred page) never undoes a frame.
+  const count = wheelSlots(width)
+  useLayoutEffect(() => {
+    slots.current.length = count
+    labels.current = []
+    draw(posRef.current)
+  }, [count, latest, draw])
   const nums = []
-  for (let n = first; n <= last; n++) {
-    const d = n - pos
-    const look = wheelLook(d)
+  for (let i = 0; i < count; i++) {
     nums.push(
       <span
-        key={n}
-        className={'ew-wheel-n' + (n === centre ? ' ew-wheel-c' : '')}
-        style={{
-          transform: `translateX(${d * WHEEL_ITEM_PX}px) rotateY(${look.turn}deg) scale(${look.scale})`,
-          opacity: look.opacity,
+        key={i}
+        className="ew-wheel-n"
+        ref={(el) => {
+          slots.current[i] = el
         }}
       >
-        <span className="ew-wheel-face">{n}</span>
+        <span className="ew-wheel-face" />
       </span>,
     )
   }
@@ -352,6 +459,9 @@ export function PageWheel({
         onPointerCancel={onPointerEnd}
         onLostPointerCapture={onPointerEnd}
         onKeyDown={onKeyDown}
+        onBlur={(e) => {
+          delete e.currentTarget.dataset.ewPointer
+        }}
       >
         <div className="ew-wheel-drum" aria-hidden="true">
           {nums}
