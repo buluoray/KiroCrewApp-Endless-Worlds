@@ -35,8 +35,8 @@
 .ew-tabbar,
 .ew-tabmore {
   --text: #e8ebf2;
-  --muted: #c3c8d3;
-  --ew-accent-ink: color-mix(in srgb, var(--accent, #7c3aed) 35%, #fff);
+  --muted: #cdd2dc;
+  --ew-accent-ink: color-mix(in srgb, var(--accent, #7c3aed) 28%, #fff);
 }
 /* A light dashboard also hands this ground white cards, white fields and a deep red
    meant for a white page. Re-declared to the dark set the canvas was designed with, so
@@ -997,51 +997,131 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   );
 }
 /* The reading veil: where the text actually sits, a thin dark glass between it and the
-   art, plus a halo hugging every glyph. The page scrim above stays light so the art
-   reads as the room. The veil is only under the reading column (and the shelf drawer
-   beside it), so on a wide screen the art is untouched around it.
+   art. The page scrim above stays light so the art reads as the room. The veil is only
+   under the reading column (and the shelf drawer beside it), so on a wide screen the
+   art is untouched around it.
 
-   Most of the legibility is the HALO, not the glass. A glass dark enough to carry small
-   muted type over a white patch on its own (it was .72) also blacked the art out under
-   the whole column, which on a phone is the whole screen. So the glass is kept thin
-   enough that the art reads through it, and the text-shadow (inherited by every label
-   in the column) darkens only the few pixels around each glyph, where contrast is read.
+   A plain panel, drawn like every other glass panel in the app: one flat glass, a crisp
+   hairline edge and a 10px corner. No glow and no feathered edge -- both read as a haze
+   smeared over the page. The glass is kept thin (.45) so the art reads through it, and
+   the column's body ink is pure white, the one ink that reaches AA on that glass alone
+   over a white drawing. Muted and accent labels cannot (they top out near 3:1 there),
+   so they carry a crisp 1px zero-blur shadow -- a hard edge under each stroke, not a
+   glow -- in the rule below.
 
    Only when a backdrop is painted: on a plain page there is no art to defend against.
-   The blurred box-shadow feathers the glass out past the column's edge instead of a
-   hard panel border, so no geometry moves. Background only, never backdrop-filter: a
-   filter would become the containing block of the fixed phone reading row and the
-   star-map sheet inside this column. Both alphas are SOLVED by
-   backend/tests/test_theme_contrast.py: over a white drawing (under the page scrim's
-   lightest stop) the glass alone keeps body text at 3:1, and every ink reaches 4.5:1
-   on its halo. */
+   Two zero-blur spread shadows carry the glass and its hairline a little past the
+   column's edge instead of padding, so no geometry moves; a spread shadow grows its
+   corner from the element's own radius, so 3px here draws a 10px corner at 12px out.
+   Background only, never backdrop-filter: a filter would become the containing block of
+   the fixed phone reading row and the star-map sheet inside this column. Measured by
+   backend/tests/test_theme_contrast.py. */
 .ew-root:has(> .ew-backdrop) .ew-main,
 .ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
-  --ew-veil: rgba(9, 10, 14, .4);
-  --ew-halo: rgba(5, 6, 10, .7);
+  --ew-veil: rgba(9, 10, 14, .45);
+  --ew-veil-edge: rgba(255, 255, 255, .09);
+  --ew-ink-edge: 0 1px 0 rgba(5, 6, 10, .85);
+  --text: #ffffff;
   background: var(--ew-veil);
-  box-shadow: 0 0 28px 14px var(--ew-veil);
-  border-radius: 12px;
-  text-shadow:
-    0 0 1px rgba(5, 6, 10, .9),
-    0 0 4px var(--ew-halo),
-    0 1px 10px rgba(5, 6, 10, .45);
+  box-shadow: 0 0 0 12px var(--ew-veil), 0 0 0 13px var(--ew-veil-edge);
+  border-radius: 3px;
+}
+/* The crisp edge for every label painted in the muted or the accent ink. The list is
+   every rule whose colour is one of those inks; test_theme_contrast.py fails when a new
+   one is not added here. */
+.ew-root:has(> .ew-backdrop) .ew-main :is(
+  .ew-aside-tab,
+  .ew-back,
+  .ew-btn-quiet,
+  .ew-chip,
+  .ew-chip-accent,
+  .ew-clock,
+  .ew-confirm-ask,
+  .ew-count,
+  .ew-create-count,
+  .ew-create-hint,
+  .ew-create-plus,
+  .ew-create-sub,
+  .ew-create-titlelabel,
+  .ew-dcat,
+  .ew-doomed-where,
+  .ew-draft-jump,
+  .ew-drow-rumour,
+  .ew-echo-label,
+  .ew-echo-line,
+  .ew-gap,
+  .ew-ghint,
+  .ew-hint,
+  .ew-kebab,
+  .ew-kv .ew-k,
+  .ew-lang,
+  .ew-mark-gain,
+  .ew-meta,
+  .ew-milestone-row,
+  .ew-note,
+  .ew-opt-on,
+  .ew-order-toggle,
+  .ew-pager-turn,
+  .ew-past-action,
+  .ew-past-turn,
+  .ew-pick-label,
+  .ew-pick-n,
+  .ew-pick-row-on .ew-pick-n,
+  .ew-plabel,
+  .ew-progress-count,
+  .ew-progress-label,
+  .ew-prose blockquote,
+  .ew-rail-head,
+  .ew-rail-home,
+  .ew-rail-note,
+  .ew-rail-sub,
+  .ew-rail-x,
+  .ew-recap-label,
+  .ew-reveal-label,
+  .ew-role-sum,
+  .ew-sealed,
+  .ew-setting-head:hover .ew-setting-name,
+  .ew-setting-sum,
+  .ew-settings-group,
+  .ew-settings-label,
+  .ew-settings-note,
+  .ew-settings-saved,
+  .ew-shelfbtn,
+  .ew-story-moment-close,
+  .ew-story-moment-hint,
+  .ew-story-moment-title,
+  .ew-sub,
+  .ew-summary-label,
+  .ew-summary-world,
+  .ew-tab,
+  .ew-tagline,
+  .ew-unlocked-meaning,
+  .ew-unlocked-row,
+  .ew-version,
+  .ew-wait-label,
+  .ew-wheel-latest,
+  .ew-wheel-n,
+  .ew-world-enter,
+  .ew-world-possibilities-label,
+  .ew-world-possibility,
+  button.ew-pager-turn
+),
+.ew-root:has(> .ew-backdrop) .ew-main .ew-mark::before {
+  text-shadow: var(--ew-ink-edge);
 }
 /* The side panels keep #101's full glass. The shelf list and the status panel are
    columns of small muted labels, not prose, so they gain little from seeing the art
    and lose the most when it is bright. The drawer gets the full glass outright; the
-   status aside already sits on the column's thin glass, so it adds the share that
-   brings the two layers to the same .72 (1 - .6 x .46). Solved in
-   backend/tests/test_theme_contrast.py with the muted ink held to AA WITHOUT the
-   halo. */
+   status aside already sits on the column's glass, so it adds the share that brings
+   the two layers to the same .72 (1 - .55 x .5). Same crisp edge as the column. */
 .ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
   --ew-veil: rgba(9, 10, 14, .72);
 }
 .ew-root:has(> .ew-backdrop) .ew-aside {
-  --ew-side-glass: rgba(9, 10, 14, .54);
+  --ew-side-glass: rgba(9, 10, 14, .5);
   background: var(--ew-side-glass);
-  box-shadow: 0 0 16px 8px var(--ew-side-glass);
-  border-radius: 10px;
+  box-shadow: 0 0 0 8px var(--ew-side-glass), 0 0 0 9px rgba(255, 255, 255, .09);
+  border-radius: 4px;
 }
 
 .ew-play { display: block; }.ew-aside { display: none; }
@@ -1889,9 +1969,11 @@ button.ew-pager-turn:focus-visible {
 .ew-topbar-fixed {
   position: fixed; left: 0; right: 0; top: var(--ew-chrome-h); z-index: 2;
   padding: 8px var(--ew-gutter, 16px);
-  /* The reading veil's glass, blurred: this row floats over the art as well as over the
-     column. It sits inside .ew-main, so its pager and date carry the veil's halo too. */
-  background: rgba(8, 9, 18, .4);
+  /* The reading veil's glass: this row floats over the art as well as over the column,
+     and sits inside .ew-main, so it takes the column's white body ink and its muted
+     labels' crisp edge. The blur stays because prose scrolls UNDER this row; without it
+     the lines behind would read through the pager. */
+  background: rgba(8, 9, 18, .45);
   backdrop-filter: blur(16px) saturate(1.15);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   transition: transform .28s ease, opacity .28s ease;
