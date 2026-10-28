@@ -152,9 +152,7 @@ def test_the_veil_lets_the_art_through() -> None:
 
 def _column_rules() -> list[str]:
     """Every rule that paints the story column, the drawer beside it or the side panel."""
-    found = re.findall(
-        r"([^{}]*(?:\.ew-main|\.ew-rail|\.ew-aside)[^{}]*)\{([^}]*)\}", _css(), re.S
-    )
+    found = re.findall(r"([^{}]*(?:\.ew-main|\.ew-rail|\.ew-aside)[^{}]*)\{([^}]*)\}", _css(), re.S)
     return [f"{sel.strip()} {{{body}}}" for sel, body in found if ".ew-backdrop" in sel]
 
 
@@ -197,8 +195,9 @@ def test_the_shelf_drawer_keeps_the_full_glass() -> None:
 
 def test_the_status_aside_adds_its_glass_to_the_column() -> None:
     """The aside's labels sit on the column's glass AND the aside's own: AA with no halo."""
-    side = _parse_colour(_decl(_rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-aside"),
-                               "--ew-side-glass"))
+    side = _parse_colour(
+        _decl(_rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-aside"), "--ew-side-glass")
+    )
     grounds = [_over(side[0], side[1], g) for g in _veil_grounds(_decl(_veil_rule(), "--ew-veil"))]
     for name, ink in _side_inks().items():
         got = _worst(ink, grounds)
