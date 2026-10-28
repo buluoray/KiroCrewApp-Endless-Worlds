@@ -996,23 +996,36 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
     color-mix(in srgb, var(--ew-bg, #0b0c10) 40%, transparent)
   );
 }
-/* The reading veil: where the text actually sits, a dark glass between it and the art.
-   The page scrim above stays light so the art reads as the room; the veil is only under
-   the reading column (and the shelf drawer beside it), so on a wide screen the art is
-   untouched around it. Without it every label sat straight on the art, and a bright
-   patch in the drawing took the contrast with it.
+/* The reading veil: where the text actually sits, a thin dark glass between it and the
+   art, plus a halo hugging every glyph. The page scrim above stays light so the art
+   reads as the room. The veil is only under the reading column (and the shelf drawer
+   beside it), so on a wide screen the art is untouched around it.
+
+   Most of the legibility is the HALO, not the glass. A glass dark enough to carry small
+   muted type over a white patch on its own (it was .72) also blacked the art out under
+   the whole column, which on a phone is the whole screen. So the glass is kept thin
+   enough that the art reads through it, and the text-shadow (inherited by every label
+   in the column) darkens only the few pixels around each glyph, where contrast is read.
 
    Only when a backdrop is painted: on a plain page there is no art to defend against.
-   A spread box-shadow carries the veil a little past the column's edge instead of
-   padding, so no geometry moves. Background only, never backdrop-filter: a filter would
-   become the containing block of the fixed phone reading row and the star-map sheet
-   inside this column. The alpha is SOLVED by backend/tests/test_theme_contrast.py:
-   the app's muted ink must reach 4.5:1 through it over a white drawing. */
+   The blurred box-shadow feathers the glass out past the column's edge instead of a
+   hard panel border, so no geometry moves. Background only, never backdrop-filter: a
+   filter would become the containing block of the fixed phone reading row and the
+   star-map sheet inside this column. Both alphas are SOLVED by
+   backend/tests/test_theme_contrast.py: over a white drawing (under the page scrim's
+   lightest stop) the glass alone keeps body text at 3:1, and every ink reaches 4.5:1
+   on its halo. */
 .ew-root:has(> .ew-backdrop) .ew-main,
 .ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
-  background: rgba(9, 10, 14, .72);
-  box-shadow: 0 0 0 12px rgba(9, 10, 14, .72);
-  border-radius: 4px;
+  --ew-veil: rgba(9, 10, 14, .4);
+  --ew-halo: rgba(5, 6, 10, .7);
+  background: var(--ew-veil);
+  box-shadow: 0 0 28px 14px var(--ew-veil);
+  border-radius: 12px;
+  text-shadow:
+    0 0 1px rgba(5, 6, 10, .9),
+    0 0 4px var(--ew-halo),
+    0 1px 10px rgba(5, 6, 10, .45);
 }
 
 .ew-play { display: block; }.ew-aside { display: none; }
@@ -1860,9 +1873,9 @@ button.ew-pager-turn:focus-visible {
 .ew-topbar-fixed {
   position: fixed; left: 0; right: 0; top: var(--ew-chrome-h); z-index: 2;
   padding: 8px var(--ew-gutter, 16px);
-  /* The same solved alpha as the reading veil: this row floats over the art as well as
-     over the column, and its pager and date are small type. */
-  background: rgba(8, 9, 18, .72);
+  /* The reading veil's glass, blurred: this row floats over the art as well as over the
+     column. It sits inside .ew-main, so its pager and date carry the veil's halo too. */
+  background: rgba(8, 9, 18, .4);
   backdrop-filter: blur(16px) saturate(1.15);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
   transition: transform .28s ease, opacity .28s ease;
