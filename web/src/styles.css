@@ -1027,6 +1027,22 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
     0 0 4px var(--ew-halo),
     0 1px 10px rgba(5, 6, 10, .45);
 }
+/* The side panels keep #101's full glass. The shelf list and the status panel are
+   columns of small muted labels, not prose, so they gain little from seeing the art
+   and lose the most when it is bright. The drawer gets the full glass outright; the
+   status aside already sits on the column's thin glass, so it adds the share that
+   brings the two layers to the same .72 (1 - .6 x .46). Solved in
+   backend/tests/test_theme_contrast.py with the muted ink held to AA WITHOUT the
+   halo. */
+.ew-root.ew-view-live:has(> .ew-backdrop) .ew-shell-open .ew-rail {
+  --ew-veil: rgba(9, 10, 14, .72);
+}
+.ew-root:has(> .ew-backdrop) .ew-aside {
+  --ew-side-glass: rgba(9, 10, 14, .54);
+  background: var(--ew-side-glass);
+  box-shadow: 0 0 16px 8px var(--ew-side-glass);
+  border-radius: 10px;
+}
 
 .ew-play { display: block; }.ew-aside { display: none; }
 @media (min-width: 900px) {

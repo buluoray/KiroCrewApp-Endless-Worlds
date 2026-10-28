@@ -167,6 +167,32 @@ def test_the_veil_lets_the_art_through() -> None:
     assert alpha <= 0.5, f"the reading glass is {alpha:.2f} opaque; the art goes dark under it"
 
 
+def _side_inks() -> dict[str, tuple[float, float, float]]:
+    return {k: v for k, v in _inks().items() if k in ("text", "muted")}
+
+
+def test_the_shelf_drawer_keeps_the_full_glass() -> None:
+    """The drawer's subtitles (the turn, "ended") are muted small type: AA with no halo."""
+    rail = _rule(
+        # Its own rule, not the column's shared one (where the drawer is a second selector).
+        r"\}\s*\.ew-root\.ew-view-live:has\(> \.ew-backdrop\) \.ew-shell-open \.ew-rail"
+    )
+    grounds = _veil_grounds(_decl(rail, "--ew-veil"))
+    for name, ink in _side_inks().items():
+        got = _worst(ink, grounds)
+        assert got >= BODY_FLOOR, f"{name} in the shelf drawer is {got:.2f}:1 without its halo"
+
+
+def test_the_status_aside_adds_its_glass_to_the_column() -> None:
+    """The aside's labels sit on the column's glass AND the aside's own: AA with no halo."""
+    side = _parse_colour(_decl(_rule(r"\.ew-root:has\(> \.ew-backdrop\) \.ew-aside"),
+                               "--ew-side-glass"))
+    grounds = [_over(side[0], side[1], g) for g in _veil_grounds(_decl(_veil_rule(), "--ew-veil"))]
+    for name, ink in _side_inks().items():
+        got = _worst(ink, grounds)
+        assert got >= BODY_FLOOR, f"{name} in the status aside is {got:.2f}:1 without its halo"
+
+
 def test_the_phone_reading_row_is_as_light_as_the_veil() -> None:
     row = _decl(_rule(r"\.ew-topbar-fixed"), "background")
     grounds = _veil_grounds(row)
