@@ -22,7 +22,9 @@ import { LifeRow, WorldCard, WorldDetailView } from './library'
 import { PerfPage } from './perf'
 import { DRAFT_PREFIX, OpeningScreen } from './opening'
 import { PlayPage } from './play'
-import { WorldRail, type ReadWidth } from './rail'
+import { WorldRail } from './rail'
+import { fontFaceCss, loadReading, saveReading, type ReadingPrefs } from './reading'
+import { ReadingContext, type ReadingControl } from './reading-panel'
 import { Backdrop } from './backdrop'
 import { SceneSlot } from './scene'
 import { SettingsPanel } from './settings'
@@ -44,9 +46,6 @@ const WHERE = 'endless-worlds:where'
  *  shared with the dashboard document like every other key this app keeps. */
 const LANG_KEY = 'endless-worlds:lang'
 
-/** The reader's standing choice of reading measure. A preference, not a per-world
- *  fact, so it is kept here rather than asked of the backend. */
-const WIDTH_KEY = 'endless-worlds:width'
 const RAIL_KEY = 'endless-worlds:rail'
 
 /** The FIRST-RUN default UI language: follow the Crew, fall back to English.
@@ -61,6 +60,20 @@ function crewLanguageDefault(): Lang {
   const code = (document.documentElement.lang || navigator.language || '').slice(0, 2).toLowerCase()
   return asLang(code) ?? 'en'
 }
+
+/** localStorage, or null where touching it throws (some private modes). */
+function safeStorage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+/** The bundled reading faces, resolved against this module's own URL: the dashboard
+ *  serves `index.mjs` from the app's `ui/` directory, and the font files sit beside
+ *  it in `ui/fonts/`. */
+const FONT_FACES = fontFaceCss(new URL(/* @vite-ignore */ '.', import.meta.url).href)
 
 type View = 'library' | 'detail' | 'opening' | 'live' | 'create' | 'draft' | 'perf'
 
@@ -164,17 +177,17 @@ export default function EndlessWorlds() {
       return next
     })
   }, [])
-  const [readWidth, setReadWidth] = useState<ReadWidth>(() =>
-    localStorage.getItem(WIDTH_KEY) === 'fixed' ? 'fixed' : 'fluid',
+  // The reader's typography — font, size, line spacing, paragraph style and measure
+  // (reading.ts). Standing preferences, so they are read once and written on change.
+  const [reading, setReading] = useState<ReadingPrefs>(() => loadReading(safeStorage()))
+  const readingControl = useMemo<ReadingControl>(
+    () => ({
+      prefs: reading,
+      set: (key, value) => setReading((prev) => saveReading(safeStorage(), prev, key, value)),
+    }),
+    [reading],
   )
-  const chooseWidth = useCallback((next: ReadWidth) => {
-    try {
-      localStorage.setItem(WIDTH_KEY, next)
-    } catch {
-      /* private mode: the choice still holds for this session */
-    }
-    setReadWidth(next)
-  }, [])
+  const readWidth = reading.width
   // The app mounts inside the dashboard's own scroll container, which keeps its
   // offset across our view swaps — so moving from the shelf into a tall opening
   // form would land the player at its BOTTOM. Bring our root back into view at the
@@ -963,136 +976,144 @@ export default function EndlessWorlds() {
 
   return (
     <LanguageContext.Provider value={applyLanguage}>
-      <div className={rootClass} lang={lang} ref={rootRef}>
-        {/* Injected rather than imported as a stylesheet: this app mounts into the
+      <ReadingContext.Provider value={readingControl}>
+        <div
+          className={rootClass}
+          lang={lang}
+          ref={rootRef}
+          data-ew-font={reading.font}
+          data-ew-size={reading.size}
+          data-ew-leading={reading.leading}
+          data-ew-paragraph={reading.paragraph}
+        >
+          {/* Injected rather than imported as a stylesheet: this app mounts into the
           dashboard's document, and a <style> element goes away with the component
           instead of outliving it in the page's stylesheet list. */}
-        <style>{styles}</style>
+          <style>{styles}</style>
+          <style>{FONT_FACES}</style>
 
-        {/* Full-app backdrop: rendered at the root (not inside the play column) so on
+          {/* Full-app backdrop: rendered at the root (not inside the play column) so on
           desktop it spans the rail AND the play area for immersion, and on a phone
           it fills the screen. Only on a live view — the shelf stays plain. */}
-        {view === 'live' && live && backdrop ? (
-          <Backdrop
-            runId={live}
-            version={backdrop.version}
-            turn={backdrop.turn}
-            mobile={backdrop.mobile}
-          />
-        ) : null}
+          {view === 'live' && live && backdrop ? (
+            <Backdrop
+              runId={live}
+              version={backdrop.version}
+              turn={backdrop.turn}
+              mobile={backdrop.mobile}
+            />
+          ) : null}
 
-        {/* Inside a life on a phone the app's own name is dropped. It carries nothing a
+          {/* Inside a life on a phone the app's own name is dropped. It carries nothing a
           reader needs mid-story — the language picker and Settings live on the shelf,
           not here — and keeping it put a second, differently-coloured band above the
           reading bar, which read as two unrelated headers stacked. Without it the bar
           meets the dashboard's chrome directly and the page starts at the story. */}
-        {narrowLive ? null : (
-          <div className="ew-head">
-            <Glyph />
-            <h2>{t('app.title')}</h2>
-            {view === 'library' ? (
-              <div className="ew-headtools">
-                <select
-                  className="ew-uilang"
-                  aria-label={t('app.language')}
-                  value={lang}
-                  onChange={(e) => chooseLanguage(e.target.value)}
-                >
-                  <option value="zh">中文</option>
-                  <option value="en">English</option>
-                </select>
-                <button
-                  className="ew-uilang"
-                  type="button"
-                  onClick={() => setShowSettings((s) => !s)}
-                  aria-expanded={showSettings}
-                >
-                  {t('settings.open')}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        )}
+          {narrowLive ? null : (
+            <div className="ew-head">
+              <Glyph />
+              <h2>{t('app.title')}</h2>
+              {view === 'library' ? (
+                <div className="ew-headtools">
+                  <select
+                    className="ew-uilang"
+                    aria-label={t('app.language')}
+                    value={lang}
+                    onChange={(e) => chooseLanguage(e.target.value)}
+                  >
+                    <option value="zh">中文</option>
+                    <option value="en">English</option>
+                  </select>
+                  <button
+                    className="ew-uilang"
+                    type="button"
+                    onClick={() => setShowSettings((s) => !s)}
+                    aria-expanded={showSettings}
+                  >
+                    {t('settings.open')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          )}
 
-        {view === 'library' ? <div className="ew-tagline">{t('app.tagline')}</div> : null}
+          {view === 'library' ? <div className="ew-tagline">{t('app.tagline')}</div> : null}
 
-        {view === 'library' && showSettings ? (
-          <SettingsPanel onClose={() => setShowSettings(false)} />
-        ) : null}
+          {view === 'library' && showSettings ? (
+            <SettingsPanel onClose={() => setShowSettings(false)} />
+          ) : null}
 
-        {note ? (
-          <div className="ew-note ew-note-row">
-            <span>{note}</span>
-            <button className="ew-btn ew-btn-quiet" type="button" onClick={() => setNote('')}>
-              {t('note.dismiss')}
-            </button>
-          </div>
-        ) : null}
+          {note ? (
+            <div className="ew-note ew-note-row">
+              <span>{note}</span>
+              <button className="ew-btn ew-btn-quiet" type="button" onClick={() => setNote('')}>
+                {t('note.dismiss')}
+              </button>
+            </div>
+          ) : null}
 
-        {/* One axis, plus a drawer that pushes rather than covers. The rail renders
+          {/* One axis, plus a drawer that pushes rather than covers. The rail renders
           nothing below 1100px and nothing at all while closed, so a phone gets
           exactly the layout it had and a desktop gets the whole width for the story
           until it asks for the shelf. */}
-        <div className={'ew-shell' + (railOpen ? ' ew-shell-open' : '')}>
-          <WorldRail
-            worlds={worlds}
-            runs={runs}
-            activeRunId={live}
-            activeWorldId={world?.worldId ?? selected}
-            onWorld={openWorld}
-            onLife={enterLife}
-            onHome={home}
-            atShelf={view === 'library'}
-            open={railOpen}
-            onClose={toggleRail}
-            width={readWidth}
-            onWidth={chooseWidth}
-          />
-          <div className="ew-main">
-            {/* The desktop's shelf opener, in the same top-left slot the phone puts
+          <div className={'ew-shell' + (railOpen ? ' ew-shell-open' : '')}>
+            <WorldRail
+              worlds={worlds}
+              runs={runs}
+              activeRunId={live}
+              activeWorldId={world?.worldId ?? selected}
+              onWorld={openWorld}
+              onLife={enterLife}
+              onHome={home}
+              atShelf={view === 'library'}
+              open={railOpen}
+              onClose={toggleRail}
+            />
+            <div className="ew-main">
+              {/* The desktop's shelf opener, in the same top-left slot the phone puts
               its "back to the shelf" in — that button is hidden at this width, so
               the corner carries one control at every size, not two. */}
-            <button
-              className="ew-shelfbtn"
-              type="button"
-              aria-expanded={railOpen}
-              onClick={toggleRail}
-            >
-              {t('rail.open')}
-            </button>
-            <div
-              className="ew-bodywrap"
-              style={{
-                display: hideBody ? 'none' : undefined,
-                // Only the tab bar sits at the foot now — the reading controls stick
-                // to the TOP of the pane, so nothing extra is owed down here.
-                paddingBottom: narrowLive ? '72px' : undefined,
-              }}
-            >
-              {body}
-            </div>
-            {view === 'library' && !hideBody ? (
-              <div className="ew-version">{t('app.version', { version: __APP_VERSION__ })}</div>
-            ) : null}
-            {/* A system region tab (phone): the story column is hidden and this
+              <button
+                className="ew-shelfbtn"
+                type="button"
+                aria-expanded={railOpen}
+                onClick={toggleRail}
+              >
+                {t('rail.open')}
+              </button>
+              <div
+                className="ew-bodywrap"
+                style={{
+                  display: hideBody ? 'none' : undefined,
+                  // Only the tab bar sits at the foot now — the reading controls stick
+                  // to the TOP of the pane, so nothing extra is owed down here.
+                  paddingBottom: narrowLive ? '72px' : undefined,
+                }}
+              >
+                {body}
+              </div>
+              {view === 'library' && !hideBody ? (
+                <div className="ew-version">{t('app.version', { version: __APP_VERSION__ })}</div>
+              ) : null}
+              {/* A system region tab (phone): the story column is hidden and this
               region's panels stand alone. Its mounted scenes render below, outside
               the shell, filtered to the same region. */}
-            {hideBody ? (
-              <div
-                className="ew-region-pane"
-                style={{ paddingBottom: scenesShown ? undefined : '72px' }}
-              >
-                {panels
-                  .filter((p) => (p.region ?? '') === tab)
-                  .map((p) => (
-                    <PanelBox key={p.id} panel={p} />
-                  ))}
-              </div>
-            ) : null}
+              {hideBody ? (
+                <div
+                  className="ew-region-pane"
+                  style={{ paddingBottom: scenesShown ? undefined : '72px' }}
+                >
+                  {panels
+                    .filter((p) => (p.region ?? '') === tab)
+                    .map((p) => (
+                      <PanelBox key={p.id} panel={p} />
+                    ))}
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
 
-        {/* Outside `body` on purpose, and one frame per mounted scene: each is
+          {/* Outside `body` on purpose, and one frame per mounted scene: each is
           created on first need and never moved or re-keyed, because moving an
           iframe reloads it. The order is the mount order and never re-sorted, so an
           asking scene becoming answered does not shuffle a frame and reload it.
@@ -1100,37 +1121,44 @@ export default function EndlessWorlds() {
           The wrapper is stable for the whole life of the run, so the frames are
           created inside it and never move: it exists to carry the phone's tab-bar
           clearance, which the shell's own padding cannot reach out here. */}
-        {live ? (
-          <div className={scenesShown ? 'ew-scenes-clear' : undefined}>
-            {scenes.map((s) => (
-              <SceneSlot
-                key={s.sceneId}
-                runId={live}
-                sceneId={s.sceneId}
-                asks={s.asks}
-                visible={!sheetOpen && (!narrowLive || activeSceneIds.includes(s.sceneId))}
-                onChoice={onSceneChoice}
-                resetSignal={sceneEpoch}
-                locked={turnPending}
-              />
-            ))}
-          </div>
-        ) : null}
-        {doomed ? (
-          <DeleteWorldDialog
-            worldId={doomed}
-            onCancel={() => setDoomed(null)}
-            onDeleted={afterDelete}
-          />
-        ) : null}
+          {live ? (
+            <div className={scenesShown ? 'ew-scenes-clear' : undefined}>
+              {scenes.map((s) => (
+                <SceneSlot
+                  key={s.sceneId}
+                  runId={live}
+                  sceneId={s.sceneId}
+                  asks={s.asks}
+                  visible={!sheetOpen && (!narrowLive || activeSceneIds.includes(s.sceneId))}
+                  onChoice={onSceneChoice}
+                  resetSignal={sceneEpoch}
+                  locked={turnPending}
+                />
+              ))}
+            </div>
+          ) : null}
+          {doomed ? (
+            <DeleteWorldDialog
+              worldId={doomed}
+              onCancel={() => setDoomed(null)}
+              onDeleted={afterDelete}
+            />
+          ) : null}
 
-        {/* The phone's bottom navigator — sticky at the foot of the app's own scroll
+          {/* The phone's bottom navigator — sticky at the foot of the app's own scroll
           container (never fixed, which would escape the panel in the dashboard).
           Desktop keeps the WorldRail and never shows this. */}
-        {narrowLive ? (
-          <WorldTabBar tabs={tabs} active={tab} dots={dots} hidden={barHidden} onSelect={setTab} />
-        ) : null}
-      </div>
+          {narrowLive ? (
+            <WorldTabBar
+              tabs={tabs}
+              active={tab}
+              dots={dots}
+              hidden={barHidden}
+              onSelect={setTab}
+            />
+          ) : null}
+        </div>
+      </ReadingContext.Provider>
     </LanguageContext.Provider>
   )
 }

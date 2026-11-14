@@ -24,6 +24,8 @@ guarantee.
 | `opening.tsx` | the opening form — sealed world-decided groups, 30-day draft TTL |
 | `create-world.tsx` | the world-creation surfaces, mirroring life creation |
 | `rail.tsx` | `WorldRail` — the desktop navigation drawer (> 1100px) |
+| `paragraphs.ts` | `splitParagraphs` — narration cut into the paragraph blocks the page renders |
+| `reading.ts`, `reading-panel.tsx` | the reader's type settings (font, size, spacing, paragraphs, width) and the "Aa" panel |
 | `tabbar.tsx` | `WorldTabBar` — the phone tab bar, portaled to `document.body` |
 | `library.tsx` | the shelf of worlds and lives |
 | `memory.tsx`, `legacy.tsx`, `story-card.tsx`, `memory-state.ts` | the star-map / keepsake / legacy surfaces |
@@ -111,6 +113,41 @@ guarantee.
   `test_non_reading_desktop_pages_fill_the_canvas_from_the_top_left`,
   `test_a_world_title_cannot_widen_the_rail`, and
   `test_a_label_that_is_really_a_sentence_stops_columnising`.
+
+- **The app owns the paragraph blocks; the host renders only inside them.**
+  `Prose` (`ui.tsx`) cuts narration with `splitParagraphs` (`paragraphs.ts`) and
+  renders each paragraph as its own `.ew-para` element, passing just that
+  paragraph's text to the host's `MarkdownRenderer`. A blank line and a single line
+  break between two lines of prose are both paragraph breaks; a list, quote, table or
+  fenced block stays one block. The reason is the host's markup: it wraps every
+  block in a wrapper of its own and sets its `<p>` at line-height 1.5 with its own
+  margins, so a gap rule on `p` matched every paragraph as a last child and the
+  page read as one wall of text. The gap is `.ew-para + .ew-para`, and inside a
+  block the host's paragraph takes the block's type. Chinese pages (`:lang(zh)`,
+  from the life's own `language`, which `PlayPage` passes as `lang`) indent each
+  paragraph by 2em with a small gap; Latin pages space paragraphs and do not indent
+  the first one. The split is tested by `web/test/paragraphs.test.ts` (`npm test`);
+  the wiring by `test_reading_type.py::test_the_story_is_rendered_one_block_per_paragraph`
+  and `test_the_gap_is_between_the_apps_blocks_not_the_hosts_paragraphs`.
+
+- **Reading type is one "Aa" panel of named steps, stored per reader.**
+  `ReadingSettings` (`reading-panel.tsx`) sits at the end of the reading page's top
+  bar (and beside the ending page's back link), so it is reachable at every width;
+  the text width moved into it from the desktop drawer, which a phone never renders.
+  It holds font (`literata` default, `newsreader`, `kai`, `sans`, `system`), text
+  size (4 steps), line spacing (3), paragraph style (`auto`, `indent`, `spaced`) and
+  text width (`fixed`, `fluid`). `reading.ts` loads and saves them in localStorage
+  (width keeps its old `endless-worlds:width` key), falling back per setting on an
+  unknown value; the root carries them as `data-ew-*` and the stylesheet maps each
+  step to per-script values. Literata and Newsreader are bundled as Latin-subset
+  woff2 files in `ui/fonts/` with their OFL licences, loaded same-origin
+  (`fontFaceCss`, resolved against `import.meta.url`) because the dashboard CSP is
+  `font-src 'self'`; CJK faces come from the system (Source Han / Noto Serif CJK,
+  Songti, SimSun; Kaiti for `kai`), since a CJK face is megabytes per weight and
+  text a model has not written yet cannot be subset ahead of time. A Chinese page
+  uses each face's ASCII-only twin so full-width punctuation stays in the CJK face.
+  Store rules are tested by `web/test/reading.test.ts`; labels, placement and the
+  shipped files by `test_reading_type.py`.
 
 - **`SceneSlot` is created once and never moved.** The scene iframe is created on
   first need and rendered at the root, outside every view branch; switching away

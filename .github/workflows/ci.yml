@@ -245,6 +245,13 @@ jobs:
         working-directory: web
         run: npm run lint
 
+      - name: Unit tests (node --test)
+        # The DOM-free modules (paragraph splitting, the reading-settings store) are
+        # tested as source: Node strips the TypeScript types itself, so there is no
+        # second build to keep in step with the bundle.
+        working-directory: web
+        run: npm test
+
       - name: Format check (Prettier)
         # Fails if any web/src file is not Prettier-formatted. `npm run format`
         # (prettier --write src) fixes it locally. See web/.prettierrc and

@@ -1,7 +1,8 @@
 """The UI source, for the guard tests that read it.
 
-These tests scan source rather than exercise a DOM because the app has no JS test
-runner. That is a real limitation, and it moved with the build: they used to read
+These tests scan source rather than exercise a DOM because the app has no DOM test
+runner (the DOM-free modules have their own `node --test` suite in ``web/test``).
+That is a real limitation, and it moved with the build: they used to read
 the hand-written ``ui/index.mjs``, which is now a Vite ARTIFACT. Scanning an
 artifact would check compiler output — double-quoted attributes, `jsx(...)` calls,
 inlined strings — instead of the code a person edits, so a rule could be quietly

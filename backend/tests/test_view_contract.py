@@ -231,7 +231,7 @@ def test_the_narrators_markdown_is_rendered_as_markdown(ui_src):
 
 def test_there_is_a_readable_fallback_when_the_host_has_no_renderer(ui_src):
     """Worse than markdown, never worse than unreadable."""
-    assert "ew-prose-plain" in ui_src
+    assert "ew-para-plain" in ui_src
 
 
 def test_pre_wrap_is_not_applied_to_rendered_markdown(ui_src):

@@ -173,13 +173,13 @@ html[data-mode="light"] .ew-root.ew-view-live::before {
 @media (min-width: 1100px) {
   .ew-root.ew-view-live.ew-w-fluid .ew-main { max-width: none; }
 }
-/* The prose carries a second measure of its own (`.ew-prose`, 66ch) for the
-   narrow band where the track above is uncapped. Lifting only the track leaves
-   that one behind, and the result is the inverse of what the reader asked for:
-   the recap, the digest and the echoes take the window while the story alone
-   stops at 66ch, with a wide dead margin to its right. Unscoped by width on
-   purpose — below a 66ch viewport the cap cannot bind, so there is nothing to
-   guard against there. */
+/* The prose carries a second measure of its own (`.ew-prose`: 34em, 36em in
+   Chinese) for the narrow band where the track above is uncapped. Lifting only
+   the track leaves that one behind, and the result is the inverse of what the
+   reader asked for: the recap, the digest and the echoes take the window while the
+   story alone stops at its measure, with a wide dead margin to its right. Unscoped
+   by width on purpose — below that measure the cap cannot bind, so there is
+   nothing to guard against there. */
 .ew-root.ew-w-fluid .ew-prose { max-width: none; }
 
 .ew-rail-home {
@@ -931,28 +931,100 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
 
 /* Reading typography, not UI typography — this is the only place the player reads
    for minutes at a time. */
+/* The reader's choices arrive as `data-ew-*` on the root (reading.ts) and become
+   these variables; the prose below reads only the variables. Two scripts, two sets
+   of numbers: Chinese is set looser than Latin in every reader app, because a
+   square glyph fills its em box and needs more air between lines to stay legible. */
+.ew-root {
+  --ew-read-size: 17px;
+  --ew-read-lh-latin: 1.7;
+  --ew-read-lh-cjk: 1.9;
+  --ew-read-serif-cjk: "Source Han Serif SC", "Source Han Serif", "Noto Serif CJK SC",
+    "Noto Serif SC", "Songti SC", "STSong", "SimSun", serif;
+  --ew-read-face-latin: "EW Literata", Georgia, "Times New Roman", serif;
+  --ew-read-face-cjk: "EW Literata ASCII", var(--ew-read-serif-cjk);
+}
+.ew-root[data-ew-size="s"] { --ew-read-size: 15px; }
+.ew-root[data-ew-size="l"] { --ew-read-size: 19px; }
+.ew-root[data-ew-size="xl"] { --ew-read-size: 21px; }
+.ew-root[data-ew-leading="tight"] { --ew-read-lh-latin: 1.5; --ew-read-lh-cjk: 1.7; }
+.ew-root[data-ew-leading="loose"] { --ew-read-lh-latin: 1.9; --ew-read-lh-cjk: 2.1; }
+.ew-root[data-ew-font="newsreader"] {
+  --ew-read-face-latin: "EW Newsreader", Georgia, "Times New Roman", serif;
+  --ew-read-face-cjk: "EW Newsreader ASCII", var(--ew-read-serif-cjk);
+}
+.ew-root[data-ew-font="kai"] {
+  --ew-read-face-cjk: "EW Literata ASCII", "Kaiti SC", "STKaiti", "KaiTi", "AR PL UKai CN",
+    "LXGW WenKai", var(--ew-read-serif-cjk);
+}
+.ew-root[data-ew-font="sans"] {
+  --ew-read-face-latin: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --ew-read-face-cjk: system-ui, -apple-system, "PingFang SC", "Hiragino Sans GB",
+    "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+}
+/* `system` is the dashboard's own face, which is what the story was set in before
+   there was a choice. */
+.ew-root[data-ew-font="system"] { --ew-read-face-latin: inherit; --ew-read-face-cjk: inherit; }
+
 .ew-prose {
-  font-size: 16px; line-height: 1.85; max-width: 66ch; margin: 12px 0 0;
+  font-family: var(--ew-read-face-latin);
+  font-size: var(--ew-read-size); line-height: var(--ew-read-lh-latin);
+  /* The measure: about 65-70 Latin characters a line. In em, not ch, so it holds
+     its character count when the face changes (a `ch` is one digit's width, which
+     differs a lot between faces). The reader's `fluid` width lifts it. */
+  max-width: 34em; margin: 12px 0 0;
   /* CJK and ordinary prose wrap fine on their own; this only catches a long
      unbreakable token (a URL, an id) so it breaks instead of overflowing the page
      on a narrow screen. Not `break-all`, which would break ordinary words too. */
   overflow-wrap: anywhere;
+  --ew-para-gap: .9em;
+  --ew-para-indent: 0;
 }
+/* Chinese: about 36 characters a line at most, looser lines, and the indented
+   paragraph with a small gap that Chinese books and reading apps use (首行缩进两字). */
+.ew-prose:lang(zh) {
+  font-family: var(--ew-read-face-cjk);
+  line-height: var(--ew-read-lh-cjk);
+  max-width: 36em;
+  --ew-para-gap: .5em;
+  --ew-para-indent: 2em;
+}
+/* Forced styles. A Latin page indents OR spaces its paragraphs, never both, as
+   printed novels do; a Chinese page keeps its small gap with the indent, because a
+   CJK line ends flush and an indent alone is harder to find at a glance. */
+.ew-root[data-ew-paragraph="indent"] .ew-prose { --ew-para-gap: 0; --ew-para-indent: 1.5em; }
+.ew-root[data-ew-paragraph="indent"] .ew-prose:lang(zh) { --ew-para-gap: .5em; --ew-para-indent: 2em; }
+.ew-root[data-ew-paragraph="spaced"] .ew-prose,
+.ew-root[data-ew-paragraph="spaced"] .ew-prose:lang(zh) { --ew-para-gap: 1em; --ew-para-indent: 0; }
+
+/* The paragraphs are the app's own blocks (paragraphs.ts); everything the host's
+   renderer puts inside one is reset to the block's own type, because that renderer
+   sets its paragraphs at line-height 1.5 with margins of its own. */
+.ew-para { margin: 0; }
+.ew-para + .ew-para { margin-top: var(--ew-para-gap); }
+.ew-para :is(p, li, blockquote) { line-height: inherit; }
+.ew-para p { margin: 0; }
+.ew-para-text,
+.ew-para-text p { text-indent: var(--ew-para-indent); }
+/* The first paragraph of a page, and the first after a heading, is not indented in
+   Latin typesetting; Chinese indents every paragraph. */
+.ew-prose:not(:lang(zh)) > .ew-para-text:first-child,
+.ew-prose:not(:lang(zh)) > .ew-para-text:first-child p,
+.ew-prose:not(:lang(zh)) > .ew-para-head + .ew-para-text,
+.ew-prose:not(:lang(zh)) > .ew-para-head + .ew-para-text p { text-indent: 0; }
+/* A heading or a list keeps clear space round it whatever the paragraph style. */
+.ew-para-head, .ew-para-block { margin-block: .8em; }
+.ew-para-head:first-child, .ew-para-block:first-child { margin-top: 0; }
 .ew-prose pre { overflow-x: auto; }
-/* Only the fallback path needs pre-wrap. With the host's markdown renderer,
-   paragraphs are real elements and pre-wrap would double every blank line. */
-.ew-prose-plain { white-space: pre-wrap; }
-.ew-prose p { margin: 0 0 1.1em; }
-.ew-prose p:last-child { margin-bottom: 0; }
 .ew-prose em { font-style: italic; }
 .ew-prose h1, .ew-prose h2, .ew-prose h3 {
-  font-size: 1.05em; font-weight: 600; margin: 1.4em 0 .5em;
+  font-size: 1.05em; font-weight: 600; margin: 0;
 }
 .ew-prose blockquote {
-  margin: 1em 0; padding-left: 12px;
+  margin: 0; padding-left: 12px;
   border-left: 2px solid var(--border, #2d2f3d); color: var(--muted, #6b7280);
 }
-.ew-prose ul, .ew-prose ol { margin: .8em 0; padding-left: 1.4em; }
+.ew-prose ul, .ew-prose ol { margin: 0; padding-left: 1.4em; }
 .ew-prose li { margin: .25em 0; }
 
 /* ── play page ── */
@@ -1075,6 +1147,8 @@ button.ew-card:active { border-color: var(--accent, #7c3aed); }
   .ew-rail-note,
   .ew-rail-sub,
   .ew-rail-x,
+  .ew-read-label,
+  .ew-read-step[aria-pressed="true"],
   .ew-recap-label,
   .ew-reveal-label,
   .ew-role-sum,
@@ -1262,6 +1336,63 @@ button.ew-pager-turn:focus-visible {
 @media (min-width: 601px) {
   .ew-topbar.ew-topbar-wheel .ew-wheel-bar { flex: 0 1 520px; margin-left: auto; }
 }
+
+/* ── the reading-settings ("Aa") button and panel ──
+   The last thing in the reading row, as in every ebook reader. The panel drops from
+   it, right-aligned, and is the dark glass the reading veil is in either dashboard
+   theme (the live page's ink is the app's own; see the top of this file). */
+.ew-read { position: relative; flex: none; margin-left: auto; }
+/* While the panel is open its row is lifted over everything the page draws (the
+   status aside and the story make stacking contexts of their own, and the fixed
+   phone row sits at 2), and over the app's other overlays too: it is a menu the
+   reader just opened, like the row menus at 40/41. */
+.ew-topbar:has(.ew-read-panel), .ew-endbar:has(.ew-read-panel) { position: relative; z-index: 46; }
+.ew-topbar-fixed:has(.ew-read-panel) { position: fixed; }
+.ew-topbar.ew-topbar-wheel .ew-wheel-bar ~ .ew-read { margin-left: 4px; }
+.ew-endbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ew-endbar .ew-back { margin-bottom: 0; }
+.ew-read-open {
+  min-width: 44px; min-height: 44px; padding: 0 8px; border-radius: 8px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; color: var(--text, #e8ebf2);
+  font-family: "EW Literata", Georgia, serif; font-size: 18px; letter-spacing: .02em;
+}
+@media (hover: hover) { .ew-read-open:hover { border-color: var(--border, #33354a); } }
+.ew-read-open[aria-expanded="true"] { border-color: var(--accent, #7c3aed); }
+.ew-read-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 45;
+  width: min(340px, calc(100vw - 2 * var(--ew-gutter, 16px)));
+  padding: 14px; border-radius: 12px;
+  background: #141520; border: 1px solid var(--border, #33354a);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  color: var(--text, #e8ebf2);
+  font-family: inherit; font-size: 13px; line-height: 1.4; text-align: left;
+}
+.ew-read-row + .ew-read-row { margin-top: 12px; }
+.ew-read-label { font-size: 12px; color: var(--muted, #cdd2dc); margin-bottom: 6px; }
+.ew-read-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.ew-read-step {
+  flex: 1 1 0; min-width: max-content; min-height: 36px; padding: 0 10px;
+  border-radius: 8px; cursor: pointer; font: inherit;
+  background: var(--surface-2, rgba(255, 255, 255, .05));
+  border: 1px solid var(--border, #33354a); color: var(--text, #e8ebf2);
+}
+.ew-read-step[aria-pressed="true"] {
+  border-color: var(--ew-accent-ink, #c4b5fd); color: var(--ew-accent-ink, #c4b5fd);
+  background: color-mix(in srgb, var(--accent, #7c3aed) 22%, transparent);
+}
+.ew-read-step:focus-visible { outline: 2px solid var(--ew-accent-ink, #c4b5fd); outline-offset: 1px; }
+/* Each face's button is set in that face, so the choice is made by looking. */
+.ew-read-steps-font { display: grid; grid-template-columns: 1fr 1fr; }
+.ew-read-steps-font .ew-read-step { font-size: 15px; }
+.ew-read-steps-font [data-value="literata"] { font-family: "EW Literata ASCII", var(--ew-read-serif-cjk); }
+.ew-read-steps-font [data-value="newsreader"] { font-family: "EW Newsreader ASCII", var(--ew-read-serif-cjk); }
+.ew-read-steps-font [data-value="kai"] { font-family: "EW Literata ASCII", "Kaiti SC", "STKaiti", "KaiTi", "AR PL UKai CN", "LXGW WenKai", var(--ew-read-serif-cjk); }
+.ew-read-steps-font [data-value="sans"] { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+/* The size steps show their own size, smallest to largest. */
+.ew-read-steps-size [data-value="s"] { font-size: 12px; }
+.ew-read-steps-size [data-value="m"] { font-size: 14px; }
+.ew-read-steps-size [data-value="l"] { font-size: 16px; }
+.ew-read-steps-size [data-value="xl"] { font-size: 18px; }
 .ew-wheel {
   flex: 1 1 auto; min-width: 0; height: 44px;
   display: grid; grid-template: 100% / 100%;

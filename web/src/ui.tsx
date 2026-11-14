@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { PanelView, ShapedField } from './api'
+import { splitParagraphs } from './paragraphs'
 import { t } from './strings'
 
 /**
@@ -50,23 +51,39 @@ function stripFrames(text: string): string {
     .join('\n')
 }
 
-export function Prose({ text }: { text: string }) {
+/** `lang` is the LIFE's language, not the interface's: the two differ whenever the
+ *  reader has pinned the interface to one language and plays a world in the other,
+ *  and the paragraph style and the CJK face are chosen by the language of the text. */
+export function Prose({ text, lang }: { text: string; lang?: string }) {
   const Md = hostUi()?.MarkdownRenderer
   const cleaned = text ? stripFrames(text) : text
   if (!cleaned) {
-    return <p className="ew-prose ew-prose-plain">{t('play.silent')}</p>
+    return (
+      <div className="ew-prose" lang={lang}>
+        <p className="ew-para ew-para-text">{t('play.silent')}</p>
+      </div>
+    )
   }
-  if (!Md) {
-    // Older host: plain text with the line breaks the narrator wrote. Worse than
-    // markdown, never worse than unreadable.
-    return <p className="ew-prose ew-prose-plain">{cleaned}</p>
-  }
+  // One element per paragraph, owned by the app (see paragraphs.ts for why the host's
+  // own paragraph markup cannot carry the gap). Keyed by position: a page's text is
+  // replaced whole, never edited in place.
   return (
-    <div className="ew-prose">
-      {/* softBreaks: a line break the narrator wrote is a line break they meant.
-          Narration is not documentation, so collapsing single newlines the way
-          strict markdown does would run sentences together. */}
-      <Md content={cleaned} softBreaks />
+    <div className="ew-prose" lang={lang}>
+      {splitParagraphs(cleaned).map((para, i) =>
+        Md ? (
+          <div key={i} className={`ew-para ew-para-${para.kind}`}>
+            {/* softBreaks only matters inside a kept markdown block now (a list, a
+                quote): a line break written there is a line break meant. */}
+            <Md content={para.text} softBreaks />
+          </div>
+        ) : (
+          // Older host: plain text, one paragraph per element. Worse than markdown,
+          // never worse than unreadable.
+          <p key={i} className={`ew-para ew-para-${para.kind} ew-para-plain`}>
+            {para.text}
+          </p>
+        ),
+      )}
     </div>
   )
 }
