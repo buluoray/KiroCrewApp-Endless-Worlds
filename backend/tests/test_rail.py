@@ -156,14 +156,16 @@ def test_the_two_width_modes_are_the_only_two_and_one_of_them_is_stored():
     """The choice is a standing preference, not a per-visit toggle: a reader who set
     a measure and came back to the app's own default would have to set it again every
     session, which reads as the setting not working."""
-    src = module("main.tsx")
-    assert "endless-worlds:width" in src, "the width choice is not persisted anywhere"
-    assert re.search(r"localStorage\.setItem\(WIDTH_KEY", src), (
+    reading = module("reading.ts")
+    assert "width: 'endless-worlds:width'" in reading, (
+        "the width choice is not persisted under the key it always had"
+    )
+    assert re.search(r"storage\?\.setItem\(READING_KEYS\[key\]", reading), (
         "the width choice is read but never written"
     )
+    src = module("main.tsx")
     assert re.search(r"ew-w-' \+ readWidth", src), "the chosen width never reaches the stylesheet"
-    rail = module("rail.tsx")
-    assert re.search(r"ReadWidth = 'fluid' \| 'fixed'", rail), (
+    assert re.search(r"ReadWidth = 'fluid' \| 'fixed'", reading), (
         "the width type must name exactly the two modes the stylesheet implements"
     )
     css = styles()

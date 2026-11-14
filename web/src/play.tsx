@@ -41,6 +41,7 @@ import { PanelBox, Prose, Waiting } from './ui'
 import { StoryPage } from './story-page'
 import { PagePicker } from './page-picker'
 import { PageWheel, WheelLatest } from './page-wheel'
+import { ReadingSettings } from './reading-panel'
 import { createScrubStore } from './scrub-store'
 import { buildTabs, tabIcon } from './tabbar'
 
@@ -919,14 +920,22 @@ export function PlayPage({
             }}
           />
         ) : null}
-        <button className="ew-back" type="button" aria-label={t('play.backLabel')} onClick={onBack}>
-          {t('play.back')}
-        </button>
+        <div className="ew-endbar">
+          <button
+            className="ew-back"
+            type="button"
+            aria-label={t('play.backLabel')}
+            onClick={onBack}
+          >
+            {t('play.back')}
+          </button>
+          <ReadingSettings />
+        </div>
         <div className="ew-clock">{v.clock || t('play.turn', { turn: v.turn })}</div>
         <h3 className="ew-detail-title">{v.title}</h3>
         <div className="ew-note ew-note-live">{t('play.endedBadge')}</div>
         <StoryPage page={v.turn}>
-          <Prose text={v.prose} />
+          <Prose text={v.prose} lang={v.language} />
         </StoryPage>
         <div className="ew-meta">{t('play.endedMeta', { turn: v.turn })}</div>
         <LifeSummary runId={runId} />
@@ -1175,7 +1184,7 @@ export function PlayPage({
           {pageLoading ? (
             <div className="ew-meta">{t('history.reading')}</div>
           ) : (
-            <Prose text={shownProse} />
+            <Prose text={shownProse} lang={v.language} />
           )}
         </div>
       </StoryPage>
@@ -1572,6 +1581,7 @@ export function PlayPage({
           {t('play.back')}
         </button>
         {wheelBar}
+        <ReadingSettings />
       </div>
       {error ? (
         // A dropped poll while a real view is on screen: say so quietly and keep

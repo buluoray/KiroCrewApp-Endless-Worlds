@@ -88,6 +88,52 @@ _PROSE_LONG = (
 
 _PROSE_SHORT = "水压出来了，前两下是浑的，第三下开始变清。你把桶挪到出水口下面。"
 
+#: A full page of novel-length narration, paragraphs separated by blank lines — the
+#: shape the narrator is asked to write. The paragraph gap, the first-line indent and
+#: the line length are only judgeable on a page this long.
+_PROSE_NOVEL = (
+    "雨是后半夜停的。你醒来的时候，屋檐还在往下滴水，一声一声，落在门口那只翻过来的"
+    "铁皮桶底上，像有人在很远的地方敲门。\n\n"
+    "阿美已经起来了。她坐在窗边那张缺了一条腿的椅子上，用一截麻绳把伤腿和木板绑在一起，"
+    "绑一圈，停一下，再绑一圈。她没有回头，只说了一句：“集雨槽满了，三格都满了。”\n\n"
+    "你走到楼顶。天还是灰的，城西那道黑烟淡了很多，几乎看不出来。三格集雨槽并排摆在"
+    "水泥地上，水面浮着一层细灰，底下却是清的。你蹲下去，用手指试了试，凉得发疼。\n\n"
+    "这是这个月第一次，你们不用去井边。不用穿过那条两边都是碎玻璃的巷子，不用在出水口"
+    "前面等那三下浑水，也不用一边压泵一边回头看街口。你把这件事在心里过了一遍，才发现"
+    "自己在笑。\n\n"
+    "“够喝几天？”阿美在楼梯口问。她扶着门框，一步一步挪上来，脸色比昨天好了一点。\n\n"
+    "你算了算。两个人，省着用，烧开了喝，再留一格洗伤口——"
+    "“五天，”你说，“要是再下一场，就能撑到月底。”\n\n"
+    "她点点头，没有说话，在你旁边坐下来，看着那三格水。过了很久，她说：“那就先别走了。”"
+)
+
+#: The same page in English, written the OTHER way the narrator sometimes writes it:
+#: one paragraph per line with no blank line between them. Each line must still read
+#: as its own paragraph, not as one block with line breaks in it.
+_PROSE_NOVEL_EN = (
+    "The rain stopped some time after midnight. When you woke, the eaves were still "
+    "dripping, one drop at a time, onto the upturned tin bucket by the door, like someone "
+    "knocking very far away.\n"
+    "Amei was already up. She sat by the window on the chair with the missing leg, "
+    "binding her bad leg to a board with a length of twine: one turn, a pause, another "
+    "turn. She did not look round. \u201cThe rain tanks are full,\u201d she said. "
+    "\u201cAll three.\u201d\n"
+    "You climbed to the roof. The sky was still grey, and the smoke over the west of the "
+    "city had thinned until you could barely see it. The three tanks sat side by side on "
+    "the concrete, a skin of fine ash on top and clear water underneath. You crouched "
+    "and tested it with a finger. It was cold enough to hurt.\n"
+    "For the first time this month you would not have to go to the well. No alley lined "
+    "with broken glass, no waiting through the three muddy pulls at the spout, no "
+    "pumping with one eye on the end of the street. You went over it once in your head "
+    "before you noticed you were smiling.\n"
+    "\u201cHow many days?\u201d Amei asked from the top of the stairs. She was holding the "
+    "door frame, coming up one step at a time, and she looked better than yesterday.\n"
+    "You worked it out. Two people, careful, boiled before drinking, one tank kept back "
+    "for her wound. \u201cFive,\u201d you said. \u201cAnother rain and we last the month.\u201d\n"
+    "She nodded and sat down beside you and looked at the water for a long time. "
+    "\u201cThen we stay,\u201d she said."
+)
+
 #: A scene with a spatial kind (grid) — the map. Structure only, no geometry.
 _SCENE_MAP: dict[str, Any] = {
     "title": "周边地图",
@@ -475,6 +521,20 @@ def _build_english(srv: Any, data: Path, built: dict[str, str]) -> str:
     return run
 
 
+def _build_novel(srv: Any, data: Path, built: dict[str, str]) -> str:
+    """A page of novel-length Chinese prose: paragraph gap, 首行缩进 and the measure."""
+    run = _new_run(srv, WORLD_TITLE)
+    _advance(srv, run, 1, _PROSE_NOVEL, {"alive": True, "turn": 1, "language": "zh"})
+    return run
+
+
+def _build_novel_en(srv: Any, data: Path, built: dict[str, str]) -> str:
+    """The same page in English, one paragraph per line with no blank lines."""
+    run = _new_run(srv, "Last Echoes", language="en")
+    _advance(srv, run, 1, _PROSE_NOVEL_EN, {"alive": True, "turn": 1, "language": "en"})
+    return run
+
+
 def _build_lineage_ended(srv: Any, data: Path, built: dict[str, str]) -> str:
     """A finished life in the world that declares lineage — the source an heir needs.
 
@@ -575,6 +635,15 @@ def _build_heir(srv: Any, data: Path, built: dict[str, str]) -> str:
 
 
 SCENARIOS: list[Scenario] = [
+    # First, so they are the OLDEST lives: the shelf lists the most recent first, and
+    # the shots that reach a life's row menu on a phone need it to stay where it was.
+    Scenario("novel", "雨停之后", "a long Chinese page: paragraphs and reading type", _build_novel),
+    Scenario(
+        "novel-en",
+        "After the Rain",
+        "a long English page written one paragraph per line, with no blank lines",
+        _build_novel_en,
+    ),
     Scenario(
         "rich",
         "第三天 · 井边",

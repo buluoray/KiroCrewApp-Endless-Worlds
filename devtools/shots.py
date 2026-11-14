@@ -269,6 +269,32 @@ SHOTS: list[Shot] = [
         measure=(".ew-play-root", ".ew-prose"),
     ),
     Shot(
+        "novel",
+        "a long Chinese page: one block per paragraph, a gap between them, the indent",
+        scenario="novel",
+        steps=_open("雨停之后"),
+        measure=(".ew-prose", ".ew-para"),
+        expects=(Expect(".ew-prose", min_h=200, fits_x=True),),
+    ),
+    Shot(
+        "novel-en",
+        "a long English page written one paragraph per line: each line its own block",
+        scenario="novel-en",
+        steps=_open("After the Rain"),
+        measure=(".ew-prose", ".ew-para"),
+        expects=(Expect(".ew-prose", min_h=200, fits_x=True),),
+    ),
+    Shot(
+        "reading-settings",
+        "the Aa reading-settings panel, open over the page it changes",
+        scenario="novel",
+        steps=[*_open("雨停之后"), {"clickSel": ".ew-read-open"}, {"wait": ".ew-read-panel"}],
+        measure=(".ew-read-panel", ".ew-prose"),
+        expects=(
+            Expect(".ew-read-panel", min_w=240, fits_x=True, why="every step must be reachable"),
+        ),
+    ),
+    Shot(
         "heir",
         "the next generation: an inherited person and heirloom carried across from a "
         "finished life, on the heir's own first page",

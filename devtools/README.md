@@ -3,7 +3,7 @@
 Two things live here, and the first is useful on its own:
 
 1. **`fixtures.py` — legal data from the backend's own writers.** A life story you can
-   load in seconds without asking an LLM to write one: seven seeded lives with turns,
+   load in seconds without asking an LLM to write one: nine seeded lives with turns,
    prose, mounted scenes, a backdrop, a memory graph and keepsakes — including the two
    states nobody reaches by playing, a **closed life** and the **next generation** that
    inherits a person and an heirloom from it.
